@@ -84,6 +84,19 @@ def InvariantLayer.HasNF (q : InvariantLayer) : Prop :=
 
 open Classical
 
+theorem ISKTerm_cd {t : ITerm} (ht : ISKTerm t) : ISKTerm (cd t) := by
+  have h_ps := ParStep_cd t (ParStep.refl t)
+  have h_ired := ParStep_to_IRed h_ps
+  exact ISKTerm_IRed_preserved ht h_ired
+
+partial def cd_loop (t : ISKSubtype) : ISKSubtype :=
+  let t' := cd t.val
+  if t.val = t' then
+    t
+  else
+    cd_loop ⟨t', ISKTerm_cd t.property⟩
+
+@[implemented_by cd_loop]
 noncomputable def nf_of_term (t : ISKSubtype) : ISKSubtype :=
   if h : ISAR.HasNF t then
     Classical.choose h
