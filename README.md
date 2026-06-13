@@ -104,6 +104,24 @@ We formalized the general Dialect view framework, proved view representation ind
 
 ---
 
+### Phase 4: Linear Duplication & Optimal Computable Kernel
+We formalized linear duplication, verified size-decreasing properties for bounded fuel termination, and machine-verified the canonical ISAR matrix algebra:
+
+17. **[ISARMatrices.lean](ISARMatrices.lean)**:
+    * Defines $4 \times 4$ matrices over the integers $\mathbb{Z}$ in a completely self-contained way with decidable equality.
+    * Formalizes the canonical ISAR matrices ($I$, $R$, $A$, $S$) for both representation models in the codebase.
+    * Formally proves **idempotency** of the projection matrix $I^2 = I$ and **nilpotency** of the rewrite operator $(I \cdot R \cdot A \cdot S)^2 = 0$ constructively using reflexivity (`rfl`).
+
+18. **[InvariantLayer.lean](InvariantLayer.lean)**:
+    * Added support for **linear duplication** (`LinearIKTerm`) and the multiplicity-based `dupCount` tracking.
+    * Formally proved `cd_size_le_LinearIK` and `cd_size_lt_LinearIK`, showing that complete development strictly reduces term size for all non-fixed-point linear terms.
+    * Defined `sufficient_fuel` and proved its correctness (`sufficient_fuel_correct`), providing the optimal fuel certificate.
+
+19. **[KernelCategory.lean](KernelCategory.lean)**:
+    * Implemented `ComputableISAR_Kernel_Optimal` using the optimal bounded fuel certificate for linearly-typed terms.
+
+---
+
 ## Narratives
 * Phase 1 narrative: [story.md](story.md).
 * Phase 2 narrative: [hf_story.md](hf_story.md).
@@ -113,7 +131,7 @@ We formalized the general Dialect view framework, proved view representation ind
 
 ## Verification Status
 
-All 16 modules compile successfully with **no errors, no warnings, and no `sorry` statements**.
+All 18 modules compile successfully with **no errors, no warnings, and no `sorry` statements**.
 
 ### Build commands used
 ```powershell
@@ -134,5 +152,7 @@ lean -R . -o TRSView.olean TRSView.lean
 lean -R . -o BytecodeView.olean BytecodeView.lean
 lean -R . -o QuantityKernel.olean QuantityKernel.lean
 lean -R . -o ViewUnification.olean ViewUnification.lean
+lean -R . -o ISARMatrices.olean ISARMatrices.lean
 ```
 All files were successfully verified by the Lean 4 typechecker.
+
