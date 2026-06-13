@@ -4,6 +4,7 @@ import TRSView
 import BytecodeView
 import QuantityKernel
 import ZFCInterpretation
+import Futamura
 
 namespace ISAR
 
