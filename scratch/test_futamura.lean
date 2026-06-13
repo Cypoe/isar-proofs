@@ -96,4 +96,30 @@ theorem futamura_first (t : ITerm) (env : Nat → ITerm) (static_env : Nat → O
       dsimp [specialize, subst]
       rw [ihf, ihx]
 
+/-- Correctness predicate for a specializer term. -/
+def SpecializerCorrect (spec_term : ITerm) (make_env : ITerm → (Nat → Option ITerm) → (Nat → ITerm)) : Prop :=
+  ∀ (p : ITerm) (s_env : Nat → Option ITerm),
+    subst spec_term (make_env p s_env) = specialize p s_env
+
+/--
+Theorem: Second Futamura Projection (Compiler Generation Correctness).
+Specializing the specializer with respect to the interpreter yields a compiler, which
+when applied to the dynamic environment, behaves exactly like specializing the interpreter directly.
+-/
+theorem futamura_second
+    (spec_term : ITerm)
+    (make_env : ITerm → (Nat → Option ITerm) → (Nat → ITerm))
+    (h_corr : SpecializerCorrect spec_term make_env)
+    (interp : ITerm)
+    (static_env_for_interp : Nat → Option ITerm)
+    (static_env_for_spec : Nat → Option ITerm)
+    (dynamic_env_for_spec : Nat → ITerm)
+    (h_coh : Coherent (make_env interp static_env_for_interp) static_env_for_spec dynamic_env_for_spec) :
+    subst (specialize spec_term static_env_for_spec) dynamic_env_for_spec =
+      specialize interp static_env_for_interp := by
+  have h_first := futamura_first spec_term (make_env interp static_env_for_interp) static_env_for_spec dynamic_env_for_spec h_coh
+  have h_spec := h_corr interp static_env_for_interp
+  rw [h_first, h_spec]
+
 end ISAR
+
