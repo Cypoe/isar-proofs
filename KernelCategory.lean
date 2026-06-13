@@ -58,6 +58,10 @@ def ComputableISAR_Kernel (fuel : Nat) : Kernel where
     have h2 := OperEq_cd_loop_fuel fuel c2
     exact OperEq.trans h1 (OperEq.trans h (OperEq.symm h2))
 
+/-- The optimal computable ISAR kernel for linearly-typed terms. -/
+def ComputableISAR_Kernel_Optimal (t : ISKSubtype) (_ht : LinearIKTerm t.val) : Kernel :=
+  ComputableISAR_Kernel (sufficient_fuel t)
+
 
 /--
 A structure-preserving morphism between semantic kernels.
