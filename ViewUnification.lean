@@ -156,10 +156,13 @@ theorem universal_factorization_theorem (K : Kernel) (f : KernelHom K ISAR_Kerne
 def OperEq_D {Object : Type} (step : Object → Object → Prop) (o1 o2 : Object) : Prop :=
   ∃ o3, Relation.ReflTransGen step o1 o3 ∧ Relation.ReflTransGen step o2 o3
 
+open Classical
+
 /-- A transition system that is confluent, strongly normalizing, and semantically representable
 via a faithful causal signature into the 4x4 ISAR basis. -/
 structure ConfluentSNSystem where
   Object : Type
+  nonempty : Nonempty Object
   step : Object → Object → Prop
   confluent : ∀ (s s1 s2 : Object), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
     ∃ s3, Relation.ReflTransGen step s1 s3 ∧ Relation.ReflTransGen step s2 s3
@@ -176,9 +179,26 @@ This represents the claim that the four basis matrices span the representation s
 axiom encode_from_sig : (Fin 4 → Fin 4 → Int) → ISKSubtype
 
 /--
-The decoding/projection function mapping substrate terms back to system objects.
+The evaluation function reducing any transition system object to its normal form.
 -/
-axiom system_view_of (D : ConfluentSNSystem) : ISKSubtype → D.Object
+noncomputable def eval_to_nf (D : ConfluentSNSystem) (o : D.Object) : D.Object :=
+  D.sn.fix (fun x ih =>
+    if h : ∃ y, D.step x y then
+      ih (Classical.choose h) (Classical.choose_spec h)
+    else
+      x
+  ) o
+
+/--
+The decoding/projection function mapping substrate terms back to system objects,
+constructively defined by finding the matching object signature and evaluating to normal form.
+-/
+noncomputable def system_view_of (D : ConfluentSNSystem) (t : ISKSubtype) : D.Object :=
+  have : Nonempty D.Object := D.nonempty
+  if h : ∃ o : D.Object, OperEq (encode_from_sig (D.causal_signature o)) t then
+    eval_to_nf D (Classical.choose h)
+  else
+    Classical.choice this
 
 /--
 Soundness of the view mapping: operational equivalence in the substrate
