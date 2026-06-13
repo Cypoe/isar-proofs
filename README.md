@@ -111,6 +111,8 @@ We formalized linear duplication, verified size-decreasing properties for bounde
     * Defines $4 \times 4$ matrices over the integers $\mathbb{Z}$ in a completely self-contained way with decidable equality.
     * Formalizes the canonical ISAR matrices ($I$, $R$, $A$, $S$) for both representation models in the codebase.
     * Formally proves **idempotency** of the projection matrix $I^2 = I$ and **nilpotency** of the rewrite operator $(I \cdot R \cdot A \cdot S)^2 = 0$ constructively using reflexivity (`rfl`).
+    * Formally proves **gauge equivalence** between the two kernel representations: $P \cdot K_1 \cdot P^{-1} = K_2$, showing they are conjugate (similar) via an invertible lower-triangular matrix $P$ over $\mathbb{Z}$, unifying the two Python verification paths.
+
 
 18. **[InvariantLayer.lean](InvariantLayer.lean)**:
     * Added support for **linear duplication** (`LinearIKTerm`) and the multiplicity-based `dupCount` tracking.

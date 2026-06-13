@@ -136,4 +136,44 @@ theorem I2_idempotent : I2 * I2 = I2 := rfl
 /-- Theorem: The core rewrite operator K2 = I2 * R2 * A2 * S2 is nilpotent (K2² = 0). -/
 theorem K2_nilpotent : (I2 * R2 * A2 * S2) * (I2 * R2 * A2 * S2) = zero := rfl
 
+
+/- =========================================================
+   3. Gauge Equivalence (Isomorphism Verification)
+   ========================================================= -/
+
+/-- The 4D Identity matrix. -/
+def I_id : Matrix4 where
+  m00 := 1; m01 := 0; m02 := 0; m03 := 0
+  m10 := 0; m11 := 1; m12 := 0; m13 := 0
+  m20 := 0; m21 := 0; m22 := 1; m23 := 0
+  m30 := 0; m31 := 0; m32 := 0; m33 := 1
+
+/-- Lower-triangular gauge transformation matrix (P). -/
+def P : Matrix4 where
+  m00 := 1; m01 := 0; m02 := 0; m03 := 0
+  m10 := 1; m11 := 1; m12 := 0; m13 := 0
+  m20 := 0; m21 := 0; m22 := 1; m23 := 0
+  m30 := 0; m31 := 0; m32 := 0; m33 := 1
+
+/-- Inverse gauge transformation matrix (P_inv). -/
+def P_inv : Matrix4 where
+  m00 := 1;  m01 := 0; m02 := 0; m03 := 0
+  m10 := -1; m11 := 1; m12 := 0; m13 := 0
+  m20 := 0;  m21 := 0; m22 := 1; m23 := 0
+  m30 := 0;  m31 := 0; m32 := 0; m33 := 1
+
+/-- Theorem: P_inv is the left inverse of P. -/
+theorem P_inv_left : P_inv * P = I_id := rfl
+
+/-- Theorem: P_inv is the right inverse of P. -/
+theorem P_inv_right : P * P_inv = I_id := rfl
+
+/--
+Theorem: Gauge Equivalence.
+The two kernel representations are conjugate (similar) via the gauge matrix P.
+This formally unifies the two inconsistent representations of R used in the python scripts.
+-/
+theorem K1_K2_gauge_equiv : P * (I1 * R1 * A1 * S1) * P_inv = (I2 * R2 * A2 * S2) := rfl
+
 end ISAR
+
