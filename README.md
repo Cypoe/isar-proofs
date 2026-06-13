@@ -76,9 +76,10 @@ We formalized the general Dialect view framework, proved view representation ind
 
 12. **[ReverseRosetta.lean](ReverseRosetta.lean)**:
     * Formalizes `TransitionSystem` and state subset closure `IsClosed`.
-    * Proves **Operational Closed Decodability** (`operationally_closed_decodable`), demonstrating closed systems preserve trace decodability.
+    * Proves the **Forward Invariance of Closed Subsystems** (`closure_preserved_under_reachability`), demonstrating that reachable states remain within the closed state space.
     * Formalizes `AnchorDependentSystem` where steps require external environmental anchors.
-    * Proves **Referential Openness** (`referentially_open_requires_anchor`), proving that without knowing anchors, trace semantics are non-deterministic and cannot be decoded from the state alone.
+    * Proves **Referential Openness** (`referentially_open_requires_anchor`), proving that without knowing anchors, trace semantics are non-deterministic and the state alone does not determine the decoded outcome.
+
 
 13. **[TRSView.lean](TRSView.lean)**:
     * Implements a concrete SKI rewrite dialect `TTerm` and compiler `trs_encode`.

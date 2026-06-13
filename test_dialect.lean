@@ -38,14 +38,16 @@ def Reachable (TS : TransitionSystem) (s : TS.State) (t : TS.State) : Prop :=
   Relation.ReflTransGen TS.step s t
 
 def BehavioralTrace (TS : TransitionSystem) (s : TS.State) : TS.State → Prop :=
-  Reachable TS
+  Reachable TS s
 
-theorem operationally_closed_decodable (TS : TransitionSystem) (C : TS.State → Prop) (hc : IsClosed TS C) :
+
+theorem closure_preserved_under_reachability (TS : TransitionSystem) (C : TS.State → Prop) (hc : IsClosed TS C) :
     ∀ s s', C s → Reachable TS s s' → C s' := by
   intro s s' hs hr
   induction hr with
   | refl => exact hs
   | tail _ hstep ih =>
       exact hc _ _ ih hstep
+
 
 end ISAR

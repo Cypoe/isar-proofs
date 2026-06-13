@@ -19,17 +19,18 @@ def IsClosed (TS : TransitionSystem) (C : TS.State → Prop) : Prop :=
   ∀ (s1 s2 : TS.State), C s1 → TS.step s1 s2 → C s2
 
 /--
-Operationally Closed Decodable Theorem:
-If a system state-space subset C is closed under steps, then any state reachable from C
-remains in C. Thus, the operational behavior is internally decodable (always satisfies C).
+Forward Invariance of Closed Subsystems:
+If a system state-space subset C is closed under steps (forward invariant),
+then any state reachable from C remains in C.
 -/
-theorem operationally_closed_decodable (TS : TransitionSystem) (C : TS.State → Prop) (hc : IsClosed TS C) :
+theorem closure_preserved_under_reachability (TS : TransitionSystem) (C : TS.State → Prop) (hc : IsClosed TS C) :
     ∀ (s1 s2 : TS.State), C s1 → Reachable TS s1 s2 → C s2 := by
   intro s1 s2 hC hReach
   induction hReach with
   | refl => exact hC
   | tail s_mid s_end _ h_step ih =>
       exact hc s_mid s_end ih h_step
+
 
 
 /- =========================================================

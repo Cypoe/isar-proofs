@@ -95,13 +95,14 @@ Verified in [BytecodeView.lean](file:///C:/Users/fabi0/Documents/antigravity/joy
 
 The "Reverse Rosetta Stone" is not a claim about mystical universality (i.e., that any script or sequence can be translated). It is a boundary theorem about **closure**:
 
-1. **Closed Dialects** (`operationally_closed_decodable`):
-   An operationally closed system maintains its invariants. Because its transitions do not depend on external parameters, its behavior is internally determined and decodable via its trace.
+1. **Closed Subsystems** (`closure_preserved_under_reachability`):
+   An operationally closed system preserves its invariants under reachability. Because its transition states do not escape the closed state-space, it exhibits forward invariance.
    
 2. **Open Dialects** (`referentially_open_requires_anchor`):
    A referentially open system has transitions depending on external anchors:
    $$s \xrightarrow{a} s'$$
-   Without knowing the anchor $a$, the behavior starting from $s$ is non-deterministic. Thus, semantic recovery requires a missing reference frame (an external grounding anchor).
+   Without knowing the anchor $a$, the behavior starting from $s$ is non-deterministic. Thus, state alone does not determine the decoded outcome when different anchor traces lead to observably different endpoints.
+
 
 This distinction explains why executable systems (closed languages) can be decompiled and understood from behavior alone, while undeciphered human scripts or encrypted texts (referentially open) remain opaque without external historical/physical anchors.
 

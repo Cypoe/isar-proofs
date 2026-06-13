@@ -167,10 +167,11 @@ The more domains that can be shown to satisfy the same pattern, the stronger the
 - `Dialect.observational_equiv_of_quotient_eq`
 - `no_preferred_syntax`
 - `KernelHom.factor_through_ISAR`
-- `operationally_closed_decodable`
+- `closure_preserved_under_reachability`
 - `referentially_open_requires_anchor`
 - `QuantityKernel.sound`
 - `QuantityKernel.factor_unique`
+
 
 ## Paper framing
 
