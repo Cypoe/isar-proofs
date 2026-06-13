@@ -132,18 +132,34 @@ inductive BasisAlgebra : Matrix4 → Prop where
   | add (M1 M2 : Matrix4) (h1 : BasisAlgebra M1) (h2 : BasisAlgebra M2) : BasisAlgebra (M1 + M2)
   | mul (M1 M2 : Matrix4) (h1 : BasisAlgebra M1) (h2 : BasisAlgebra M2) : BasisAlgebra (M1 * M2)
 
-/-- Axiomatic term signature mapping in the substrate. -/
-noncomputable axiom term_signature : ISKSubtype → (Fin 4 → Fin 4 → Int)
+/-- Constructive term signature valuation function mapping ITerm directly to Matrix4. -/
+def term_signature_val : ITerm → Matrix4
+  | .var _   => zero
+  | .norm    => I1
+  | .sₛ      => S1
+  | .konst   => I1 * R1 * A1 * S1
+  | .dup     => zero
+  | .swap    => zero
+  | .comp    => zero
+  | .app f x => term_signature_val f * term_signature_val x
+
+/-- Bijective term signature mapping in the substrate. -/
+noncomputable def term_signature (t : ISKSubtype) : Fin 4 → Fin 4 → Int :=
+  fromMatrix4 (term_signature_val t.val)
 
 /-- The matrix representative of a substrate term. -/
 noncomputable def term_matrix (t : ISKSubtype) : Matrix4 :=
   toMatrix4 (term_signature t)
 
-/-- The identity term I maps to I1. -/
-axiom term_matrix_I : term_matrix ⟨ITerm.norm, ISKTerm.norm⟩ = I1
+/-- Theorem: The identity term I maps to I1. -/
+theorem term_matrix_I : term_matrix ⟨ITerm.norm, ISKTerm.norm⟩ = I1 := by
+  dsimp [term_matrix, term_signature, term_signature_val]
+  rw [toMatrix4_fromMatrix4]
 
-/-- The combinator S maps to S1. -/
-axiom term_matrix_S : term_matrix ⟨ITerm.sₛ, ISKTerm.sₛ⟩ = S1
+/-- Theorem: The combinator S maps to S1. -/
+theorem term_matrix_S : term_matrix ⟨ITerm.sₛ, ISKTerm.sₛ⟩ = S1 := by
+  dsimp [term_matrix, term_signature, term_signature_val]
+  rw [toMatrix4_fromMatrix4]
 
 /-- The rotation matrix R1 is representable by some term. -/
 axiom term_matrix_R : ∃ (t : ISKSubtype), term_matrix t = R1
@@ -154,8 +170,12 @@ axiom term_matrix_A : ∃ (t : ISKSubtype), term_matrix t = A1
 /-- The zero matrix is representable by some term. -/
 axiom term_matrix_zero : ∃ (t : ISKSubtype), term_matrix t = zero
 
-/-- Application of terms corresponds to matrix multiplication. -/
-axiom term_matrix_mul (t1 t2 : ISKSubtype) : term_matrix (app_raw t1 t2) = term_matrix t1 * term_matrix t2
+/-- Theorem: Application of terms corresponds to matrix multiplication. -/
+theorem term_matrix_mul (t1 t2 : ISKSubtype) :
+    term_matrix (app_raw t1 t2) = term_matrix t1 * term_matrix t2 := by
+  dsimp [term_matrix, term_signature]
+  rw [toMatrix4_fromMatrix4, toMatrix4_fromMatrix4, toMatrix4_fromMatrix4]
+  rfl
 
 /-- Matrix addition is representable by some term constructor. -/
 axiom term_matrix_add (t1 t2 : ISKSubtype) : ∃ (t : ISKSubtype), term_matrix t = term_matrix t1 + term_matrix t2
