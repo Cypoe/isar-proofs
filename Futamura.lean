@@ -1,4 +1,4 @@
-import ISAR
+import InvariantLayer
 
 namespace ISAR
 
@@ -140,7 +140,44 @@ theorem futamura_third
   have h_spec := h_corr spec_term static_env_for_spec_interp
   rw [h_first, h_spec]
 
+/-- Theorem: For any term in the pure ISK fragment, specialization is the identity. -/
+theorem specialize_ISKTerm (t : ITerm) (ht : ISKTerm t) (s_env : Nat → Option ITerm) :
+    specialize t s_env = t := by
+  induction ht with
+  | norm => rfl
+  | konst => rfl
+  | sₛ => rfl
+  | app hf hx ihf ihx =>
+      dsimp [specialize]
+      rw [ihf, ihx]
+
+/-- Theorem: Specialization of any ISKTerm is itself an ISKTerm. -/
+theorem specialize_is_ISKTerm (t : ITerm) (ht : ISKTerm t) (s_env : Nat → Option ITerm) :
+    ISKTerm (specialize t s_env) := by
+  rw [specialize_ISKTerm t ht s_env]
+  exact ht
+
+/--
+Theorem: Syntactic specialization respects operational equivalence (OperEq) on the ISKSubtype fragment.
+Since specialization acts as the identity on variable-free terms, it trivially preserves equivalence classes.
+-/
+theorem specialize_respects_OperEq (t u : ITerm) (ht : ISKTerm t) (hu : ISKTerm u)
+    (h : OperEq ⟨t, ht⟩ ⟨u, hu⟩) (s_env : Nat → Option ITerm) :
+    ∃ (ht_spec : ISKTerm (specialize t s_env)) (hu_spec : ISKTerm (specialize u s_env)),
+      OperEq ⟨specialize t s_env, ht_spec⟩ ⟨specialize u s_env, hu_spec⟩ := by
+  have ht_spec := specialize_is_ISKTerm t ht s_env
+  have hu_spec := specialize_is_ISKTerm u hu s_env
+  have h_t_eq : specialize t s_env = t := specialize_ISKTerm t ht s_env
+  have h_u_eq : specialize u s_env = u := specialize_ISKTerm u hu s_env
+  have h_goal : ⟨specialize t s_env, ht_spec⟩ = (⟨t, ht⟩ : ISKSubtype) := Subtype.ext h_t_eq
+  have h_goal2 : ⟨specialize u s_env, hu_spec⟩ = (⟨u, hu⟩ : ISKSubtype) := Subtype.ext h_u_eq
+  have h_eq_eq : OperEq ⟨specialize t s_env, ht_spec⟩ ⟨specialize u s_env, hu_spec⟩ := by
+    rw [h_goal, h_goal2]
+    exact h
+  exact ⟨ht_spec, hu_spec, h_eq_eq⟩
+
 
 end ISAR
+
 
 
