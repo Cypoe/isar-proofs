@@ -151,4 +151,20 @@ theorem universal_factorization_theorem (K : Kernel) (f : KernelHom K ISAR_Kerne
     OperEq (f.hom c) (K.decode c) := by
   exact morphism_uniqueness K f c
 
+/-- A transition system that is confluent and strongly normalizing. -/
+structure ConfluentSNSystem where
+  Object : Type
+  step : Object → Object → Prop
+  confluent : ∀ (s s1 s2 : Object), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
+    ∃ s3, Relation.ReflTransGen step s1 s3 ∧ Relation.ReflTransGen step s2 s3
+  sn : WellFounded (fun x y => step y x)
+
+/--
+Conjecture (The Fundamental Theorem of Dialect Realizability):
+Any confluent and strongly normalizing system D induces an AdmissibleDialect structure.
+Proving this constructively resolves the meta-circularity of terminality.
+-/
+axiom confluence_SN_gives_AdmissibleDialect (D : ConfluentSNSystem) : AdmissibleDialect
+
 end ISAR
+
