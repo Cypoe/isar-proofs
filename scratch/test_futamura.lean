@@ -121,5 +121,26 @@ theorem futamura_second
   have h_spec := h_corr interp static_env_for_interp
   rw [h_first, h_spec]
 
+/--
+Theorem: Third Futamura Projection (Compiler Generator Correctness).
+Specializing the specializer with respect to itself yields a compiler generator (cogen), which
+when applied to an interpreter, behaves exactly like specializing the specializer directly with respect to that interpreter.
+-/
+theorem futamura_third
+    (spec_term : ITerm)
+    (make_env : ITerm → (Nat → Option ITerm) → (Nat → ITerm))
+    (h_corr : SpecializerCorrect spec_term make_env)
+    (static_env_for_spec_interp : Nat → Option ITerm)
+    (static_env_for_cogen : Nat → Option ITerm)
+    (dynamic_env_for_cogen : Nat → ITerm)
+    (h_coh : Coherent (make_env spec_term static_env_for_spec_interp) static_env_for_cogen dynamic_env_for_cogen) :
+    subst (specialize spec_term static_env_for_cogen) dynamic_env_for_cogen =
+      specialize spec_term static_env_for_spec_interp := by
+  have h_first := futamura_first spec_term (make_env spec_term static_env_for_spec_interp) static_env_for_cogen dynamic_env_for_cogen h_coh
+  have h_spec := h_corr spec_term static_env_for_spec_interp
+  rw [h_first, h_spec]
+
+
 end ISAR
+
 
