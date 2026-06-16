@@ -242,6 +242,10 @@
       }
     }
   </style>
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.js"></script>
+  <script id="MathJax-script" async
+          src="https://cdn.jsdelivr.net/npm/mathjax@3.0.1/es5/tex-mml-chtml.js">
+  </script>
 </head>
 <body>
   <div class="front-container">
@@ -264,15 +268,19 @@
       <div class="prose-grid">
         <div class="prose-card">
           <h3>1. The Ontological Substrate</h3>
-          <p>At the foundation of the stack is the <strong>Substrate</strong>, formally defined as the type of terms (<code>ITerm</code> in <code>ISAR.lean</code>) containing variables, primitive operators (identity <code>norm</code>, constant <code>konst</code>, composition <code>comp</code>, and duplication <code>dup</code>), and term application. Primitives are characterized purely by their rewriting laws (e.g., identity $\text{norm} \cdot x \to x$ and constant $\text{konst} \cdot x \cdot y \to x$). In <code>BasisCompleteness.lean</code>, we prove that the standard distributive combinator $S$ is constructively definable from these primitive operators and satisfies its expected reduction behavior, demonstrating the algebraic completeness of the basis.</p>
+          <p>At the foundation of the stack is the <strong>Substrate</strong>, formally defined as the term algebra (<code>ITerm</code> in <code>ISAR.lean</code>) containing variables, operators (identity <code>norm</code>, constant <code>konst</code>, composition <code>comp</code>, and duplication <code>dup</code>), and term application. While these serve as constructors for the syntactic rewrite calculus, they are constructively derived at the tensor layer from the four geometric primitives: Identity (<code>I</code>), Rewrite (<code>R</code>), Adjacency (<code>A</code>), and State (<code>S</code>). The operators are characterized by their rewriting laws (e.g., identity \(\text{norm} \cdot x \to x\) and constant \(\text{konst} \cdot x \cdot y \to x\)\). In <code>BasisCompleteness.lean</code>, we prove that the standard distributive combinator \(S\) is constructively definable from the basis and satisfies its expected reduction behavior, demonstrating the algebraic completeness of the basis.</p>
         </div>
         <div class="prose-card">
-          <h3>2. The Invariant Quotient</h3>
-          <p>Directly above the syntax is the <strong>Invariant Layer</strong>, which formalizes computation independently of concrete evaluation steps. Two terms are defined as equivalent (the relation <code>OperEq</code> in <code>InvariantLayer.lean</code>) if they reduce to a common term. Using the confluence of the calculus, we prove that this joinability relation forms a transitive equivalence relation (a <code>Setoid</code>). The Invariant Layer is the quotient type of the terms modulo this equivalence relation. We prove that for any term possessing a normal form, there exists a unique canonical representative in the quotient.</p>
+          <h3>2. The Invariant Layer & Quotient</h3>
+          <p>Directly above the syntax is the <strong>Invariant Layer</strong> (\(\Delta\)), which is a terminal object in the category of admissible computational substrates. The quotient specifically is a coinvariant—more precisely, the cofinal quotient under operational equivalence. Formally, this is the <strong>bisimulation quotient</strong>: two terms are identified if and only if they share the same infinite continuation behavior (\(t_1 \sim t_2\), i.e., no observation can distinguish them). In process algebra, this relation is called <strong>bisimilarity</strong> (Park/Milner), and the quotient space is the final coalgebra of the observable functor. The invariant layer \(\Delta\) is the greatest fixed point of this observable equivalence relation—making it coinductive rather than inductive, witnessed from above rather than constructed from below.</p>
         </div>
         <div class="prose-card">
           <h3>3. Semantic Views</h3>
           <p>Rather than treating different formalisms—such as the lambda calculus, term rewriting systems, stack-based virtual machine bytecode, or set theories—as competing foundations, they are modeled as <strong>Semantic Views</strong> (the <code>Kernel</code> structure in <code>KernelCategory.lean</code>). A semantic view consists of a target carrier type, a decoding mapping back to the calculus, and an equivalence relation representing observational equivalence. Category-theoretic terminality (<code>morphism_uniqueness</code>) proves that any structure-preserving morphism from a semantic view factors uniquely through the canonical quotient, unifying different systems under a single algebraic framework.</p>
+        </div>
+        <div class="prose-card">
+          <h3>4. Historical Note: Ross's Plex Tract</h3>
+          <p>The term <strong>Plex</strong> is a direct homage to computer science pioneer <strong>Douglas T. Ross</strong> and his seminal 1961 paper, <em>"A Generalized Technique for Symbol Manipulation and Numerical Calculation"</em> (the Plex Tract). Ross introduced the "plex" as a unified structural entity combining data elements and topology pointers. In our framework, we realize Ross's vision mathematically: the substrate represents a universal topology network where computation is the invariant projection of structured relationships, rather than an arbitrary sequence of syntactic commands.</p>
         </div>
       </div>
     </section>
@@ -288,7 +296,7 @@
           <div style="padding:var(--space-4); background:var(--color-surface-offset); border-radius:var(--radius-md); border:1px solid var(--color-border)">
             <strong style="color:var(--color-purple)">1. First Futamura Projection (Specialization Soundness):</strong>
             <p style="margin-top:var(--space-1); font-size:var(--text-sm); color:var(--color-text-muted)">
-              Given a program $t$, a static environment mapping static inputs, and a dynamic environment mapping dynamic inputs, specialization produces a new program. We prove (<code>futamura_first</code>) that running the specialized program with the dynamic inputs yields the same result as running the original program with the complete environment:
+              Given a program \(t\), a static environment mapping static inputs, and a dynamic environment mapping dynamic inputs, specialization produces a new program. We prove (<code>futamura_first</code>) that running the specialized program with the dynamic inputs yields the same result as running the original program with the complete environment:
               $$\text{subst}(\text{specialize}(t, env_{\text{static}}), env_{\text{dynamic}}) = \text{subst}(t, env)$$
             </p>
           </div>
@@ -380,7 +388,7 @@
         <tbody>
           <tr>
             <td><strong>Primitive structure</strong></td>
-            <td>Tensor state $X$, operator $U$, context $ctx$</td>
+            <td>Tensor state \(X\), operator \(U\), context \(ctx\)</td>
             <td>Terms, rules, graphs (induced under view)</td>
           </tr>
           <tr>
@@ -390,12 +398,12 @@
           </tr>
           <tr>
             <td><strong>Normal form definition</strong></td>
-            <td>$\Pi(X) = X$ (algebraic projection fixpoint)</td>
+            <td>\(\Pi(X) = X\) (algebraic projection fixpoint)</td>
             <td>No more rewrite rules apply (syntactic)</td>
           </tr>
           <tr>
             <td><strong>Confluence</strong></td>
-            <td>Idempotence of quotient $\Pi$ (automatic)</td>
+            <td>Idempotence of quotient \(\Pi\) (automatic)</td>
             <td>Critical pair analysis / Knuth-Bendix (proof)</td>
           </tr>
           <tr>
@@ -407,10 +415,95 @@
       </table>
     </section>
 
+    <section>
+      <h3 class="section-title">ISAR vs. Classical Systems</h3>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-6);font-size:var(--text-sm)">
+        How does ISAR compare to classical "code = data" systems? We define five meta-properties to highlight the unique categorical and structural features verified in the ISAR vertical stack.
+      </p>
+      
+      <div class="prose-grid" style="grid-template-columns: 1fr; margin-bottom: var(--space-6);">
+        <div class="prose-card" style="width: 100%;">
+          <h3>The Structural Question</h3>
+          <p style="font-size: var(--text-base); color: var(--color-text); line-height: 1.6;">
+            <strong>"What additional structural properties does ISAR possess compared to classical 'code = data' systems like Lisp, Lambda, Smalltalk, etc.?"</strong>
+          </p>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); margin-top: var(--space-4);">
+            <div style="padding: var(--space-4); background: var(--color-surface-offset); border-radius: var(--radius-md); border: 1px solid var(--color-border);">
+              <strong style="color: var(--color-primary);">1. The Standard Core (IK-Fragment)</strong>
+              <p style="margin-top: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5;">
+                In the IK-fragment (without Adjacency and Rewrite operators), ISAR operates on the same level as Lisp or untyped Lambda calculus. Code and data are homogeneous, SKI is embedded, and confluence guarantees Turing-completeness.
+              </p>
+            </div>
+            <div style="padding: var(--space-4); background: var(--color-surface-offset); border-radius: var(--radius-md); border: 1px solid var(--color-border);">
+              <strong style="color: var(--color-purple);">2. The Richer Substrate (Full ISAR)</strong>
+              <p style="margin-top: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5;">
+                Full ISAR introduces first-class representation of **Identity (I)**, **Rewrite (R)**, **Adjacency (A)**, and **State (S)**. It constructs a stable operational quotient (the bisimulation final coalgebra) and proves categorical terminality, making it a universal dialect mediator.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <table class="view-table">
+        <thead>
+          <tr>
+            <th>System</th>
+            <th>P1: Homogeneous Algebra</th>
+            <th>P2: Self-Interpretation</th>
+            <th>P3: Stable Quotient</th>
+            <th>P4: Terminality Theorem</th>
+            <th>P5: Pluralistic Factorization</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>SKI Combinators</strong></td>
+            <td>✔ <span style="font-size: var(--text-xs); color: var(--color-text-muted);">(homogeneous)</span></td>
+            <td>(partial)</td>
+            <td>✖</td>
+            <td>✖</td>
+            <td>✖</td>
+          </tr>
+          <tr>
+            <td><strong>Lambda Calculus</strong></td>
+            <td>✔ <span style="font-size: var(--text-xs); color: var(--color-text-muted);">(beta redex)</span></td>
+            <td>✔ <span style="font-size: var(--text-xs); color: var(--color-text-muted);">(constructible)</span></td>
+            <td>✖</td>
+            <td>✖</td>
+            <td>✖</td>
+          </tr>
+          <tr>
+            <td><strong>Lisp / Scheme</strong></td>
+            <td>✔ <span style="font-size: var(--text-xs); color: var(--color-text-muted);">(homoiconic)</span></td>
+            <td>✔ <span style="font-size: var(--text-xs); color: var(--color-text-muted);">(eval/apply)</span></td>
+            <td>(ad-hoc)</td>
+            <td>✖</td>
+            <td>✖</td>
+          </tr>
+          <tr>
+            <td><strong>Smalltalk</strong></td>
+            <td>✔ <span style="font-size: var(--text-xs); color: var(--color-text-muted);">(all is object)</span></td>
+            <td>✔ <span style="font-size: var(--text-xs); color: var(--color-text-muted);">(metaclasses)</span></td>
+            <td>(VM-managed)</td>
+            <td>✖</td>
+            <td>✖</td>
+          </tr>
+          <tr style="background: color-mix(in oklab, var(--color-purple) 8%, var(--color-surface-2));">
+            <td><strong>ISAR Stack</strong></td>
+            <td><strong>✔</strong> <span style="font-size: var(--text-xs); color: var(--color-primary);">(`ITerm` syntax)</span></td>
+            <td><strong>✔</strong> <span style="font-size: var(--text-xs); color: var(--color-primary);">(`LambdaFragment`)</span></td>
+            <td><strong>✔</strong> <span style="font-size: var(--text-xs); color: var(--color-primary);">(`InvariantLayer`)</span></td>
+            <td><strong>✔</strong> <span style="font-size: var(--text-xs); color: var(--color-primary);">(`morphism_uniqueness`)</span></td>
+            <td><strong>✔</strong> <span style="font-size: var(--text-xs); color: var(--color-primary);">(ZFC, TRS, Stack VM, Quantities)</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="paradox-box">
       <h3 style="font-family:var(--font-display);font-size:clamp(1.65rem, 1.35rem + 1vw, 2.35rem);color:var(--color-purple);font-weight:700;letter-spacing:-0.01em;">The Epistemological Paradox: CIC vs. ISAR</h3>
       <p style="font-size:var(--text-sm);color:var(--color-text-muted);line-height:1.6">To verify the universal substrate, we employ <strong>Lean 4</strong>, a proof assistant based on the <strong>Calculus of Inductive Constructions (CIC)</strong>. This introduces a subtle paradox: we use a typed, terminating metalanguage (Lean) to prove properties of a Turing-complete, potentially diverging object language (ISAR). We resolve this by decoupling execution from reasoning. Lean does not run infinite computations; it reasons statically over inductive step relations, allowing terminating logic to certify general-recursive dynamics.</p>
-      <p style="font-size:var(--text-sm);color:var(--color-text-muted);line-height:1.6"><strong>The Gauge Shadow:</strong> Category-theoretic terminality demands that any two matrix models ($K_1$, $K_2$) of the substrate must be isomorphic. At the carrier matrix layer, this algebraic isomorphism manifests precisely as a <strong>gauge similarity transformation</strong>: $P \cdot K_1 \cdot P^{-1} = K_2$. The gauge-dependence represents our choice of coordinates (the matrix entries), while the gauge-invariance represents the terminal semantics.</p>
+      <p style="font-size:var(--text-sm);color:var(--color-text-muted);line-height:1.6"><strong>The Gauge Shadow:</strong> Category-theoretic terminality demands that any two matrix models (\(K_1\), \(K_2\)) of the substrate must be isomorphic. At the carrier matrix layer, this algebraic isomorphism manifests precisely as a <strong>gauge similarity transformation</strong>: \(P \cdot K_1 \cdot P^{-1} = K_2\). The gauge-dependence represents our choice of coordinates (the matrix entries), while the gauge-invariance represents the terminal semantics.</p>
     </section>
 
     <section>
@@ -430,7 +523,7 @@
           <tr>
             <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/BasisCompleteness.lean">BasisCompleteness.lean</a></td>
             <td>Completeness of structural carriers</td>
-            <td><code>completeness_of_basis</code> (derives $S$ from $I, K, W, C, B$)</td>
+            <td><code>completeness_of_basis</code> (derives \(S\) from \(I, K, W, C, B\))</td>
           </tr>
           <tr>
             <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/InvariantLayer.lean">InvariantLayer.lean</a></td>
@@ -475,7 +568,7 @@
           <tr>
             <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ISARMatrices.lean">ISARMatrices.lean</a></td>
             <td>Geometric matrix gauge transformations</td>
-            <td>Similarity matrix conjugation $P \cdot K_1 \cdot P^{-1} = K_2$</td>
+            <td>Similarity matrix conjugation \(P \cdot K_1 \cdot P^{-1} = K_2\)</td>
           </tr>
           <tr>
             <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ReverseRosetta.lean">ReverseRosetta.lean</a></td>
