@@ -2,7 +2,7 @@
   --color-bg:#f7f6f2;--color-surface:#f9f8f5;--color-surface-2:#fbfbf9;--color-surface-offset:#f3f0ec;--color-border:#d4d1ca;
   --color-text:#28251d;--color-text-muted:#7a7974;--color-text-faint:#bab9b4;--color-primary:#01696f;--color-blue:#006494;--color-purple:#7a39bb;
   --color-green:#437a22;--color-red:#a13544;--color-orange:#da7101;--shadow-sm:0 1px 2px oklch(0.2 0.01 80 / 0.06);--shadow-md:0 4px 12px oklch(0.2 0.01 80 / 0.08);
-  --text-xs:clamp(.75rem,.7rem+.25vw,.875rem);--text-sm:clamp(.875rem,.8rem+.35vw,1rem);--text-base:clamp(1rem,.95rem+.25vw,1.125rem);--text-lg:clamp(1.125rem,1rem+.75vw,1.5rem);--text-xl:clamp(1.5rem,1.2rem+1.25vw,2.25rem);--text-2xl:clamp(2rem,1.2rem+2.5vw,3.5rem);--text-hero:clamp(3rem,.5rem+7vw,7rem);
+  --text-xs:clamp(.75rem,.7rem+.25vw,.875rem);--text-sm:clamp(.875rem,.8rem+.35vw,1rem);--text-base:clamp(1rem,.95rem+.25vw,1.125rem);--text-lg:clamp(1.125rem,1.05rem+.5vw,1.65rem);--text-xl:clamp(1.65rem,1.35rem+1vw,2.5rem);--text-2xl:clamp(2.5rem,1.8rem+2vw,4rem);--text-hero:clamp(3.5rem,2rem+5vw,6.5rem);
   --space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.25rem;--space-6:1.5rem;--space-8:2rem;--space-10:2.5rem;--space-12:3rem;--space-16:4rem;--space-20:5rem;
   --radius-sm:.375rem;--radius-md:.5rem;--radius-lg:.75rem;--radius-xl:1rem;--radius-full:9999px;
   --font-body:'Satoshi', Inter, sans-serif;--font-display:'Boska', Georgia, serif;

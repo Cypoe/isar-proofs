@@ -26,34 +26,42 @@
     
     .front-header h1 {
       font-family: var(--font-display);
-      font-size: var(--text-xl);
+      font-size: clamp(2rem, 1.5rem + 2vw, 3rem);
       background: linear-gradient(135deg, var(--color-primary), var(--color-purple));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
+      font-weight: 700;
+      letter-spacing: -0.02em;
     }
     
     .front-hero {
       text-align: center;
-      padding: var(--space-12) 0 var(--space-8);
-      background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--color-primary) 8%, transparent), transparent 70%);
+      padding: var(--space-20) var(--space-6) var(--space-16);
+      background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--color-primary) 12%, transparent), transparent 75%);
       border-radius: var(--radius-xl);
-      border: 1px solid color-mix(in oklab, var(--color-text) 5%, transparent);
+      border: 1px solid color-mix(in oklab, var(--color-text) 8%, transparent);
       display: grid;
       place-items: center;
-      gap: var(--space-4);
+      gap: var(--space-6);
     }
     
     .front-hero h2 {
       font-family: var(--font-display);
-      font-size: var(--text-2xl);
-      line-height: 1.1;
+      font-size: clamp(3.5rem, 2.5rem + 5vw, 6.5rem);
+      line-height: 1.02;
       max-width: 20ch;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      background: linear-gradient(180deg, var(--color-text) 60%, color-mix(in oklab, var(--color-text) 70%, transparent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
     
     .front-hero p {
-      max-width: 70ch;
+      max-width: 75ch;
       color: var(--color-text-muted);
-      font-size: var(--text-sm);
+      font-size: clamp(1.1rem, 1rem + 0.5vw, 1.4rem);
+      line-height: 1.5;
     }
     
     .cta-btn {
@@ -78,34 +86,48 @@
     
     .section-title {
       font-family: var(--font-display);
-      font-size: var(--text-xl);
-      margin-bottom: var(--space-3);
-      border-bottom: 2px solid color-mix(in oklab, var(--color-primary) 20%, transparent);
-      padding-bottom: var(--space-2);
-      display: inline-block;
+      font-size: clamp(2.5rem, 1.8rem + 3vw, 4.5rem);
+      margin-top: var(--space-16);
+      margin-bottom: var(--space-6);
+      border-bottom: 2px solid color-mix(in oklab, var(--color-primary) 30%, transparent);
+      padding-bottom: var(--space-4);
+      display: block;
+      width: 100%;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
     }
     
     .prose-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
       gap: var(--space-6);
     }
     
     .prose-card {
-      padding: var(--space-6);
+      padding: var(--space-8);
       background: var(--color-surface-2);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-xl);
       box-shadow: var(--shadow-sm);
       display: flex;
       flex-direction: column;
-      gap: var(--space-3);
+      gap: var(--space-4);
     }
     
     .prose-card h3 {
       font-family: var(--font-display);
-      font-size: var(--text-lg);
+      font-size: clamp(1.65rem, 1.35rem + 1vw, 2.35rem);
       color: var(--color-primary);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      line-height: 1.15;
+    }
+    
+    .prose-card p {
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+      line-height: 1.6;
     }
     
     .diagram-container {
@@ -181,6 +203,7 @@
     .view-table th {
       background: color-mix(in oklab, var(--color-primary) 10%, var(--color-surface-2));
       font-weight: 700;
+      color: var(--color-text);
     }
     
     .view-table tr:last-child td {
@@ -201,18 +224,21 @@
       background: linear-gradient(135deg, color-mix(in oklab, var(--color-purple) 8%, transparent), color-mix(in oklab, var(--color-primary) 5%, transparent));
       border: 1px solid color-mix(in oklab, var(--color-purple) 20%, transparent);
       border-radius: var(--radius-xl);
-      padding: var(--space-6);
+      padding: var(--space-8);
       display: flex;
       flex-direction: column;
-      gap: var(--space-3);
+      gap: var(--space-6);
     }
     
     @media (max-width: 768px) {
       .front-hero {
-        padding: var(--space-8) var(--space-4);
+        padding: var(--space-12) var(--space-4);
       }
       .front-hero h2 {
-        font-size: var(--text-xl);
+        font-size: clamp(2.5rem, 2rem + 3vw, 4rem);
+      }
+      .section-title {
+        font-size: clamp(2rem, 1.5rem + 2vw, 3rem);
       }
     }
   </style>
@@ -226,7 +252,7 @@
     
     <section class="front-hero">
       <h2>The Ontological Atlas of Formal Systems</h2>
-      <p>A mathematically verified vertical stack mapping calculi, process algebras, and set theories as epistemic projections over a representation-free tensor dynamics.</p>
+      <p>A mathematically verified framework mapping calculi, process algebras, and set theories as structured views over a universal quotient space.</p>
       <a href="./explorer.html" class="cta-btn">
         Explore Morphospace Graph
         <span>→</span>
@@ -238,15 +264,48 @@
       <div class="prose-grid">
         <div class="prose-card">
           <h3>1. The Ontological Substrate</h3>
-          <p>At the bottom of the stack lies the <strong>Tensor Space</strong> ($T$): a representation-free ontological substrate. Objects are compared purely via extensional equivalence ($ExtEq$), avoiding syntactic bias. It is populated by primitive operators corresponding to combinators $I, K, W, C, B$. The $S$ combinator is not primitive; it is derived constructively and proved to extensionally satisfy the $S$-reduction rule.</p>
+          <p>At the foundation of the stack is the <strong>Substrate</strong>, formally defined as the type of terms (<code>ITerm</code> in <code>ISAR.lean</code>) containing variables, primitive operators (identity <code>norm</code>, constant <code>konst</code>, composition <code>comp</code>, and duplication <code>dup</code>), and term application. Primitives are characterized purely by their rewriting laws (e.g., identity $\text{norm} \cdot x \to x$ and constant $\text{konst} \cdot x \cdot y \to x$). In <code>BasisCompleteness.lean</code>, we prove that the standard distributive combinator $S$ is constructively definable from these primitive operators and satisfies its expected reduction behavior, demonstrating the algebraic completeness of the basis.</p>
         </div>
         <div class="prose-card">
-          <h3>2. The Invariant Layer</h3>
-          <p>Above the substrate is the <strong>Invariant Layer</strong>, obtained by taking the quotient of the symbolic calculus modulo operational equivalence. We prove that this forms a rigorous equivalence relation. For any term possessing a normal form, there exists a unique canonical representative, establishing that the invariant layer packages computation independent of concrete evaluation paths.</p>
+          <h3>2. The Invariant Quotient</h3>
+          <p>Directly above the syntax is the <strong>Invariant Layer</strong>, which formalizes computation independently of concrete evaluation steps. Two terms are defined as equivalent (the relation <code>OperEq</code> in <code>InvariantLayer.lean</code>) if they reduce to a common term. Using the confluence of the calculus, we prove that this joinability relation forms a transitive equivalence relation (a <code>Setoid</code>). The Invariant Layer is the quotient type of the terms modulo this equivalence relation. We prove that for any term possessing a normal form, there exists a unique canonical representative in the quotient.</p>
         </div>
         <div class="prose-card">
-          <h3>3. Epistemic Pluralism</h3>
-          <p>Under <strong>Epistemic View Pluralism</strong>, different formalisms—such as the lambda calculus, term rewriting systems, stack-based bytecode machines, and hereditarily finite set theory—are not competing foundations. Instead, they are all <strong>semantic views (decoders)</strong> that project and materialize meaning from the same representation-free operational quotient.</p>
+          <h3>3. Semantic Views</h3>
+          <p>Rather than treating different formalisms—such as the lambda calculus, term rewriting systems, stack-based virtual machine bytecode, or set theories—as competing foundations, they are modeled as <strong>Semantic Views</strong> (the <code>Kernel</code> structure in <code>KernelCategory.lean</code>). A semantic view consists of a target carrier type, a decoding mapping back to the calculus, and an equivalence relation representing observational equivalence. Category-theoretic terminality (<code>morphism_uniqueness</code>) proves that any structure-preserving morphism from a semantic view factors uniquely through the canonical quotient, unifying different systems under a single algebraic framework.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h3 class="section-title">Verified Partial Evaluation & The Futamura Chain</h3>
+      <div class="prose-card" style="width: 100%;">
+        <h3>The Mechanics of Futamura Projections</h3>
+        <p style="margin-bottom:var(--space-4); font-size: 1.05rem; line-height: 1.6;">
+          In <a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/Futamura.lean">Futamura.lean</a>, we formally define substitution (<code>subst</code>) and partial evaluation (<code>specialize</code>) over variables and terms, and prove the correctness of the three Futamura projections:
+        </p>
+        <div style="display:grid; gap:var(--space-4); margin-bottom:var(--space-2)">
+          <div style="padding:var(--space-4); background:var(--color-surface-offset); border-radius:var(--radius-md); border:1px solid var(--color-border)">
+            <strong style="color:var(--color-purple)">1. First Futamura Projection (Specialization Soundness):</strong>
+            <p style="margin-top:var(--space-1); font-size:var(--text-sm); color:var(--color-text-muted)">
+              Given a program $t$, a static environment mapping static inputs, and a dynamic environment mapping dynamic inputs, specialization produces a new program. We prove (<code>futamura_first</code>) that running the specialized program with the dynamic inputs yields the same result as running the original program with the complete environment:
+              $$\text{subst}(\text{specialize}(t, env_{\text{static}}), env_{\text{dynamic}}) = \text{subst}(t, env)$$
+            </p>
+          </div>
+          <div style="padding:var(--space-4); background:var(--color-surface-offset); border-radius:var(--radius-md); border:1px solid var(--color-border)">
+            <strong style="color:var(--color-purple)">2. Second Futamura Projection (Compiler Generation):</strong>
+            <p style="margin-top:var(--space-1); font-size:var(--text-sm); color:var(--color-text-muted)">
+              If we specialize a correct partial evaluator with respect to an interpreter, we generate a compiler. We prove (<code>futamura_second</code>) that applying this compiler to a program source yields a specialized executable program that behaves identically to the interpreter running that program:
+              $$\text{specialize}(\text{specializer}, \text{interpreter}) = \text{compiler}$$
+            </p>
+          </div>
+          <div style="padding:var(--space-4); background:var(--color-surface-offset); border-radius:var(--radius-md); border:1px solid var(--color-border)">
+            <strong style="color:var(--color-purple)">3. Third Futamura Projection (Compiler Generator):</strong>
+            <p style="margin-top:var(--space-1); font-size:var(--text-sm); color:var(--color-text-muted)">
+              If we specialize the partial evaluator with respect to itself, we generate a compiler generator (often called <code>cogen</code>). We prove (<code>futamura_third</code>) that applying <code>cogen</code> to any interpreter yields a compiler for that interpreter:
+              $$\text{specialize}(\text{specializer}, \text{specializer}) = \text{cogen}$$
+            </p>
+          </div>
         </div>
       </div>
     </section>
@@ -349,9 +408,9 @@
     </section>
 
     <section class="paradox-box">
-      <h3 style="font-family:var(--font-display);font-size:var(--text-lg);color:var(--color-purple)">The Epistemological Paradox: CIC vs. ISAR</h3>
-      <p style="font-size:var(--text-sm)">To verify the universal substrate, we employ <strong>Lean 4</strong>, a proof assistant based on the <strong>Calculus of Inductive Constructions (CIC)</strong>. This introduces a subtle paradox: we use a typed, terminating metalanguage (Lean) to prove properties of a Turing-complete, potentially diverging object language (ISAR). We resolve this by decoupling execution from reasoning. Lean does not run infinite computations; it reasons statically over inductive step relations, allowing terminating logic to certify general-recursive dynamics.</p>
-      <p style="font-size:var(--text-sm)"><strong>The Gauge Shadow:</strong> Category-theoretic terminality demands that any two matrix models ($K_1$, $K_2$) of the substrate must be isomorphic. At the carrier matrix layer, this algebraic isomorphism manifests precisely as a <strong>gauge similarity transformation</strong>: $P \cdot K_1 \cdot P^{-1} = K_2$. The gauge-dependence represents our choice of coordinates (the matrix entries), while the gauge-invariance represents the terminal semantics.</p>
+      <h3 style="font-family:var(--font-display);font-size:clamp(1.65rem, 1.35rem + 1vw, 2.35rem);color:var(--color-purple);font-weight:700;letter-spacing:-0.01em;">The Epistemological Paradox: CIC vs. ISAR</h3>
+      <p style="font-size:var(--text-sm);color:var(--color-text-muted);line-height:1.6">To verify the universal substrate, we employ <strong>Lean 4</strong>, a proof assistant based on the <strong>Calculus of Inductive Constructions (CIC)</strong>. This introduces a subtle paradox: we use a typed, terminating metalanguage (Lean) to prove properties of a Turing-complete, potentially diverging object language (ISAR). We resolve this by decoupling execution from reasoning. Lean does not run infinite computations; it reasons statically over inductive step relations, allowing terminating logic to certify general-recursive dynamics.</p>
+      <p style="font-size:var(--text-sm);color:var(--color-text-muted);line-height:1.6"><strong>The Gauge Shadow:</strong> Category-theoretic terminality demands that any two matrix models ($K_1$, $K_2$) of the substrate must be isomorphic. At the carrier matrix layer, this algebraic isomorphism manifests precisely as a <strong>gauge similarity transformation</strong>: $P \cdot K_1 \cdot P^{-1} = K_2$. The gauge-dependence represents our choice of coordinates (the matrix entries), while the gauge-invariance represents the terminal semantics.</p>
     </section>
 
     <section>
@@ -362,7 +421,7 @@
       <table class="view-table">
         <thead>
           <tr>
-            <th>Verified Lean File</th>
+            <th>Verified Lean/Doc File</th>
             <th>Ontological Target Role</th>
             <th>Primary Verified Theorem</th>
           </tr>
@@ -409,6 +468,11 @@
             <td>Compilation and execution equivalence over VM stack operations</td>
           </tr>
           <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/Futamura.lean">Futamura.lean</a></td>
+            <td>Futamura projections verification</td>
+            <td>First Futamura projection proof (specializer soundness)</td>
+          </tr>
+          <tr>
             <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ISARMatrices.lean">ISARMatrices.lean</a></td>
             <td>Geometric matrix gauge transformations</td>
             <td>Similarity matrix conjugation $P \cdot K_1 \cdot P^{-1} = K_2$</td>
@@ -417,6 +481,11 @@
             <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ReverseRosetta.lean">ReverseRosetta.lean</a></td>
             <td>Operational boundary limits</td>
             <td><code>closure_preserved_under_reachability</code> (closed) & <code>open_requires_anchor</code></td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ISAR_VS_FUTAMURA_KERNELS.md">ISAR_VS_FUTAMURA_KERNELS.md</a></td>
+            <td>Substrate and partial evaluation documentation</td>
+            <td>Core definitions and correspondence table</td>
           </tr>
         </tbody>
       </table>
