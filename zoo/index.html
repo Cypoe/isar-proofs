@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Formal Systems Zoo</title>
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&f[]=boska@400,500,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <a class="sr-only" href="#main">Skip to content</a>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div style="display:flex;align-items:center;gap:var(--space-3)">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-label="Formal systems zoo logo">
+              <path d="M4 18c0-4.5 3.5-8 8-8s8 3.5 8 8"/>
+              <path d="M12 4v12"/>
+              <circle cx="12" cy="4" r="2.2" fill="currentColor" stroke="none"/>
+              <circle cx="6" cy="18" r="1.6" fill="currentColor" stroke="none"/>
+              <circle cx="18" cy="18" r="1.6" fill="currentColor" stroke="none"/>
+            </svg>
+          </div>
+          <div>
+            <h1>Formal Zoo</h1>
+            <p>Systems as species</p>
+          </div>
+        </div>
+        <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">☼</button>
+      </div>
+
+      <label class="search">
+        <span aria-hidden="true">⌕</span>
+        <input id="searchInput" type="text" placeholder="Search λ, SKI, π, logic…" />
+      </label>
+
+      <div class="filter-group">
+        <h2>Family</h2>
+        <div id="familyChips" class="chips"></div>
+      </div>
+
+      <div class="filter-group">
+        <h2>Turing status</h2>
+        <div id="tcChips" class="chips"></div>
+      </div>
+
+      <div class="filter-group">
+        <h2>Carrier lens</h2>
+        <div id="carrierChips" class="chips"></div>
+      </div>
+
+      <div class="mini-legend">
+        <div class="legend-item"><span class="dot" style="background:#4f98a3"></span> Substrate / minimal kernels</div>
+        <div class="legend-item"><span class="dot" style="background:#6daa45"></span> Combinators & logic</div>
+        <div class="legend-item"><span class="dot" style="background:#dd6974"></span> Lambda families</div>
+        <div class="legend-item"><span class="dot" style="background:#d163a7"></span> Process calculi</div>
+        <div class="legend-item"><span class="dot" style="background:#5591c7"></span> Rewriting / automata</div>
+      </div>
+    </aside>
+
+    <main id="main" class="main">
+      <section class="hero">
+        <div class="hero-copy">
+          <h2>A zoo of formal systems.</h2>
+          <p>This zoo maps calculi and logics as a unified morphospace based on primitive count, rewrite laws, behavioral quotient, and carrier profiles. Here, &lambda;-calculus, SKI, Iota, &pi;-calculus, and sequent calculus are presented as operational neighbors within a shared semantic space.</p>
+        </div>
+        <div class="hero-panels">
+          <div class="panel stats">
+            <div class="stat"><strong id="statSystems">0</strong><span>Systems</span></div>
+            <div class="stat"><strong id="statFamilies">0</strong><span>Families</span></div>
+            <div class="stat"><strong id="statTC">0</strong><span>Turing-complete</span></div>
+          </div>
+          <div class="panel">
+            <p><strong>Specimen Anatomy:</strong> Every formal system is treated as a specimen with observable features: basis size, rewrite laws, normalization behavior, and quotient under bisimulation or behavioral equivalence.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h3>Morphospace</h3>
+            <p>Nodes are formal systems placed by primitive count and carrier participation. Edges indicate direct reduction, compilation, or known interpretive embeddings.</p>
+          </div>
+        </div>
+        <div class="graph-wrap">
+          <div class="graph-controls">
+            <button class="toggle active" data-view="family">Color by family</button>
+            <button class="toggle" data-view="tc">Color by computability</button>
+            <button class="toggle" data-view="substrate">Highlight substrate relation</button>
+            <button class="toggle" data-view="quotient">Behavioral Quotient</button>
+          </div>
+          <div id="graph" class="graph" aria-label="formal systems graph"></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h3>Specimens</h3>
+            <p>Each card is a candidate exhibit label: basis, rewrite semantics, quotient, and the carrier fingerprint that situates it relative to ISAR.</p>
+          </div>
+        </div>
+        <div id="cards" class="cards"></div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h3>Selected system</h3>
+            <p>The detailed panel is where the zoo becomes research-grade: you can inspect the system’s local anatomy and how it embeds into neighboring systems.</p>
+          </div>
+        </div>
+        <div class="detail">
+          <div id="detailMain" class="detail-main">
+            <div class="detail-empty">
+              <div>
+                <p>Select a system from the graph or cards.</p>
+                <p style="font-size:var(--text-sm)">Use the tabs in the detail panel to inspect the system's local anatomy, translation maps, and interactive execution environments.</p>
+              </div>
+            </div>
+          </div>
+          <div class="detail-meta">
+            <div class="card">
+              <div class="card-head"><h4>Zoo Classification Axes</h4><span class="badge">specification</span></div>
+              <ul style="display:grid;gap:var(--space-2);padding-left:1rem;color:var(--color-text-muted)">
+                <li>Primitive basis size</li>
+                <li>Rewrite locality</li>
+                <li>Normalization behavior</li>
+                <li>Bisimulation quotient</li>
+                <li>ISAR carrier fingerprint</li>
+                <li>Compilation / interpretation neighbors</li>
+              </ul>
+            </div>
+            <div class="card">
+              <div class="card-head"><h4>Interactive Lab</h4><span class="badge">active</span></div>
+              <p>This atlas integrates real-time compilers, abstract syntax tree parsers, and reduction simulators. You can compile lambda terms (&lambda; &rarr; SKI &rarr; Iota), run leftmost-outermost combinator reductions, and explore structural tree views dynamically.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <p class="footer-note">The Formal Systems Zoo is an interactive, comparative laboratory for verifying, compiling, and analyzing the computational and algebraic structure of formal languages.</p>
+    </main>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-const SYSTEMS = [
+export const SYSTEMS = [
   // === COMBINATOR CALCULI ===
   {
     id: "iota",
@@ -98,9 +98,9 @@ const SYSTEMS = [
     description: "Untyped λ + type annotations. All terms normalize. No general recursion.",
     encoding: "λx:A.M",
     rewriteRules: ["(λx:A.M)N → M[x:=N]", "Type: (A→B)"],
-    bisimQuotient: "Cartesian closed categories",
-    color: "#e8af34",
-    notable: "Curry-Howard: proofs in propositional logic",
+    bisimQuotient: "Cartesian Closed Categories",
+    color: "#dd6974",
+    notable: "Curry-Howard correspondence: propositional logic proofs",
     quotientClass: "CCC"
   },
   {
@@ -108,85 +108,85 @@ const SYSTEMS = [
     name: "System F",
     symbol: "λ2",
     family: "Lambda",
-    carriers: { I: true, S: true, A: true, R: true },
-    primitives: 5,
+    carriers: { I: true, S: true, A: true, R: false },
+    primitives: 6,
     turingComplete: false,
     symbolCount: null,
-    description: "Polymorphic λ-calculus. Second-order types. Can encode all System T programs.",
+    description: "Simply Typed λ + polymorphism (quantifying over types). Highly expressive.",
     encoding: "ΛX.λx:X.x",
-    rewriteRules: ["(ΛX.M)[A] → M[X:=A]", "(λx:A.M)N → M[x:=N]"],
-    bisimQuotient: "Polymorphic CCC",
-    color: "#fdab43",
-    notable: "Girard/Reynolds — basis of ML/Haskell type systems",
-    quotientClass: "Poly"
+    rewriteRules: ["(ΛX.M)[Y] → M[X:=Y]", "(λx:A.M)N → M[x:=N]"],
+    bisimQuotient: "Reynolds parametricity",
+    color: "#dd6974",
+    notable: "Can represent all functions provably recursive in Peano Arithmetic",
+    quotientClass: "CCC"
   },
   {
     id: "coc",
-    name: "Calculus of Constructions",
+    name: "Calculus of Const.",
     symbol: "CoC",
     family: "Lambda",
-    carriers: { I: true, S: true, A: true, R: true },
-    primitives: 6,
+    carriers: { I: true, S: true, A: true, R: false },
+    primitives: 8,
     turingComplete: false,
     symbolCount: null,
-    description: "Dependent types + polymorphism. Types and terms unified. Basis of Coq/Lean.",
-    encoding: "Π(x:A).B",
-    rewriteRules: ["β-reduction", "η-reduction", "δ-reduction (definitions)"],
-    bisimQuotient: "Locally cartesian closed categories",
-    color: "#bb653b",
-    notable: "Curry-Howard: proofs = programs, propositions = types",
-    quotientClass: "ProofTheory"
+    description: "Coquand & Huet 1986. Apex of Barendregt's cube. Dependent types (terms depend on types, types on terms).",
+    encoding: "Πx:A.B",
+    rewriteRules: ["β-reduction", "η-conversion", "dependent typecheck"],
+    bisimQuotient: "Grothendieck universes",
+    color: "#dd6974",
+    notable: "Mathematical foundation for major modern proof assistants",
+    quotientClass: "CCC"
   },
   {
     id: "coq",
-    name: "Coq",
+    name: "Coq / Gallina",
     symbol: "Coq",
     family: "Lambda",
-    carriers: { I: true, S: true, A: true, R: true },
-    primitives: 7,
+    carriers: { I: true, S: true, A: true, R: false },
+    primitives: 10,
     turingComplete: false,
     symbolCount: null,
-    description: "Interactive theorem prover based on the Calculus of Inductive Constructions (CIC). Proofs are terms, propositions are types.",
-    encoding: "Theorem id : forall A, A -> A. Proof. intros. exact x. Qed.",
-    rewriteRules: ["β-reduction", "ι-reduction (inductive matches)", "δ-reduction (unfolding)", "ζ-reduction"],
-    bisimQuotient: "Calculus of Inductive Constructions (CIC)",
-    color: "#bb653b",
-    notable: "Used to formalize the Feit-Thompson theorem and 4-color theorem",
-    quotientClass: "ProofTheory"
+    description: "Interactive theorem prover based on the Calculus of Inductive Constructions (CIC). Compiles proof scripts into verified kernels.",
+    encoding: "Inductive nat : Set := O | S : nat -> nat.",
+    rewriteRules: ["β-reduction", "ι-reduction (inductive matches)", "δ-reduction (constants)"],
+    bisimQuotient: "CIC Proof Theory",
+    color: "#dd6974",
+    notable: "Used to formally verify the Feit-Thompson odd order theorem and CompCert compiler",
+    quotientClass: "CCC"
   },
   {
     id: "lean",
-    name: "Lean",
+    name: "Lean Prover",
     symbol: "Lean",
     family: "Lambda",
-    carriers: { I: true, S: true, A: true, R: true },
-    primitives: 6,
+    carriers: { I: true, S: true, A: true, R: false },
+    primitives: 9,
     turingComplete: false,
     symbolCount: null,
-    description: "Modern proof assistant and programming language based on dependent type theory. Extensively used for formalizing advanced mathematics.",
-    encoding: "theorem my_id {α : Type} (x : α) : x = x := rfl",
-    rewriteRules: ["β-reduction", "ι-reduction", "δ-reduction", "Quotient reduction"],
-    bisimQuotient: "Dependent Type Theory with quotients",
+    description: "Interactive theorem prover and programming language utilizing a dependent type theory kernel with quotient types and classical axioms.",
+    encoding: "def add (n m : Nat) : Nat",
+    rewriteRules: ["β-reduction", "Quotient reduction", "Inductive recursion"],
+    bisimQuotient: "CIC with Quotients",
     color: "#dd6974",
-    notable: "Mathlib project contains the largest formalization of modern mathematics",
-    quotientClass: "ProofTheory"
+    notable: "Rapidly becoming the standard for formalizing modern mathematics (e.g. Liquid Tensor Experiment)",
+    quotientClass: "CCC"
   },
-  // === REWRITING SYSTEMS ===
+  // === REWRITING CALCULI ===
   {
     id: "term-rewriting",
     name: "Term Rewriting",
     symbol: "TRS",
     family: "Rewriting",
-    carriers: { I: false, S: true, A: true, R: true },
-    primitives: 2,
+    carriers: { I: true, S: true, A: false, R: true },
+    primitives: 4,
     turingComplete: true,
     symbolCount: null,
-    description: "Signature of function symbols + rewrite rules l → r. Covers all computation.",
-    encoding: "f(x,y) → g(y,x)",
-    rewriteRules: ["l → r (contextual, left-linear)"],
-    bisimQuotient: "Word problem in algebra",
+    description: "Abstract terms + algebraic rewrite rules. Computes via pattern matching.",
+    encoding: "add(0,y) → y",
+    rewriteRules: ["t(x1,..,xn) → s (pattern match)"],
+    bisimQuotient: "Initial algebra",
     color: "#5591c7",
-    notable: "Knuth-Bendix completion as normalization procedure",
+    notable: "Substrate of algebraic specification languages",
     quotientClass: "Rewriting"
   },
   {
@@ -194,8 +194,8 @@ const SYSTEMS = [
     name: "String Rewriting",
     symbol: "SRS",
     family: "Rewriting",
-    carriers: { I: false, S: true, A: false, R: true },
-    primitives: 2,
+    carriers: { I: true, S: false, A: false, R: true },
+    primitives: 3,
     turingComplete: true,
     symbolCount: null,
     description: "Words over alphabet + string replacement rules. Semi-Thue systems.",
@@ -238,7 +238,7 @@ const SYSTEMS = [
     rewriteRules: ["a.P | ā.Q →τ P | Q"],
     bisimQuotient: "Strong bisimilarity",
     color: "#d163a7",
-    notable: "First formal foundation for behavioral equivalence",
+    notable: "First foundation for behavioral equivalence",
     quotientClass: "Process"
   },
   // === LOGIC / PROOF SYSTEMS ===
@@ -382,4 +382,79 @@ const SYSTEMS = [
   }
 ];
 
-if (typeof module !== 'undefined') module.exports = SYSTEMS;
+export const edges = [
+  ['untyped-lambda','SKI'],['SKI','iota'],['SK','SKI'],['BCKW','linear-logic'],['untyped-lambda','lambda-typed'],['lambda-typed','system-f'],['system-f','coc'],['pi-calculus','ccs'],['term-rewriting','string-rewriting'],['turing-machine','term-rewriting'],['ISAR','untyped-lambda'],['ISAR','pi-calculus'],['ISAR','term-rewriting'],['ISAR','fol'],['ISAR','SKI'],['untyped-lambda','lambda-mu'],['prop-logic','lambda-typed'],['fol','coc'],
+  ['coc','coq'],['coc','lean'],['fol','isabelle-isar'],['sequent-calculus','linear-logic'],['isabelle-isar','sequent-calculus'],['ISAR','isabelle-isar']
+];
+
+export const familyColors = {
+  Substrate: '#4f98a3',
+  Combinator: '#6daa45',
+  Lambda: '#dd6974',
+  Rewriting: '#5591c7',
+  Process: '#d163a7',
+  Logic: '#437a22',
+  Automata: '#006494'
+};
+
+export const QUOTIENT_CLASSES = {
+  "Substrate": {
+    name: "Operational Substrate",
+    color: "#4f98a3",
+    description: "The ontological ground and final coalgebra. The invariant foundation through which all other formalisms are decoded as semantic views."
+  },
+  "TuringFunctional": {
+    name: "Turing-Complete Functional",
+    color: "#dd6974",
+    description: "Turing-complete deterministic functional calculi with general recursion (λ-calculus, SKI, Iota, λμ)."
+  },
+  "CCC": {
+    name: "Cartesian Closed Structure",
+    color: "#dd6974",
+    description: "Decidable type systems and logics matching Cartesian Closed Categories and standard Curry-Howard (Simply Typed λ, System F, CoC, Coq, Lean, Prop Logic)."
+  },
+  "Process": {
+    name: "Process Calculi",
+    color: "#d163a7",
+    description: "Systems for concurrent communication, mobility, and interactive execution (CCS, π-calculus)."
+  },
+  "Rewriting": {
+    name: "Rewriting & State",
+    color: "#5591c7",
+    description: "State machines and term/string replacement rules. Computes via step-by-step syntactic transformation rather than abstraction (Turing Machine, TRS, SRS)."
+  },
+  "Linear": {
+    name: "Resource Logics & Structural Rules",
+    color: "#a86fdf",
+    description: "Logics and combinators with controlled duplication and discarding of resources (linear logic, BCKW)."
+  },
+  "ProofTheory": {
+    name: "Proof Theory & Meta-Logics",
+    color: "#437a22",
+    description: "First-Order Logic, Gentzen's Sequent Calculus, and LCF-style proof assistants mapping higher-order structural proof terms."
+  }
+};
+
+export const COMB_EXPANSIONS = {
+  'ι': 'ι',
+  'I': '(ιι)',
+  'K': '(ι(ι(ιι)))',
+  'S': '(ι(ι(ι(ιι))))',
+  'B': 'S(KS)K',
+  'C': 'S(BBS)(KK)',
+  'A': 'KI',
+  'U': 'CI',
+  'Z': 'BK',
+  'P': 'BC(CI)',
+  'R': 'CC',
+  'O': 'B(BK)(BC(CI))',
+  'J': 'BK(CI)',
+  'S\'': 'B(BS)B',
+  'B\'': 'BB',
+  'C\'': 'B(BC)B',
+  'C\'B': '(C\'B)',
+  'K2': 'BKK',
+  'K3': 'BK2K',
+  'K4': 'BK3K',
+  'Y': 'SPP'
+};
