@@ -3,148 +3,436 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Formal Systems Zoo</title>
+  <title>ISAR: The Verified Ontological Substrate</title>
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&f[]=boska@400,500,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./css/style.css" />
+  <style>
+    /* Unique frontpage styles layered on top of core style.css */
+    .front-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: var(--space-8) var(--space-6) var(--space-16);
+      display: grid;
+      gap: var(--space-12);
+    }
+    
+    .front-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: var(--space-4);
+    }
+    
+    .front-header h1 {
+      font-family: var(--font-display);
+      font-size: var(--text-xl);
+      background: linear-gradient(135deg, var(--color-primary), var(--color-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    
+    .front-hero {
+      text-align: center;
+      padding: var(--space-12) 0 var(--space-8);
+      background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--color-primary) 8%, transparent), transparent 70%);
+      border-radius: var(--radius-xl);
+      border: 1px solid color-mix(in oklab, var(--color-text) 5%, transparent);
+      display: grid;
+      place-items: center;
+      gap: var(--space-4);
+    }
+    
+    .front-hero h2 {
+      font-family: var(--font-display);
+      font-size: var(--text-2xl);
+      line-height: 1.1;
+      max-width: 20ch;
+    }
+    
+    .front-hero p {
+      max-width: 70ch;
+      color: var(--color-text-muted);
+      font-size: var(--text-sm);
+    }
+    
+    .cta-btn {
+      padding: var(--space-4) var(--space-8);
+      font-size: var(--text-base);
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, var(--color-primary), var(--color-purple));
+      border-radius: var(--radius-full);
+      box-shadow: 0 0 20px color-mix(in oklab, var(--color-primary) 30%, transparent);
+      transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin-top: var(--space-4);
+    }
+    
+    .cta-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px color-mix(in oklab, var(--color-primary) 50%, transparent);
+    }
+    
+    .section-title {
+      font-family: var(--font-display);
+      font-size: var(--text-xl);
+      margin-bottom: var(--space-3);
+      border-bottom: 2px solid color-mix(in oklab, var(--color-primary) 20%, transparent);
+      padding-bottom: var(--space-2);
+      display: inline-block;
+    }
+    
+    .prose-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: var(--space-6);
+    }
+    
+    .prose-card {
+      padding: var(--space-6);
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+    
+    .prose-card h3 {
+      font-family: var(--font-display);
+      font-size: var(--text-lg);
+      color: var(--color-primary);
+    }
+    
+    .diagram-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: var(--space-4);
+    }
+    
+    .diagram-card {
+      background: #0d0c0a;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-5);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-4);
+      position: relative;
+    }
+    
+    .diagram-card:hover {
+      border-color: var(--color-primary);
+    }
+    
+    .diagram-card h4 {
+      font-size: var(--text-sm);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-purple);
+      border-bottom: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+      padding-bottom: var(--space-2);
+    }
+    
+    .diagram-flow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-2);
+      font-family: ui-monospace, monospace;
+      font-size: var(--text-xs);
+    }
+    
+    .flow-node {
+      padding: var(--space-2) var(--space-3);
+      background: var(--color-surface-offset);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      text-align: center;
+      width: 100%;
+    }
+    
+    .flow-arrow {
+      color: var(--color-primary);
+      font-weight: bold;
+    }
+    
+    .view-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--text-sm);
+      margin-top: var(--space-4);
+      background: var(--color-surface-2);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      border: 1px solid var(--color-border);
+    }
+    
+    .view-table th, .view-table td {
+      padding: var(--space-4);
+      text-align: left;
+      border-bottom: 1px solid var(--color-border);
+    }
+    
+    .view-table th {
+      background: color-mix(in oklab, var(--color-primary) 10%, var(--color-surface-2));
+      font-weight: 700;
+    }
+    
+    .view-table tr:last-child td {
+      border-bottom: none;
+    }
+    
+    .file-link {
+      font-family: ui-monospace, monospace;
+      color: var(--color-primary);
+      text-decoration: underline;
+    }
+    
+    .file-link:hover {
+      color: var(--color-purple);
+    }
+    
+    .paradox-box {
+      background: linear-gradient(135deg, color-mix(in oklab, var(--color-purple) 8%, transparent), color-mix(in oklab, var(--color-primary) 5%, transparent));
+      border: 1px solid color-mix(in oklab, var(--color-purple) 20%, transparent);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+    
+    @media (max-width: 768px) {
+      .front-hero {
+        padding: var(--space-8) var(--space-4);
+      }
+      .front-hero h2 {
+        font-size: var(--text-xl);
+      }
+    }
+  </style>
 </head>
 <body>
-  <a class="sr-only" href="#main">Skip to content</a>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div style="display:flex;align-items:center;gap:var(--space-3)">
-          <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-label="Formal systems zoo logo">
-              <path d="M4 18c0-4.5 3.5-8 8-8s8 3.5 8 8"/>
-              <path d="M12 4v12"/>
-              <circle cx="12" cy="4" r="2.2" fill="currentColor" stroke="none"/>
-              <circle cx="6" cy="18" r="1.6" fill="currentColor" stroke="none"/>
-              <circle cx="18" cy="18" r="1.6" fill="currentColor" stroke="none"/>
-            </svg>
-          </div>
-          <div>
-            <h1>Formal Zoo</h1>
-            <p>Systems as species</p>
-          </div>
+  <div class="front-container">
+    <header class="front-header">
+      <h1>ISAR Stack</h1>
+      <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">☼</button>
+    </header>
+    
+    <section class="front-hero">
+      <h2>The Ontological Atlas of Formal Systems</h2>
+      <p>A mathematically verified vertical stack mapping calculi, process algebras, and set theories as epistemic projections over a representation-free tensor dynamics.</p>
+      <a href="./explorer.html" class="cta-btn">
+        Explore Morphospace Graph
+        <span>→</span>
+      </a>
+    </section>
+
+    <section>
+      <h3 class="section-title">The Ontological Narrative</h3>
+      <div class="prose-grid">
+        <div class="prose-card">
+          <h3>1. The Ontological Substrate</h3>
+          <p>At the bottom of the stack lies the <strong>Tensor Space</strong> ($T$): a representation-free ontological substrate. Objects are compared purely via extensional equivalence ($ExtEq$), avoiding syntactic bias. It is populated by primitive operators corresponding to combinators $I, K, W, C, B$. The $S$ combinator is not primitive; it is derived constructively and proved to extensionally satisfy the $S$-reduction rule.</p>
         </div>
-        <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">☼</button>
+        <div class="prose-card">
+          <h3>2. The Invariant Layer</h3>
+          <p>Above the substrate is the <strong>Invariant Layer</strong>, obtained by taking the quotient of the symbolic calculus modulo operational equivalence. We prove that this forms a rigorous equivalence relation. For any term possessing a normal form, there exists a unique canonical representative, establishing that the invariant layer packages computation independent of concrete evaluation paths.</p>
+        </div>
+        <div class="prose-card">
+          <h3>3. Epistemic Pluralism</h3>
+          <p>Under <strong>Epistemic View Pluralism</strong>, different formalisms—such as the lambda calculus, term rewriting systems, stack-based bytecode machines, and hereditarily finite set theory—are not competing foundations. Instead, they are all <strong>semantic views (decoders)</strong> that project and materialize meaning from the same representation-free operational quotient.</p>
+        </div>
       </div>
+    </section>
 
-      <label class="search">
-        <span aria-hidden="true">⌕</span>
-        <input id="searchInput" type="text" placeholder="Search λ, SKI, π, logic…" />
-      </label>
-
-      <div class="filter-group">
-        <h2>Family</h2>
-        <div id="familyChips" class="chips"></div>
+    <section>
+      <h3 class="section-title">Ontological Maps: Rosetta Commuting Flows</h3>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-4);font-size:var(--text-sm)">
+        Every verified system in the ISAR stack commutes under the same universal factorization pattern:
+      </p>
+      <div class="diagram-container">
+        <div class="diagram-card">
+          <h4>A. Lambda Calculus View</h4>
+          <div class="diagram-flow">
+            <div class="flow-node">Lambda term (t)</div>
+            <div class="flow-arrow">↓ encode</div>
+            <div class="flow-node">Substrate (T)</div>
+            <div class="flow-arrow">↓ Kernel + Quotient</div>
+            <div class="flow-node">Invariant Layer [T]</div>
+            <div class="flow-arrow">↓ decode</div>
+            <div class="flow-node">Lambda Normal Form</div>
+          </div>
+        </div>
+        <div class="diagram-card">
+          <h4>B. Hereditarily Finite Sets</h4>
+          <div class="diagram-flow">
+            <div class="flow-node">HF Set (s)</div>
+            <div class="flow-arrow">↓ encode</div>
+            <div class="flow-node">Substrate (T)</div>
+            <div class="flow-arrow">↓ Kernel + Quotient</div>
+            <div class="flow-node">Invariant Layer [T]</div>
+            <div class="flow-arrow">↓ decode</div>
+            <div class="flow-node">Set-theoretic Result</div>
+          </div>
+        </div>
+        <div class="diagram-card">
+          <h4>C. Term Rewriting Systems</h4>
+          <div class="diagram-flow">
+            <div class="flow-node">TRS Term (t)</div>
+            <div class="flow-arrow">↓ encode</div>
+            <div class="flow-node">Substrate (T)</div>
+            <div class="flow-arrow">↓ Kernel + Quotient</div>
+            <div class="flow-node">Invariant Layer [T]</div>
+            <div class="flow-arrow">↓ decode</div>
+            <div class="flow-node">Algebraic Normal Form</div>
+          </div>
+        </div>
+        <div class="diagram-card">
+          <h4>D. Stack VM Bytecode</h4>
+          <div class="diagram-flow">
+            <div class="flow-node">Bytecode (p)</div>
+            <div class="flow-arrow">↓ encode</div>
+            <div class="flow-node">Substrate (T)</div>
+            <div class="flow-arrow">↓ Kernel + Quotient</div>
+            <div class="flow-node">Invariant Layer [T]</div>
+            <div class="flow-arrow">↓ decode</div>
+            <div class="flow-node">Final Virtual Machine Stack</div>
+          </div>
+        </div>
       </div>
+    </section>
 
-      <div class="filter-group">
-        <h2>Turing status</h2>
-        <div id="tcChips" class="chips"></div>
-      </div>
+    <section>
+      <h3 class="section-title">Comparative Analysis</h3>
+      <table class="view-table">
+        <thead>
+          <tr>
+            <th>Aspect</th>
+            <th>Ontology (Plex IS)</th>
+            <th>Semantics (Plex MEANS)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Primitive structure</strong></td>
+            <td>Tensor state $X$, operator $U$, context $ctx$</td>
+            <td>Terms, rules, graphs (induced under view)</td>
+          </tr>
+          <tr>
+            <td><strong>Evaluation dynamics</strong></td>
+            <td>Tensor contraction + quotient projection</td>
+            <td>Symbolic rewrite steps (evaluation paths)</td>
+          </tr>
+          <tr>
+            <td><strong>Normal form definition</strong></td>
+            <td>$\Pi(X) = X$ (algebraic projection fixpoint)</td>
+            <td>No more rewrite rules apply (syntactic)</td>
+          </tr>
+          <tr>
+            <td><strong>Confluence</strong></td>
+            <td>Idempotence of quotient $\Pi$ (automatic)</td>
+            <td>Critical pair analysis / Knuth-Bendix (proof)</td>
+          </tr>
+          <tr>
+            <td><strong>Terminality</strong></td>
+            <td>Terminal object in the category of kernels</td>
+            <td>Turing-complete encoding capacity</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
-      <div class="filter-group">
-        <h2>Carrier lens</h2>
-        <div id="carrierChips" class="chips"></div>
-      </div>
+    <section class="paradox-box">
+      <h3 style="font-family:var(--font-display);font-size:var(--text-lg);color:var(--color-purple)">The Epistemological Paradox: CIC vs. ISAR</h3>
+      <p style="font-size:var(--text-sm)">To verify the universal substrate, we employ <strong>Lean 4</strong>, a proof assistant based on the <strong>Calculus of Inductive Constructions (CIC)</strong>. This introduces a subtle paradox: we use a typed, terminating metalanguage (Lean) to prove properties of a Turing-complete, potentially diverging object language (ISAR). We resolve this by decoupling execution from reasoning. Lean does not run infinite computations; it reasons statically over inductive step relations, allowing terminating logic to certify general-recursive dynamics.</p>
+      <p style="font-size:var(--text-sm)"><strong>The Gauge Shadow:</strong> Category-theoretic terminality demands that any two matrix models ($K_1$, $K_2$) of the substrate must be isomorphic. At the carrier matrix layer, this algebraic isomorphism manifests precisely as a <strong>gauge similarity transformation</strong>: $P \cdot K_1 \cdot P^{-1} = K_2$. The gauge-dependence represents our choice of coordinates (the matrix entries), while the gauge-invariance represents the terminal semantics.</p>
+    </section>
 
-      <div class="mini-legend">
-        <div class="legend-item"><span class="dot" style="background:#4f98a3"></span> Substrate / minimal kernels</div>
-        <div class="legend-item"><span class="dot" style="background:#6daa45"></span> Combinators & logic</div>
-        <div class="legend-item"><span class="dot" style="background:#dd6974"></span> Lambda families</div>
-        <div class="legend-item"><span class="dot" style="background:#d163a7"></span> Process calculi</div>
-        <div class="legend-item"><span class="dot" style="background:#5591c7"></span> Rewriting / automata</div>
-      </div>
-    </aside>
-
-    <main id="main" class="main">
-      <section class="hero">
-        <div class="hero-copy">
-          <h2>A zoo of formal systems.</h2>
-          <p>This zoo maps calculi and logics as a unified morphospace based on primitive count, rewrite laws, behavioral quotient, and carrier profiles. Here, &lambda;-calculus, SKI, Iota, &pi;-calculus, and sequent calculus are presented as operational neighbors within a shared semantic space.</p>
-        </div>
-        <div class="hero-panels">
-          <div class="panel stats">
-            <div class="stat"><strong id="statSystems">0</strong><span>Systems</span></div>
-            <div class="stat"><strong id="statFamilies">0</strong><span>Families</span></div>
-            <div class="stat"><strong id="statTC">0</strong><span>Turing-complete</span></div>
-          </div>
-          <div class="panel">
-            <p><strong>Specimen Anatomy:</strong> Every formal system is treated as a specimen with observable features: basis size, rewrite laws, normalization behavior, and quotient under bisimulation or behavioral equivalence.</p>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-head">
-          <div>
-            <h3>Morphospace</h3>
-            <p>Nodes are formal systems placed by primitive count and carrier participation. Edges indicate direct reduction, compilation, or known interpretive embeddings.</p>
-          </div>
-        </div>
-        <div class="graph-wrap">
-          <div class="graph-controls">
-            <button class="toggle active" data-view="family">Color by family</button>
-            <button class="toggle" data-view="tc">Color by computability</button>
-            <button class="toggle" data-view="substrate">Highlight substrate relation</button>
-            <button class="toggle" data-view="quotient">Behavioral Quotient</button>
-          </div>
-          <div id="graph" class="graph" aria-label="formal systems graph"></div>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-head">
-          <div>
-            <h3>Specimens</h3>
-            <p>Each card is a candidate exhibit label: basis, rewrite semantics, quotient, and the carrier fingerprint that situates it relative to ISAR.</p>
-          </div>
-        </div>
-        <div id="cards" class="cards"></div>
-      </section>
-
-      <section>
-        <div class="section-head">
-          <div>
-            <h3>Selected system</h3>
-            <p>The detailed panel is where the zoo becomes research-grade: you can inspect the system’s local anatomy and how it embeds into neighboring systems.</p>
-          </div>
-        </div>
-        <div class="detail">
-          <div id="detailMain" class="detail-main">
-            <div class="detail-empty">
-              <div>
-                <p>Select a system from the graph or cards.</p>
-                <p style="font-size:var(--text-sm)">Use the tabs in the detail panel to inspect the system's local anatomy, translation maps, and interactive execution environments.</p>
-              </div>
-            </div>
-          </div>
-          <div class="detail-meta">
-            <div class="card">
-              <div class="card-head"><h4>Zoo Classification Axes</h4><span class="badge">specification</span></div>
-              <ul style="display:grid;gap:var(--space-2);padding-left:1rem;color:var(--color-text-muted)">
-                <li>Primitive basis size</li>
-                <li>Rewrite locality</li>
-                <li>Normalization behavior</li>
-                <li>Bisimulation quotient</li>
-                <li>ISAR carrier fingerprint</li>
-                <li>Compilation / interpretation neighbors</li>
-              </ul>
-            </div>
-            <div class="card">
-              <div class="card-head"><h4>Interactive Lab</h4><span class="badge">active</span></div>
-              <p>This atlas integrates real-time compilers, abstract syntax tree parsers, and reduction simulators. You can compile lambda terms (&lambda; &rarr; SKI &rarr; Iota), run leftmost-outermost combinator reductions, and explore structural tree views dynamically.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <p class="footer-note">The Formal Systems Zoo is an interactive, comparative laboratory for verifying, compiling, and analyzing the computational and algebraic structure of formal languages.</p>
-    </main>
+    <section>
+      <h3 class="section-title">The Lean Verification Index</h3>
+      <p style="color:var(--color-text-muted);margin-bottom:var(--space-4);font-size:var(--text-sm)">
+        Below is the verified code index mapped to the local workspace files. Click any file to view its proof script:
+      </p>
+      <table class="view-table">
+        <thead>
+          <tr>
+            <th>Verified Lean File</th>
+            <th>Ontological Target Role</th>
+            <th>Primary Verified Theorem</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/BasisCompleteness.lean">BasisCompleteness.lean</a></td>
+            <td>Completeness of structural carriers</td>
+            <td><code>completeness_of_basis</code> (derives $S$ from $I, K, W, C, B$)</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/InvariantLayer.lean">InvariantLayer.lean</a></td>
+            <td>Formal operational quotient space</td>
+            <td>Quotient Setoid formulation and canonical representative equivalence</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ISAR.lean">ISAR.lean</a></td>
+            <td>Symbolic calculus rewriting</td>
+            <td>Confluence, determinism, and <code>IStepBasis</code> simulation</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/KernelCategory.lean">KernelCategory.lean</a></td>
+            <td>Universal category of semantic views</td>
+            <td><code>morphism_uniqueness</code> (proving terminality of ISAR Kernel)</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/LambdaFragment.lean">LambdaFragment.lean</a></td>
+            <td>Lambda compiler adequacy</td>
+            <td>Compositional homomorphic compilation and Closed Term Separation</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ZFCInterpretation.lean">ZFCInterpretation.lean</a></td>
+            <td>Hereditarily Finite Set view interpreter</td>
+            <td>Relative interpretation of set theory constructors onto ISAR</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/TRSView.lean">TRSView.lean</a></td>
+            <td>Term Rewriting System isomorphism</td>
+            <td>Isomorphism between symbolic tree terms and the operational substrate</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/BytecodeView.lean">BytecodeView.lean</a></td>
+            <td>Bytecode execution view</td>
+            <td>Compilation and execution equivalence over VM stack operations</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ISARMatrices.lean">ISARMatrices.lean</a></td>
+            <td>Geometric matrix gauge transformations</td>
+            <td>Similarity matrix conjugation $P \cdot K_1 \cdot P^{-1} = K_2$</td>
+          </tr>
+          <tr>
+            <td><a class="file-link" href="file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/ReverseRosetta.lean">ReverseRosetta.lean</a></td>
+            <td>Operational boundary limits</td>
+            <td><code>closure_preserved_under_reachability</code> (closed) & <code>open_requires_anchor</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
   </div>
 
-  <script type="module" src="./js/main.js"></script>
+  <script>
+    const themeBtn = document.querySelector('[data-theme-toggle]');
+    if (themeBtn) {
+      themeBtn.addEventListener('click', () => {
+        const root = document.documentElement;
+        const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        root.setAttribute('data-theme', next);
+        themeBtn.textContent = next === 'dark' ? '☼' : '☾';
+      });
+    }
+  </script>
 </body>
 </html>
