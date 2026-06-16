@@ -394,6 +394,9 @@
       ['coc','coq'],['coc','lean'],['fol','isabelle-isar'],['sequent-calculus','linear-logic'],['isabelle-isar','sequent-calculus'],['ISAR','isabelle-isar']
     ];
 
+    let reductionTerm = null;
+    let reductionTimer = null;
+
     const familyColors = {
       Substrate: '#4f98a3',
       Combinator: '#6daa45',
@@ -752,16 +755,22 @@
     }
 
     function formatSKI(term) {
-      if (term.type === 'comb') return term.name;
-      if (term.type === 'var') return term.name;
+      if (!term) return '';
+      if (term.type === 'comb' || term.type === 'var' || term.type === 'leaf') return term.name || '';
       if (term.type === 'app') {
         let left = formatSKI(term.left);
         let right = formatSKI(term.right);
-        if (term.right.type === 'app' || (term.right.type === 'comb' && term.right.name.length > 1) || (term.right.type === 'var' && term.right.name.length > 1)) {
+        if (term.right && (
+          term.right.type === 'app' ||
+          (term.right.type === 'comb' && term.right.name && term.right.name.length > 1) ||
+          (term.right.type === 'var' && term.right.name && term.right.name.length > 1) ||
+          (term.right.type === 'leaf' && term.right.name && term.right.name.length > 1)
+        )) {
           right = `(${right})`;
         }
         return `${left}${right}`;
       }
+      return '';
     }
 
     // --- COMBINATOR EXPRESSION PARSER ---
@@ -844,7 +853,7 @@
         }
         const expansion = COMB_EXPANSIONS[name];
         if (!expansion) {
-          throw new Error(`Unknown combinator: ${name}`);
+          return { left: null, right: null };
         }
         const parsed = parseCombinatorExpr(expansion);
         return expandToIota(parsed);
@@ -1121,7 +1130,12 @@
         node.style.top = pos.y + 'px';
         node.innerHTML = `<div class="node-circle" style="background:${getColor(s)}"><span>${s.symbol}</span></div><small>${s.name}</small>`;
         node.setAttribute('aria-label', s.name);
-        node.addEventListener('click', () => { state.selected = s.id; renderDetail(); highlightSelection(); });
+        node.addEventListener('click', () => {
+          state.customCombinator = '';
+          state.selected = s.id;
+          renderDetail();
+          highlightSelection();
+        });
         if(state.selected && state.selected !== s.id) node.classList.add('soft');
         graph.appendChild(node);
       });
@@ -1154,6 +1168,7 @@
       cards.innerHTML = systems.map(cardHTML).join('');
       [...cards.children].forEach((card, i) => {
         card.addEventListener('click', () => {
+          state.customCombinator = '';
           state.selected = systems[i].id;
           renderDetail();
           highlightSelection();
@@ -1162,6 +1177,12 @@
     }
 
     function renderDetail(){
+      // Clear any running reduction sandbox timer when switching specimen/detail views
+      if (reductionTimer) {
+        clearInterval(reductionTimer);
+        reductionTimer = null;
+      }
+
       const s = SYSTEMS.find(x => x.id === state.selected);
       if(!s){
         detailMain.innerHTML = `<div class="detail-empty"><div><p>Select a system from the graph or cards.</p></div></div>`;
@@ -1207,20 +1228,24 @@
           </div>
           <div id="labContent" style="display:${state.detailTab === 'lab' ? 'block' : 'none'}"></div>
         </div>`;
-
+ 
       const btnAnatomy = document.getElementById('tabBtnAnatomy');
       const btnLab = document.getElementById('tabBtnLab');
       const divAnatomy = document.getElementById('anatomyContent');
       const divLab = document.getElementById('labContent');
-
+ 
       btnAnatomy.addEventListener('click', () => {
         state.detailTab = 'anatomy';
         btnAnatomy.classList.add('active');
         btnLab.classList.remove('active');
         divAnatomy.style.display = 'block';
         divLab.style.display = 'none';
+        if (reductionTimer) {
+          clearInterval(reductionTimer);
+          reductionTimer = null;
+        }
       });
-
+ 
       btnLab.addEventListener('click', () => {
         state.detailTab = 'lab';
         btnLab.classList.add('active');
@@ -1229,10 +1254,113 @@
         divLab.style.display = 'block';
         renderLab(s);
       });
-
+ 
       if (state.detailTab === 'lab') {
         renderLab(s);
       }
+    }
+
+    // --- COMBINATOR REDUCTION ENGINE ---
+    function getSpine(node) {
+      const args = [];
+      let curr = node;
+      while (curr && curr.type === 'app') {
+        args.unshift(curr.right);
+        curr = curr.left;
+      }
+      return { head: curr, args };
+    }
+
+    function cloneTerm(node) {
+      if (!node) return null;
+      if (node.type === 'leaf' || node.type === 'comb' || node.type === 'var') {
+        return { type: 'leaf', name: node.name };
+      }
+      return {
+        type: 'app',
+        left: cloneTerm(node.left),
+        right: cloneTerm(node.right)
+      };
+    }
+
+    function reduceLMO(node) {
+      if (!node) return { reduced: false, node: null };
+
+      const spine = getSpine(node);
+      if (spine.head && spine.head.type === 'leaf') {
+        const name = spine.head.name;
+        let arity = 0;
+        if (name === 'ι') arity = 1;
+        else if (name === 'I') arity = 1;
+        else if (name === 'K') arity = 2;
+        else if (name === 'S') arity = 3;
+        else if (name === 'B') arity = 3;
+        else if (name === 'C') arity = 3;
+        else if (name === 'W') arity = 2;
+        
+        if (arity > 0 && spine.args.length >= arity) {
+          let reducedTerm;
+          const args = spine.args;
+          if (name === 'ι') {
+            reducedTerm = {
+              type: 'app',
+              left: { type: 'app', left: cloneTerm(args[0]), right: { type: 'leaf', name: 'S' } },
+              right: { type: 'leaf', name: 'K' }
+            };
+          } else if (name === 'I') {
+            reducedTerm = cloneTerm(args[0]);
+          } else if (name === 'K') {
+            reducedTerm = cloneTerm(args[0]);
+          } else if (name === 'S') {
+            const f = args[0], g = args[1], x = args[2];
+            reducedTerm = {
+              type: 'app',
+              left: { type: 'app', left: cloneTerm(f), right: cloneTerm(x) },
+              right: { type: 'app', left: cloneTerm(g), right: cloneTerm(x) }
+            };
+          } else if (name === 'B') {
+            const f = args[0], g = args[1], x = args[2];
+            reducedTerm = {
+              type: 'app',
+              left: cloneTerm(f),
+              right: { type: 'app', left: cloneTerm(g), right: cloneTerm(x) }
+            };
+          } else if (name === 'C') {
+            const f = args[0], x = args[1], y = args[2];
+            reducedTerm = {
+              type: 'app',
+              left: { type: 'app', left: cloneTerm(f), right: cloneTerm(y) },
+              right: cloneTerm(x)
+            };
+          } else if (name === 'W') {
+            const f = args[0], x = args[1];
+            reducedTerm = {
+              type: 'app',
+              left: { type: 'app', left: cloneTerm(f), right: cloneTerm(x) },
+              right: cloneTerm(x)
+            };
+          }
+
+          let result = reducedTerm;
+          for (let k = arity; k < args.length; k++) {
+            result = { type: 'app', left: result, right: cloneTerm(args[k]) };
+          }
+          return { reduced: true, node: result };
+        }
+      }
+
+      if (node.type === 'app') {
+        const leftRes = reduceLMO(node.left);
+        if (leftRes.reduced) {
+          return { reduced: true, node: { type: 'app', left: leftRes.node, right: node.right } };
+        }
+        const rightRes = reduceLMO(node.right);
+        if (rightRes.reduced) {
+          return { reduced: true, node: { type: 'app', left: node.left, right: rightRes.node } };
+        }
+      }
+
+      return { reduced: false, node };
     }
 
     function renderLab(s) {
@@ -1240,8 +1368,52 @@
       if (!container) return;
       container.innerHTML = '';
 
+      // Clear any running reduction sandbox timer when rendering a new lab
+      if (reductionTimer) {
+        clearInterval(reductionTimer);
+        reductionTimer = null;
+      }
+
       if (s.family === 'Combinator') {
         const initialExpr = s.encoding;
+        
+        let presets = [];
+        let defaultExpr = '';
+        if (s.id === 'iota') {
+          presets = [
+            { value: 'ι x', label: 'ι x (Expand ι)' },
+            { value: 'ι ι x', label: 'ι ι x' },
+            { value: 'ι (ι ι) x', label: 'ι (ι ι) x' }
+          ];
+          defaultExpr = 'ι x';
+        } else if (s.id === 'SK') {
+          presets = [
+            { value: 'S K K x', label: 'S K K x (Identity)' },
+            { value: 'S (K S) K x y z', label: 'S (K S) K x y z (Composition B)' },
+            { value: 'S K K (S K K)', label: 'S K K (S K K) (Divergent Omega)' }
+          ];
+          defaultExpr = 'S K K x';
+        } else if (s.id === 'BCKW') {
+          presets = [
+            { value: 'I x', label: 'I x (Identity)' },
+            { value: 'B I I x', label: 'B I I x (Double application)' },
+            { value: 'W I x', label: 'W I x (Duplication)' },
+            { value: 'C I x y', label: 'C I x y (Flip identity)' },
+            { value: 'K x y', label: 'K x y (Constant)' }
+          ];
+          defaultExpr = 'B I I x';
+        } else {
+          // SKI or fallback
+          presets = [
+            { value: 'S I I x', label: 'S I I x (Double application)' },
+            { value: 'S(KS)K x y z', label: 'S(KS)K x y z (Composition B)' },
+            { value: 'I x', label: 'I x (Identity)' },
+            { value: 'K x y', label: 'K x y (Constant)' },
+            { value: 'S I I (S I I)', label: 'S I I (S I I) (Divergent Omega)' }
+          ];
+          defaultExpr = 'S I I x';
+        }
+
         container.innerHTML = `
           <div class="lab-container">
             <h4>Iota Tree Visualizer</h4>
@@ -1289,6 +1461,27 @@
                 <div class="metric"><strong id="combSizeVal">-</strong><span>Iota Symbol Count</span></div>
                 <div class="metric"><strong id="combDepthVal">-</strong><span>Tree Depth</span></div>
               </div>
+            </div>
+
+            <div style="border-top:1px solid color-mix(in oklab, var(--color-text) 10%, transparent);padding-top:var(--space-4);margin-top:var(--space-4);display:grid;gap:var(--space-3)">
+              <h4 style="font-size:var(--text-md)">Reduction Sandbox</h4>
+              <p style="font-size:var(--text-sm);color:var(--color-text-muted)">
+                Step through active reductions of combinators containing variables (like <code>x, y, z</code>).
+              </p>
+              <div style="display:flex;gap:var(--space-2)">
+                <select id="reductionPresetSelect" style="flex:1;background:var(--color-surface-2);border:1px solid var(--color-border);padding:var(--space-2);border-radius:var(--radius-sm);color:var(--color-text);font-size:var(--text-sm)">
+                  ${presets.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
+                </select>
+                <button id="reductionResetBtn" class="toggle active" style="padding:0 var(--space-3)">Load</button>
+              </div>
+              
+              <div style="display:flex;gap:var(--space-2)">
+                <input type="text" id="reductionExprInput" style="flex:1;background:var(--color-surface-2);border:1px solid var(--color-border);padding:var(--space-2);border-radius:var(--radius-sm);font-family:monospace;font-size:var(--text-sm)" value="${defaultExpr}" />
+                <button id="reductionStepBtn" class="toggle" style="padding:0 var(--space-3)">Step</button>
+                <button id="reductionRunBtn" class="toggle" style="padding:0 var(--space-3)">Run</button>
+              </div>
+              
+              <div class="trace-box" id="reductionTraceBox" style="max-height:100px">Load an expression to start reduction trace...</div>
             </div>
           </div>
         `;
@@ -1345,6 +1538,87 @@
             updateTree();
           }
         });
+
+        // --- REDUCTION SANDBOX EVENT LISTENERS & STATE ---
+
+        function loadReduction() {
+          if (reductionTimer) {
+            clearInterval(reductionTimer);
+            reductionTimer = null;
+            document.getElementById('reductionRunBtn').textContent = 'Run';
+            document.getElementById('reductionRunBtn').classList.remove('active');
+          }
+          const exprStr = document.getElementById('reductionExprInput').value.trim();
+          const traceEl = document.getElementById('reductionTraceBox');
+          traceEl.textContent = '';
+          try {
+            reductionTerm = parseCombinatorExpr(exprStr);
+            traceEl.textContent += `Loaded expression: ${formatSKI(reductionTerm)}\n`;
+            updateReductionTree();
+          } catch (err) {
+            traceEl.textContent = `Error loading: ${err.message}\n`;
+          }
+        }
+
+        function updateReductionTree() {
+          if (!reductionTerm) return;
+          const expanded = expandToIota(reductionTerm);
+          drawTreeCanvas(canvas, expanded);
+          
+          const size = countSymbols(expanded);
+          const depth = getTreeMaxDepth(expanded);
+          document.getElementById('combSizeVal').textContent = size;
+          document.getElementById('combDepthVal').textContent = depth;
+          document.getElementById('customCombInput').value = formatSKI(reductionTerm);
+        }
+
+        function stepReduction() {
+          if (!reductionTerm) return;
+          const traceEl = document.getElementById('reductionTraceBox');
+          const prevStr = formatSKI(reductionTerm);
+          const res = reduceLMO(reductionTerm);
+          if (res.reduced) {
+            reductionTerm = res.node;
+            const newStr = formatSKI(reductionTerm);
+            traceEl.textContent += `${prevStr}  →  ${newStr}\n`;
+            traceEl.scrollTop = traceEl.scrollHeight;
+            updateReductionTree();
+          } else {
+            traceEl.textContent += `Normal form reached: ${prevStr}\n`;
+            traceEl.scrollTop = traceEl.scrollHeight;
+            if (reductionTimer) {
+              clearInterval(reductionTimer);
+              reductionTimer = null;
+              document.getElementById('reductionRunBtn').textContent = 'Run';
+              document.getElementById('reductionRunBtn').classList.remove('active');
+            }
+          }
+        }
+
+        function toggleRunReduction() {
+          const btn = document.getElementById('reductionRunBtn');
+          if (reductionTimer) {
+            clearInterval(reductionTimer);
+            reductionTimer = null;
+            btn.textContent = 'Run';
+            btn.classList.remove('active');
+          } else {
+            btn.textContent = 'Pause';
+            btn.classList.add('active');
+            reductionTimer = setInterval(stepReduction, 800);
+          }
+        }
+
+        document.getElementById('reductionPresetSelect').addEventListener('change', e => {
+          document.getElementById('reductionExprInput').value = e.target.value;
+          loadReduction();
+        });
+        document.getElementById('reductionResetBtn').addEventListener('click', loadReduction);
+        document.getElementById('reductionStepBtn').addEventListener('click', stepReduction);
+        document.getElementById('reductionRunBtn').addEventListener('click', toggleRunReduction);
+        
+        loadReduction(); // Auto-load default preset
+
 
       } else if (s.family === 'Lambda') {
         container.innerHTML = `
