@@ -14,7 +14,7 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{font-family:var(--font-body);font-size:var(--text-base);line-height:1.6;background:radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--color-surface-offset) 15%, #060606), #060606); color:var(--color-text); min-height:100dvh}
+body{font-family:var(--font-body);font-size:var(--text-base);line-height:1.6;background:radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--color-surface-offset) 60%, var(--color-bg)), var(--color-bg)); color:var(--color-text); min-height:100dvh}
 img,svg{display:block;max-width:100%}
 button,input,select{font:inherit;color:inherit}
 button{cursor:pointer;background:none;border:none}
@@ -95,7 +95,7 @@ html, * {
 .graph-controls{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-4)}
 .toggle{padding:.55rem .8rem;border-radius:0;font-size:var(--text-xs);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;background:var(--color-surface-2);border:1px solid var(--color-border);transition:all 0.15s ease}
 .toggle.active{background:var(--color-primary);color:#000;border-color:var(--color-primary);font-weight:700}
-.graph{position:relative;height:520px;border-radius:0;background-color:#080808;background-image:radial-gradient(var(--color-border) 1px, transparent 1px);background-size:20px 20px;overflow:hidden;border:1px solid var(--color-border)}
+.graph{position:relative;height:520px;border-radius:0;background-color:var(--color-surface-2);background-image:radial-gradient(var(--color-border) 1px, transparent 1px);background-size:20px 20px;overflow:hidden;border:1px solid var(--color-border)}
 .node{position:absolute;transform:translate(-50%,-50%);display:grid;place-items:center;gap:4px;text-align:center;transition:transform .18s ease, opacity .18s ease;cursor:pointer}
 .node:hover{transform:translate(-50%,-50%) scale(1.04)}
 .node.hidden{opacity:.12;pointer-events:none}
@@ -213,7 +213,7 @@ html, * {
 }
 .canvas-card {
   position: relative;
-  background: #080808;
+  background: var(--color-surface-offset);
   border: 1px solid var(--color-border);
   border-radius: 0;
   overflow: hidden;
@@ -261,7 +261,7 @@ html, * {
 .trace-box {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  background: #080808;
+  background: var(--color-surface-offset);
   color: var(--color-primary);
   padding: var(--space-4);
   border-radius: 0;
