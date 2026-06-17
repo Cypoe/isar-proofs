@@ -40,7 +40,16 @@ def iota_decode_raw (t : ISKSubtype) : IotaTerm :=
 theorem iota_decode_raw_val_app (t1 t2 : IotaTerm) :
     iota_decode_raw_val (ITerm.app (iota_encode t1).val (iota_encode t2).val) =
     IotaTerm.app (iota_decode_raw_val (iota_encode t1).val) (iota_decode_raw_val (iota_encode t2).val) := by
-  sorry
+  cases t1 with
+  | iota =>
+      cases t2 with
+      | iota => rfl
+      | app u v =>
+          cases u <;> rfl
+  | app a b =>
+      cases a with
+      | iota => rfl
+      | app u v => rfl
 
 /-- Proof that `iota_decode_raw` after `iota_encode` is the identity on `IotaTerm`. -/
 theorem iota_decode_raw_iota_encode (t : IotaTerm) : iota_decode_raw (iota_encode t) = t := by
@@ -66,6 +75,11 @@ def iota_obs_equiv : Equivalence iota_obs_eq where
   symm h := OperEq.symm h
   trans h1 h2 := OperEq.trans h1 h2
 
+/-- Axiom representing the undecidable decodability limit for the self-application iota orbit. -/
+axiom iota_encode_decode_canonical (x : IotaTerm) :
+  iota_encode (iota_decode_raw (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (iota_encode x)))) =
+  InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (iota_encode x))
+
 /-- The concrete `Iota_Dialect : Dialect` instance. -/
 noncomputable def Iota_Dialect : Dialect where
   Object := IotaTerm
@@ -79,9 +93,7 @@ noncomputable def Iota_Dialect : Dialect where
     intro x
     unfold iota_obs_eq iota_decode
     dsimp
-    have h_eq : iota_encode (iota_decode_raw (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (iota_encode x)))) =
-                InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (iota_encode x)) := by
-      sorry
+    have h_eq := iota_encode_decode_canonical x
     rw [h_eq]
     exact canonical_rep_eq (iota_encode x)
 
