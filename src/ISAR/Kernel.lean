@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 namespace Relation
 
 inductive ReflTransGen {α : Type _} (r : α → α → Prop) (a : α) : α → Prop where
@@ -792,25 +791,3 @@ theorem IRedBasis_preserves_NoS {t u : ITerm} (h : IRedBasis t u) (ht : NoS t) :
   | refl => exact ht
   | tail _ hstep ih => exact IStepBasis_preserves_NoS hstep ih
 end ISAR
-=======
-import ISAR.Kernel
-import ISAR.InvariantLayer
-import ISAR.LambdaFragment
-import ISAR.TensorSemantics
-import ISAR.KernelCategory
-import ISAR.HFSet
-import ISAR.HFSetEncoding
-import ISAR.HFSetSemantics
-import ISAR.ZFCInterpretation
-import ISAR.DialectKernel
-import ISAR.ViewIndependence
-import ISAR.ReverseRosetta
-import ISAR.TRSView
-import ISAR.BytecodeView
-import ISAR.IotaView
-import ISAR.QuantityKernel
-import ISAR.Futamura
-import ISAR.ISARMatrices
-import ISAR.BasisCompleteness
-import ISAR.ViewUnification
->>>>>>> 86015e8 (Reorganize workspace into a Lean 4 Lake package, resolve namespace conflicts, and add dependencies)
