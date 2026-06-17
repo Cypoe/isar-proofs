@@ -160,29 +160,12 @@ In HVM2, programs are compiled into interaction nets to guarantee optimal, symme
 
 ## Verification Status
 
-All 20 modules compile successfully with **no errors, no warnings, and no `sorry` statements**.
+All modules compile successfully under the Lake package manager.
 
 ### Build commands used
 ```powershell
-$env:LEAN_PATH="."
-lean -R . -o ISAR.olean ISAR.lean
-lean -R . -o InvariantLayer.olean InvariantLayer.lean
-lean -R . -o LambdaFragment.olean LambdaFragment.lean
-lean -R . -o TensorSemantics.olean TensorSemantics.lean
-lean -R . -o KernelCategory.olean KernelCategory.lean
-lean -R . -o HFSet.olean HFSet.lean
-lean -R . -o HFSetEncoding.olean HFSetEncoding.lean
-lean -R . -o HFSetSemantics.olean HFSetSemantics.lean
-lean -R . -o ZFCInterpretation.olean ZFCInterpretation.lean
-lean -R . -o DialectKernel.olean DialectKernel.lean
-lean -R . -o ViewIndependence.olean ViewIndependence.lean
-lean -R . -o ReverseRosetta.olean ReverseRosetta.lean
-lean -R . -o TRSView.olean TRSView.lean
-lean -R . -o BytecodeView.olean BytecodeView.lean
-lean -R . -o QuantityKernel.olean QuantityKernel.lean
-lean -R . -o Futamura.olean Futamura.lean
-lean -R . -o ViewUnification.olean ViewUnification.lean
-lean -R . -o ISARMatrices.olean ISARMatrices.lean
+lake build
 ```
-All files were successfully verified by the Lean 4 typechecker.
+All files are located in `src/` and are compiled in parallel in the correct dependency order.
+
 
