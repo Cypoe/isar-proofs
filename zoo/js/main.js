@@ -284,6 +284,8 @@ function renderGraph() {
     edge.style.top = p1.y + 'px';
     edge.style.width = len + 'px';
     edge.style.transform = `rotate(${ang}deg)`;
+    edge.setAttribute('data-source', a);
+    edge.setAttribute('data-target', b);
     
     // Highlight edges from ISAR substrate explicitly in probability view
     if (state.view === 'probability' && (a === 'ISAR' || b === 'ISAR')) {
@@ -1259,6 +1261,22 @@ function renderOccamLens(s) {
   }
 }
 
+// BFS over directed edges to collect all nodes reachable from startId
+function getReachableNodes(startId) {
+  const reachable = new Set();
+  const queue = [startId];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const [a, b] of edges) {
+      if (a === cur && !reachable.has(b)) {
+        reachable.add(b);
+        queue.push(b);
+      }
+    }
+  }
+  return reachable;
+}
+
 function highlightSelection() {
   if (!graph) return;
   const systems = filteredSystems();
@@ -1275,6 +1293,46 @@ function highlightSelection() {
       n.style.opacity = state.selected ? '.35' : '1';
     }
   });
+
+  // --- Edge highlighting ---
+  const edgeEls = graph.querySelectorAll('.edge');
+  if (!state.selected) {
+    // No selection: restore default styling
+    edgeEls.forEach(el => {
+      el.style.opacity = '';
+      el.style.height = '';
+      el.style.background = '';
+      el.style.boxShadow = '';
+      el.style.zIndex = '';
+    });
+  } else {
+    const reachable = getReachableNodes(state.selected);
+    edgeEls.forEach(el => {
+      const src = el.getAttribute('data-source');
+      const tgt = el.getAttribute('data-target');
+      const isDirect = (src === state.selected || tgt === state.selected);
+      const isReachable = !isDirect && reachable.has(src) && reachable.has(tgt);
+      if (isDirect) {
+        el.style.opacity = '1';
+        el.style.height = '3px';
+        el.style.background = 'var(--color-primary)';
+        el.style.boxShadow = '0 0 10px var(--color-primary), 0 0 20px color-mix(in oklab, var(--color-primary) 40%, transparent)';
+        el.style.zIndex = '2';
+      } else if (isReachable) {
+        el.style.opacity = '0.45';
+        el.style.height = '1.5px';
+        el.style.background = 'var(--color-blue)';
+        el.style.boxShadow = 'none';
+        el.style.zIndex = '1';
+      } else {
+        el.style.opacity = '0.06';
+        el.style.height = '1.5px';
+        el.style.background = '';
+        el.style.boxShadow = 'none';
+        el.style.zIndex = '0';
+      }
+    });
+  }
 
   // Highlight list cards
   if (cards) {

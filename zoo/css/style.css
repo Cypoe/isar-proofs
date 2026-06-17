@@ -272,7 +272,7 @@ html, * {
 }
 
 .edge {
-  transition: opacity 0.4s ease, left 0.6s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.6s cubic-bezier(0.25, 0.8, 0.25, 1), width 0.6s cubic-bezier(0.25, 0.8, 0.25, 1), transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: opacity 0.4s ease, height 0.3s ease, background 0.3s ease, box-shadow 0.3s ease, left 0.6s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.6s cubic-bezier(0.25, 0.8, 0.25, 1), width 0.6s cubic-bezier(0.25, 0.8, 0.25, 1), transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 .edge.hidden {
   opacity: 0 !important;
