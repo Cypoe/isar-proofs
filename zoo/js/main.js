@@ -27,6 +27,16 @@ const state = {
   tmState: 'q0'
 };
 
+// --- GRAPH PAN & ZOOM STATE ---
+const graphState = {
+  panX: 0,
+  panY: 0,
+  zoomScale: 1,
+  isDragging: false,
+  startX: 0,
+  startY: 0
+};
+
 let reductionTerm = null;
 let reductionTimer = null;
 
@@ -43,7 +53,10 @@ function filteredSystems() {
     const q = state.query.toLowerCase();
     const carrierMatch = state.carrier === 'All' || s.carriers[state.carrier];
     const tcMatch = state.tc === 'All' || (state.tc === 'Yes' ? s.turingComplete : !s.turingComplete);
-    const famMatch = state.family === 'All' || s.family === state.family;
+    let famMatch = state.family === 'All' || s.family === state.family;
+    if (state.view === 'probability' && state.family === 'Probability' && s.id === 'ISAR') {
+      famMatch = true;
+    }
     const textMatch = !q || [s.name, s.symbol, s.family, s.description, s.notable, s.bisimQuotient].join(' ').toLowerCase().includes(q);
     return carrierMatch && tcMatch && famMatch && textMatch;
   });
@@ -71,9 +84,44 @@ function renderChipSet(id, values, active, onSelect) {
   });
 }
 
+let cachedSubstrateDistances = null;
+function getSubstrateDistance(id) {
+  if (!cachedSubstrateDistances) {
+    cachedSubstrateDistances = { 'ISAR': 0 };
+    const queue = ['ISAR'];
+    const adj = {};
+    SYSTEMS.forEach(s => adj[s.id] = []);
+    edges.forEach(([u, v]) => {
+      if (adj[u] && adj[v]) {
+        adj[u].push(v);
+        adj[v].push(u);
+      }
+    });
+    while (queue.length > 0) {
+      const curr = queue.shift();
+      const currDist = cachedSubstrateDistances[curr];
+      (adj[curr] || []).forEach(neighbor => {
+        if (cachedSubstrateDistances[neighbor] === undefined) {
+          cachedSubstrateDistances[neighbor] = currDist + 1;
+          queue.push(neighbor);
+        }
+      });
+    }
+  }
+  return cachedSubstrateDistances[id];
+}
+
 function getColor(s) {
   if (state.view === 'tc') return s.turingComplete ? '#6daa45' : '#e8af34';
-  if (state.view === 'substrate') return s.id === 'ISAR' ? '#4f98a3' : (s.carriers.I && s.carriers.S && s.carriers.A && s.carriers.R ? '#a86fdf' : '#666');
+  if (state.view === 'substrate') {
+    const d = getSubstrateDistance(s.id);
+    if (d === 0) return 'var(--color-primary)';   // Depth 0: Core substrate
+    if (d === 1) return 'var(--color-blue)';      // Depth 1: Direct compile/embed neighbors
+    if (d === 2) return 'var(--color-purple)';    // Depth 2: Close translation layer
+    if (d === 3) return 'var(--color-red)';       // Depth 3: Extended translation layer
+    if (d >= 4) return 'var(--color-orange)';     // Depth 4+: Highly remote systems
+    return 'var(--color-text-faint)';             // Unreachable
+  }
   if (state.view === 'quotient') return QUOTIENT_CLASSES[s.quotientClass]?.color || '#888';
   return familyColors[s.family] || s.color || '#888';
 }
@@ -81,28 +129,87 @@ function getColor(s) {
 function renderGraph() {
   if (!graph) return;
   graph.innerHTML = '';
+
   const systems = filteredSystems();
   const w = graph.clientWidth || 900;
   const h = graph.clientHeight || 520;
+
+  // Create viewport div
+  const viewport = document.createElement('div');
+  viewport.className = 'graph-viewport';
+  viewport.id = 'graphViewport';
+  viewport.style.position = 'absolute';
+  viewport.style.left = '0';
+  viewport.style.top = '0';
+  viewport.style.width = '100%';
+  viewport.style.height = '100%';
+  viewport.style.transformOrigin = '0 0';
+  viewport.style.transform = `translate(${graphState.panX}px, ${graphState.panY}px) scale(${graphState.zoomScale})`;
+  graph.appendChild(viewport);
+
+  // Floating zoom controls (attached directly to graph, not inside viewport)
+  const controls = document.createElement('div');
+  controls.className = 'zoom-controls';
+  controls.style.cssText = `
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+  `;
+  
+  const btnIn = document.createElement('button');
+  btnIn.innerHTML = '＋';
+  btnIn.className = 'sidebar-toggle';
+  btnIn.addEventListener('click', () => {
+    graphState.zoomScale = Math.min(2.5, graphState.zoomScale * 1.2);
+    updateGraphTransform();
+  });
+  
+  const btnOut = document.createElement('button');
+  btnOut.innerHTML = '－';
+  btnOut.className = 'sidebar-toggle';
+  btnOut.addEventListener('click', () => {
+    graphState.zoomScale = Math.max(0.4, graphState.zoomScale / 1.2);
+    updateGraphTransform();
+  });
+  
+  const btnReset = document.createElement('button');
+  btnReset.innerHTML = '⟲';
+  btnReset.className = 'sidebar-toggle';
+  btnReset.addEventListener('click', () => {
+    graphState.zoomScale = 1;
+    graphState.panX = 0;
+    graphState.panY = 0;
+    updateGraphTransform();
+  });
+  
+  controls.appendChild(btnIn);
+  controls.appendChild(btnOut);
+  controls.appendChild(btnReset);
+  graph.appendChild(controls);
+
   const families = unique(systems.map(s => s.family));
   const familyY = new Map(families.map((f, i) => [f, ((i + 1) / (families.length + 1)) * h]));
   const maxPrim = Math.max(...SYSTEMS.map(s => s.primitives));
   const positions = new Map();
 
-  // Quotient view circular positions
+  // Quotient view Venn-diagram spatial arrangement
   const classKeys = Object.keys(QUOTIENT_CLASSES);
-  const radiusX = w * 0.33;
-  const radiusY = h * 0.33;
   const centerX = w / 2;
   const centerY = h / 2;
-  const classCoords = {};
-  classKeys.forEach((key, index) => {
-    const angle = (index / classKeys.length) * 2 * Math.PI - Math.PI / 2;
-    classCoords[key] = {
-      x: centerX + Math.cos(angle) * radiusX,
-      y: centerY + Math.sin(angle) * radiusY
-    };
-  });
+  const classCoords = {
+    "Substrate":        { x: centerX,             y: centerY + h * 0.12 },
+    "TuringFunctional": { x: centerX - w * 0.22,  y: centerY - h * 0.18 },
+    "CCC":              { x: centerX - w * 0.04,  y: centerY - h * 0.20 },
+    "Linear":           { x: centerX - w * 0.12,  y: centerY - h * 0.02 },
+    "ProofTheory":      { x: centerX + w * 0.15,  y: centerY - h * 0.12 },
+    "Lattice":          { x: centerX + w * 0.24,  y: centerY + h * 0.08 },
+    "Process":          { x: centerX - w * 0.25,  y: centerY + h * 0.10 },
+    "Rewriting":        { x: centerX - w * 0.10,  y: centerY + h * 0.20 }
+  };
 
   const systemsInClass = {};
   systems.forEach(s => {
@@ -110,15 +217,37 @@ function renderGraph() {
     systemsInClass[s.quotientClass].push(s.id);
   });
 
+  const systemsByLevel = {};
+  for (let l = 0; l <= 4; l++) {
+    systemsByLevel[l] = [];
+  }
+  systems.forEach(s => {
+    const lvl = s.latticeLevel !== undefined ? s.latticeLevel : 0;
+    systemsByLevel[lvl].push(s.id);
+  });
+
+  // 1. Initial coordinates assignment
   systems.forEach((s, i) => {
     if (state.view === 'quotient') {
       const pos = classCoords[s.quotientClass] || { x: centerX, y: centerY };
       const idx = systemsInClass[s.quotientClass].indexOf(s.id);
       const count = systemsInClass[s.quotientClass].length;
-      const r = 24;
+      const r = count > 1 ? (40 + count * 6) : 0;
       const offsetAngle = count > 1 ? (idx / count) * 2 * Math.PI : 0;
       const x = pos.x + Math.cos(offsetAngle) * r;
       const y = pos.y + Math.sin(offsetAngle) * r;
+      positions.set(s.id, { x, y });
+    } else if (state.view === 'probability') {
+      const lvl = s.latticeLevel !== undefined ? s.latticeLevel : 0;
+      const x = 100 + (lvl / 4) * (w - 200);
+      const idx = systemsByLevel[lvl].indexOf(s.id);
+      const count = systemsByLevel[lvl].length;
+      let y;
+      if (count === 1) {
+        y = h / 2;
+      } else {
+        y = 60 + (idx / (count - 1)) * (h - 120);
+      }
       positions.set(s.id, { x, y });
     } else {
       const x = 80 + ((s.primitives - 1) / Math.max(1, maxPrim - 1)) * (w - 160);
@@ -126,6 +255,15 @@ function renderGraph() {
       const yBase = familyY.get(s.family) || h / 2;
       const y = yBase + ((carrierScore - 2) * 20) + (Math.sin(i * 1.7) * 22);
       positions.set(s.id, { x, y });
+    }
+  });
+
+  // 2. Keep nodes in graph boundaries
+  systems.forEach(s => {
+    const pos = positions.get(s.id);
+    if (pos) {
+      pos.x = Math.max(50, Math.min(w - 50, pos.x));
+      pos.y = Math.max(50, Math.min(h - 50, pos.y));
     }
   });
 
@@ -141,22 +279,60 @@ function renderGraph() {
     edge.style.top = p1.y + 'px';
     edge.style.width = len + 'px';
     edge.style.transform = `rotate(${ang}deg)`;
-    graph.appendChild(edge);
+    viewport.appendChild(edge);
   });
 
   // Draw quotient boundary overlays
   if (state.view === 'quotient') {
     classKeys.forEach(key => {
+      const pts = systems.filter(s => s.quotientClass === key);
+      if (pts.length === 0) return; // Do not draw empty class bubbles
+      
       const pos = classCoords[key];
+      const count = pts.length;
+      const r = count > 1 ? (40 + count * 6) : 0;
+      const bubbleRadius = r + 55; // includes node circle radius + padding
+      const bubbleDiameter = bubbleRadius * 2;
+      
       const bubble = document.createElement('div');
       bubble.className = 'quotient-bubble visible';
       bubble.style.left = pos.x + 'px';
       bubble.style.top = pos.y + 'px';
-      bubble.style.width = '120px';
-      bubble.style.height = '120px';
-      bubble.innerHTML = `<span style="text-align:center;font-size:9px;color:var(--color-text-muted);pointer-events:none;padding:5px">${QUOTIENT_CLASSES[key].name}</span>`;
-      graph.appendChild(bubble);
+      bubble.style.width = bubbleDiameter + 'px';
+      bubble.style.height = bubbleDiameter + 'px';
+      
+      // Dynamic colors based on quotient class color
+      const clColor = QUOTIENT_CLASSES[key]?.color || '#888';
+      bubble.style.borderColor = `color-mix(in oklab, ${clColor} 40%, transparent)`;
+      bubble.style.background = `color-mix(in oklab, ${clColor} 5%, transparent)`;
+      
+      bubble.innerHTML = `<span style="text-align:center;font-size:9.5px;font-weight:600;color:${clColor};pointer-events:none;padding:6px;max-width:90%;line-height:1.2;align-self:end;margin-bottom:8px">${QUOTIENT_CLASSES[key].name}</span>`;
+      viewport.appendChild(bubble);
     });
+  }
+
+  // Draw probability axis overlays
+  if (state.view === 'probability') {
+    const levelNames = [
+      "Poset\n(Order)",
+      "Boolean Lattice\n(Classical Logic)",
+      "Probability Calculus\n(Weighted Logic)",
+      "Orthomodular Poset\n(Quantum Logic)",
+      "Effect Algebra\n(Unsharp Logic)"
+    ];
+    for (let l = 0; l <= 4; l++) {
+      const x = 100 + (l / 4) * (w - 200);
+      const bubble = document.createElement('div');
+      bubble.className = 'quotient-bubble visible';
+      bubble.style.left = x + 'px';
+      bubble.style.top = (h / 2) + 'px';
+      bubble.style.width = '130px';
+      bubble.style.height = '130px';
+      bubble.style.borderStyle = 'dashed';
+      bubble.style.borderColor = 'rgba(230, 126, 34, 0.4)';
+      bubble.innerHTML = `<span style="text-align:center;font-size:9px;color:#e67e22;pointer-events:none;padding:5px;white-space:pre-line;text-transform:none;letter-spacing:normal">${levelNames[l]}</span>`;
+      viewport.appendChild(bubble);
+    }
   }
 
   // Draw system nodes
@@ -173,9 +349,13 @@ function renderGraph() {
       state.selected = s.id;
       renderDetail();
       highlightSelection();
+      const detailEl = document.querySelector('.detail');
+      if (detailEl) {
+        detailEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
     if (state.selected && state.selected !== s.id) node.classList.add('soft');
-    graph.appendChild(node);
+    viewport.appendChild(node);
   });
 }
 
@@ -211,6 +391,10 @@ function renderCards() {
       state.selected = systems[i].id;
       renderDetail();
       highlightSelection();
+      const detailEl = document.querySelector('.detail');
+      if (detailEl) {
+        detailEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
   });
 }
@@ -242,6 +426,7 @@ function renderDetail() {
       <div class="tab-headers">
         <button class="tab-btn ${state.detailTab === 'anatomy' ? 'active' : ''}" id="tabBtnAnatomy" data-tab="anatomy">Anatomy</button>
         <button class="tab-btn ${state.detailTab === 'lab' ? 'active' : ''}" id="tabBtnLab" data-tab="lab">Interactive Lab</button>
+        <button class="tab-btn ${state.detailTab === 'occam' ? 'active' : ''}" id="tabBtnOccam" data-tab="occam">Occam Lens</button>
       </div>
       <div id="anatomyContent" style="display:${state.detailTab === 'anatomy' ? 'block' : 'none'}">
         <div style="display:grid;gap:var(--space-5)">
@@ -274,19 +459,24 @@ function renderDetail() {
         </div>
       </div>
       <div id="labContent" style="display:${state.detailTab === 'lab' ? 'block' : 'none'}"></div>
+      <div id="occamContent" style="display:${state.detailTab === 'occam' ? 'block' : 'none'}"></div>
     </div>`;
 
   const btnAnatomy = document.getElementById('tabBtnAnatomy');
   const btnLab = document.getElementById('tabBtnLab');
+  const btnOccam = document.getElementById('tabBtnOccam');
   const divAnatomy = document.getElementById('anatomyContent');
   const divLab = document.getElementById('labContent');
+  const divOccam = document.getElementById('occamContent');
 
   btnAnatomy.addEventListener('click', () => {
     state.detailTab = 'anatomy';
     btnAnatomy.classList.add('active');
     btnLab.classList.remove('active');
+    btnOccam.classList.remove('active');
     divAnatomy.style.display = 'block';
     divLab.style.display = 'none';
+    divOccam.style.display = 'none';
     if (reductionTimer) {
       clearInterval(reductionTimer);
       reductionTimer = null;
@@ -297,13 +487,28 @@ function renderDetail() {
     state.detailTab = 'lab';
     btnLab.classList.add('active');
     btnAnatomy.classList.remove('active');
+    btnOccam.classList.remove('active');
     divAnatomy.style.display = 'none';
     divLab.style.display = 'block';
+    divOccam.style.display = 'none';
     renderLab(s);
+  });
+
+  btnOccam.addEventListener('click', () => {
+    state.detailTab = 'occam';
+    btnOccam.classList.add('active');
+    btnAnatomy.classList.remove('active');
+    btnLab.classList.remove('active');
+    divAnatomy.style.display = 'none';
+    divLab.style.display = 'none';
+    divOccam.style.display = 'block';
+    renderOccamLens(s);
   });
 
   if (state.detailTab === 'lab') {
     renderLab(s);
+  } else if (state.detailTab === 'occam') {
+    renderOccamLens(s);
   }
 }
 
@@ -949,6 +1154,61 @@ Semantics Style: ${s.encoding}
   }
 }
 
+function renderOccamLens(s) {
+  const container = document.getElementById('occamContent');
+  if (!container) return;
+  
+  const pCount = s.occam?.parameterCount || "0 (No parameters)";
+  const pVol = s.occam?.parameterVolume || "None (Discrete system)";
+  const flex = s.occam?.flexibility || "Strictly bounded";
+  const comp = s.occam?.compressionLength || "Minimal";
+  const marg = s.occam?.marginalLikelihood || "Maximum evidence (unparameterized)";
+
+  container.innerHTML = `
+    <div class="lab-container">
+      <h4 style="margin-bottom:var(--space-2)">Bayesian Evidence & Occam Penalty Profile</h4>
+      <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-bottom:var(--space-4)">
+        A specimen's Bayesian evidence (marginal likelihood) scores its validity against observed data \\(D\\):
+      </p>
+      
+      <div style="padding:var(--space-4); background:var(--color-surface-offset); border-radius:var(--radius-md); border:1px solid var(--color-border); margin-bottom:var(--space-4); text-align:center; font-family:var(--font-mono); font-size:var(--text-lg); color:var(--color-primary)">
+        \\[p(D \\mid M) = \\int p(D \\mid \\theta, M) p(\\theta \\mid M) d\\theta\\]
+      </div>
+      
+      <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-bottom:var(--space-5)">
+        The penalty arises because highly flexible models spread their prior probability mass \\(p(\\theta \\mid M)\\) over a large parameter volume, leaving less mass for the specific parameters that match the data.
+      </p>
+      
+      <div style="display:grid;grid-template-columns:1fr;gap:var(--space-3)">
+        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Parameter Count</strong>
+          <span style="font-size:var(--text-sm);color:var(--color-text)">${pCount}</span>
+        </div>
+        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Prior Volume / Range</strong>
+          <span style="font-size:var(--text-sm);color:var(--color-text)">${pVol}</span>
+        </div>
+        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Expressive Flexibility</strong>
+          <span style="font-size:var(--text-sm);color:var(--color-text)">${flex}</span>
+        </div>
+        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Compression Length</strong>
+          <span style="font-size:var(--text-sm);color:var(--color-text)">${comp}</span>
+        </div>
+        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Marginal Likelihood (Occam Score)</strong>
+          <span style="font-size:var(--text-sm);color:var(--color-text)">${marg}</span>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  if (window.MathJax) {
+    window.MathJax.typesetPromise([container]).catch(err => console.log('MathJax typesetting error:', err));
+  }
+}
+
 function highlightSelection() {
   if (!graph) return;
   [...graph.querySelectorAll('.node')].forEach((n, i) => {
@@ -1006,3 +1266,125 @@ if (themeBtn) {
 // --- RUN INITIAL RENDERS ---
 renderStats();
 rerender();
+
+function updateGraphTransform() {
+  const viewport = document.getElementById('graphViewport');
+  if (viewport) {
+    viewport.style.transform = `translate(${graphState.panX}px, ${graphState.panY}px) scale(${graphState.zoomScale})`;
+  }
+}
+
+function initGraphZoom() {
+  if (!graph) return;
+  
+  graph.addEventListener('mousedown', e => {
+    if (e.target.closest('.node') || e.target.closest('.zoom-controls') || e.target.closest('.sidebar-toggle')) return;
+    graphState.isDragging = true;
+    graphState.startX = e.clientX - graphState.panX;
+    graphState.startY = e.clientY - graphState.panY;
+    graph.style.cursor = 'grabbing';
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!graphState.isDragging) return;
+    graphState.panX = e.clientX - graphState.startX;
+    graphState.panY = e.clientY - graphState.startY;
+    updateGraphTransform();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (graphState.isDragging) {
+      graphState.isDragging = false;
+      if (graph) graph.style.cursor = 'grab';
+    }
+  });
+
+  graph.addEventListener('wheel', e => {
+    e.preventDefault();
+    const zoomFactor = 1.1;
+    const oldScale = graphState.zoomScale;
+    
+    const rect = graph.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    if (e.deltaY < 0) {
+      graphState.zoomScale = Math.min(2.5, graphState.zoomScale * zoomFactor);
+    } else {
+      graphState.zoomScale = Math.max(0.4, graphState.zoomScale / zoomFactor);
+    }
+    
+    graphState.panX = mouseX - (mouseX - graphState.panX) * (graphState.zoomScale / oldScale);
+    graphState.panY = mouseY - (mouseY - graphState.panY) * (graphState.zoomScale / oldScale);
+    
+    updateGraphTransform();
+  }, { passive: false });
+  
+  // Touch panning
+  let lastTouchX = 0, lastTouchY = 0;
+  graph.addEventListener('touchstart', e => {
+    if (e.target.closest('.node') || e.target.closest('.zoom-controls') || e.target.closest('.sidebar-toggle')) return;
+    if (e.touches.length === 1) {
+      graphState.isDragging = true;
+      lastTouchX = e.touches[0].clientX;
+      lastTouchY = e.touches[0].clientY;
+    }
+  });
+
+  graph.addEventListener('touchmove', e => {
+    if (!graphState.isDragging) return;
+    if (e.touches.length === 1) {
+      const dx = e.touches[0].clientX - lastTouchX;
+      const dy = e.touches[0].clientY - lastTouchY;
+      graphState.panX += dx;
+      graphState.panY += dy;
+      lastTouchX = e.touches[0].clientX;
+      lastTouchY = e.touches[0].clientY;
+      updateGraphTransform();
+    }
+  });
+
+  graph.addEventListener('touchend', () => {
+    graphState.isDragging = false;
+  });
+  
+  graph.style.cursor = 'grab';
+}
+
+// --- COLLAPSIBLE SIDEBAR CONTROLLER ---
+const shell = document.querySelector('.shell');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+const collapseBtn = document.getElementById('sidebarCollapseBtn');
+const expandBtn = document.getElementById('sidebarExpandBtn');
+
+function setSidebarState(collapsed) {
+  if (collapsed) {
+    if (shell) shell.classList.add('sidebar-collapsed');
+    if (expandBtn) expandBtn.style.display = 'grid';
+    if (sidebarOverlay) sidebarOverlay.classList.remove('active');
+  } else {
+    if (shell) shell.classList.remove('sidebar-collapsed');
+    if (expandBtn) expandBtn.style.display = 'none';
+    if (sidebarOverlay && window.innerWidth <= 1080) {
+      sidebarOverlay.classList.add('active');
+    }
+  }
+}
+
+if (collapseBtn) {
+  collapseBtn.addEventListener('click', () => setSidebarState(true));
+}
+if (expandBtn) {
+  expandBtn.addEventListener('click', () => setSidebarState(false));
+}
+if (sidebarOverlay) {
+  sidebarOverlay.addEventListener('click', () => setSidebarState(true));
+}
+
+initGraphZoom();
+
+// Collapse sidebar by default on mobile
+if (window.innerWidth <= 1080) {
+  setSidebarState(true);
+}
+

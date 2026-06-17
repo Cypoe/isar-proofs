@@ -6,9 +6,15 @@
   <title>Formal Systems Zoo</title>
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&f[]=boska@400,500,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./css/style.css" />
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.js"></script>
+  <script id="MathJax-script" async
+          src="https://cdn.jsdelivr.net/npm/mathjax@3.0.1/es5/tex-mml-chtml.js">
+  </script>
 </head>
 <body>
   <a class="sr-only" href="#main">Skip to content</a>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <button class="sidebar-expand-btn" id="sidebarExpandBtn" aria-label="Expand sidebar" style="display:none">▸</button>
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
@@ -27,7 +33,10 @@
             <p>Systems as species</p>
           </a>
         </div>
-        <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">☼</button>
+        <div style="display:flex;align-items:center;gap:var(--space-2)">
+          <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">☼</button>
+          <button class="sidebar-toggle" id="sidebarCollapseBtn" aria-label="Collapse sidebar">◂</button>
+        </div>
       </div>
 
       <label class="search">
@@ -90,6 +99,7 @@
             <button class="toggle" data-view="tc">Color by computability</button>
             <button class="toggle" data-view="substrate">Highlight substrate relation</button>
             <button class="toggle" data-view="quotient">Behavioral Quotient</button>
+            <button class="toggle" data-view="probability">Probability & Lattice Axis</button>
           </div>
           <div id="graph" class="graph" aria-label="formal systems graph"></div>
         </div>

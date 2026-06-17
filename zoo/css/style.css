@@ -22,6 +22,32 @@ a{color:inherit;text-decoration:none}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 :focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;border-radius:var(--radius-sm)}
 
+/* Custom premium scrollbar style applied page-wide and to all scrollable elements */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--color-primary) 25%, transparent);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--color-primary) 50%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Firefox scrollbar support */
+html, * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-primary) 25%, transparent) transparent;
+}
+
 .shell{display:grid;grid-template-columns:320px 1fr;min-height:100dvh}
 .sidebar{position:sticky;top:0;height:100dvh;padding:var(--space-6);border-right:1px solid color-mix(in oklab, var(--color-text) 10%, transparent);background:color-mix(in oklab, var(--color-surface) 92%, transparent);backdrop-filter: blur(18px);overflow:auto}
 .brand{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-6)}
@@ -68,7 +94,18 @@ a{color:inherit;text-decoration:none}
 .node small{font-size:12px;color:var(--color-text-muted);background:color-mix(in oklab, var(--color-surface) 85%, transparent);padding:.1rem .35rem;border-radius:999px}
 .edge{position:absolute;height:1.5px;transform-origin:left center;background:linear-gradient(90deg, color-mix(in oklab, var(--color-primary) 35%, transparent), color-mix(in oklab, var(--color-text) 18%, transparent));opacity:.7}
 
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:var(--space-4)}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: var(--space-4);
+  max-height: 380px;
+  overflow-y: auto;
+  padding: var(--space-4);
+  border: 1px solid color-mix(in oklab, var(--color-text) 12%, transparent);
+  border-radius: var(--radius-xl);
+  background: color-mix(in oklab, var(--color-surface-offset) 45%, transparent);
+  box-shadow: inset 0 2px 8px color-mix(in oklab, var(--color-text) 5%, transparent);
+}
 .card{padding:var(--space-5);background:color-mix(in oklab, var(--color-surface) 90%, transparent);border:1px solid color-mix(in oklab, var(--color-text) 10%, transparent);border-radius:var(--radius-xl);display:grid;gap:var(--space-4);box-shadow:var(--shadow-sm)}
 .card-head{display:flex;justify-content:space-between;align-items:start;gap:var(--space-4)}
 .card-head h4{font-size:var(--text-lg)}
@@ -215,5 +252,115 @@ a{color:inherit;text-decoration:none}
   transition: opacity 0.5s ease;
 }
 .quotient-bubble.visible {
-  opacity: 0.4;
+  opacity: 0.95;
 }
+
+/* --- COLLAPSIBLE SIDEBAR LAYOUT & TRANSITIONS --- */
+.sidebar {
+  transition: transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), width 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), padding 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), border-color 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
+  will-change: transform, width;
+}
+
+.sidebar-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--color-surface-2);
+  border: 1px solid color-mix(in oklab, var(--color-text) 10%, transparent);
+  font-size: 14px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.sidebar-toggle:hover {
+  background: color-mix(in oklab, var(--color-primary) 12%, var(--color-surface-2));
+  border-color: color-mix(in oklab, var(--color-primary) 40%, transparent);
+}
+
+.sidebar-expand-btn {
+  position: fixed;
+  top: var(--space-4);
+  left: var(--space-4);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--color-surface);
+  border: 1px solid color-mix(in oklab, var(--color-text) 15%, transparent);
+  box-shadow: var(--shadow-md);
+  z-index: 999;
+  font-size: 18px;
+  color: var(--color-primary);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.sidebar-expand-btn:hover {
+  transform: scale(1.05);
+  background: color-mix(in oklab, var(--color-primary) 8%, var(--color-surface));
+}
+
+.sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.sidebar-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.shell {
+  transition: grid-template-columns 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
+  will-change: grid-template-columns;
+}
+
+.shell.sidebar-collapsed {
+  grid-template-columns: 0px 1fr !important;
+}
+
+.shell.sidebar-collapsed .sidebar {
+  width: 0 !important;
+  padding: var(--space-6) 0 !important;
+  overflow: hidden;
+  border-right-color: transparent !important;
+  pointer-events: none;
+}
+
+/* --- MOBILE COLLAPSIBLE DRAWER --- */
+@media (max-width: 1080px) {
+  .shell {
+    grid-template-columns: 1fr !important;
+  }
+  .sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 320px !important;
+    height: 100dvh !important;
+    z-index: 1000 !important;
+    border-right: 1px solid var(--color-border) !important;
+    border-bottom: none !important;
+    transform: translateX(0) !important;
+    box-shadow: var(--shadow-md);
+  }
+  .shell.sidebar-collapsed .sidebar {
+    transform: translateX(-100%) !important;
+    width: 320px !important;
+    padding: var(--space-6) !important;
+  }
+}
+
+/* --- ZOOMABLE VIEWPORT STYLES --- */
+.graph-viewport {
+  transition: transform 0.1s ease-out;
+  transform-origin: 0 0;
+}
+

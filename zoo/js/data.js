@@ -15,7 +15,15 @@ export const SYSTEMS = [
     bisimQuotient: "SKI",
     color: "#4f98a3",
     notable: "Most compressed single-combinator universal basis",
-    quotientClass: "TuringFunctional"
+    quotientClass: "TuringFunctional",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete operational state space)",
+      flexibility: "Zero (Strict deterministic rewriting)",
+      compressionLength: "1 primitive node (ι)",
+      marginalLikelihood: "Highest (Minimal description length, no flexibility penalty)"
+    }
   },
   {
     id: "SKI",
@@ -32,7 +40,15 @@ export const SYSTEMS = [
     bisimQuotient: "λ-calculus",
     color: "#6daa45",
     notable: "Standard reference basis for combinatory logic",
-    quotientClass: "TuringFunctional"
+    quotientClass: "TuringFunctional",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Low (Deterministic combinator reduction)",
+      compressionLength: "3 primitives (S, K, I)",
+      marginalLikelihood: "Very High (No continuous parameters)"
+    }
   },
   {
     id: "SK",
@@ -49,7 +65,15 @@ export const SYSTEMS = [
     bisimQuotient: "λ-calculus",
     color: "#6daa45",
     notable: "I = SKK — identity emerges from constants",
-    quotientClass: "TuringFunctional"
+    quotientClass: "TuringFunctional",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Low (Deterministic)",
+      compressionLength: "2 primitives (S, K)",
+      marginalLikelihood: "Very High"
+    }
   },
   {
     id: "BCKW",
@@ -66,7 +90,15 @@ export const SYSTEMS = [
     bisimQuotient: "Linear λ-calculus",
     color: "#a86fdf",
     notable: "Corresponds to structural rules of sequent calculus",
-    quotientClass: "Linear"
+    quotientClass: "Linear",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Low (Linear logic/resource constraints)",
+      compressionLength: "4 primitives (B, C, K, W)",
+      marginalLikelihood: "Very High"
+    }
   },
   // === LAMBDA CALCULI ===
   {
@@ -84,7 +116,15 @@ export const SYSTEMS = [
     bisimQuotient: "SKI",
     color: "#dd6974",
     notable: "Foundation of functional programming",
-    quotientClass: "TuringFunctional"
+    quotientClass: "TuringFunctional",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "Countably infinite (variable identifiers)",
+      parameterVolume: "Countably infinite (Discrete name space)",
+      flexibility: "Unbounded (Turing-complete functional flexibility)",
+      compressionLength: "3 primitives (Var, Abs, App)",
+      marginalLikelihood: "Medium-Low (High flexibility spreads prior mass thin)"
+    }
   },
   {
     id: "lambda-typed",
@@ -101,7 +141,15 @@ export const SYSTEMS = [
     bisimQuotient: "Cartesian Closed Categories",
     color: "#dd6974",
     notable: "Curry-Howard correspondence: propositional logic proofs",
-    quotientClass: "CCC"
+    quotientClass: "CCC",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 free parameters (Type constraints eliminate variables)",
+      parameterVolume: "0 (Well-typed discrete finite orbits)",
+      flexibility: "Low-Medium (Strongly normalizing, decidable)",
+      compressionLength: "Simply typed syntax rules",
+      marginalLikelihood: "High"
+    }
   },
   {
     id: "system-f",
@@ -118,7 +166,15 @@ export const SYSTEMS = [
     bisimQuotient: "Reynolds parametricity",
     color: "#dd6974",
     notable: "Can represent all functions provably recursive in Peano Arithmetic",
-    quotientClass: "CCC"
+    quotientClass: "CCC",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Medium (Highly expressive typed logic, normalizing)",
+      compressionLength: "System F type rules",
+      marginalLikelihood: "High"
+    }
   },
   {
     id: "coc",
@@ -135,7 +191,15 @@ export const SYSTEMS = [
     bisimQuotient: "Grothendieck universes",
     color: "#dd6974",
     notable: "Mathematical foundation for major modern proof assistants",
-    quotientClass: "CCC"
+    quotientClass: "CCC",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Medium-High (Dependent types)",
+      compressionLength: "Calculus of Constructions rules",
+      marginalLikelihood: "High"
+    }
   },
   {
     id: "coq",
@@ -152,7 +216,15 @@ export const SYSTEMS = [
     bisimQuotient: "CIC Proof Theory",
     color: "#dd6974",
     notable: "Used to formally verify the Feit-Thompson odd order theorem and CompCert compiler",
-    quotientClass: "CCC"
+    quotientClass: "CCC",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 free parameters (Pure constructive proofs)",
+      parameterVolume: "0 (Discrete proof-witness space)",
+      flexibility: "High (Expresses all constructive mathematics)",
+      compressionLength: "CIC proof terms (Coq kernel)",
+      marginalLikelihood: "Medium-High"
+    }
   },
   {
     id: "lean",
@@ -169,7 +241,15 @@ export const SYSTEMS = [
     bisimQuotient: "CIC with Quotients",
     color: "#dd6974",
     notable: "Rapidly becoming the standard for formalizing modern mathematics (e.g. Liquid Tensor Experiment)",
-    quotientClass: "CCC"
+    quotientClass: "CCC",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 free parameters (Constructive & classical proofs)",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "High (Polymorphic quotients & inductive types)",
+      compressionLength: "CIC with quotients (Lean kernel)",
+      marginalLikelihood: "Medium-High"
+    }
   },
   // === REWRITING CALCULI ===
   {
@@ -187,7 +267,15 @@ export const SYSTEMS = [
     bisimQuotient: "Initial algebra",
     color: "#5591c7",
     notable: "Substrate of algebraic specification languages",
-    quotientClass: "Rewriting"
+    quotientClass: "Rewriting",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "Variable signature rules",
+      parameterVolume: "Countable rule schemas",
+      flexibility: "High (Can define arbitrary algebraic relations)",
+      compressionLength: "Signature size + rule counts",
+      marginalLikelihood: "Medium"
+    }
   },
   {
     id: "string-rewriting",
@@ -204,7 +292,15 @@ export const SYSTEMS = [
     bisimQuotient: "Monoid presentations",
     color: "#5591c7",
     notable: "Simplest Turing-complete rewriting — used in Post's theorem",
-    quotientClass: "Rewriting"
+    quotientClass: "Rewriting",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "Alphabet Σ + production rules",
+      parameterVolume: "Discrete rule choices",
+      flexibility: "High (Turing-complete string replacements)",
+      compressionLength: "Alphabet size + rule string lengths",
+      marginalLikelihood: "Medium-Low"
+    }
   },
   // === PROCESS CALCULI ===
   {
@@ -222,7 +318,15 @@ export const SYSTEMS = [
     bisimQuotient: "Bisimilarity quotient (Milner)",
     color: "#d163a7",
     notable: "Basis of session types and distributed systems theory",
-    quotientClass: "Process"
+    quotientClass: "Process",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "Infinite name spaces (channels)",
+      parameterVolume: "Countably infinite channel topologies",
+      flexibility: "Very High (Mobile concurrent interaction pathways)",
+      compressionLength: "5 primitives (Out, In, Par, Nil, Restriction)",
+      marginalLikelihood: "Low"
+    }
   },
   {
     id: "ccs",
@@ -239,7 +343,15 @@ export const SYSTEMS = [
     bisimQuotient: "Strong bisimilarity",
     color: "#d163a7",
     notable: "First foundation for behavioral equivalence",
-    quotientClass: "Process"
+    quotientClass: "Process",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "Static channel names",
+      parameterVolume: "Discrete network topologies",
+      flexibility: "High (Concurrent process behavior)",
+      compressionLength: "4 primitives (Prefix, Choice, Par, Nil)",
+      marginalLikelihood: "Medium-Low"
+    }
   },
   // === LOGIC / PROOF SYSTEMS ===
   {
@@ -257,7 +369,15 @@ export const SYSTEMS = [
     bisimQuotient: "Boolean algebra",
     color: "#437a22",
     notable: "Curry-Howard: simply typed λ-calculus",
-    quotientClass: "CCC"
+    quotientClass: "CCC",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "N Boolean variables (discrete inputs)",
+      parameterVolume: "2^N states",
+      flexibility: "Low (Finite truth value assignments)",
+      compressionLength: "Formula size (Boolean connectives)",
+      marginalLikelihood: "High (Decidable proposition space)"
+    }
   },
   {
     id: "fol",
@@ -274,7 +394,15 @@ export const SYSTEMS = [
     bisimQuotient: "Lindström's theorem",
     color: "#437a22",
     notable: "Gödel incompleteness — limits of formal provability",
-    quotientClass: "ProofTheory"
+    quotientClass: "ProofTheory",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "Individual & relation signatures",
+      parameterVolume: "Unbounded universe models",
+      flexibility: "High (Quantifiers over individual domains)",
+      compressionLength: "First-order signature + quantifiers",
+      marginalLikelihood: "Medium-Low (Semi-decidable logic)"
+    }
   },
   {
     id: "linear-logic",
@@ -291,7 +419,15 @@ export const SYSTEMS = [
     bisimQuotient: "∗-autonomous categories",
     color: "#437a22",
     notable: "Girard 1987 — corresponds to BCKW combinators",
-    quotientClass: "Linear"
+    quotientClass: "Linear",
+    latticeLevel: 3,
+    occam: {
+      parameterCount: "Resource formulas",
+      parameterVolume: "Discrete state lattices",
+      flexibility: "Medium (Resource consumption tracking)",
+      compressionLength: "LL proof trees",
+      marginalLikelihood: "Medium"
+    }
   },
   {
     id: "sequent-calculus",
@@ -308,7 +444,15 @@ export const SYSTEMS = [
     bisimQuotient: "Classical / Intuitionistic logic",
     color: "#437a22",
     notable: "Cut elimination theorem corresponds to normalization / execution",
-    quotientClass: "ProofTheory"
+    quotientClass: "ProofTheory",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "Structural sequents",
+      parameterVolume: "Discrete proof trees",
+      flexibility: "Medium (Classical vs intuitionistic proof search)",
+      compressionLength: "LK/LJ rules",
+      marginalLikelihood: "Medium"
+    }
   },
   {
     id: "isabelle-isar",
@@ -325,7 +469,15 @@ export const SYSTEMS = [
     bisimQuotient: "LCF-style kernel / Higher-order logic",
     color: "#437a22",
     notable: "LCF kernel architecture ensures absolute proof correctness",
-    quotientClass: "ProofTheory"
+    quotientClass: "ProofTheory",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 free parameters (Meta-logic Pure)",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "High (Generic multi-logic support)",
+      compressionLength: "Meta-logical frameworks",
+      marginalLikelihood: "Medium"
+    }
   },
   // === AUTOMATA ===
   {
@@ -343,7 +495,15 @@ export const SYSTEMS = [
     bisimQuotient: "Computable functions",
     color: "#006494",
     notable: "Church-Turing thesis — defines the boundary of computation",
-    quotientClass: "Rewriting"
+    quotientClass: "Rewriting",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "K states × Σ alphabet transition matrix entries",
+      parameterVolume: "Discrete transition lookup tables",
+      flexibility: "Unbounded (Turing-complete tape execution)",
+      compressionLength: "Transition table size",
+      marginalLikelihood: "Low"
+    }
   },
   {
     id: "lambda-mu",
@@ -360,7 +520,15 @@ export const SYSTEMS = [
     bisimQuotient: "Classical sequent calculus",
     color: "#dd6974",
     notable: "Curry-Howard for classical logic — call/cc = excluded middle",
-    quotientClass: "TuringFunctional"
+    quotientClass: "TuringFunctional",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "High (Classical control flow / call/cc)",
+      compressionLength: "5 primitives (λμ syntax)",
+      marginalLikelihood: "Medium-Low"
+    }
   },
   // === BARKER IOTA ORBIT SPECIES ===
   {
@@ -378,7 +546,15 @@ export const SYSTEMS = [
     bisimQuotient: "InvariantLayer",
     color: "#6daa45",
     notable: "Leaf size of 3 nodes in the iota tree basis",
-    quotientClass: "Substrate"
+    quotientClass: "Substrate",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Zero (Strict invariant)",
+      compressionLength: "3 nodes (leaf size 3 in Iota basis: (ιι)ι)",
+      marginalLikelihood: "Highest (Matches identity carrier C_I)"
+    }
   },
   {
     id: "barker-A",
@@ -395,7 +571,15 @@ export const SYSTEMS = [
     bisimQuotient: "Adjacency",
     color: "#6daa45",
     notable: "Leaf size of 11 nodes (6 leaves)",
-    quotientClass: "Substrate"
+    quotientClass: "Substrate",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Zero (Adjacency selection)",
+      compressionLength: "11 nodes (leaf size 11 in Iota basis: (ι(ι(ιι)))(ιι))",
+      marginalLikelihood: "Highest (Matches adjacency carrier C_A)"
+    }
   },
   {
     id: "barker-K",
@@ -412,7 +596,15 @@ export const SYSTEMS = [
     bisimQuotient: "Rewrite",
     color: "#6daa45",
     notable: "Leaf size of 7 nodes (4 leaves)",
-    quotientClass: "Substrate"
+    quotientClass: "Substrate",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Zero (Rewrite selection)",
+      compressionLength: "7 nodes (leaf size 7 in Iota basis: ι(ι(ιι)))",
+      marginalLikelihood: "Highest (Matches rewrite carrier C_R)"
+    }
   },
   {
     id: "barker-S",
@@ -429,7 +621,15 @@ export const SYSTEMS = [
     bisimQuotient: "State",
     color: "#6daa45",
     notable: "Leaf size of 9 nodes (5 leaves)",
-    quotientClass: "Substrate"
+    quotientClass: "Substrate",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Zero (State distribution)",
+      compressionLength: "9 nodes (leaf size 9 in Iota basis: ι(ι(ι(ιι))))",
+      marginalLikelihood: "Highest (Matches state carrier C_S)"
+    }
   },
   {
     id: "barker-X",
@@ -446,7 +646,15 @@ export const SYSTEMS = [
     bisimQuotient: "Closure",
     color: "#6daa45",
     notable: "Untypable carrier boundary. Infinite type: α ≅ α → β",
-    quotientClass: "Substrate"
+    quotientClass: "Substrate",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Zero (Self-application closure)",
+      compressionLength: "11 nodes (leaf size 11 in Iota basis: ι(ι(ι(ι(ιι)))))",
+      marginalLikelihood: "Highest (Axiom 5 closure operator)"
+    }
   },
   {
     id: "barker-Y",
@@ -463,7 +671,15 @@ export const SYSTEMS = [
     bisimQuotient: "FixedPoint",
     color: "#6daa45",
     notable: "Concrete instance of Axiom 8: U(K) = K",
-    quotientClass: "Substrate"
+    quotientClass: "Substrate",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters",
+      parameterVolume: "0 (Discrete)",
+      flexibility: "Zero (Fixed-point loop)",
+      compressionLength: "35 nodes (leaf size 35 in Iota basis)",
+      marginalLikelihood: "Highest (Tritlo fixed point witness)"
+    }
   },
   // === ISAR KERNEL ===
   {
@@ -481,14 +697,156 @@ export const SYSTEMS = [
     bisimQuotient: "Terminal object / Final coalgebra",
     color: "#4f98a3",
     notable: "Ontological ground — not a dialect but the substrate all dialects inhabit",
-    quotientClass: "Substrate"
+    quotientClass: "Substrate",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters (Universal invariant)",
+      parameterVolume: "0 (Discrete tensor invariant space)",
+      flexibility: "Zero (Canonical quotient ground)",
+      compressionLength: "4 geometric primitives (IRAS)",
+      marginalLikelihood: "Absolute Maximum"
+    }
+  },
+  // === PROBABILITY & LATTICE LADDER ===
+  {
+    id: "poset",
+    name: "Poset",
+    symbol: "P",
+    family: "Probability",
+    carriers: { I: true, S: false, A: false, R: false },
+    primitives: 1,
+    turingComplete: false,
+    symbolCount: null,
+    description: "Partially ordered set. The simplest algebraic representation of entailment or refinement without negation or join/meet. Propositions form the poset objects, and relation models logical consequence.",
+    encoding: "a ≤ b",
+    rewriteRules: ["a ≤ b, b ≤ c ⊢ a ≤ c (transitivity)", "a ≤ a (reflexivity)"],
+    bisimQuotient: "Preorder reflection",
+    color: "#e67e22",
+    notable: "Minimal algebraic foundation for logical implication",
+    quotientClass: "Lattice",
+    latticeLevel: 0,
+    occam: {
+      parameterCount: "0 free parameters (pure relational structures)",
+      parameterVolume: "0 (Discrete partial orders)",
+      flexibility: "Zero flexibility (purely topological order)",
+      compressionLength: "Single order relation (≤)",
+      marginalLikelihood: "Highest (No parameter space weight decay)"
+    }
+  },
+  {
+    id: "boolean-lattice",
+    name: "Boolean Lattice",
+    symbol: "B_L",
+    family: "Probability",
+    carriers: { I: true, S: false, A: true, R: false },
+    primitives: 4,
+    turingComplete: false,
+    symbolCount: null,
+    description: "Distributive orthocomplemented lattice. Represents classical logic where meet is AND, join is OR, and orthocomplement is NOT. Complements are unique, and distributivity holds.",
+    encoding: "a ∧ (b ∨ c) = (a ∧ b) ∨ (a ∧ c)",
+    rewriteRules: ["a ∧ ~a = 0", "a ∨ ~a = 1", "~~a = a"],
+    bisimQuotient: "Boolean algebra",
+    color: "#e67e22",
+    notable: "Algebraic foundation of classical logic and 0/1-valued propositions",
+    quotientClass: "Lattice",
+    latticeLevel: 1,
+    occam: {
+      parameterCount: "0 parameters (structure is fixed algebraically)",
+      parameterVolume: "0 (Discrete lattices)",
+      flexibility: "Low (Algebraic structures are crisp and rigid)",
+      compressionLength: "Lattice signatures (meet, join, complement, 0, 1)",
+      marginalLikelihood: "Very High (Crisp bounds)"
+    }
+  },
+  {
+    id: "probability-calculus",
+    name: "Probability Calculus",
+    symbol: "Pr",
+    family: "Probability",
+    carriers: { I: true, S: true, A: true, R: false },
+    primitives: 5,
+    turingComplete: false,
+    symbolCount: null,
+    description: "Measure-theoretic semantics on a Boolean lattice. Extends logic to uncertainty by assigning values in [0,1] conforming to Kolmogorov axioms (sum and product rules).",
+    encoding: "p(A|B) = p(A ∧ B) / p(B)",
+    rewriteRules: ["p(A ∨ B) = p(A) + p(B) - p(A ∧ B)", "p(A ∧ B) = p(A|B)p(B)"],
+    bisimQuotient: "Probability space",
+    color: "#e67e22",
+    notable: "Weighted extension of Boolean logic under consistency constraints",
+    quotientClass: "Lattice",
+    latticeLevel: 2,
+    occam: {
+      parameterCount: "N continuous parameters (probabilities)",
+      parameterVolume: "Discrete probability simplex Δ^(2^N - 1) in [0,1]^N",
+      flexibility: "High (Infinite continuous probability density assignments)",
+      compressionLength: "Kolmogorov axioms (product and sum rules)",
+      marginalLikelihood: "Evaluated dynamically via prior integrations (Occam penalty active)"
+    }
+  },
+  {
+    id: "quantum-logic",
+    name: "Quantum Logic",
+    symbol: "Q_L",
+    family: "Probability",
+    carriers: { I: true, S: true, A: true, R: true },
+    primitives: 6,
+    turingComplete: false,
+    symbolCount: null,
+    description: "Orthomodular lattice / poset. Non-distributive logic of quantum event structures (Birkhoff & von Neumann). Weakens distributivity to model incompatible measurements.",
+    encoding: "a ≤ b ⇒ b = a ∨ (b ∧ a^⊥)",
+    rewriteRules: ["a ∧ (a^⊥ ∨ (a ∧ b)) = a ∧ b (orthomodularity)"],
+    bisimQuotient: "Hilbert space projection lattice",
+    color: "#e67e22",
+    notable: "Non-classical logic where properties cannot be simultaneously observed",
+    quotientClass: "Lattice",
+    latticeLevel: 3,
+    occam: {
+      parameterCount: "Matrix/state coefficients (amplitudes)",
+      parameterVolume: "Unit sphere in Hilbert space H (Fubini-Study metric space)",
+      flexibility: "Very High (Non-commutative projection operations)",
+      compressionLength: "Orthomodular poset axioms",
+      marginalLikelihood: "Medium-Low (Complex geometry spreads prior density)"
+    }
+  },
+  {
+    id: "effect-algebra",
+    name: "Effect Algebra",
+    symbol: "EA",
+    family: "Probability",
+    carriers: { I: true, S: true, A: true, R: true },
+    primitives: 7,
+    turingComplete: false,
+    symbolCount: null,
+    description: "Generalization of Boolean algebra and quantum logic allowing unsharp or partial propositions. Adds a partial binary operation representing disjoint combination of events.",
+    encoding: "a ⊕ b is defined",
+    rewriteRules: ["a ⊕ b = b ⊕ a", "(a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)", "a ⊕ 0 = a"],
+    bisimQuotient: "Convex effect algebra",
+    color: "#e67e22",
+    notable: "Most general mathematical framework for operational probability and quantum measurements",
+    quotientClass: "Lattice",
+    latticeLevel: 4,
+    occam: {
+      parameterCount: "Continuous unsharp parameters",
+      parameterVolume: "Convex state space (effects of a C*-algebra)",
+      flexibility: "Maximum (Allows fuzzy/partial propositions and measurements)",
+      compressionLength: "Effect algebra axioms (partial binary operation ⊕)",
+      marginalLikelihood: "Lowest (Extreme flexibility penalizes evidence)"
+    }
   }
 ];
 
 export const edges = [
   ['untyped-lambda','SKI'],['SKI','iota'],['SK','SKI'],['BCKW','linear-logic'],['untyped-lambda','lambda-typed'],['lambda-typed','system-f'],['system-f','coc'],['pi-calculus','ccs'],['term-rewriting','string-rewriting'],['turing-machine','term-rewriting'],['ISAR','untyped-lambda'],['ISAR','pi-calculus'],['ISAR','term-rewriting'],['ISAR','fol'],['ISAR','SKI'],['untyped-lambda','lambda-mu'],['prop-logic','lambda-typed'],['fol','coc'],
   ['coc','coq'],['coc','lean'],['fol','isabelle-isar'],['sequent-calculus','linear-logic'],['isabelle-isar','sequent-calculus'],['ISAR','isabelle-isar'],
-  ['iota','barker-I'],['barker-I','barker-A'],['barker-A','barker-K'],['barker-K','barker-S'],['barker-S','barker-X'],['barker-X','barker-I'],['barker-Y','barker-X'],['barker-Y','barker-S'],['ISAR','barker-Y']
+  ['iota','barker-I'],['barker-I','barker-A'],['barker-A','barker-K'],['barker-K','barker-S'],['barker-S','barker-X'],['barker-X','barker-I'],['barker-Y','barker-X'],['barker-Y','barker-S'],['ISAR','barker-Y'],
+  // Probability & Lattice Axis connections
+  ['poset','boolean-lattice'],
+  ['boolean-lattice','probability-calculus'],
+  ['boolean-lattice','quantum-logic'],
+  ['quantum-logic','effect-algebra'],
+  ['probability-calculus','effect-algebra'],
+  ['prop-logic','boolean-lattice'],
+  ['ISAR', 'poset']
 ];
 
 export const familyColors = {
@@ -498,7 +856,8 @@ export const familyColors = {
   Rewriting: '#5591c7',
   Process: '#d163a7',
   Logic: '#437a22',
-  Automata: '#006494'
+  Automata: '#006494',
+  Probability: '#e67e22'
 };
 
 export const QUOTIENT_CLASSES = {
@@ -536,6 +895,11 @@ export const QUOTIENT_CLASSES = {
     name: "Proof Theory & Meta-Logics",
     color: "#437a22",
     description: "First-Order Logic, Gentzen's Sequent Calculus, and LCF-style proof assistants mapping higher-order structural proof terms."
+  },
+  "Lattice": {
+    name: "Order & Measure Semantics",
+    color: "#e67e22",
+    description: "Order-theoretic and measure-theoretic representations of implication and belief updating, moving from crisp posets to unsharp effect algebras."
   }
 };
 
