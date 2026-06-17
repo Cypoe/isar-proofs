@@ -322,13 +322,21 @@ function renderLab(s) {
     
     let presets = [];
     let defaultExpr = '';
-    if (s.id === 'iota') {
-      presets = [
-        { value: 'ι x', label: 'ι x (Expand ι)' },
-        { value: 'ι ι x', label: 'ι ι x' },
-        { value: 'ι (ι ι) x', label: 'ι (ι ι) x' }
-      ];
-      defaultExpr = 'ι x';
+    if (s.id === 'iota' || s.id.startsWith('barker-')) {
+      if (s.id === 'iota') {
+        presets = [
+          { value: 'ι x', label: 'ι x (Expand ι)' },
+          { value: 'ι ι x', label: 'ι ι x' },
+          { value: 'ι (ι ι) x', label: 'ι (ι ι) x' }
+        ];
+        defaultExpr = 'ι x';
+      } else {
+        presets = [
+          { value: `${s.encoding} x`, label: `${s.name} applied` },
+          { value: `${s.encoding}`, label: `${s.name} definition` }
+        ];
+        defaultExpr = s.encoding;
+      }
     } else if (s.id === 'SK') {
       presets = [
         { value: 'S K K x', label: 'S K K x (Identity)' },

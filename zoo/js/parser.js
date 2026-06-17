@@ -143,7 +143,7 @@ export function parseLambda(str) {
 export function parseCombinatorExpr(str) {
   const knownNames = [
     "C'B", "K2", "K3", "K4", "S'", "B'", "C'",
-    "ι", "I", "K", "S", "B", "C", "A", "U", "Z", "P", "R", "O", "J", "Y"
+    "ι", "I", "K", "S", "B", "C", "A", "U", "Z", "P", "R", "O", "J", "X", "Y"
   ];
 
   const tokens = [];

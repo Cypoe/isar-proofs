@@ -362,6 +362,109 @@ export const SYSTEMS = [
     notable: "Curry-Howard for classical logic — call/cc = excluded middle",
     quotientClass: "TuringFunctional"
   },
+  // === BARKER IOTA ORBIT SPECIES ===
+  {
+    id: "barker-I",
+    name: "Barker I",
+    symbol: "I_ι",
+    family: "Combinator",
+    carriers: { I: true, S: false, A: false, R: false },
+    primitives: 3,
+    turingComplete: false,
+    symbolCount: 3,
+    description: "Identity carrier in Barker's iota orbit. I x = x. In the iota basis, it has a leaf size of 3 nodes: (ιι)ι.",
+    encoding: "(ιι)ι",
+    rewriteRules: ["I x → x"],
+    bisimQuotient: "InvariantLayer",
+    color: "#6daa45",
+    notable: "Leaf size of 3 nodes in the iota tree basis",
+    quotientClass: "Substrate"
+  },
+  {
+    id: "barker-A",
+    name: "Barker A",
+    symbol: "A_ι",
+    family: "Combinator",
+    carriers: { I: true, S: false, A: true, R: false },
+    primitives: 2,
+    turingComplete: false,
+    symbolCount: 11,
+    description: "Adjacency / selection carrier in Barker's iota orbit. A x y = y. Ignores first arg, picks second. Expanded as (ι(ι(ιι)))(ιι).",
+    encoding: "(ι(ι(ιι)))(ιι)",
+    rewriteRules: ["A x y → y"],
+    bisimQuotient: "Adjacency",
+    color: "#6daa45",
+    notable: "Leaf size of 11 nodes (6 leaves)",
+    quotientClass: "Substrate"
+  },
+  {
+    id: "barker-K",
+    name: "Barker K",
+    symbol: "K_ι",
+    family: "Combinator",
+    carriers: { I: true, S: false, A: false, R: true },
+    primitives: 4,
+    turingComplete: false,
+    symbolCount: 7,
+    description: "Rewrite / selection carrier in Barker's iota orbit. K x y = x. Ignores second arg, returns first. Expanded as ι(ι(ιι)).",
+    encoding: "ι(ι(ιι))",
+    rewriteRules: ["K x y → x"],
+    bisimQuotient: "Rewrite",
+    color: "#6daa45",
+    notable: "Leaf size of 7 nodes (4 leaves)",
+    quotientClass: "Substrate"
+  },
+  {
+    id: "barker-S",
+    name: "Barker S",
+    symbol: "S_ι",
+    family: "Combinator",
+    carriers: { I: true, S: true, A: false, R: false },
+    primitives: 5,
+    turingComplete: false,
+    symbolCount: 9,
+    description: "State / distribution carrier in Barker's iota orbit. S f g x = f x (g x). Distributes shared argument. Expanded as ι(ι(ι(ιι))).",
+    encoding: "ι(ι(ι(ιι)))",
+    rewriteRules: ["S f g x → f x (g x)"],
+    bisimQuotient: "State",
+    color: "#6daa45",
+    notable: "Leaf size of 9 nodes (5 leaves)",
+    quotientClass: "Substrate"
+  },
+  {
+    id: "barker-X",
+    name: "Barker X",
+    symbol: "X_ι",
+    family: "Combinator",
+    carriers: { I: true, S: true, A: true, R: true },
+    primitives: 5,
+    turingComplete: false,
+    symbolCount: 11,
+    description: "Self-application seed from which the four carriers are generated: X = S S K. Untypable under Hindley-Milner.",
+    encoding: "ι(ι(ι(ι(ιι))))",
+    rewriteRules: ["X X → K", "X (X X) → S"],
+    bisimQuotient: "Closure",
+    color: "#6daa45",
+    notable: "Untypable carrier boundary. Infinite type: α ≅ α → β",
+    quotientClass: "Substrate"
+  },
+  {
+    id: "barker-Y",
+    name: "Barker Y",
+    symbol: "Y_ι",
+    family: "Combinator",
+    carriers: { I: true, S: true, A: true, R: true },
+    primitives: 10,
+    turingComplete: true,
+    symbolCount: 35,
+    description: "Fixed-point combinator in the self-application basis: Y = X(SB(CX)). Concrete instance of Theoretical Closure.",
+    encoding: "X(S(S(KS)K)(S(S(BBS)(KK))X))",
+    rewriteRules: ["Y f → f (Y f)"],
+    bisimQuotient: "FixedPoint",
+    color: "#6daa45",
+    notable: "Concrete instance of Axiom 8: U(K) = K",
+    quotientClass: "Substrate"
+  },
   // === ISAR KERNEL ===
   {
     id: "ISAR",
@@ -384,7 +487,8 @@ export const SYSTEMS = [
 
 export const edges = [
   ['untyped-lambda','SKI'],['SKI','iota'],['SK','SKI'],['BCKW','linear-logic'],['untyped-lambda','lambda-typed'],['lambda-typed','system-f'],['system-f','coc'],['pi-calculus','ccs'],['term-rewriting','string-rewriting'],['turing-machine','term-rewriting'],['ISAR','untyped-lambda'],['ISAR','pi-calculus'],['ISAR','term-rewriting'],['ISAR','fol'],['ISAR','SKI'],['untyped-lambda','lambda-mu'],['prop-logic','lambda-typed'],['fol','coc'],
-  ['coc','coq'],['coc','lean'],['fol','isabelle-isar'],['sequent-calculus','linear-logic'],['isabelle-isar','sequent-calculus'],['ISAR','isabelle-isar']
+  ['coc','coq'],['coc','lean'],['fol','isabelle-isar'],['sequent-calculus','linear-logic'],['isabelle-isar','sequent-calculus'],['ISAR','isabelle-isar'],
+  ['iota','barker-I'],['barker-I','barker-A'],['barker-A','barker-K'],['barker-K','barker-S'],['barker-S','barker-X'],['barker-X','barker-I'],['barker-Y','barker-X'],['barker-Y','barker-S'],['ISAR','barker-Y']
 ];
 
 export const familyColors = {
@@ -456,5 +560,6 @@ export const COMB_EXPANSIONS = {
   'K2': 'BKK',
   'K3': 'BK2K',
   'K4': 'BK3K',
-  'Y': 'SPP'
+  'X': 'ιS',
+  'Y': 'X(S B (C X))'
 };
