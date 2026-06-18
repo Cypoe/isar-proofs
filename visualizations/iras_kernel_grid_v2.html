@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>IRAS Kernel Grid v2</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06080f;--surface:#0c0f18;
+  --I:#4ecdc4;--R:#ffbe5b;--A:#c792ea;--S:#7dd26f;
+  --border:rgba(255,255,255,.07);--muted:#7a7d85;--text:#d4d6dc;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --sans:system-ui,-apple-system,sans-serif;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--sans)}
+#app{display:grid;grid-template-rows:36px 1fr;height:100vh}
+header{display:flex;align-items:center;gap:10px;padding:0 12px;
+  background:rgba(6,8,15,.97);border-bottom:1px solid var(--border);
+  font-family:var(--mono);font-size:12px;z-index:10}
+#dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;
+  background:radial-gradient(circle at 30% 25%,#7ef7ff,#0d3f4d);
+  box-shadow:0 0 10px rgba(94,242,255,.5)}
+#hdr-title{color:var(--I);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+#hdr-sub{color:var(--muted);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hdr-btns{margin-left:auto;display:flex;gap:5px;flex-shrink:0}
+button{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:5px;
+  border:1px solid var(--border);background:#0f1320;color:var(--text);cursor:pointer;white-space:nowrap}
+button:hover{background:#181d2e}
+button.accent{border-color:var(--I);color:var(--I);background:rgba(78,205,196,.07)}
+button.accent:hover{background:var(--I);color:#030608}
+#body{display:grid;grid-template-columns:1fr 310px;overflow:hidden}
+#left{display:grid;grid-template-rows:1fr 130px;background:radial-gradient(circle at 50% 30%,#0f1525,#04050a);position:relative}
+#cv-wrap{position:relative;overflow:hidden}
+canvas#cv{width:100%;height:100%;display:block;cursor:crosshair;image-rendering:pixelated}
+#legend{position:absolute;left:8px;bottom:8px;padding:6px 10px;border-radius:7px;
+  background:rgba(4,6,14,.88);border:1px solid var(--border);
+  font-family:var(--mono);font-size:10.5px;color:var(--muted);
+  backdrop-filter:blur(8px);line-height:1.8;pointer-events:none}
+.lr{display:flex;align-items:center;gap:6px}
+.sw{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.swI{background:var(--I)}.swR{background:var(--R)}.swA{background:var(--A)}.swS{background:var(--S)}
+#proj-badge{position:absolute;right:8px;top:8px;font-family:var(--mono);font-size:10px;
+  padding:3px 8px;border-radius:5px;border:1px solid rgba(78,205,196,.3);
+  background:rgba(78,205,196,.08);color:var(--I);pointer-events:none;transition:opacity .3s;opacity:0}
+#ts-wrap{border-top:1px solid var(--border);background:rgba(6,8,15,.8);position:relative}
+canvas#ts{width:100%;height:100%;display:block}
+#ts-legend{position:absolute;top:5px;right:8px;font-family:var(--mono);font-size:10px;
+  color:var(--muted);display:flex;gap:10px}
+.tsl{display:flex;align-items:center;gap:4px}
+.tsldot{width:8px;height:2px;border-radius:1px}
+#right{display:flex;flex-direction:column;background:var(--surface);border-left:1px solid var(--border);overflow-y:auto}
+#stats{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;
+  padding:5px 10px;border-bottom:1px solid var(--border);
+  font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+#stats span.v{color:var(--text)}
+#panel{padding:10px;display:flex;flex-direction:column;gap:10px}
+h2{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:3px}
+p{font-size:11px;line-height:1.55;color:#b0b3bb}
+code{font-family:var(--mono);font-size:10px;background:rgba(255,255,255,.04);
+  border:1px solid var(--border);border-radius:3px;padding:1px 4px}
+pre{font-family:var(--mono);font-size:9.5px;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:5px;padding:7px;
+  color:#9ba0aa;line-height:1.6;overflow-x:auto;white-space:pre}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;margin-top:4px}
+.sl{display:flex;flex-direction:column;gap:2px}
+.sl label{display:flex;justify-content:space-between;color:var(--muted);font-family:var(--mono);font-size:10.5px}
+input[type=range]{width:100%;accent-color:var(--I)}
+.toggle-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);font-family:var(--mono)}
+input[type=checkbox]{accent-color:var(--I);width:13px;height:13px}
+.hi{color:var(--I)}
+#note{font-size:10.5px;color:var(--muted);border-top:1px solid var(--border);padding-top:6px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <div id="dot"></div>
+  <span id="hdr-title">IRAS Kernel Grid</span>
+  <span id="hdr-sub">U(K)=I·R·A·S — nilpotent, confluent, open-system</span>
+  <div id="hdr-btns">
+    <button onclick="doReset()">Reset</button>
+    <button onclick="doRandom()">Randomize</button>
+    <button id="pbtn" class="accent" onclick="togglePause()">Pause</button>
+  </div>
+</header>
+<div id="body">
+  <div id="left">
+    <div id="cv-wrap">
+      <canvas id="cv"></canvas>
+      <div id="legend">
+        <div style="color:var(--text);font-weight:600;margin-bottom:2px">Carriers · drag to inject A</div>
+        <div class="lr"><div class="sw swI"></div>I — invariant / fixed-point</div>
+        <div class="lr"><div class="sw swR"></div>R — rewrite / asymmetry</div>
+        <div class="lr"><div class="sw swA"></div>A — adjacency (open boundary)</div>
+        <div class="lr"><div class="sw swS"></div>S — state / closure</div>
+      </div>
+      <div id="proj-badge">∇·I = 0  projection ON</div>
+    </div>
+    <div id="ts-wrap">
+      <canvas id="ts"></canvas>
+      <div id="ts-legend">
+        <div class="tsl"><div class="tsldot" style="background:var(--I)"></div>ΣI</div>
+        <div class="tsl"><div class="tsldot" style="background:var(--R)"></div>ΣR</div>
+        <div class="tsl"><div class="tsldot" style="background:var(--A)"></div>ΣA</div>
+        <div class="tsl"><div class="tsldot" style="background:#ff6b6b"></div>Δ open-ness</div>
+      </div>
+    </div>
+  </div>
+  <div id="right">
+    <div id="stats">
+      <span>step <span class="v" id="st">0</span></span>
+      <span>ΣI <span class="v" id="sI">–</span></span>
+      <span>ΣR <span class="v" id="sR">–</span></span>
+      <span>ΣA <span class="v" id="sA">–</span></span>
+      <span>Δ <span class="v" id="sD">–</span></span>
+    </div>
+    <div id="panel">
+      <div>
+        <h2>Kernel (ISARMatrices.lean, verified)</h2>
+        <pre>I=[[1,0,0,0],  R=[[1,0,0,0],
+   [0,0,0,0],     [0,0,0,0],
+   [0,0,1,0],     [0,1,0,0],
+   [0,0,0,0]]     [0,0,1,0]]
+
+A=[[0,0,0,0],  S=[[1,1,0,0],
+   [1,0,0,0],     [0,1,0,0],
+   [0,1,0,0],     [0,0,1,0],
+   [0,0,0,0]]     [0,0,0,1]]
+
+<span class="hi">U(K)² = 0   (K1_nilpotent : rfl)</span>
+<span class="hi">I²    = I   (I1_idempotent : rfl)</span></pre>
+      </div>
+      <div>
+        <h2>Passes per tick</h2>
+        <p>
+          <b>1. Diffusion</b> — I and R spread by 4-neighbour average.<br/>
+          <b>2. Kernel coupling</b> — <code>A ← (1−λ)A + κ(Ī+R̄)</code>, matching proven row [1,1,0,0] of U(K).<br/>
+          <b>3. Invariant projection</b> (toggle) — subtract mean of I, rescale to conserve ΣI. Mocks I²=I idempotency as a field-level divergence-free constraint.
+        </p>
+      </div>
+      <div>
+        <h2>Parameters</h2>
+        <div class="grid2">
+          <div class="sl">
+            <label><span style="color:var(--I)">I diffusion</span><span id="lI"></span></label>
+            <input type="range" id="dI" min="0" max="50" value="12">
+          </div>
+          <div class="sl">
+            <label><span style="color:var(--R)">R diffusion</span><span id="lR"></span></label>
+            <input type="range" id="dR" min="0" max="50" value="20">
+          </div>
+          <div class="sl">
+            <label><span style="color:var(--A)">κ (I,R→A)</span><span id="lK"></span></label>
+            <input type="range" id="kp" min="0" max="50" value="22">
+          </div>
+          <div class="sl">
+            <label><span style="color:var(--A)">A leak λ</span><span id="lL"></span></label>
+            <input type="range" id="lk" min="0" max="50" value="8">
+          </div>
+          <div class="sl">
+            <label><span style="color:var(--S)">S coupling</span><span id="lS"></span></label>
+            <input type="range" id="sc" min="0" max="50" value="0">
+          </div>
+          <div class="sl">
+            <label><span>inject radius</span><span id="lRad"></span></label>
+            <input type="range" id="rad" min="1" max="8" value="3">
+          </div>
+        </div>
+        <div class="toggle-row" style="margin-top:8px">
+          <input type="checkbox" id="projOn">
+          <label for="projOn">Invariant projection (I²=I mock)</label>
+        </div>
+        <div class="toggle-row" style="margin-top:5px">
+          <input type="checkbox" id="tsLog" checked>
+          <label for="tsLog">Log time-series (Σ per channel)</label>
+        </div>
+      </div>
+      <div id="note">
+        <b>Δ</b> = (ΣA−ΣA₀)/(ΣI+ΣR+1). Projection OFF + inject → Δ rises (open). Projection ON → Δ suppressed (closed-like).<br/><br/>
+        <b>Space</b> pause · <b>R</b> randomize · <b>0</b> reset
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<script>
+// ALL STATE DECLARED FIRST -- no TDZ
+var W = 104, H = 72;
+var MAX_HIST = 600;
+var hist    = [];
+var sumA0   = null;
+var stepN   = 0;
+var _paused = false;
+var dragging = false;
+var fI = new Float32Array(W * H);
+var fR = new Float32Array(W * H);
+var fA = new Float32Array(W * H);
+var fS = new Float32Array(W * H);
+
+var cv   = document.getElementById('cv');
+var ctx  = cv.getContext('2d');
+var ts   = document.getElementById('ts');
+var tctx = ts.getContext('2d');
+
+function resizeCV() {
+  var r = cv.parentElement.getBoundingClientRect();
+  cv.width  = Math.max(1, Math.floor(r.width));
+  cv.height = Math.max(1, Math.floor(r.height));
+}
+function resizeTS() {
+  var r = ts.parentElement.getBoundingClientRect();
+  ts.width  = Math.max(1, Math.floor(r.width));
+  ts.height = Math.max(1, Math.floor(r.height));
+}
+var ro = new ResizeObserver(function(){ resizeCV(); resizeTS(); });
+ro.observe(cv.parentElement);
+ro.observe(ts.parentElement);
+resizeCV(); resizeTS();
+
+function randomize() {
+  for (var i = 0; i < W * H; i++) {
+    fI[i] = Math.random() * 0.9;
+    fR[i] = Math.random() * 0.9;
+    fA[i] = 0; fS[i] = 0;
+  }
+  hist.length = 0; sumA0 = null;
+}
+function doReset() {
+  fI.fill(0); fR.fill(0); fA.fill(0); fS.fill(0);
+  stepN = 0; hist.length = 0; sumA0 = null;
+}
+function doRandom() { randomize(); stepN = 0; }
+randomize();
+
+function cl(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
+function gidx(x, y) { return y * W + x; }
+function gsafe(arr, x, y) {
+  if (x < 0) x = 0; else if (x >= W) x = W - 1;
+  if (y < 0) y = 0; else if (y >= H) y = H - 1;
+  return arr[gidx(x, y)];
+}
+function nb(arr, x, y) {
+  return (gsafe(arr,x-1,y)+gsafe(arr,x+1,y)+gsafe(arr,x,y-1)+gsafe(arr,x,y+1))*0.25;
+}
+function slv(id) { return +document.getElementById(id).value / 100; }
+
+var sliders = {dI:'lI', dR:'lR', kp:'lK', lk:'lL', sc:'lS', rad:'lRad'};
+function updateLabels() {
+  for (var id in sliders)
+    document.getElementById(sliders[id]).textContent = (+document.getElementById(id).value/100).toFixed(2);
+}
+for (var sid in sliders)
+  document.getElementById(sid).addEventListener('input', updateLabels);
+updateLabels();
+
+function kernelStep() {
+  var diffI = slv('dI'), diffR = slv('dR');
+  var kappa = slv('kp'), leak  = slv('lk');
+  var scp   = slv('sc');
+  var proj  = document.getElementById('projOn').checked;
+  var nI = new Float32Array(W*H), nR = new Float32Array(W*H);
+  var nA = new Float32Array(W*H), nS = new Float32Array(W*H);
+  var totI=0, totR=0, totA=0;
+  for (var y=0; y<H; y++) {
+    for (var x=0; x<W; x++) {
+      var i=gidx(x,y);
+      var IN=nb(fI,x,y), RN=nb(fR,x,y), AN=nb(fA,x,y);
+      nI[i]=cl((1-diffI)*fI[i]+diffI*IN, 0, 1.8);
+      nR[i]=cl((1-diffR)*fR[i]+diffR*RN, 0, 1.8);
+      nA[i]=cl((1-leak)*fA[i]+kappa*(IN+RN)+0.04*AN, 0, 4.0);
+      nS[i]=cl(scp*AN, 0, 1.8);
+      totI+=nI[i]; totR+=nR[i]; totA+=nA[i];
+    }
+  }
+  if (proj && totI>1e-6) {
+    var mean=totI/(W*H), s2=0;
+    for (var i=0;i<W*H;i++){nI[i]=cl(nI[i]-mean*0.5,0,1.8);s2+=nI[i];}
+    var scale=totI/(s2+1e-9); totI=0;
+    for (var i=0;i<W*H;i++){nI[i]=cl(nI[i]*scale,0,1.8);totI+=nI[i];}
+  }
+  fI=nI; fR=nR; fA=nA; fS=nS;
+  stepN++;
+  if (document.getElementById('tsLog').checked) {
+    var n=W*H, sI=totI/n, sR=totR/n, sA=totA/n;
+    if (sumA0===null) sumA0=sA;
+    hist.push({sI:sI, sR:sR, sA:sA, delta:(sA-sumA0)/(sI+sR+1e-6)});
+    if (hist.length>MAX_HIST) hist.shift();
+  }
+  var n=W*H, aI=totI/n, aR=totR/n, aA=totA/n;
+  document.getElementById('st').textContent=stepN;
+  document.getElementById('sI').textContent=aI.toFixed(3);
+  document.getElementById('sR').textContent=aR.toFixed(3);
+  document.getElementById('sA').textContent=aA.toFixed(3);
+  var d=sumA0!=null?(aA-sumA0)/(aI+aR+1e-6):0;
+  document.getElementById('sD').textContent=d.toFixed(3);
+  document.getElementById('proj-badge').style.opacity=proj?'1':'0';
+}
+
+function renderField() {
+  var cw=cv.width, ch=cv.height;
+  if(cw<1||ch<1) return;
+  var img=ctx.createImageData(cw,ch), d=img.data;
+  for (var py=0;py<ch;py++) {
+    var gy=Math.floor(py/ch*H);
+    for (var px=0;px<cw;px++) {
+      var gx=Math.floor(px/cw*W), i=gidx(gx,gy);
+      var Iv=fI[i],Rv=fR[i],Av=fA[i],Sv=fS[i];
+      var r=8,g=10,b=18;
+      r+=Iv*78; g+=Iv*205; b+=Iv*100;
+      r+=Rv*255;g+=Rv*130;b+=Rv*20;
+      r+=Av*120;g+=Av*60; b+=Av*200;
+      r+=Sv*40; g+=Sv*120;b+=Sv*40;
+      var o=(py*cw+px)*4;
+      d[o]=Math.min(255,r|0);d[o+1]=Math.min(255,g|0);d[o+2]=Math.min(255,b|0);d[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+}
+
+var CH_COLORS=['#4ecdc4','#ffbe5b','#c792ea','#ff6b6b'];
+var CH_KEYS=['sI','sR','sA','delta'];
+function renderTS() {
+  var w=ts.width, h=ts.height;
+  if(w<2||h<2) return;
+  tctx.fillStyle='rgba(6,8,15,0.92)'; tctx.fillRect(0,0,w,h);
+  if(hist.length<2) return;
+  var mins={sI:Infinity,sR:Infinity,sA:Infinity,delta:Infinity};
+  var maxs={sI:-Infinity,sR:-Infinity,sA:-Infinity,delta:-Infinity};
+  for(var j=0;j<hist.length;j++){
+    for(var ki=0;ki<CH_KEYS.length;ki++){
+      var k=CH_KEYS[ki];
+      if(hist[j][k]<mins[k])mins[k]=hist[j][k];
+      if(hist[j][k]>maxs[k])maxs[k]=hist[j][k];
+    }
+  }
+  var pad=10, uw=w-pad*2, uh=h-pad*2, n=hist.length;
+  tctx.strokeStyle='rgba(255,255,255,0.05)'; tctx.lineWidth=1;
+  for(var gi=0;gi<=4;gi++){var gy=pad+uh*(gi/4);tctx.beginPath();tctx.moveTo(pad,gy);tctx.lineTo(w-pad,gy);tctx.stroke();}
+  for(var ci=0;ci<CH_KEYS.length;ci++){
+    var k=CH_KEYS[ci], lo=mins[k], hi2=maxs[k], span=hi2-lo||1;
+    tctx.beginPath(); tctx.strokeStyle=CH_COLORS[ci];
+    tctx.lineWidth=k==='delta'?1.5:1.2;
+    tctx.setLineDash(k==='delta'?[3,3]:[]);
+    for(var j=0;j<n;j++){
+      var x=pad+uw*(j/(n-1)), y=pad+uh*(1-(hist[j][k]-lo)/span);
+      j===0?tctx.moveTo(x,y):tctx.lineTo(x,y);
+    }
+    tctx.stroke(); tctx.setLineDash([]);
+  }
+}
+
+function gxy(e){
+  var r=cv.getBoundingClientRect();
+  return{x:Math.floor((e.clientX-r.left)/r.width*W),y:Math.floor((e.clientY-r.top)/r.height*H)};
+}
+function inject(e){
+  var p=gxy(e), rad=+document.getElementById('rad').value;
+  for(var dy=-rad;dy<=rad;dy++) for(var dx=-rad;dx<=rad;dx++){
+    var xx=p.x+dx,yy=p.y+dy;
+    if(xx<0||xx>=W||yy<0||yy>=H||dx*dx+dy*dy>rad*rad) continue;
+    fA[gidx(xx,yy)]+=2.0;
+  }
+}
+cv.addEventListener('mousedown',function(e){dragging=true;inject(e);});
+cv.addEventListener('mousemove',function(e){if(dragging)inject(e);});
+window.addEventListener('mouseup',function(){dragging=false;});
+cv.addEventListener('touchstart',function(e){e.preventDefault();dragging=true;inject(e.touches[0]);},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(dragging)inject(e.touches[0]);},{passive:false});
+window.addEventListener('touchend',function(){dragging=false;});
+
+function togglePause(){
+  _paused=!_paused;
+  document.getElementById('pbtn').textContent=_paused?'Resume':'Pause';
+}
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();togglePause();}
+  else if(e.key==='r'||e.key==='R')doRandom();
+  else if(e.key==='0')doReset();
+});
+
+function loop(){if(!_paused)kernelStep();renderField();renderTS();requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>
