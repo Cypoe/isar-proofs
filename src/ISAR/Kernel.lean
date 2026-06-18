@@ -1,27 +1,4 @@
-namespace Relation
-
-inductive ReflTransGen {α : Type _} (r : α → α → Prop) (a : α) : α → Prop where
-  | refl : ReflTransGen r a a
-  | tail {b c} : ReflTransGen r a b → r b c → ReflTransGen r a c
-
-namespace ReflTransGen
-
-@[refl]
-theorem refl' {α : Type _} {r : α → α → Prop} {a : α} : ReflTransGen r a a :=
-  refl
-
-theorem trans {α : Type _} {r : α → α → Prop} {a b c : α}
-    (h1 : ReflTransGen r a b) (h2 : ReflTransGen r b c) : ReflTransGen r a c := by
-  induction h2 with
-  | refl => exact h1
-  | tail _ hstep ih => exact ReflTransGen.tail ih hstep
-
-theorem single {α : Type _} {r : α → α → Prop} {a b : α} (h : r a b) : ReflTransGen r a b :=
-  ReflTransGen.tail ReflTransGen.refl h
-
-end ReflTransGen
-
-end Relation
+import Mathlib.Logic.Relation
 
 open Relation
 
