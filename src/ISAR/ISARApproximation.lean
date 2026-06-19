@@ -226,7 +226,7 @@ noncomputable def addressSetoid (d k : Nat) (σ : Activation) : Setoid (RawAddre
 observational/functional equivalence. This is the exact continuous counterpart to
 the discrete `InvariantLayer`.
 -/
-noncomputable def KernelAddress (d k : Nat) (σ : Activation) : Type :=
+def KernelAddress (d k : Nat) (σ : Activation) : Type :=
   Quotient (addressSetoid d k σ)
 
 /--
