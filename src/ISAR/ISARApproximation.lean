@@ -443,6 +443,59 @@ axiom continuousRealizationLimit (d k : Nat) (σ : Activation) :
   KernelAddressLimit d k σ → C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))
 
 /--
+The canonical embedding from the quotient address space `KernelAddress` to its metric completion `KernelAddressLimit`.
+
+**Mathematical Motivation**: Represents the inclusion map $i : X \to \hat{X}$ of a metric space into its completion.
+**Why Axiomatic**: Represents the canonical inclusion of a space into its completion.
+-/
+axiom kernelAddressEmbedding (d k : Nat) (σ : Activation) :
+  KernelAddress d k σ → KernelAddressLimit d k σ
+
+/--
+The continuous realization map on the completion is the unique continuous extension of `continuousRealization`.
+This means it commutes with the embedding: $\hat{f}(i(q)) = f(q)$.
+
+**Mathematical Motivation**: This is the definitional property of the extension of a map to the completion.
+**Why Axiomatic**: Relies on the properties of completion extension.
+-/
+axiom continuousRealizationLimit_coe (d k : Nat) (σ : Activation) (q : KernelAddress d k σ) :
+  continuousRealizationLimit d k σ (kernelAddressEmbedding d k σ q) = continuousRealization d k σ q
+
+/--
+**Injectivity of the Completion Embedding.**
+
+The canonical embedding from the quotient address space into its completion is injective.
+
+**Proof**: Follows directly from the injectivity of `continuousRealization` and the commuting property
+of the realization map on the completion.
+-/
+theorem kernelAddressEmbedding_injective (d k : Nat) (σ : Activation) :
+    Function.Injective (kernelAddressEmbedding d k σ) := by
+  intro q₁ q₂ h
+  have h_eq : continuousRealizationLimit d k σ (kernelAddressEmbedding d k σ q₁) =
+              continuousRealizationLimit d k σ (kernelAddressEmbedding d k σ q₂) := by rw [h]
+  rw [continuousRealizationLimit_coe, continuousRealizationLimit_coe] at h_eq
+  exact continuousRealization_injective d k σ q₁ q₂ h_eq
+
+/--
+**Density of the Quotient Address Space in the Completion.**
+
+The quotient address space is dense in its completion, meaning any limit address can be approximated
+uniformly on compact domains to arbitrary precision by a quotient address.
+
+**Proof**: Follows by applying the density of the UAT (`ISAR_UAT`) to the realization of the limit address.
+-/
+theorem kernelAddressEmbedding_dense (d k : Nat) (σ : Activation) (h_np : Activation.nonPolynomial σ)
+    (K : Set (EuclideanSpace ℝ (Fin d))) (hK : IsCompact K)
+    (θ_limit : KernelAddressLimit d k σ) (ε : ℝ) (hε : 0 < ε) :
+    ∃ q : KernelAddress d k σ,
+      ∀ x ∈ K, ‖continuousRealization d k σ q x - continuousRealizationLimit d k σ θ_limit x‖ < ε := by
+  let f_map := continuousRealizationLimit d k σ θ_limit
+  obtain ⟨θ_raw, h_approx⟩ := ISAR_UAT d k K hK f_map σ h_np ε hε
+  use Quotient.mk _ θ_raw
+  exact h_approx
+
+/--
 **Topological Extension to Completion (Functional Analysis Axiom).**
 
 An injective map with a dense range into a complete metric space extends uniquely
