@@ -1,7 +1,7 @@
-﻿# ADR-003: Scalar Type Split — ℚ for Algebra, `axiom` for Analysis
+# ADR-003: Scalar Type Split — ℝ for Algebra, `axiom` for Analysis
 
 **Status**: Accepted
-**Date**: 2026-06-18
+**Date**: 2026-06-19
 **File**: `src/ISAR/ISARApproximation.lean`
 
 ---
@@ -21,10 +21,10 @@ The algebraic claim is constructive and finite. The statistical claim requires r
 
 ## Decision
 
-### Scalar type for the matrix algebra: `Rat` (ℚ)
+### Scalar type for the matrix algebra: `Real` (ℝ) via Mathlib
 
 ```lean
-def QMat := Fin 4 → Fin 4 → Rat
+abbrev RMat := Matrix (Fin 4) (Fin 4) ℝ
 ```
 
 **`Float` rejected**: opaque to Lean's kernel; all Float arithmetic requires `sorry` or
@@ -33,12 +33,9 @@ def QMat := Fin 4 → Fin 4 → Rat
 **`Bool` rejected**: Boolean scalars give 𝔽₂ (characteristic 2). Nilpotency over 𝔽₂ is
 vacuous. The UAT requires characteristic 0. Rejected on mathematical-content grounds.
 
-**`Real` (ℝ) deferred**: requires `Mathlib.Data.Real.Basic` and Cauchy/Dedekind machinery.
-The algebraic content (nilpotency, ring homomorphism) is valid over any characteristic-0
-field; ℚ is the smallest such field and has zero import overhead.
+**`Rat` (ℚ) bypassed**: Originally proposed to avoid Mathlib dependency in `ISARApproximation.lean`. However, because ℚ is totally disconnected, this created a ℚ→ℝ density gap for the UAT (which requires differentiability and continuity on ℝ).
 
-**`Rat` accepted**: Lean's core `Rat` type has exact arithmetic, is fully kernel-reducible,
-and supports `ring`/`push_cast` without Mathlib. All algebraic proofs are sorry-free.
+**`Real` (ℝ) accepted**: By using Mathlib's `Matrix (Fin 4) (Fin 4) ℝ`, we fully type the algebraic maps and the UAT over ℝ, closing the density gap. The algebraic proofs (e.g. `toRMat_mul`, `K1R_nilpotent`) remain entirely `sorry`-free, closed via `fin_cases`, `push_cast`, and `ring`.
 
 ### Analytic content: `axiom`
 
@@ -47,19 +44,10 @@ These are declared as `axiom` — the Lean equivalent of citing Cybenko 1989.
 
 ---
 
-## The ℚ vs ℝ Gap
+## Resolution of the ℚ vs ℝ Gap
 
-This is the key honest limitation.
-
-`ISARUpdateQ` takes α ∈ ℚ⁴. The UAT requires continuity in α ∈ ℝ⁴.
-**ℚ is totally disconnected** — no differentiability or continuity notion yields the UAT.
-
-The bridge (cited, not proved):
-1. The ℚ-family `{αI·I + αR·R + αA·A + αS·S | α ∈ ℚ⁴}` is proved here over ℚ.
-2. By density of ℚ in ℝ, the unique continuous extension to ℝ⁴ exists.
-3. The UAT applies to the real closure. This is the content of `axiom ISAR_UAT`.
-
-`Float` in the axiom statements stands in for ℝ in the conclusion.
+By transitioning fully to `ℝ`, the parameters of `ISARUpdateR` are real numbers `α ∈ ℝ⁴`.
+This allows the state space and update parameters to reside in the same topological field, satisfying the continuity conditions of the UAT without a density bridge.
 
 ---
 
@@ -67,17 +55,17 @@ The bridge (cited, not proved):
 
 All axioms are intentional analytic declarations (see proof sketch in section 7):
 
-| Axiom | Role | Why axiomatic |
+| Axiom / Definition | Role | Why axiomatic / defined |
 |---|---|---|
-| `GridState N` | State space ℝ^{4N} | Requires ℝ-vector space |
-| `GridNorm N` | Approximation error norm | Requires metric/norm on ℝ^{4N} |
+| `GridState N` | State space ℝ^{4N} | **Definitional**: Concrete Mathlib type `EuclideanSpace ℝ (Fin (4 * N))` (not an axiom). |
+| Norm on `GridState N` | Approximation error norm | **Definitional**: Comes free from `NormedAddCommGroup` (not an axiom). |
 | `Activation` | Nonlinear activation σ | Continuous function type over ℝ |
 | `Activation.applyGrid` | σ elementwise | Requires continuity infrastructure |
 | `Activation.nonPolynomial` | σ is non-polynomial | Real-analysis predicate |
-| `ISARGridUpdate` | ISAR update (Float params) | Real-valued linear map |
+| `ISARGridUpdate` | ISAR update (ℝ params) | Real-valued linear map |
 | `gridEncode` | ℝᵈ → state embedding | Continuous injection |
 | `gridReadout` | state → ℝᵏ projection | Continuous surjection |
-| `ISAR_UAT` | Universal approximation | Cybenko/Hornik + ℚ→ℝ bridge |
+| `ISAR_UAT` | Universal approximation | Cybenko/Hornik |
 
 **No algebraic theorems use `sorry` or `axiom`.**
 
@@ -85,8 +73,7 @@ All axioms are intentional analytic declarations (see proof sketch in section 7)
 
 ## Consequences
 
-- Eliminating `axiom ISAR_UAT` in the future requires only adding
-  `import Mathlib.Analysis.SpecialFunctions` and swapping `Rat → ℝ` in `ISARUpdateQ`.
-  All algebraic proofs remain unchanged.
+- The algebraic representation is fully unified with the analytic representation over `ℝ`.
+- `GridState` and the norm on it are fully concrete Mathlib objects.
 - `Mathlib.Tactic` is imported for `fin_cases`, `push_cast`, `ring`. It does NOT
-  introduce `Classical.choice` or other non-constructive axioms into the algebraic proofs.
+  introduce `sorry` or other non-constructive axioms into the algebraic proofs.
