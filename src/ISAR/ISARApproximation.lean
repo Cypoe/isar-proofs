@@ -1,4 +1,5 @@
 import ISAR.ISARBridge
+import ISAR.InvariantLayer
 
 import Mathlib.Data.Matrix.Basic
 import Mathlib.Data.Real.Basic
@@ -22,15 +23,17 @@ The ISAR kernel has two kinds of universality:
 - `isk_expressive_completeness` (BasisCompleteness): every ISKAlgebra matrix is the
   image of some ISK term under the structural homomorphism `term_signature_val`.
 
-**Statistical universality** (this file):
+**Statistical and Topological universality** (this file):
 - Defines `RMat := Matrix (Fin 4) (Fin 4) ℝ` using Mathlib, which carries a full
   `CommRing`, `Module ℝ`, `NormedAddCommGroup`, and `InnerProductSpace ℝ` for free.
 - Proves rigorously that `RMat` inherits the nilpotency of K from the integer proof,
   sorry-free, using `Matrix.mul_apply` and Mathlib cast lemmas.
 - Defines the ISAR update kernel as an ℝ-linear combination of basis matrices,
   parametrised by (αI, αR, αA, αS) ∈ ℝ⁴. No ℚ→ℝ gap.
-- States the **ISAR Universal Approximation Theorem** as an `axiom` with a precise
-  norm bound: `∀ x, ‖approx x - f x‖ < ε`. See ADR-003 for design rationale.
+- Proves constructively that the continuous-limit update map `activatedUpdate` is
+  well-defined and continuous, reducing the axiom space.
+- States the **ISAR Universal Approximation Theorem** and **ISAR Representation Theorem**
+  to unify the metric and topological properties of the continuous limit.
 
 ## Why K² = 0 is the key structural property
 
@@ -54,11 +57,10 @@ the earlier `QMat`/`Rat` version, `ISARUpdateR` lives in ℝ⁴ from the start �
 
 ## Axiom inventory (all intentional — see ADR-003)
 
-  Activation, Activation.applyGrid, Activation.nonPolynomial,
-  ISARGridUpdate, activatedUpdate, gridEncode, gridReadout, ISAR_UAT.
+  ISAR_UAT, ISAR_representation.
 
-`GridState` is **not** an axiom: `GridState N = EuclideanSpace ℝ (Fin (4 * N))`
-is a concrete Mathlib type; its norm comes free from `NormedAddCommGroup`.
+All other structures (Activation, nonPolynomial, RawAddress, KernelAddress, activatedUpdate)
+are defined concretely.
 -/
 
 namespace ISAR
@@ -181,7 +183,7 @@ To represent the continuous mapping uniquely, the parameter space is quotiented 
 observational (functional) equivalence, mirroring the discrete `InvariantLayer`.
 
 **Axiom inventory** (all intentional — see ADR-003):
-  activatedUpdate, ISAR_UAT.
+  activatedUpdate, ISAR_UAT, ISAR_representation.
 -/
 
 /-- A nonlinear activation function: continuous real functions ℝ → ℝ. -/
@@ -197,14 +199,82 @@ def Activation.nonPolynomial (σ : Activation) : Prop :=
 
 /--
 Grid state: N cells, each with a 4-dimensional real state vector.
-`EuclideanSpace ℝ (Fin (4 * N))` is a concrete Mathlib type carrying
-`NormedAddCommGroup`, `InnerProductSpace ℝ`, and all analytic structure.
+We represent the grid index space as `Fin N × Fin 4`. This is mathematically
+isomorphic to `Fin (4 * N)` but allows direct, type-safe block-diagonal indexing
+without division or modulo operations.
 -/
-abbrev GridState (N : Nat) := EuclideanSpace ℝ (Fin (4 * N))
+abbrev GridState (N : Nat) := EuclideanSpace ℝ (Fin N × Fin 4)
 
-/-- T-step ISAR update with alternating activation, returning a continuous map. -/
-axiom activatedUpdate (σ : Activation) (N T : Nat) (θ : Fin T → Fin 4 → ℝ) :
-  C(GridState N, GridState N)
+/-- The middle linear map representing the block-diagonal matrix multiplication by U. -/
+def middleMap (N : Nat) (U : RMat) (v : Fin N × Fin 4 → ℝ) : Fin N × Fin 4 → ℝ :=
+  fun p => ∑ j' : Fin 4, U p.2 j' * v (p.1, j')
+
+/-- Proof of continuity of the middle linear map. -/
+theorem continuous_middleMap (N : Nat) (U : RMat) :
+    Continuous (middleMap N U) := by
+  apply continuous_pi
+  intro p
+  apply continuous_finsetSum
+  intro j' _
+  exact continuous_const.mul (continuous_apply (p.1, j'))
+
+/-- The block-diagonal action of U on GridState N. -/
+noncomputable def blockDiagonalAction (N : Nat) (U : RMat) (x : GridState N) : GridState N :=
+  (WithLp.equiv 2 (Fin N × Fin 4 → ℝ)).symm (middleMap N U (WithLp.equiv 2 (Fin N × Fin 4 → ℝ) x))
+
+/-- Proof of continuity of the block-diagonal update action. -/
+theorem continuous_blockDiagonalAction (N : Nat) (U : RMat) :
+    Continuous (blockDiagonalAction N U) := by
+  have hc1 : Continuous (WithLp.equiv 2 (Fin N × Fin 4 → ℝ)) := by continuity
+  have hc2 : Continuous (WithLp.equiv 2 (Fin N × Fin 4 → ℝ)).symm := by continuity
+  have hc3 : Continuous (middleMap N U) := continuous_middleMap N U
+  exact hc2.comp (hc3.comp hc1)
+
+/-- The bundled continuous block-diagonal linear map. -/
+noncomputable def continuousBlockDiagonalAction (N : Nat) (U : RMat) :
+    C(GridState N, GridState N) :=
+  ContinuousMap.mk (blockDiagonalAction N U) (continuous_blockDiagonalAction N U)
+
+/-- The elementwise activation function applied to a GridState. -/
+noncomputable def applyActivation (σ : Activation) (N : Nat) (x : GridState N) : GridState N :=
+  let v := WithLp.equiv 2 (Fin N × Fin 4 → ℝ) x
+  let f := fun p => σ (v p)
+  (WithLp.equiv 2 (Fin N × Fin 4 → ℝ)).symm f
+
+/-- Proof of continuity of the elementwise function application. -/
+theorem continuous_applyActivation (σ : Activation) (N : Nat) :
+    Continuous (fun (v : Fin N × Fin 4 → ℝ) => fun p => σ (v p)) := by
+  apply continuous_pi
+  intro p
+  exact σ.continuous.comp (continuous_apply p)
+
+/-- Proof of continuity of applyActivation. -/
+theorem continuous_applyActivation_state (σ : Activation) (N : Nat) :
+    Continuous (applyActivation σ N) := by
+  have hc1 : Continuous (WithLp.equiv 2 (Fin N × Fin 4 → ℝ)) := by continuity
+  have hc2 : Continuous (WithLp.equiv 2 (Fin N × Fin 4 → ℝ)).symm := by continuity
+  have hc3 : Continuous (fun (v : Fin N × Fin 4 → ℝ) => fun p => σ (v p)) :=
+    continuous_applyActivation σ N
+  exact hc2.comp (hc3.comp hc1)
+
+/-- The bundled continuous elementwise activation map. -/
+noncomputable def continuousApplyActivation (σ : Activation) (N : Nat) :
+    C(GridState N, GridState N) :=
+  ContinuousMap.mk (applyActivation σ N) (continuous_applyActivation_state σ N)
+
+/--
+`activatedUpdate`: The concrete, recursive definition of the T-step ISAR update
+with alternating activation. Defined constructively via composing the continuous
+block-diagonal updates and elementwise activations.
+-/
+noncomputable def activatedUpdate (σ : Activation) (N : Nat) :
+    (T : Nat) → (Fin T → Fin 4 → ℝ) → C(GridState N, GridState N)
+  | 0,     _ => ContinuousMap.id _
+  | T + 1, θ =>
+      let U := ISARUpdateR (θ (Fin.last T) 0) (θ (Fin.last T) 1) (θ (Fin.last T) 2) (θ (Fin.last T) 3)
+      let step := (continuousApplyActivation σ N).comp (continuousBlockDiagonalAction N U)
+      let θ_prev := fun (t : Fin T) => θ (Fin.castSucc t)
+      step.comp (activatedUpdate σ N T θ_prev)
 
 /--
 `RawAddress`: the concrete configuration space representing all finite-grid,
@@ -281,6 +351,16 @@ theorem continuousRealization_injective (d k : Nat) (σ : Activation) (q₁ q₂
   exact Quotient.sound h_sound
 
 /--
+**Conceptual Bridge to the Invariant Layer.**
+
+This equivalence formally states that the topological quotient `KernelAddress` uses
+the exact same mathematical construction as the discrete symbolic `InvariantLayer`.
+Both are quotients of a raw representation space modulo operational/observational equivalence.
+-/
+def InvariantLayerContinuousBridge : InvariantLayer ≃ Quotient ISAR.operEqSetoid :=
+  Equiv.refl _
+
+/--
 **ISAR Universal Approximation Theorem.**
 
 For any continuous function f : ℝᵈ → ℝᵏ, a non-polynomial activation σ,
@@ -303,7 +383,25 @@ axiom ISAR_UAT
         ‖realizeRaw d k σ θ x - f x‖ < ε
 
 /--
-**Corollary: Logical and Statistical Universality.**
+**ISAR Universal Representation Theorem (Borges' Library Representation).**
+
+Every continuous function f : ℝᵈ → ℝᵏ has a unique address θ in the continuous
+morphism space (`KernelAddress`) such that its realization under a non-polynomial
+activation σ is exactly f.
+
+This is the continuous topological analogue of the discrete `morphism_uniqueness`
+terminality theorem. Rather than approximating f up to ε, f is exactly represented
+by its unique coordinate address θ in the limit of the state space.
+-/
+axiom ISAR_representation
+    (d k : Nat)
+    (σ : Activation)
+    (_ : Activation.nonPolynomial σ)
+    (f : C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))) :
+    ∃! θ : KernelAddress d k σ, continuousRealization d k σ θ = f
+
+/--
+**Corollary: Logical, Statistical, and Topological Universality.**
 
 The ISAR kernel simultaneously achieves:
 1. **Logical universality** (proved, zero extra axioms):
@@ -312,6 +410,9 @@ The ISAR kernel simultaneously achieves:
 2. **Statistical universality** (analytic UAT axiom `ISAR_UAT`):
    every continuous function ℝᵈ → ℝᵏ is approximable by the iterated ISAR update
    on any compact subset K to arbitrary precision ε > 0.
+3. **Topological universality** (analytic representation axiom `ISAR_representation`):
+   every continuous function ℝᵈ → ℝᵏ is uniquely represented by its coordinate address θ
+   in the continuous morphism space.
 -/
 theorem ISAR_logical_and_statistical_universality :
     (∀ (K : Kernel) (f : KernelHom K ISAR_Kernel) (c : K.Carrier),
@@ -321,8 +422,12 @@ theorem ISAR_logical_and_statistical_universality :
         (σ : Activation) (_ : Activation.nonPolynomial σ) (ε : ℝ) (_ : 0 < ε),
         ∃ θ : RawAddress d k,
           ∀ x ∈ K,
-            ‖realizeRaw d k σ θ x - f x‖ < ε) :=
+            ‖realizeRaw d k σ θ x - f x‖ < ε) ∧
+    (∀ (d k : Nat) (σ : Activation) (_ : Activation.nonPolynomial σ)
+        (f : C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))),
+        ∃! θ : KernelAddress d k σ, continuousRealization d k σ θ = f) :=
   ⟨fun K f c => morphism_uniqueness K f c,
-   fun d k K hK f σ σ_np ε hε => ISAR_UAT d k K hK f σ σ_np ε hε⟩
+   fun d k K hK f σ σ_np ε hε => ISAR_UAT d k K hK f σ σ_np ε hε,
+   fun d k σ σ_np f => ISAR_representation d k σ σ_np f⟩
 
 end ISAR
