@@ -170,33 +170,75 @@ theorem nilpotent_kills_higher_order : K1R * K1R = 0 := K1R_nilpotent
 /-! ## 7. Universal Representation (Continuous Morphism and Address Space) -/
 
 /-
-We axiomatise the topological representation space, which lifts the category-theoretic
+We define the topological representation space, which lifts the category-theoretic
 terminality (`morphism_uniqueness`) to the continuous setting. Rather than an external
 curve-fitting approximation (UAT), continuous functions are internally represented as
 unique trajectories through the ISAR state space.
 
+To represent the continuous mapping uniquely, the parameter space is quotiented modulo
+observational (functional) equivalence, mirroring the discrete `InvariantLayer`.
+
 **Axiom inventory** (all intentional — see ADR-003):
-  Activation, Activation.nonPolynomial, KernelAddress, continuousRealization, ISAR_representation.
+  RawAddress, realizeRaw, ISAR_representation.
 -/
 
-/-- A nonlinear activation function (type abstract — represents any σ : ℝ → ℝ). -/
-axiom Activation : Type
+/-- A nonlinear activation function: continuous real functions ℝ → ℝ. -/
+abbrev Activation := C(ℝ, ℝ)
+
+/-- Horner's method to evaluate a polynomial represented as a list of real coefficients. -/
+def evalPoly (coeffs : List ℝ) (x : ℝ) : ℝ :=
+  coeffs.foldr (fun coef acc => coef + x * acc) 0
 
 /-- Predicate: σ is non-polynomial (necessary condition for representation). -/
-axiom Activation.nonPolynomial : Activation → Prop
+def Activation.nonPolynomial (σ : Activation) : Prop :=
+  ∀ coeffs : List ℝ, (σ : ℝ → ℝ) ≠ evalPoly coeffs
 
 /--
-The abstract type of continuous addresses (morphisms) in the ISAR state space.
-Represents the topological counterpart to the discrete `KernelHom`.
+The abstract type of raw continuous parameters or trajectories in the ISAR state space.
+Lacks uniqueness due to neural/coordinate symmetries.
 -/
-axiom KernelAddress (d k : Nat) : Type
+axiom RawAddress (d k : Nat) : Type
 
 /--
-The continuous realization mapping associated with a given kernel address θ.
-Maps a coordinate space ℝᵈ to ℝᵏ continuously under the activation σ.
+The realization map mapping a raw parameter trajectory to a continuous function.
 -/
-axiom continuousRealization (d k : Nat) (σ : Activation) (θ : KernelAddress d k) :
-    C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))
+axiom realizeRaw (d k : Nat) (σ : Activation) :
+  RawAddress d k → C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))
+
+/--
+Two raw addresses are observationally/functionally equivalent if they realize
+the same continuous function.
+-/
+def AddressEq (d k : Nat) (σ : Activation) (θ₁ θ₂ : RawAddress d k) : Prop :=
+  realizeRaw d k σ θ₁ = realizeRaw d k σ θ₂
+
+/-- The setoid defining the functional equivalence relation on RawAddress. -/
+noncomputable def addressSetoid (d k : Nat) (σ : Activation) : Setoid (RawAddress d k) where
+  r := AddressEq d k σ
+  iseqv := {
+    refl  := fun _ => rfl
+    symm  := fun h => h.symm
+    trans := fun h₁ h₂ => h₁.trans h₂
+  }
+
+/--
+`KernelAddress`: the address space defined as the quotient of RawAddress modulo
+observational/functional equivalence. This is the exact continuous counterpart to
+the discrete `InvariantLayer`.
+-/
+noncomputable def KernelAddress (d k : Nat) (σ : Activation) : Type :=
+  Quotient (addressSetoid d k σ)
+
+/--
+The well-defined continuous realization of a quotiented `KernelAddress`.
+Derived via `Quotient.lift` from `realizeRaw`.
+-/
+noncomputable def continuousRealization (d k : Nat) (σ : Activation) (q : KernelAddress d k σ) :
+    C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k)) :=
+  Quotient.lift (fun θ => realizeRaw d k σ θ) (by
+    intro θ₁ θ₂ h
+    exact h
+  ) q
 
 /--
 **ISAR Universal Representation Theorem (Borges' Library Representation).**
@@ -214,7 +256,7 @@ axiom ISAR_representation
     (σ : Activation)
     (_ : Activation.nonPolynomial σ)
     (f : C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))) :
-    ∃! θ : KernelAddress d k, continuousRealization d k σ θ = f
+    ∃! θ : KernelAddress d k σ, continuousRealization d k σ θ = f
 
 /--
 **Corollary: Logical and Topological Universality.**
@@ -232,7 +274,7 @@ theorem ISAR_logical_and_topological_universality :
         OperEq (f.hom c) (K.decode c)) ∧
     (∀ (d k : Nat) (σ : Activation) (_ : Activation.nonPolynomial σ)
         (f : C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))),
-        ∃! θ : KernelAddress d k, continuousRealization d k σ θ = f) :=
+        ∃! θ : KernelAddress d k σ, continuousRealization d k σ θ = f) :=
   ⟨fun K f c => morphism_uniqueness K f c,
    fun d k σ σ_np f => ISAR_representation d k σ σ_np f⟩
 
