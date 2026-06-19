@@ -49,15 +49,17 @@ By transitioning fully to `ℝ`, the parameters of `ISARUpdateR` are real number
 
 ## Axiom Inventory
 
-All axioms are intentional topological/representation declarations:
+By formalizing the quotient structure and continuous activations, the axiom inventory has been minimized to only two analytical axioms:
 
-| Axiom | Role | Why axiomatic |
+| Axiom / Definition | Role | Why axiomatic / defined |
 |---|---|---|
-| `Activation` | Nonlinear activation σ | Continuous function type over ℝ |
-| `Activation.nonPolynomial` | σ is non-polynomial | Real-analysis predicate |
-| `KernelAddress` | Address space (morphisms) | Continuous analogue of discrete morphism space |
-| `continuousRealization` | Address realization map | Maps address $\theta$ to continuous function $f$ |
-| `ISAR_representation` | Universal representation | Exact representation bijection ($\exists!$) |
+| `Activation` | Nonlinear activation σ | **Definitional**: Concrete type `C(ℝ, ℝ)`. |
+| `Activation.nonPolynomial` | σ is non-polynomial | **Definitional**: Concrete predicate defined using Horner's method. |
+| `RawAddress` | Configuration space | **Definitional**: Concrete type representing $(N, T, \theta, encode, readout)$ configurations. |
+| `KernelAddress` | Address space | **Definitional**: Concrete quotient of `RawAddress` modulo functional equivalence. |
+| `continuousRealization` | Address realization map | **Definitional**: Lifted composition map on the quotient. |
+| `activatedUpdate` | T-step update map | **Axiomatic**: Requires the continuous-limit block dynamics. |
+| `ISAR_UAT` | Universal approximation | **Axiomatic**: Standard Cybenko/Hornik approximation theorem on compact domains. |
 
 **No algebraic theorems use `sorry` or `axiom`.**
 
