@@ -578,4 +578,24 @@ theorem ISAR_logical_and_statistical_universality :
    fun d k K hK f σ σ_np ε hε => ISAR_UAT d k K hK f σ σ_np ε hε,
    fun d k σ σ_np f => ISAR_representation d k σ σ_np f⟩
 
+/--
+**Physical System Representation Theorem.**
+
+Every physical system represented as an admissible continuous kernel has a unique address
+in the continuous completion limit space.
+
+**Mathematical Motivation**: The observable behaviors of physical systems (e.g. S-matrices,
+partition functions, chaotic Lorenz trajectories) map to continuous functions `f_sys` over
+the state space. By applying the representation theorem `ISAR_representation`, every such system
+has a unique fractal address `θ` in the completion of the quotient address space.
+-/
+theorem physical_system_has_address
+    (d k : Nat)
+    (σ : Activation)
+    (h_np : Activation.nonPolynomial σ)
+    (f_sys : C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))) :
+    ∃! θ : KernelAddressLimit d k σ,
+      continuousRealizationLimit d k σ θ = f_sys :=
+  ISAR_representation d k σ h_np f_sys
+
 end ISAR
