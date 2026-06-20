@@ -1,0 +1,90 @@
+\chapter{Applications and Advanced Properties}
+
+In this final chapter, we formalize several advanced computational and structural properties of the ISAR framework: Futamura projections for partial evaluation, observational isomorphisms between dialects, and the classification of referentially open systems.
+
+\section{Partial Evaluation and Futamura Projections}
+
+We formalize partial evaluation and compile-time optimization via Futamura projections.
+
+\begin{definition}[Specializer]
+\lean{ISAR.specialize}
+The partial evaluator that specializes a term with respect to a static environment:
+$$\text{specialize} : \text{ITerm} \to (\mathbb{N} \to \text{Option } \text{ITerm}) \to \text{ITerm}$$
+\end{definition}
+
+\begin{definition}[Specializer Correctness]
+\lean{ISAR.SpecializerCorrect}
+\uses{ISAR.specialize}
+The correctness predicate asserting that specialization preserves evaluation under coherent dynamic environments.
+\end{definition}
+
+We prove the three Futamura projections.
+
+\begin{theorem}[First Futamura Projection]
+\lean{ISAR.futamura_first}
+\uses{ISAR.SpecializerCorrect}
+Specializing an interpreter term $I$ with respect to a static source program $P$ produces an executable target program:
+$$\text{specialize } I\ [P, \cdot] \sim_{op} \text{target\_program}$$
+\end{theorem}
+
+\begin{theorem}[Second Futamura Projection]
+\lean{ISAR.futamura_second}
+\uses{ISAR.SpecializerCorrect}
+Specializing the specializer with respect to an interpreter $I$ produces a compiler for that language:
+$$\text{specialize } \text{spec}\ [I, \cdot] \sim_{op} \text{compiler}$$
+\end{theorem}
+
+\begin{theorem}[Third Futamura Projection]
+\lean{ISAR.futamura_third}
+\uses{ISAR.SpecializerCorrect}
+Specializing the specializer with respect to itself produces a compiler-compiler (generating compilers from interpreters):
+$$\text{specialize } \text{spec}\ [\text{spec}, \cdot] \sim_{op} \text{compiler-compiler}$$
+\end{theorem}
+
+\section{Dialect Isomorphisms and Unification}
+
+We formalize structural unifications and observational equivalence between different dialects.
+
+\begin{definition}[Observational Isomorphism]
+\lean{ISAR.ObservationalIsomorphism}
+An observational isomorphism between two dialects $D_1$ and $D_2$ is a pair of maps between their objects preserving the evaluation and coding semantics.
+\end{definition}
+
+\begin{definition}[Admissible Dialect]
+\lean{ISAR.AdmissibleDialect}
+A dialect packaged with its admissibility proofs, allowing it to induce a semantic kernel.
+\end{definition}
+
+\begin{theorem}[Isomorphism Unification]
+\lean{ISAR.isomorphism_unification}
+\uses{ISAR.AdmissibleDialect, ISAR.ObservationalIsomorphism}
+An observational isomorphism between two admissible dialects induces an isomorphism between their corresponding semantic kernels in the category of kernels.
+\end{theorem}
+
+\section{Referential Openness and Anchor Dependency}
+
+We analyze systems that are operationally closed versus referentially open (anchor-dependent).
+
+\begin{definition}[Transition System]
+\lean{ISAR.TransitionSystem}
+A standard operationally closed autonomous transition system.
+\end{definition}
+
+\begin{theorem}[Forward Invariance]
+\lean{ISAR.closure_preserved_under_reachability}
+\uses{ISAR.TransitionSystem}
+If a state-space subset $C$ is closed under the step relation (forward invariant), any state reachable from $C$ remains in $C$.
+\end{theorem}
+
+\begin{definition}[Anchor-Dependent System]
+\lean{ISAR.AnchorDependentSystem}
+A referentially open transition system whose transitions depend on an external environment context (anchor).
+\end{definition}
+
+\begin{theorem}[Anchor Dependency]
+\lean{ISAR.referentially_open_requires_anchor}
+\uses{ISAR.AnchorDependentSystem}
+If a state can lead to different observations under different anchor sequences, the semantics cannot be resolved from the state alone without environmental anchors.
+\\
+This highlights the fundamental difference between closed computation (symbolic rewriting) and open interaction (continuous parameters).
+\end{theorem}

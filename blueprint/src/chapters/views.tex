@@ -1,0 +1,100 @@
+\chapter{Symbolic Views and Dialects}
+
+The ISAR architecture supports multiple symbolic views or ``dialects'' over the representation-free substrate. Each view compiles to the substrate and decodes back, satisfying a preservation law. In this chapter, we formalize several dialects: the Lambda calculus fragment, ZFC hereditarily finite sets, term rewriting systems, bytecode compilation, and Barker's Iota combinator.
+
+\section{The Lambda Calculus Fragment}
+
+We define the standard $\lambda$-calculus with de Bruijn indices.
+
+\begin{definition}[Lambda Terms]
+\lean{ISAR.LTerm}
+Lambda terms with variables (represented by natural number de Bruijn indices), applications, and abstractions:
+\begin{align*}
+t, u \in \text{LTerm} &::= \mathbf{var}\ n \mid \mathbf{app}\ t\ u \mid \mathbf{lam}\ t
+\end{align*}
+\end{definition}
+
+\begin{definition}[Lambda Step]
+\lean{ISAR.LStep}
+Single-step $\beta$-reduction on \texttt{LTerm} using de Bruijn shifts and substitutions.
+\end{definition}
+
+\begin{definition}[Lambda Compiler]
+\lean{ISAR.compile}
+\uses{ISAR.LTerm, ISAR.ITerm}
+Compiles lambda terms into the ISAR substrate via bracket abstraction:
+$$\text{compile} : \text{LTerm} \to \text{ITerm}$$
+\end{definition}
+
+\begin{theorem}[Compiler Simulation]
+\lean{ISAR.compile_simulates_step, ISAR.compile_simulates_red}
+\uses{ISAR.compile, ISAR.LStep}
+The compiler faithfully simulates lambda reductions in the ISAR kernel:
+$$\forall t, u \in \text{LTerm}, \quad t \to_\beta u \implies \text{compile } t \to^* \text{compile } u$$
+\end{theorem}
+
+\section{Hereditarily Finite Sets and ZFC}
+
+We formalize Hereditarily Finite (HF) Sets, their encoding, and show they satisfy set-theoretic axioms.
+
+\begin{definition}[HF Sets]
+\lean{HF}
+The type of hereditarily finite sets, built inductively from the empty set.
+\end{definition}
+
+\begin{definition}[Extensional Equality]
+\lean{ExtEq}
+\uses{HF}
+Set-theoretic extensional equivalence ($x =_{ext} y$):
+$$x =_{ext} y \iff \text{ExtEq } x\ y$$
+\end{definition}
+
+\begin{definition}[HF Set Encoding]
+\lean{ISAR.HF_encode}
+\uses{HF, ISAR.InvariantLayer}
+Encodes HF sets into substrate invariant layers:
+$$\text{HF\_encode} : \text{HF} \to \text{InvariantLayer}$$
+\end{definition}
+
+\begin{theorem}[HF Encoding Correctness]
+\lean{ISAR.decode_layer_HF_encode, ISAR.HF_encode_decode_layer}
+\uses{ISAR.HF_encode}
+The encoding is sound and invertible:
+$$\forall c \in \text{HF}, \quad \text{decode\_layer}(\text{HF\_encode } c) = c$$
+\end{theorem}
+
+\begin{definition}[HF Set Kernel]
+\lean{ISAR.HF_Kernel}
+\uses{ISAR.Kernel, HF}
+The set-theoretic admissible semantic kernel HF\_Kernel.
+\end{definition}
+
+\begin{theorem}[ZFC Interpretation Factorization]
+\lean{ISAR.HF_Kernel_factorization}
+\uses{ISAR.HF_Kernel, ISAR.ISAR_Kernel_terminal}
+The HF set kernel factors uniquely through \texttt{ISAR\_Kernel}:
+$$\forall f : \text{KernelHom HF\_Kernel ISAR\_Kernel}, \quad f(c) \sim_{op} \text{encode\_raw } c$$
+This faithful factorization proves that the ZFC HF set fragment faithfully interprets into the ISAR substrate.
+\end{theorem}
+
+\section{Term Rewriting, Bytecode, and Iota Views}
+
+We define dialects for other standard computational models.
+
+\begin{definition}[SKI TRS Dialect]
+\lean{ISAR.TRS_Dialect}
+\uses{ISAR.Dialect}
+The term rewriting dialect modeling pure SKI combinator terms \texttt{TTerm}.
+\end{definition}
+
+\begin{definition}[Bytecode Dialect]
+\lean{ISAR.Bytecode_Dialect}
+\uses{ISAR.Dialect}
+The dialect representing stack-based virtual machine instruction bytecode \texttt{Instruction} compiled and decompiled.
+\end{definition}
+
+\begin{definition}[Barker's Iota Dialect]
+\lean{ISAR.Iota_Dialect}
+\uses{ISAR.Dialect}
+The dialect modeling the single-combinator \texttt{IotaTerm} utilizing Barker's universal combinator $\iota = \lambda x. x\ S\ K$.
+\end{definition}

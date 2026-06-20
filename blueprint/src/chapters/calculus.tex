@@ -1,0 +1,90 @@
+\chapter{Core Combinatory Calculus}
+
+In this chapter, we formalize the syntax and reduction semantics of the ISAR combinatory logic kernel. The core ISAR calculus is a substrate-independent combinator system that supports S-K combinator reductions, parallel reductions, and normalization.
+
+\section{Syntax and Reduction Semantics}
+
+The syntax consists of standard S-K combinators and the specialized ISAR terms.
+
+\begin{definition}[S-K Term Syntax]
+\lean{ISAR.SK}
+The inductive type of basic S-K combinator expressions is defined by:
+\begin{align*}
+t, u \in \text{SK} &::= \mathbf{S} \mid \mathbf{K} \mid t\ u
+\end{align*}
+\end{definition}
+
+\begin{definition}[ISAR Term Syntax]
+\lean{ISAR.ITerm}
+The core term syntax of the ISAR kernel extends basic combinators with norms, constants, and custom operations:
+\begin{align*}
+t, u \in \text{ITerm} &::= \mathbf{norm} \mid \mathbf{s_s} \mid \mathbf{konst} \mid \mathbf{app}\ t\ u
+\end{align*}
+\end{definition}
+
+We define the reduction rules for both systems.
+
+\begin{definition}[SKStep Reduction]
+\lean{ISAR.SKStep}
+The reduction relation on SK terms represents the standard combinatory logic reduction rules:
+\begin{itemize}
+    \item $\mathbf{K}\ x\ y \to x$
+    \item $\mathbf{S}\ x\ y\ z \to (x\ z)(y\ z)$
+\end{itemize}
+\end{definition}
+
+\begin{definition}[IStep Reduction]
+\lean{ISAR.IStep}
+The single-step reduction relation on ISAR terms defines the operational semantics of norms and constants.
+\end{definition}
+
+\begin{theorem}[Confluence of IRed]
+\lean{ISAR.IRed_confluence}
+\uses{ISAR.ITerm, ISAR.IStep}
+The reduction relation $\text{IRed}$ (the reflexive transitive closure of $\text{IStep}$) satisfies the Church-Rosser confluence property:
+$$\forall t, u_1, u_2, \quad t \to^* u_1 \land t \to^* u_2 \implies \exists v, \quad u_1 \to^* v \land u_2 \to^* v$$
+\end{theorem}
+
+\begin{theorem}[Unique Normal Forms]
+\lean{ISAR.isar_fragment_unique_normal_forms}
+\uses{ISAR.IRed_confluence}
+If a term $t$ reduces to two normal forms $n_1$ and $n_2$, then $n_1 = n_2$.
+\end{theorem}
+
+\section{The Invariant Layer}
+
+Using the uniqueness of normal forms, we define the quotient space representing behavioral equivalence classes of terms.
+
+\begin{definition}[ISKSubtype]
+\lean{ISAR.ISKSubtype}
+\uses{ISAR.ITerm}
+The subtype of ISAR terms belonging to the S-K fragment:
+$$\text{ISKSubtype} := \{ t : \text{ITerm} \mid \text{ISKTerm } t \}$$
+\end{definition}
+
+\begin{definition}[Operational Equivalence]
+\lean{ISAR.OperEq}
+\uses{ISAR.ISKSubtype}
+Two terms are operationally equivalent if they behave identically under reduction:
+$$t \sim_{op} u \iff \text{OperEq } t\ u$$
+\end{definition}
+
+\begin{definition}[Invariant Layer]
+\lean{ISAR.InvariantLayer}
+\uses{ISAR.OperEq}
+The quotient type of \texttt{ISKSubtype} modulo \texttt{OperEq}:
+$$\text{InvariantLayer} := \text{Quotient } (\text{operEqSetoid})$$
+\end{definition}
+
+\begin{definition}[Invariant Layer Application]
+\lean{ISAR.InvariantLayer.app}
+\uses{ISAR.InvariantLayer}
+The application operator lifted to the quotient space:
+$$\text{app} : \text{InvariantLayer} \to \text{InvariantLayer} \to \text{InvariantLayer}$$
+\end{definition}
+
+\begin{definition}[Canonical Representative]
+\lean{ISAR.InvariantLayer.canonical_rep}
+\uses{ISAR.InvariantLayer}
+A noncomputable function mapping each equivalence class to its canonical representative in \texttt{ISKSubtype}.
+\end{definition}

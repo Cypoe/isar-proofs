@@ -18,6 +18,5 @@ lean_lib «ISAR» where
 
 require checkdecls from git "https://github.com/PatrickMassot/checkdecls.git"
 
--- mlake buiketa if get_config? env = some "dev" then
 require «doc-gen4» from git
   "https://github.com/leanprover/doc-gen4" @ "v4.31.0"

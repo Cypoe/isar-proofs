@@ -1,0 +1,85 @@
+\chapter{Category-Theoretic Interface}
+
+The ISAR kernel provides a category-theoretic interpretation of representation-free substrates and semantic views. We formalize this using the category of semantic kernels and morphisms, and prove that the canonical invariant quotient space is a terminal object in this category.
+
+\section{Semantic Kernels and Morphisms}
+
+We define the category of admissible semantic kernels over the substrate.
+
+\begin{definition}[Semantic Kernel]
+\lean{ISAR.Kernel}
+An admissible semantic kernel $K$ consists of:
+\begin{enumerate}
+    \item A carrier type $\text{Carrier}$.
+    \item A view mapping $\text{view\_of} : \text{ISKSubtype} \to \text{Carrier}$.
+    \item An observational equivalence relation $\approx$ on $\text{Carrier}$.
+    \item A soundness property: operational equivalence in the substrate implies view equivalence:
+    $$\forall t, u, \quad t \sim_{op} u \implies \text{view\_of } t \approx \text{view\_of } u$$
+    \item A decoding/reconstruction mapping $\text{decode} : \text{Carrier} \to \text{ISKSubtype}$.
+    \item Coherence axioms relating $\text{view\_of}$ and $\text{decode}$.
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[Canonical ISAR Kernel]
+\lean{ISAR.ISAR_Kernel}
+\uses{ISAR.Kernel}
+The identity kernel mapping the substrate directly to itself is the canonical presentation.
+\end{definition}
+
+\begin{definition}[Computable ISAR Kernel]
+\lean{ISAR.ComputableISAR_Kernel}
+\uses{ISAR.Kernel}
+The computable kernel parametrized by normalization fuel.
+\end{definition}
+
+\begin{definition}[Optimal Computable Kernel]
+\lean{ISAR.ComputableISAR_Kernel_Optimal}
+\uses{ISAR.ComputableISAR_Kernel}
+The computable kernel instantiated with optimal fuel computed from the term size for linearly-typed terms.
+\end{definition}
+
+\begin{definition}[Kernel Morphism]
+\lean{ISAR.KernelHom}
+\uses{ISAR.Kernel}
+A morphism $f : K_1 \to K_2$ between semantic kernels is a carrier mapping that preserves the view representations and respects equivalence.
+\end{definition}
+
+\begin{definition}[Canonical Homomorphism]
+\lean{ISAR.canonical_hom}
+\uses{ISAR.KernelHom, ISAR.ISAR_Kernel}
+For any kernel $K$, the canonical homomorphism into $\text{ISAR\_Kernel}$ is defined by the decoding mapping.
+\end{definition}
+
+\section{Terminality of the Canonical Kernel}
+
+We prove that the canonical representation-free kernel is terminal, meaning that any admissible view can be uniquely decoded into it.
+
+\begin{theorem}[Morphism Uniqueness]
+\lean{ISAR.morphism_uniqueness}
+\uses{ISAR.KernelHom, ISAR.canonical_hom}
+Any structure-preserving morphism $f : K \to \text{ISAR\_Kernel}$ is observationally equivalent to the canonical decoding morphism:
+$$\forall c \in K.\text{Carrier}, \quad f(c) \sim_{op} \text{decode } c$$
+\end{theorem}
+
+\begin{theorem}[ISAR Kernel Terminality]
+\lean{ISAR.ISAR_Kernel_terminal}
+\uses{ISAR.morphism_uniqueness, ISAR.ISAR_Kernel}
+The quotient of the morphism space $\text{KernelHom } K\ \text{ISAR\_Kernel}$ modulo observational equivalence is a singleton:
+$$\exists! [f] \in \text{KernelHom } K\ \text{ISAR\_Kernel} / \sim_{op}$$
+Thus, $\text{ISAR\_Kernel}$ is a terminal object in the category of semantic kernels.
+\end{theorem}
+
+\section{The Dialect Subsystem}
+
+A Dialect is an alternative abstract view over the substrate.
+
+\begin{definition}[Dialect]
+\lean{ISAR.Dialect}
+A Dialect specifies:
+\begin{enumerate}
+    \item A type of dialect objects.
+    \item A type of observations and observational equivalence.
+    \item An evaluation mapping, an encoder to substrate terms, and a decoder from the substrate.
+    \item A coherence law: evaluation commutes with encoding and decoding.
+\end{enumerate}
+\end{definition}
