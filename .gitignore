@@ -7,7 +7,6 @@
 blueprint/print
 blueprint/web
 blueprint/lean_decls
-
 blueprint/src/*.pdf
 blueprint/src/*.aux
 blueprint/src/*.paux
@@ -19,5 +18,8 @@ blueprint/src/*.log
 blueprint/src/*.fls
 blueprint/src/*.fdb_latexmk
 blueprint/src/*.run.xml
+
+home_page/_site/
+home_page/*.pdf
 
 isar_proofs.egg-info/

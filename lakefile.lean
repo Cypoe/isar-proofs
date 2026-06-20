@@ -10,15 +10,14 @@ package «isar» where
     ⟨`linter.unusedVariables, false⟩
   ]
   lintDriver := "batteries/runLinter"
-  lintDriverArgs := #["ISAR"]
 
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4.git" @ "v4.31.0"
 
 @[default_target]
 lean_lib «ISAR» where
-  srcDir := "src"
-  roots := #[`ISAR]
+  -- srcDir := "src"
+  -- roots := #[`ISAR]
 
 require checkdecls from git "https://github.com/PatrickMassot/checkdecls.git"
 
