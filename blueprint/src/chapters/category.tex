@@ -4,7 +4,7 @@ The ISAR kernel provides a category-theoretic interpretation of representation-f
 
 \section{The Category of Semantic Kernels}
 
-We define the category $\mathcal{K}$ of admissible semantic kernels over the substrate.
+The definitions and structures in this section are mechanically verified in \url{src/ISAR/KernelCategory.lean} and \url{src/ISAR/DialectKernel.lean}. We define the category $\mathcal{K}$ of admissible semantic kernels over the substrate.
 
 \begin{definition}[Semantic Kernel]
 \lean{ISAR.Kernel}
@@ -61,7 +61,7 @@ For any kernel $K$, the canonical homomorphism into $\text{ISAR\_Kernel}$ is def
 
 \section{Universal Factorization and Terminality}
 
-We prove that the canonical representation-free kernel is terminal, meaning that any admissible view can be uniquely decoded into it.
+The uniqueness and terminality theorems are formalized and proved in \url{src/ISAR/KernelCategory.lean}. We prove that the canonical representation-free kernel is terminal, meaning that any admissible view can be uniquely decoded into it.
 
 \begin{theorem}[Morphism Uniqueness]
 \lean{ISAR.morphism_uniqueness}
@@ -82,7 +82,7 @@ This category-theoretic result is not a naming convention: it is an algebraic th
 
 \section{The Dialect Subsystem}
 
-A Dialect is an alternative abstract view over the substrate.
+The Dialect structures in this section are verified in \url{src/ISAR/DialectKernel.lean}. A Dialect is an alternative abstract view over the substrate.
 
 \begin{definition}[Dialect]
 \lean{ISAR.Dialect}

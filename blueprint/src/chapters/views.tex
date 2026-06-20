@@ -4,7 +4,7 @@ The ISAR architecture supports multiple symbolic views or ``dialects'' over the 
 
 \section{The Lambda Calculus Fragment}
 
-We define the standard $\lambda$-calculus with de Bruijn indices.
+The bracket abstraction compiler and simulation properties in this section are mechanically verified in \url{src/ISAR/LambdaFragment.lean}. We define the standard $\lambda$-calculus with de Bruijn indices.
 
 \begin{definition}[Lambda Terms]
 \lean{ISAR.LTerm}
@@ -35,7 +35,7 @@ $$\forall t, u \in \text{LTerm}, \quad t \to_\beta u \implies \text{compile } t 
 
 \section{Hereditarily Finite Sets and ZFC}
 
-We formalize Hereditarily Finite (HF) Sets, their encoding, and show they satisfy set-theoretic axioms.
+The set-theoretic encoding and relative ZFC interpretation verified in this section are mechanically verified in \url{src/ISAR/HFSet.lean}, \url{src/ISAR/HFSetEncoding.lean}, and \url{src/ISAR/HFSetSemantics.lean}. This relative interpretation is strictly limited to the Hereditarily Finite (HF) set fragment (ZFC without the axiom of infinity). We formalize HF Sets, their encoding, and show they satisfy set-theoretic axioms.
 
 \begin{definition}[HF Sets]
 \lean{HF}
@@ -84,7 +84,7 @@ Syntactically distinct terms representing the same set (e.g., $\{a, b\}$ and $\{
 
 \section{Term Rewriting, Bytecode, and Iota Views}
 
-We define dialects for other standard computational models.
+The SKI TRS view, stack bytecode compiler, and Barker's iota dialect are verified in \url{src/ISAR/TRSView.lean}, \url{src/ISAR/BytecodeView.lean}, and \url{src/ISAR/IotaView.lean} respectively. We define dialects for other standard computational models.
 
 \begin{definition}[SKI TRS Dialect]
 \lean{ISAR.TRS_Dialect}

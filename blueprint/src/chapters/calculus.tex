@@ -4,7 +4,7 @@ In this chapter, we formalize the syntax, reduction semantics, and computational
 
 \section{Syntax and Reduction Semantics}
 
-The syntax consists of standard S-K combinators and the specialized ISAR terms.
+The definitions and operational behavior described in this section are mechanically verified in \url{src/ISAR/Kernel.lean}. The syntax consists of standard S-K combinators and the specialized ISAR terms.
 
 \begin{definition}[S-K Term Syntax]
 \lean{ISAR.SK}
@@ -51,7 +51,7 @@ The relation $\twoheadrightarrow_I$ (denoted \texttt{IRed}) is the reflexive-tra
 
 \section{Parallel Reduction and Confluence}
 
-To prove confluence, we define the parallel reduction relation \texttt{ParStep} ($\Rightarrow$), which allows simultaneous contractions of multiple redexes in a single step:
+The parallel reduction relation, Takahashi's Lemma, and the confluence theorems are formalized and proved in \url{src/ISAR/Kernel.lean}. To prove confluence, we define the parallel reduction relation \texttt{ParStep} ($\Rightarrow$), which allows simultaneous contractions of multiple redexes in a single step:
 
 \begin{definition}[Parallel Step]
 \lean{ISAR.ParStep}
@@ -87,7 +87,7 @@ If a term $t$ reduces to two normal forms $n_1$ and $n_2$, then $n_1 = n_2$.
 
 \section{Conservative Basis Translation}
 
-The distributive combinator $s_s$ is not strictly necessary for the rewrite algebra. We constructively define the derived S combinator as:
+The derived combinator simulation and conservative translation are verified in \url{src/ISAR/Kernel.lean}. The distributive combinator $s_s$ is not strictly necessary for the rewrite algebra. We constructively define the derived S combinator as:
 \begin{align*}
 \text{derived\_s} &\triangleq (\mathbf{comp} \cdot (\mathbf{comp} \cdot \mathbf{dup})) \\
 &\quad \cdot \big((\mathbf{swap} \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot \mathbf{swap}))) \cdot \mathbf{norm}\big)
@@ -108,7 +108,7 @@ The translation map \texttt{translate\_to\_basis} (which replaces $s_s$ with \te
 
 \section{The Invariant Layer}
 
-Using the uniqueness of normal forms, we define the quotient space representing behavioral equivalence classes of terms.
+The operational quotient and application congruence are formalized and proved in \url{src/ISAR/InvariantLayer.lean}. Using the uniqueness of normal forms, we define the quotient space representing behavioral equivalence classes of terms.
 
 \begin{definition}[ISKSubtype]
 \lean{ISAR.ISKSubtype}
@@ -146,7 +146,7 @@ A noncomputable function mapping each equivalence class to its canonical represe
 
 \section{Linear Duplication and Computable Normalization}
 
-We define the linear duplication fragment \texttt{LinearIKTerm} and its termination metrics, which share a direct isomorphism with linear interaction nets (such as those executed by HVM2 / Higher-order Virtual Machine 2).
+Local duplication counts, size-decrease properties of complete development, and fuel correctness are verified in \url{src/ISAR/Kernel.lean} and \url{src/ISAR/InvariantLayer.lean}. We define the linear duplication fragment \texttt{LinearIKTerm} and its termination metrics, which share a direct isomorphism with linear interaction nets.
 
 \begin{definition}[Linear Duplication]
 \lean{ISAR.InvariantLayer.dupCount}
@@ -174,6 +174,3 @@ A fuel-based normalization loop that computes the normal form.
 \uses{ISAR.cd_loop_fuel, ISAR.cd_size_lt_LinearIK}
 The optimal fuel limit computed from the term size is sufficient to guarantee complete normalization at runtime.
 \end{theorem}
-
-
-

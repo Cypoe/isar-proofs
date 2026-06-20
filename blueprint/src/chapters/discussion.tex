@@ -1,0 +1,35 @@
+\chapter{Discussion, Related Work, and Limitations}
+
+We present a review of related literature, establish the formal boundaries of validity for our theorems, and outline directions for future research.
+
+\section{Related Work}
+
+The ISAR framework intersects several foundational areas of computer science and logic:
+
+\begin{itemize}
+    \item \textbf{Combinatory Logic and Lambda Calculus}: The bracket abstraction algorithm compiled to combinator form is a classical approach pioneered by Curry and Feys~\cite{curry1958combinatory} and Barendregt~\cite{barendregt1984lambda}. While traditional implementations suffer from code size explosion (e.g., $O(n^3)$ for standard abstraction), the linear fragment of ISAR maintains bounded sizing, sharing a direct connection to optimal reduction.
+    \item \textbf{Optimal Evaluation and Interaction Nets}: Yves Lafont's interaction nets~\cite{lafont1990interaction} provide a graphical formulation of computation where reductions are local and symmetric. Our formalization of the linear fragment (\texttt{LinearIKTerm}) and its bounds mirrors the behavior of optimal virtual machines like the Higher-Order Virtual Machine 2 (HVM2)~\cite{hvm2}, which compiles terms to interaction nets for parallel execution.
+    \item \textbf{Categorical Semantics of Computation}: Lawvere's functorial semantics~\cite{lawvere1963functorial} established algebraic theories as categories. Our formulation of semantic kernels ($\mathcal{K}$) and the proof of terminality of the Invariant Layer quotient formalizes view-independence as a universal factorization property.
+    \item \textbf{Proof Assistant Kernels}: The verification and automated generation of documentation utilizing Lean 4 quotients and metadata mappings (e.g., doc-gen4~\cite{docgen4}) represent the state-of-the-art in proof design. Our work extends this by proving formal simulation theorems directly against the proof assistant's environment.
+\end{itemize}
+
+\section{Limitations and Scope Boundaries}
+
+The theorems presented in this work are accompanied by strict boundary conditions:
+
+\begin{enumerate}
+    \item \textbf{Closed Dialects Only}: The terminality and factorization theorems apply exclusively to computational dialects that are \textit{operationally closed}—meaning they possess a total encoding function into the substrate and their evaluation dynamics can be modeled as deterministic, confluent rewrite steps. This excludes open, dynamic, or referentially open systems (such as natural languages, interactive APIs, or non-deterministic transition systems) that require contextual anchors.
+    \item \textbf{ZFC HF Set Scope}: The set-theoretic relative interpretation is verified solely for the Hereditarily Finite set fragment. Extension to infinite sets (ZFC with the axiom of infinity) requires different ordinals and is outside the scope of the current Lean 4 proofs.
+    \item \textbf{Interpretive Physical Assumptions}: The application of the Universal Approximation Theorem to physical systems rests on the interpretive hypothesis that a physical system's state space can be modeled as an admissible continuous kernel. This hypothesis is a modeling choice and is not mechanically verified by the Lean 4 proof assistant.
+\end{enumerate}
+
+\section{Future Work}
+
+This paper forms the core substrate of a multi-part series of monographs:
+\begin{itemize}
+    \item \textbf{Paper 2 (Continuous Approximation)}: Extension of the discrete kernel to real-valued physical quantities, continuous address spaces, and metric completions, proving the unique continuous representation limit.
+    \item \textbf{Paper 3 (Hardware Compilation)}: Verification of the compilation path from the algebraic matrix representations to optimal virtual machines (HVM2) and relational database schemas.
+\end{itemize}
+
+\bibliographystyle{plain}
+\bibliography{references}
