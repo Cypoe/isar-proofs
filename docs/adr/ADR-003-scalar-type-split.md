@@ -72,5 +72,6 @@ By formalizing the quotient structure, continuous activations, and recursive blo
 - The algebraic representation is fully unified with the topological representation space over `ℝ`.
 - The UAT is replaced by an exact representation theorem (`ISAR_representation`), mirroring the category-theoretic terminality (`morphism_uniqueness`) in the continuous limit.
 - The axiom inventory is significantly simplified, removing all grid-scaffolding axioms (`GridState`, `ISARGridUpdate`, `gridEncode`, `gridReadout`, etc.).
+- **Topological Completion Roadmap**: By proving `kernelAddressEmbedding_injective` and `kernelAddressEmbedding_dense`, we have formal proof terms for the two key requirements of the completion theorem. When Mathlib's `UniformSpace.Completion` API stabilizes, the limit axioms (`KernelAddressLimit`, `continuousRealizationLimit`, and `topological_extension_bijection`) can be mechanically substituted and fully collapsed into Mathlib theorems, leaving only `ISAR_UAT` as a freestanding axiom.
 - `Mathlib.Tactic` is imported for `fin_cases`, `push_cast`, `ring`. It does NOT
   introduce `sorry` or other non-constructive axioms into the algebraic proofs.

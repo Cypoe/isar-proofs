@@ -1,4 +1,5 @@
 import ISAR.InvariantLayer
+import Mathlib.Tactic
 
 namespace ISAR
 
@@ -93,5 +94,37 @@ theorem morphism_uniqueness (K : Kernel) (f : KernelHom K ISAR_Kernel) (c : K.Ca
   have h_f_view := f.hom_view (K.decode c)
   -- 4. By transitivity and symmetry, f.hom c ≈ K.decode c
   exact OperEq.trans (OperEq.symm h_f_congr) h_f_view
+
+/-- Observational equivalence between morphisms K → ISAR_Kernel. -/
+def HomEquiv (K : Kernel) (f g : KernelHom K ISAR_Kernel) : Prop :=
+  ∀ c, OperEq (f.hom c) (g.hom c)
+
+/-- Setoid instance for quotienting morphism space modulo observational equivalence. -/
+instance homSetoid (K : Kernel) : Setoid (KernelHom K ISAR_Kernel) where
+  r := HomEquiv K
+  iseqv := {
+    refl := fun _ _ => OperEq.refl _
+    symm := fun h c => OperEq.symm (h c)
+    trans := fun h1 h2 c => OperEq.trans (h1 c) (h2 c)
+  }
+
+/--
+**ISAR Kernel Terminality.**
+
+The quotient of the morphism space `KernelHom K ISAR_Kernel` modulo observational equivalence
+is a singleton (unique existence holds).
+
+**Proof**: Existence follows constructively from `canonical_hom K`. Uniqueness follows by applying
+`morphism_uniqueness` to show that any structure-preserving morphism is observationally equivalent
+to `canonical_hom K` (the canonical decoding).
+-/
+theorem ISAR_Kernel_terminal (K : Kernel) :
+    ∃! _f_class : Quotient (homSetoid K), True := by
+  use Quotient.mk _ (canonical_hom K)
+  refine ⟨trivial, fun y_class _ => ?_⟩
+  refine Quotient.inductionOn y_class (fun g => ?_)
+  apply Quotient.sound
+  intro c
+  exact morphism_uniqueness K g c
 
 end ISAR

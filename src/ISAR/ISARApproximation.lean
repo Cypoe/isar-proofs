@@ -5,6 +5,7 @@ import Mathlib.Data.Matrix.Basic
 import Mathlib.Data.Real.Basic
 import Mathlib.Analysis.InnerProductSpace.PiL2
 import Mathlib.Topology.ContinuousMap.Basic
+import Mathlib.Topology.CompactOpen
 import Mathlib.Algebra.BigOperators.Fin
 import Mathlib.Tactic
 
@@ -57,10 +58,12 @@ the earlier `QMat`/`Rat` version, `ISARUpdateR` lives in ℝ⁴ from the start �
 
 ## Axiom inventory (all intentional — see ADR-003)
 
-  ISAR_UAT, ISAR_representation.
+  ISAR_UAT, KernelAddressLimit, continuousRealizationLimit, kernelAddressEmbedding,
+  continuousRealizationLimit_coe, topological_extension_bijection.
 
-All other structures (Activation, nonPolynomial, RawAddress, KernelAddress, activatedUpdate)
-are defined concretely.
+All other structures (Activation, nonPolynomial, RawAddress, KernelAddress, activatedUpdate,
+ISAR_representation, kernelAddressEmbedding_injective, kernelAddressEmbedding_dense)
+are defined or proved concretely.
 -/
 
 namespace ISAR
@@ -177,13 +180,14 @@ terminality (`morphism_uniqueness`) to the continuous setting.
 
 Rather than treating the input/output projections (encode/readout) as fixed global
 axioms, they are existentially quantified as part of the configuration space (RawAddress),
-matching the standard Cybenko/Hornik universal approximation theorem (Option A).
+matching the generalized universal approximation theorem (Option A, e.g., Leshno et al. 1993).
 
 To represent the continuous mapping uniquely, the parameter space is quotiented modulo
 observational (functional) equivalence, mirroring the discrete `InvariantLayer`.
 
 **Axiom inventory** (all intentional — see ADR-003):
-  activatedUpdate, ISAR_UAT, ISAR_representation.
+  ISAR_UAT, KernelAddressLimit, continuousRealizationLimit, kernelAddressEmbedding,
+  continuousRealizationLimit_coe, topological_extension_bijection.
 -/
 
 /-- A nonlinear activation function: continuous real functions ℝ → ℝ. -/
@@ -407,8 +411,12 @@ For any continuous function f : ℝᵈ → ℝᵏ, a non-polynomial activation �
 and a compact domain K ⊆ ℝᵈ, the finite-grid iterated ISAR update can
 approximate f uniformly on K to arbitrary precision ε > 0.
 
-This is the standard Cybenko/Hornik universal approximation theorem applied to the
-ISAR configuration space (RawAddress).
+**Mathematical Motivation**: The function space $C(\mathbb{R}^d, \mathbb{R}^k)$ carries the compact-open
+topology (the topology of uniform convergence on compact sets). This theorem states that the realization
+space is dense in $C(\mathbb{R}^d, \mathbb{R}^k)$ under the compact-open topology.
+**Citation**: Cites the Leshno, Lin, Pinkus, and Schocken (1993) universal approximation theorem, which
+establishes that a continuous activation function $\sigma$ is universal on compact subsets if and only if
+it is non-polynomial (generalizing Cybenko 1989 / Hornik 1991, which require boundedness).
 -/
 axiom ISAR_UAT
     (d k : Nat)
