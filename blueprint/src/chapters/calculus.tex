@@ -1,6 +1,6 @@
 \chapter{Core Combinatory Calculus}
 
-In this chapter, we formalize the syntax and reduction semantics of the ISAR combinatory logic kernel. The core ISAR calculus is a substrate-independent combinator system that supports S-K combinator reductions, parallel reductions, and normalization.
+In this chapter, we formalize the syntax, reduction semantics, and computational properties of the ISAR combinatory logic kernel. The core ISAR calculus is a substrate-independent combinator system that supports S-K combinator reductions, parallel reductions, complete developments, and normalization.
 
 \section{Syntax and Reduction Semantics}
 
@@ -18,8 +18,9 @@ t, u \in \text{SK} &::= \mathbf{S} \mid \mathbf{K} \mid t\ u
 \lean{ISAR.ITerm}
 The core term syntax of the ISAR kernel extends basic combinators with norms, constants, and custom operations:
 \begin{align*}
-t, u \in \text{ITerm} &::= \mathbf{norm} \mid \mathbf{s_s} \mid \mathbf{konst} \mid \mathbf{app}\ t\ u
+t, u \in \text{ITerm} &::= \mathbf{var}\ n \mid \mathbf{norm} \mid \mathbf{konst} \mid \mathbf{dup} \mid \mathbf{swap} \mid \mathbf{comp} \mid \mathbf{s_s} \mid \mathbf{app}\ t\ u
 \end{align*}
+where $\mathbf{app}\ t\ u$ denotes term application (also written $t \cdot u$).
 \end{definition}
 
 We define the reduction rules for both systems.
@@ -35,13 +36,46 @@ The reduction relation on SK terms represents the standard combinatory logic red
 
 \begin{definition}[IStep Reduction]
 \lean{ISAR.IStep}
-The single-step reduction relation on ISAR terms defines the operational semantics of norms and constants.
+The single-step reduction relation on ISAR terms defines the operational semantics of norms and constants. The reduction rules ($\to_I$) are:
+\begin{itemize}
+    \item $\mathbf{norm} \cdot x \to_I x$
+    \item $\mathbf{konst} \cdot x \cdot y \to_I x$
+    \item $\mathbf{comp} \cdot f \cdot g \cdot x \to_I f \cdot (g \cdot x)$
+    \item $\mathbf{s_s} \cdot x \cdot y \cdot z \to_I (x \cdot z) \cdot (y \cdot z)$
+\end{itemize}
+together with congruence rules for application:
+$$\frac{f \to_I f'}{f \cdot x \to_I f' \cdot x} \qquad \frac{x \to_I x'}{f \cdot x \to_I f \cdot x'}$$
 \end{definition}
+
+The relation $\twoheadrightarrow_I$ (denoted \texttt{IRed}) is the reflexive-transitive closure of \texttt{IStep}.
+
+\section{Parallel Reduction and Confluence}
+
+To prove confluence, we define the parallel reduction relation \texttt{ParStep} ($\Rightarrow$), which allows simultaneous contractions of multiple redexes in a single step:
+
+\begin{definition}[Parallel Step]
+\lean{ISAR.ParStep}
+The parallel reduction relation is defined inductively by:
+\begin{itemize}
+    \item $x \Rightarrow x$
+    \item $\mathbf{norm} \cdot x \Rightarrow x'$ if $x \Rightarrow x'$
+    \item $\mathbf{konst} \cdot x \cdot y \Rightarrow x'$ if $x \Rightarrow x'$ and $y \Rightarrow y'$
+    \item $\mathbf{comp} \cdot f \cdot g \cdot x \Rightarrow f' \cdot (g' \cdot x')$ if $f \Rightarrow f'$, $g \Rightarrow g'$, $x \Rightarrow x'$
+    \item $\mathbf{s_s} \cdot x \cdot y \cdot z \Rightarrow (x' \cdot z') \cdot (y' \cdot z')$ if $x \Rightarrow x'$, $y \Rightarrow y'$, $z \Rightarrow z'$
+    \item $f \cdot x \Rightarrow f' \cdot x'$ if $f \Rightarrow f'$ and $x \Rightarrow x'$
+\end{itemize}
+\end{definition}
+
+\begin{theorem}[Takahashi's Lemma]
+\lean{ISAR.ParStep_cd}
+\uses{ISAR.ParStep}
+If $x \Rightarrow y$, then $y \Rightarrow \text{cd}(x)$, where $\text{cd}$ is the complete development function.
+\end{theorem}
 
 \begin{theorem}[Confluence of IRed]
 \lean{ISAR.IRed_confluence}
-\uses{ISAR.ITerm, ISAR.IStep}
-The reduction relation $\text{IRed}$ (the reflexive transitive closure of $\text{IStep}$) satisfies the Church-Rosser confluence property:
+\uses{ISAR.ParStep_cd}
+The reduction relation $\text{IRed}$ satisfies the Church-Rosser confluence property:
 $$\forall t, u_1, u_2, \quad t \to^* u_1 \land t \to^* u_2 \implies \exists v, \quad u_1 \to^* v \land u_2 \to^* v$$
 \end{theorem}
 
@@ -49,6 +83,24 @@ $$\forall t, u_1, u_2, \quad t \to^* u_1 \land t \to^* u_2 \implies \exists v, \
 \lean{ISAR.isar_fragment_unique_normal_forms}
 \uses{ISAR.IRed_confluence}
 If a term $t$ reduces to two normal forms $n_1$ and $n_2$, then $n_1 = n_2$.
+\end{theorem}
+
+\section{Conservative Basis Translation}
+
+The distributive combinator $s_s$ is not strictly necessary for the rewrite algebra. We constructively define the derived S combinator as:
+$$\text{derived\_s} \triangleq (\mathbf{comp} \cdot (\mathbf{comp} \cdot \mathbf{dup})) \cdot ((\mathbf{swap} \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot \mathbf{swap}))) \cdot \mathbf{norm})$$
+
+\begin{theorem}[Derived S reduction]
+\lean{ISAR.derived_s_beta}
+\uses{ISAR.IStep}
+The derived S combinator simulates the beta-reduction rule of $S$ using only the basis operators (without $s_s$):
+$$\text{derived\_s} \cdot x \cdot y \cdot z \twoheadrightarrow_{I_{basis}} (x \cdot z) \cdot (y \cdot z)$$
+\end{theorem}
+
+\begin{theorem}[Conservative Translation]
+\lean{ISAR.translate_preserves_step}
+\uses{ISAR.derived_s_beta}
+The translation map \texttt{translate\_to\_basis} (which replaces $s_s$ with \texttt{derived\_s}) preserves reduction steps.
 \end{theorem}
 
 \section{The Invariant Layer}
@@ -88,3 +140,34 @@ $$\text{app} : \text{InvariantLayer} \to \text{InvariantLayer} \to \text{Invaria
 \uses{ISAR.InvariantLayer}
 A noncomputable function mapping each equivalence class to its canonical representative in \texttt{ISKSubtype}.
 \end{definition}
+
+\section{Linear Duplication and Computable Normalization}
+
+We define the linear duplication fragment \texttt{LinearIKTerm} and its termination metrics, which share a direct isomorphism with linear interaction nets (such as those executed by HVM2 / Higher-order Virtual Machine 2).
+
+\begin{definition}[Linear Duplication]
+\lean{ISAR.InvariantLayer.dupCount}
+The function \texttt{dupCount} tracks the duplication multiplicity of a term. For the linear fragment \texttt{LinearIKTerm}, we verify that duplication is strictly localized:
+$$\text{dupCount } t = 0$$
+\end{definition}
+
+We prove that complete development (\texttt{cd}) strictly decreases term size for all non-fixed-point linear terms.
+
+\begin{theorem}[Complete Development Size Decrease]
+\lean{ISAR.cd_size_le_LinearIK, ISAR.cd_size_lt_LinearIK}
+\uses{ISAR.InvariantLayer.dupCount}
+For any term $t$ in the \texttt{LinearIKTerm} fragment:
+$$\text{term\_size}(\text{cd } t) \leq \text{term\_size}(t)$$
+And if $t \neq \text{cd } t$, the inequality is strict.
+\end{theorem}
+
+\begin{definition}[Computable Normalization Loop]
+\lean{ISAR.cd_loop_fuel}
+A fuel-based normalization loop that computes the normal form.
+\end{definition}
+
+\begin{theorem}[Fuel Correctness]
+\lean{ISAR.sufficient_fuel_correct}
+\uses{ISAR.cd_loop_fuel, ISAR.cd_size_lt_LinearIK}
+The optimal fuel limit computed from the term size is sufficient to guarantee complete normalization at runtime.
+\end{theorem}

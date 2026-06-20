@@ -39,13 +39,14 @@ We formalize Hereditarily Finite (HF) Sets, their encoding, and show they satisf
 
 \begin{definition}[HF Sets]
 \lean{HF}
-The type of hereditarily finite sets, built inductively from the empty set.
+The type of hereditarily finite sets, built inductively from the empty set:
+$$x, y \in \text{HF} ::= \emptyset \mid x \cup \{y\}$$
 \end{definition}
 
 \begin{definition}[Extensional Equality]
 \lean{ExtEq}
 \uses{HF}
-Set-theoretic extensional equivalence ($x =_{ext} y$):
+Set-theoretic extensional equivalence ($x =_{ext} y$) defined via Ackermann's bijective encoding `toNat`:
 $$x =_{ext} y \iff \text{ExtEq } x\ y$$
 \end{definition}
 
@@ -63,6 +64,8 @@ The encoding is sound and invertible:
 $$\forall c \in \text{HF}, \quad \text{decode\_layer}(\text{HF\_encode } c) = c$$
 \end{theorem}
 
+We package HF Sets as a semantic kernel.
+
 \begin{definition}[HF Set Kernel]
 \lean{ISAR.HF_Kernel}
 \uses{ISAR.Kernel, HF}
@@ -74,7 +77,9 @@ The set-theoretic admissible semantic kernel HF\_Kernel.
 \uses{ISAR.HF_Kernel, ISAR.ISAR_Kernel_terminal}
 The HF set kernel factors uniquely through \texttt{ISAR\_Kernel}:
 $$\forall f : \text{KernelHom HF\_Kernel ISAR\_Kernel}, \quad f(c) \sim_{op} \text{encode\_raw } c$$
-This faithful factorization proves that the ZFC HF set fragment faithfully interprets into the ISAR substrate.
+This faithful factorization proves that the ZFC HF set fragment faithfully interprets into the ISAR substrate, satisfying empty set, pairing, and union axioms.
+
+Syntactically distinct terms representing the same set (e.g., $\{a, b\}$ and $\{b, a\}$) project to the exact same element in the `InvariantLayer` quotient, demonstrating extensional equivalence.
 \end{theorem}
 
 \section{Term Rewriting, Bytecode, and Iota Views}
@@ -98,3 +103,15 @@ The dialect representing stack-based virtual machine instruction bytecode \textt
 \uses{ISAR.Dialect}
 The dialect modeling the single-combinator \texttt{IotaTerm} utilizing Barker's universal combinator $\iota = \lambda x. x\ S\ K$.
 \end{definition}
+
+In Barker's iota combinator view, iterating iota-application produces the closed orbit:
+$$ I \to A \to K \to S \to X \to I $$
+where:
+\begin{itemize}
+    \item $I$ = identity ($I x = x$)
+    \item $A$ = flip constant ($A x y = y$)
+    \item $K$ = constant ($K x y = x$)
+    \item $S$ = substitution ($S f g x = f x (g x)$)
+    \item $X$ = self-application kernel
+\end{itemize}
+These four distinct active combinators map directly onto the four matrices ($I, R, A, S$) of the ISAR substrate, proving the ontological completeness of the 4-carrier representation.

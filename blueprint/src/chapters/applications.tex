@@ -41,6 +41,11 @@ Specializing the specializer with respect to itself produces a compiler-compiler
 $$\text{specialize } \text{spec}\ [\text{spec}, \cdot] \sim_{op} \text{compiler-compiler}$$
 \end{theorem}
 
+\subsection{System Generation vs. Compilation}
+It is important to distinguish the ontological role of the ISAR kernel from the epistemological role of the Futamura projections.
+- \textbf{ISAR Kernel ($U(K) = I \cdot R \cdot A \cdot S$)}: Acts as a **System Generator**. It creates the computational substrate itself, establishing the tensor manifold in which computation exists and from which operators (norm, app, composition) emerge constructively.
+- \textbf{Futamura Kernel ($I \times S \times A$)}: Acts as a **Compiler Generator**. It operates within an established space to transform program representations (interpreter $\to$ compiler).
+
 \section{Dialect Isomorphisms and Unification}
 
 We formalize structural unifications and observational equivalence between different dialects.
@@ -76,6 +81,8 @@ A standard operationally closed autonomous transition system.
 If a state-space subset $C$ is closed under the step relation (forward invariant), any state reachable from $C$ remains in $C$.
 \end{theorem}
 
+This applies to closed computational models (combinator engines, lambda calculus, stack VMs, set theory interpreters) where the state alone is sufficient to reconstruct the semantics at any step.
+
 \begin{definition}[Anchor-Dependent System]
 \lean{ISAR.AnchorDependentSystem}
 A referentially open transition system whose transitions depend on an external environment context (anchor).
@@ -85,6 +92,6 @@ A referentially open transition system whose transitions depend on an external e
 \lean{ISAR.referentially_open_requires_anchor}
 \uses{ISAR.AnchorDependentSystem}
 If a state can lead to different observations under different anchor sequences, the semantics cannot be resolved from the state alone without environmental anchors.
-\\
-This highlights the fundamental difference between closed computation (symbolic rewriting) and open interaction (continuous parameters).
 \end{theorem}
+
+This establishes the boundary of decodability (the ``Reverse Rosetta'' problem). For open systems like natural language or undeciphered scripts (e.g., Linear A), analyzing syntax is insufficient to decode meaning because the external semantic anchors are lost. Thus, referentially open systems cannot be reconstructed from syntactic relationships alone.

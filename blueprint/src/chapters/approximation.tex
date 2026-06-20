@@ -10,16 +10,38 @@ We define dimensional quantities and 4x4 matrix algebra.
 \lean{ISAR.Quantity}
 A quantity represents a physical parameter with:
 \begin{enumerate}
-    \item A value.
-    \item A physical dimension.
+    \item A value (rational scalar).
+    \item A physical dimension (exponent exponents).
     \item An epistemic uncertainty expression \texttt{Uncertainty} and \texttt{Correlation}.
 \end{enumerate}
+Covariance propagation propagates exact metric-epistemic covariance equations under addition and multiplication.
 \end{definition}
 
 \begin{definition}[Matrix4 Carriers]
 \lean{ISAR.Matrix4}
-The concrete integer 4x4 matrix representation used for basis combinator signatures.
+The concrete integer 4x4 matrix representation used for basis combinator signatures. The primitive matrices are:
+$$ I_1 = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 0 \end{pmatrix}, \quad
+R_1 = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \end{pmatrix}, \quad
+A_1 = \begin{pmatrix} 0 & 0 & 0 & 0 \\ 1 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 0 & 0 \end{pmatrix}, \quad
+S_1 = \begin{pmatrix} 1 & 1 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix} $$
 \end{definition}
+
+\begin{theorem}[Idempotency and Nilpotency]
+\lean{ISAR.I1_idempotent, ISAR.K1_nilpotent}
+\uses{ISAR.Matrix4}
+The identity matrix $I_1$ is idempotent:
+$$I_1^2 = I_1$$
+The core rewrite operator $K_1 = I_1 \cdot R_1 \cdot A_1 \cdot S_1$ is nilpotent:
+$$K_1^2 = \mathbf{0}$$
+\end{theorem}
+
+\begin{theorem}[Gauge Similarity]
+\lean{ISAR.K1_K2_gauge_equiv}
+\uses{ISAR.Matrix4}
+The two alternative matrix representations $K_1$ and $K_2$ are conjugate (similar) via the lower-triangular gauge transformation matrix $P$:
+$$P \cdot K_1 \cdot P^{-1} = K_2$$
+proving that representation details are gauge shadows, while the terminal quotient state is invariant.
+\end{theorem}
 
 \begin{definition}[Matrix View Map]
 \lean{ISAR.term_signature_val}
@@ -71,6 +93,18 @@ The structural homomorphism \texttt{kernelMatrixView} never produces the rotatio
 The parallel tensor product semantics defined over Kronecker matrix products, quotiented as ExtTensor, and the denotational mapping denot.
 \end{definition}
 
+At runtime, this tensor space is stored and manipulated inside a SQLite database. The core relations are defined by a sparse 4D tensor table `U` and a symbol table `NAMES`:
+\begin{verbatim}
+CREATE TABLE U (
+    i INTEGER, -- Term index / ID
+    s INTEGER, -- Source carrier coordinate (1..4)
+    a INTEGER, -- Adjacency / Argument coordinate (1..4)
+    r INTEGER, -- Rewrite / Reduction coordinate (1..4)
+    value REAL, -- Numeric weight
+    PRIMARY KEY(i, s, a, r)
+);
+\end{verbatim}
+
 \section{Continuous Universal Approximation}
 
 We formalize the continuous parameter space of the ISAR update.
@@ -83,7 +117,8 @@ $$\forall P \in \text{Polynomial } \mathbb{R}, \quad \sigma \neq P$$
 
 \begin{definition}[Raw Address Space]
 \lean{ISAR.RawAddress}
-The raw parameter configuration space $\text{RawAddress } d\ k$ representing a neural network configuration.
+The raw parameter configuration space $\text{RawAddress } d\ k$ representing a neural network configuration:
+$$\text{RawAddress } d\ k := \Sigma (N, T : \mathbb{N}), \quad (\text{Fin } T \to \text{Fin } 4 \to \mathbb{R}) \times C(\mathbb{R}^d, \text{GridState } N) \times C(\text{GridState } N, \mathbb{R}^k)$$
 \end{definition}
 
 \begin{definition}[Realization Map]

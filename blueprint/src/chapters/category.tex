@@ -1,14 +1,14 @@
-\chapter{Category-Theoretic Interface}
+\chapter{Category-Theoretic Interface and Terminality}
 
-The ISAR kernel provides a category-theoretic interpretation of representation-free substrates and semantic views. We formalize this using the category of semantic kernels and morphisms, and prove that the canonical invariant quotient space is a terminal object in this category.
+The ISAR kernel provides a category-theoretic interpretation of representation-free substrates and semantic views. We formalize this using the category of semantic kernels and morphisms, and prove that the canonical invariant quotient space is a terminal object in this category. This universal property of terminality establishes the mathematical foundation of view-independence.
 
-\section{Semantic Kernels and Morphisms}
+\section{The Category of Semantic Kernels}
 
-We define the category of admissible semantic kernels over the substrate.
+We define the category $\mathcal{K}$ of admissible semantic kernels over the substrate.
 
 \begin{definition}[Semantic Kernel]
 \lean{ISAR.Kernel}
-An admissible semantic kernel $K$ consists of:
+An admissible semantic kernel $K \in \mathcal{K}$ consists of:
 \begin{enumerate}
     \item A carrier type $\text{Carrier}$.
     \item A view mapping $\text{view\_of} : \text{ISKSubtype} \to \text{Carrier}$.
@@ -16,7 +16,12 @@ An admissible semantic kernel $K$ consists of:
     \item A soundness property: operational equivalence in the substrate implies view equivalence:
     $$\forall t, u, \quad t \sim_{op} u \implies \text{view\_of } t \approx \text{view\_of } u$$
     \item A decoding/reconstruction mapping $\text{decode} : \text{Carrier} \to \text{ISKSubtype}$.
-    \item Coherence axioms relating $\text{view\_of}$ and $\text{decode}$.
+    \item Coherence axioms:
+    \begin{itemize}
+        \item $\text{decode}(\text{view\_of } t) \sim_{op} t$
+        \item $\text{view\_of}(\text{decode } c) \approx c$
+        \item $c_1 \approx c_2 \implies \text{decode } c_1 \sim_{op} \text{decode } c_2$
+    \end{itemize}
 \end{enumerate}
 \end{definition}
 
@@ -41,7 +46,11 @@ The computable kernel instantiated with optimal fuel computed from the term size
 \begin{definition}[Kernel Morphism]
 \lean{ISAR.KernelHom}
 \uses{ISAR.Kernel}
-A morphism $f : K_1 \to K_2$ between semantic kernels is a carrier mapping that preserves the view representations and respects equivalence.
+A morphism $f : K_1 \to K_2$ in the category $\mathcal{K}$ is a carrier mapping $\text{hom} : K_1.\text{Carrier} \to K_2.\text{Carrier}$ that:
+\begin{itemize}
+    \item Preserves the view representations: $\forall t \in \text{ISKSubtype}, \quad K_2.\text{view\_of } t \approx_2 \text{hom}(K_1.\text{view\_of } t)$
+    \item Respects carrier equivalence: $\forall c_1, c_2, \quad c_1 \approx_1 c_2 \implies \text{hom}(c_1) \approx_2 \text{hom}(c_2)$
+\end{itemize}
 \end{definition}
 
 \begin{definition}[Canonical Homomorphism]
@@ -50,7 +59,7 @@ A morphism $f : K_1 \to K_2$ between semantic kernels is a carrier mapping that 
 For any kernel $K$, the canonical homomorphism into $\text{ISAR\_Kernel}$ is defined by the decoding mapping.
 \end{definition}
 
-\section{Terminality of the Canonical Kernel}
+\section{Universal Factorization and Terminality}
 
 We prove that the canonical representation-free kernel is terminal, meaning that any admissible view can be uniquely decoded into it.
 
@@ -66,8 +75,10 @@ $$\forall c \in K.\text{Carrier}, \quad f(c) \sim_{op} \text{decode } c$$
 \uses{ISAR.morphism_uniqueness, ISAR.ISAR_Kernel}
 The quotient of the morphism space $\text{KernelHom } K\ \text{ISAR\_Kernel}$ modulo observational equivalence is a singleton:
 $$\exists! [f] \in \text{KernelHom } K\ \text{ISAR\_Kernel} / \sim_{op}$$
-Thus, $\text{ISAR\_Kernel}$ is a terminal object in the category of semantic kernels.
+Thus, $\text{ISAR\_Kernel}$ is a terminal object in the category $\mathcal{K}$ of semantic kernels.
 \end{theorem}
+
+This category-theoretic result is not a naming convention: it is an algebraic theorem stating that the Invariant Layer is the unique (up to isomorphism) cofinal quotient that retains only the information visible to observational equivalence. Any other view is mathematically guaranteed to factor uniquely through it, separating the dialect-specific representation from the coordinate-free invariant semantics.
 
 \section{The Dialect Subsystem}
 

@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.6.14)  20 JUN 2026 14:54
+This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.6.14)  20 JUN 2026 16:14
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -308,114 +308,159 @@ Package hyperref Info: Link coloring OFF on input line 25.
 ] (./content.tex
 (./chapters/intro.tex
 Chapter 1.
-LaTeX Font Info:    Trying to load font information for U+msa on input line 3.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 13.
+
 (/usr/local/texlive/2026/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 3.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 13.
+
 
 (/usr/local/texlive/2026/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
-))
-(./chapters/calculus.tex [1
+) [1
 
-]
+] [2]
+Overfull \hbox (11.75987pt too wide) in paragraph at lines 64--64
+[]\TU/lmr/bx/n/14.4 Occam and the Description-Length Functional 
+ []
+
+) (./chapters/calculus.tex [3]
 Chapter 2.
-[2
+[4
 
 ]
-Overfull \hbox (6.47675pt too wide) in paragraph at lines 75--76
-\TU/lmr/bx/n/10 Definition 7 \TU/lmr/m/n/10 (Invariant Layer)\TU/lmr/bx/n/10 . 
+Overfull \hbox (54.32207pt too wide) detected at line 91
+[] \U/msa/m/n/10 , \OT1/cmr/m/n/10 ([] \OMS/cmsy/m/n/10 ^^A \OT1/cmr/m/n/10 ([]
+ \OMS/cmsy/m/n/10 ^^A []\OT1/cmr/m/n/10 )) \OMS/cmsy/m/n/10 ^^A \OT1/cmr/m/n/10
+ (([] \OMS/cmsy/m/n/10 ^^A \OT1/cmr/m/n/10 (([] \OMS/cmsy/m/n/10 ^^A []\OT1/cmr
+/m/n/10 ) \OMS/cmsy/m/n/10 ^^A \OT1/cmr/m/n/10 (([] \OMS/cmsy/m/n/10 ^^A []\OT1
+/cmr/m/n/10 ) \OMS/cmsy/m/n/10 ^^A []\OT1/cmr/m/n/10 ))) \OMS/cmsy/m/n/10 ^^A [
+]\OT1/cmr/m/n/10 )
+ []
+
+[5]
+Overfull \hbox (17.34671pt too wide) in paragraph at lines 103--104
+\TU/lmr/bx/n/10 Theorem 5 \TU/lmr/m/n/10 (Conservative Translation)\TU/lmr/bx/n
+/10 . \TU/lmr/m/it/10 The translation map \TU/lmtt/m/it/10 translate_to_basis
+ []
+
+
+Overfull \hbox (6.47675pt too wide) in paragraph at lines 127--128
+\TU/lmr/bx/n/10 Definition 8 \TU/lmr/m/n/10 (Invariant Layer)\TU/lmr/bx/n/10 . 
 \TU/lmr/m/it/10 The quotient type of \TU/lmtt/m/it/10 ISKSubtype \TU/lmr/m/it/1
 0 modulo \TU/lmtt/m/it/10 OperEq\TU/lmr/m/it/10 : 
  []
 
-) (./chapters/category.tex [3]
+
+Overfull \hbox (3.04788pt too wide) in paragraph at lines 144--144
+[]\TU/lmr/bx/n/14.4 Linear Duplication and Computable Normal-
+ []
+
+[6]) (./chapters/category.tex [7]
 Chapter 3.
-
-Overfull \hbox (0.65561pt too wide) in paragraph at lines 32--33
-\TU/lmr/bx/n/10 Definition 12 \TU/lmr/m/n/10 (Computable ISAR Kernel)\TU/lmr/bx
-/n/10 . \TU/lmr/m/it/10 The computable kernel parametrized
- []
-
-[4
-
-]) (./chapters/views.tex [5]
-Chapter 4.
-[6
-
-]
-Overfull \hbox (7.62338pt too wide) in paragraph at lines 99--100
-\TU/lmr/bx/n/10 Definition 26 \TU/lmr/m/n/10 (Barker’s Iota Dialect)\TU/lmr/bx/
-n/10 . \TU/lmr/m/it/10 The dialect modeling the single-combinator
- []
-
-) (./chapters/approximation.tex [7]
-Chapter 5.
 [8
 
 ]
-Overfull \hbox (5.60089pt too wide) in paragraph at lines 80--81
-\TU/lmr/bx/n/10 Definition 32 \TU/lmr/m/n/10 (Non-Polynomial Activation)\TU/lmr
+Overfull \hbox (0.65561pt too wide) in paragraph at lines 37--38
+\TU/lmr/bx/n/10 Definition 15 \TU/lmr/m/n/10 (Computable ISAR Kernel)\TU/lmr/bx
+/n/10 . \TU/lmr/m/it/10 The computable kernel parametrized
+ []
+
+[9]) (./chapters/views.tex [10]
+Chapter 4.
+[11
+
+]
+Overfull \hbox (7.62338pt too wide) in paragraph at lines 104--105
+\TU/lmr/bx/n/10 Definition 29 \TU/lmr/m/n/10 (Barker’s Iota Dialect)\TU/lmr/bx/
+n/10 . \TU/lmr/m/it/10 The dialect modeling the single-combinator
+ []
+
+[12]) (./chapters/approximation.tex [13]
+Chapter 5.
+
+Overfull \hbox (70.23158pt too wide) detected at line 26
+\OML/cmm/m/it/10 I[] \OT1/cmr/m/n/10 = [] \OML/cmm/m/it/10 ;  R[] \OT1/cmr/m/n/
+10 = [] \OML/cmm/m/it/10 ;  A[] \OT1/cmr/m/n/10 = [] \OML/cmm/m/it/10 ;  S[] \O
+T1/cmr/m/n/10 = []
+ []
+
+[14
+
+] [15]
+Overfull \hbox (5.60089pt too wide) in paragraph at lines 114--115
+\TU/lmr/bx/n/10 Definition 35 \TU/lmr/m/n/10 (Non-Polynomial Activation)\TU/lmr
 /bx/n/10 . \TU/lmr/m/it/10 An activation function $\OML/cmm/m/it/10 ^^[ \OMS/cm
 sy/m/n/10 2 \OML/cmm/m/it/10 C\OT1/cmr/m/n/10 (\U/msb/m/n/10 R\OML/cmm/m/it/10 
 ; \U/msb/m/n/10 R\OT1/cmr/m/n/10 )$
  []
 
-[9]
-Overfull \hbox (10.33339pt too wide) in paragraph at lines 124--125
-\TU/lmr/bx/n/10 Axiom 2 \TU/lmr/m/n/10 (Quotient Completion Space)\TU/lmr/bx/n/
+
+Overfull \hbox (89.98021pt too wide) detected at line 121
+[]\OML/cmm/m/it/10 d k \OT1/cmr/m/n/10 := ^^F(\OML/cmm/m/it/10 N; T \OT1/cmr/m/
+n/10 : \U/msb/m/n/10 N\OT1/cmr/m/n/10 )\OML/cmm/m/it/10 ;  \OT1/cmr/m/n/10 ([]\
+OML/cmm/m/it/10 T \OMS/cmsy/m/n/10 ! []\OT1/cmr/m/n/10 4 \OMS/cmsy/m/n/10 ! \U/
+msb/m/n/10 R\OT1/cmr/m/n/10 ) \OMS/cmsy/m/n/10 ^^B \OML/cmm/m/it/10 C\OT1/cmr/m
+/n/10 (\U/msb/m/n/10 R[]\OML/cmm/m/it/10 ; []N\OT1/cmr/m/n/10 ) \OMS/cmsy/m/n/1
+0 ^^B \OML/cmm/m/it/10 C\OT1/cmr/m/n/10 ([]\OML/cmm/m/it/10 N; \U/msb/m/n/10 R[
+]\OT1/cmr/m/n/10 )
+ []
+
+[16]
+Overfull \hbox (10.33339pt too wide) in paragraph at lines 159--160
+\TU/lmr/bx/n/10 Axiom 6 \TU/lmr/m/n/10 (Quotient Completion Space)\TU/lmr/bx/n/
 10 . \TU/lmr/m/it/10 The metric completion of \TU/lmtt/m/it/10 KernelAddress
  []
 
 
-Overfull \hbox (27.75945pt too wide) in paragraph at lines 135--136
-\TU/lmr/bx/n/10 Axiom 4 \TU/lmr/m/n/10 (Completion Embedding)\TU/lmr/bx/n/10 . 
+Overfull \hbox (27.75945pt too wide) in paragraph at lines 170--171
+\TU/lmr/bx/n/10 Axiom 8 \TU/lmr/m/n/10 (Completion Embedding)\TU/lmr/bx/n/10 . 
 \TU/lmr/m/it/10 The canonical inclusion map $\OML/cmm/m/it/10 i \OT1/cmr/m/n/10
  : [] \OMS/cmsy/m/n/10 !
  []
 
-) (./chapters/applications.tex [10]
+) (./chapters/applications.tex [17]
 Chapter 6.
 
 Overfull \hbox (2.8607pt too wide) in paragraph at lines 5--5
 []\TU/lmr/bx/n/14.4 Partial Evaluation and Futamura Projections 
  []
 
-[11
+[18
 
 ]
-Overfull \hbox (13.64629pt too wide) in paragraph at lines 64--64
+Overfull \hbox (13.64629pt too wide) in paragraph at lines 69--69
 []\TU/lmr/bx/n/14.4 Referential Openness and Anchor Dependency 
  []
 
 
-Overfull \hbox (8.55pt too wide) in paragraph at lines 66--67
+Overfull \hbox (8.55pt too wide) in paragraph at lines 71--72
 \TU/lmr/m/n/10 We analyze systems that are operationally closed versus referent
 ially open (anchor-
  []
 
 
-Overfull \hbox (3.1322pt too wide) in paragraph at lines 70--71
-\TU/lmr/bx/n/10 Definition 41 \TU/lmr/m/n/10 (Transition System)\TU/lmr/bx/n/10
+Overfull \hbox (3.1322pt too wide) in paragraph at lines 75--76
+\TU/lmr/bx/n/10 Definition 44 \TU/lmr/m/n/10 (Transition System)\TU/lmr/bx/n/10
  . \TU/lmr/m/it/10 A standard operationally closed autonomous
  []
 
-)) [12] (./print.aux)
+[19])) [20] (./print.aux)
  ***********
 LaTeX2e <2026-06-01>
 L3 programming layer <2026-05-26>
  ***********
 Package rerunfilecheck Info: File `print.out' has not changed.
-(rerunfilecheck)             Checksum: 4E1EB7B35580E838BB48A7DC34DC6D3E;4842.
+(rerunfilecheck)             Checksum: 4770BDB33A2AB82B3FE6B0E4361E083E;7240.
  ) 
 Here is how much of TeX's memory you used:
- 10674 strings out of 467813
- 176045 string characters out of 5423446
- 624795 words of memory out of 5000000
- 39641 multiletter control sequences out of 15000+600000
- 630811 words of font info for 65 fonts, out of 8000000 for 9000
+ 10692 strings out of 467813
+ 176466 string characters out of 5423446
+ 627795 words of memory out of 5000000
+ 39652 multiletter control sequences out of 15000+600000
+ 630843 words of font info for 69 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 71i,10n,79p,658b,470s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 71i,10n,79p,644b,576s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on print.pdf (13 pages).
+Output written on print.pdf (21 pages).
