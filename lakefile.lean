@@ -6,8 +6,8 @@ package «isar» where
   leanOptions := #[
     ⟨`pp.unicode.fun, true⟩, -- pretty-prints `fun a ↦ b`
     ⟨`autoImplicit, false⟩,
-    ⟨`linter.docBlame, false⟩,
-    ⟨`linter.unusedVariables, false⟩
+    ⟨`weak.linter.docBlame, false⟩,
+    ⟨`weak.linter.unusedVariables, false⟩
   ]
   lintDriver := "batteries/runLinter"
 
@@ -16,8 +16,8 @@ require mathlib from git
 
 @[default_target]
 lean_lib «ISAR» where
-  -- srcDir := "src"
-  -- roots := #[`ISAR]
+  srcDir := "src"
+  roots := #[`ISAR]
 
 require checkdecls from git "https://github.com/PatrickMassot/checkdecls.git"
 
