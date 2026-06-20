@@ -5,8 +5,12 @@ package «isar» where
   -- Settings applied to both builds and interactive editing
   leanOptions := #[
     ⟨`pp.unicode.fun, true⟩, -- pretty-prints `fun a ↦ b`
-    ⟨`autoImplicit, false⟩
+    ⟨`autoImplicit, false⟩,
+    ⟨`linter.docBlame, false⟩,
+    ⟨`linter.unusedVariables, false⟩
   ]
+  lintDriver := "batteries/runLinter"
+  lintDriverArgs := #["ISAR"]
 
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4.git" @ "v4.31.0"
