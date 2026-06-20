@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.6.14)  20 JUN 2026 17:27
+This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live 2026) (preloaded format=xelatex 2026.6.14)  20 JUN 2026 17:43
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -319,7 +319,7 @@ LaTeX Font Info:    Trying to load font information for U+msb on input line 30.
 (/usr/local/texlive/2026/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ) [1]
-(./content.tex (./chapters/intro.tex
+(./content_paper_a.tex (./chapters/intro.tex
 Chapter 1.
 
 Overfull \hbox (17.98201pt too wide) in paragraph at lines 3--4
@@ -405,7 +405,7 @@ Package rerunfilecheck Info: File `print.out' has not changed.
  ) 
 Here is how much of TeX's memory you used:
  10712 strings out of 467813
- 176766 string characters out of 5423446
+ 176814 string characters out of 5423446
  627795 words of memory out of 5000000
  39670 multiletter control sequences out of 15000+600000
  630851 words of font info for 70 fonts, out of 8000000 for 9000

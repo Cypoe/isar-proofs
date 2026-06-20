@@ -17,8 +17,12 @@ All theorems and modules in the repository are fully verified, **sorry-free**, a
 
 To explore the mathematical, physical, and formal details of the ISAR codebase:
 
-* **[Interactive Web Blueprint](./blueprint/)**: Browse the mathematical definition-dependency graph and see which sections are formally verified in Lean 4.
-* **[PDF Mathematical Monograph](./blueprint.pdf)**: A detailed mathematical writeup of the ISAR calculus, set-theoretic interpretations, and continuous completions.
+* **[Interactive Web Blueprint](./blueprint/)**: Browse the mathematical definition-dependency graph and see which sections are formally verified in Lean 4 (covering the unified monograph).
+* **[PDF Full Monograph](./blueprint_monograph.pdf)**: The full unified mathematical monograph of the ISAR calculus, set-theoretic interpretations, and continuous completions.
+* **Publications (ISAR Core Paper Triad)**:
+  * **[Paper A (TCS / PL): ISAR Semantic Kernel](./paper_a.pdf)**: A Quotient-Mediated Semantic Kernel for Closed Dialects (discrete kernel, confluence, quotients, category, dialects).
+  * **[Paper B (Logic / Philosophy): Reverse Rosetta & Decoder Theory](./paper_b.pdf)**: Logical and philosophical exploration of representation, decoder theory, closed vs. open systems.
+  * **[Paper C (Math / Applied): Structural Arithmetic & Continuous Approximation](./paper_c.pdf)**: Metric completion, continuous address spaces, matrix primitives, and the Universal Approximation Theorem.
 * **[Lean API Reference](./docs/)**: Auto-generated documentation for the full Lean 4 codebase, complete with formal definitions, types, and proof source links.
 * **[GitHub Source Repository](https://github.com/cypoe/isar-proofs)**: The main repository containing the complete Lean 4 implementation and proof sources.
 

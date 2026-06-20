@@ -1,0 +1,68 @@
+\chapter{Decoder Theory and the Reverse Rosetta Boundary}
+
+In this chapter, we explore the semantic boundaries of representation in formal systems. We analyze the distinction between closed computational systems—which factor through a view-independent invariant layer—and open, anchor-dependent systems.
+
+\section{Operational Closure vs. Environmental Anchor-Dependence}
+
+We classify computational and semantic systems into two fundamental categories based on their transition dynamics and semantic recovery:
+
+\begin{definition}[Transition System]
+\lean{ISAR.TransitionSystem}
+An autonomous transition system consists of a type of states and a step relation:
+$$\text{step} : \text{State} \to \text{State} \to \text{Prop}$$
+\end{definition}
+
+\begin{definition}[Operational Closure]
+\lean{ISAR.IsClosed}
+A subset of states $C$ is operationally closed (or forward invariant) under the transition system if all transitions starting within $C$ remain in $C$:
+$$\text{IsClosed}(TS, C) \triangleq \forall (s_1, s_2 : \text{State}), C(s_1) \to \text{step}(s_1, s_2) \to C(s_2)$$
+\end{definition}
+
+We prove that states starting in an operationally closed subsystem remain within it under any sequence of transitions:
+
+\begin{theorem}[Forward Invariance of Closed Subsystems]
+\lean{ISAR.closure_preserved_under_reachability}
+\uses{ISAR.IsClosed}
+For any transition system $TS$ and closed subsystem $C$, any state reachable from a state in $C$ remains in $C$:
+$$\forall (s_1, s_2 : \text{State}), C(s_1) \to \text{Reachable}(TS, s_1, s_2) \to C(s_2)$$
+\end{theorem}
+
+Operational closure forms the basis for reconstructibility. In a closed system (such as lambda calculus, SKI combinators, and set-theoretic semantics), the transition dynamics can be fully projected onto the $\text{InvariantLayer}$ quotient, allowing the decoder to reconstruct semantics at any point without loss of meaning.
+
+In contrast, open systems depend on external parameters:
+
+\begin{definition}[Anchor-Dependent System]
+\lean{ISAR.AnchorDependentSystem}
+A transition system where transitions depend on an external environment or context:
+$$\text{step} : \text{State} \to \text{Anchor} \to \text{State} \to \text{Prop}$$
+\end{definition}
+
+In an anchor-dependent system, trace semantics under sequences of external anchors are non-deterministic from the perspective of the state alone:
+
+\begin{theorem}[Referential Openness Requires Anchors]
+\lean{ISAR.referentially_open_requires_anchor}
+If a state can lead to different observations under different anchor sequences, then the trace semantics are not recoverable from the state alone:
+$$\exists (\text{as} : \text{List Anchor}), \neg \left(\forall (s' : \text{State}), \text{Trace}(s, \text{as}, s') \to \text{decode}(s') = \text{decode}(s_1')\right)$$
+\end{theorem}
+
+\section{The Boundary of Decodability (Reverse Rosetta)}
+
+The **Reverse Rosetta** principle represents the boundary of what can be decoded when only the syntax is preserved but the semantic context is lost.
+
+For closed systems (like lambda calculus or hereditarily finite sets), we can reconstruct their semantics from the operational quotient layer because their reductions are self-contained. For open systems (such as natural languages, undeciphered scripts like Linear A, or APIs with external state), the characters and syntax do not suffice for decoding because the meaning is tied to external cultural or environmental anchors.
+
+\section{Formal Distinction between Invariant Layer and Decoders}
+
+The distinction between the **Invariant Layer** and the **Decoder** is formalized through three distinct mechanisms:
+
+\subsection{Category-Theoretic Terminality}
+As proved in Theorem 9, the quotient $\text{InvariantLayer}$ is the terminal object in the category of semantic kernels. Any other admissible computational view is guaranteed to factor uniquely through it via a unique morphism:
+$$h : K \to \text{ISAR\_Kernel}$$
+
+\subsection{Geometrical Gauge Invariance}
+As formalized in the matrix representation of carriers, the decoder corresponds to a coordinate system (or basis choice), while the Invariant Layer represents the coordinate-free operator. Two matrix representations are isomorphic under basis conjugation:
+$$P \cdot K_1 \cdot P^{-1} = K_2$$
+proving that representation details are gauge-dependent shadows.
+
+\subsection{Empirical Decoupling}
+The type $\text{InvariantLayer}$ remains static, yet we implement entirely separate decoders for set membership, lambda terms, and stack-machine bytecodes. These map disjoint syntactic types into the same quotient, proving that the invariant layer holds the view-independent semantics while representation remains strictly delegated to the decoder.

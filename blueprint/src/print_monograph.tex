@@ -1,0 +1,35 @@
+\documentclass{report}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+\usepackage[capitalize]{cleveref}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{axiom}{Axiom}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
+
+% Custom macros for leanblueprint
+\providecommand{\home}[1]{}
+\providecommand{\github}[1]{}
+\providecommand{\dochome}[1]{}
+\providecommand{\lean}[1]{}
+\providecommand{\leanok}{}
+\providecommand{\uses}[1]{}
+
+\title{ISAR: Invariant Scalable Fractal Addressable Representations}
+\author{Fabian Schindler}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This monograph presents the complete mathematical foundations of the ISAR (Invariant Scalable Fractal Addressable Representation) framework, a formally verified computational substrate implemented in the Lean 4 proof assistant. We detail: (1) the core discrete ISAR combinator calculus, proving confluence and unique normal forms; (2) a category-theoretic terminality proof showing that observational quotients factor uniquely through the invariant layer; (3) relative set-theoretic interpretations in Hereditarily Finite sets; (4) dialect views and partial evaluation via Futamura projections; and (5) continuous completions of metric address spaces and the Universal Approximation Theorem.
+\end{abstract}
+
+\input{content.tex}
+
+\end{document}

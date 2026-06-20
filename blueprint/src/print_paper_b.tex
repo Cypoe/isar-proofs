@@ -1,0 +1,35 @@
+\documentclass{report}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+\usepackage[capitalize]{cleveref}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{axiom}{Axiom}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
+
+% Custom macros for leanblueprint
+\providecommand{\home}[1]{}
+\providecommand{\github}[1]{}
+\providecommand{\dochome}[1]{}
+\providecommand{\lean}[1]{}
+\providecommand{\leanok}{}
+\providecommand{\uses}[1]{}
+
+\title{Reverse Rosetta: Decoder Theory and Semantic Invariance in Closed and Open Systems}
+\author{Fabian Schindler}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We explore the boundaries of semantic reconstructibility and representation in formal systems. We introduce the concept of Operational Closure to mathematically distinguish closed systems (which factor uniquely through a view-independent invariant layer) from open, anchor-dependent systems. We show that while closed dialects (such as lambda calculus and set-theoretic semantics) are fully reconstructible from their invariant quotients, open systems (such as natural languages or undeciphered historical scripts like Linear A) cannot be decoded without external contextual anchors.
+\end{abstract}
+
+\input{content_paper_b.tex}
+
+\end{document}

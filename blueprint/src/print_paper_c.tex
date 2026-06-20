@@ -1,0 +1,35 @@
+\documentclass{report}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+\usepackage[capitalize]{cleveref}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{axiom}{Axiom}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
+
+% Custom macros for leanblueprint
+\providecommand{\home}[1]{}
+\providecommand{\github}[1]{}
+\providecommand{\dochome}[1]{}
+\providecommand{\lean}[1]{}
+\providecommand{\leanok}{}
+\providecommand{\uses}[1]{}
+
+\title{Structural Arithmetic and Continuous Approximation over the ISAR Kernel}
+\author{Fabian Schindler}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We bridge the discrete combinatory logic of the ISAR substrate with continuous analysis and ML theory. We define a structural quantity model and matrix representation of carriers, showing that matrix models form a terminal matrix kernel. We construct a pseudo-metric on address spaces, proving that its metric completion has a universal approximation property for continuous functions. This establishes a continuous representation limit for physical systems embedded in the ISAR substrate.
+\end{abstract}
+
+\input{content_paper_c.tex}
+
+\end{document}
