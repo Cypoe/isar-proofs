@@ -6,7 +6,6 @@
 
 blueprint/print
 blueprint/web
-blueprint/lean_decls
 blueprint/src/*.pdf
 blueprint/src/*.aux
 blueprint/src/*.paux
