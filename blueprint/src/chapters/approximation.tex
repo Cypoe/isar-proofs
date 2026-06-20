@@ -20,10 +20,12 @@ Covariance propagation propagates exact metric-epistemic covariance equations un
 \begin{definition}[Matrix4 Carriers]
 \lean{ISAR.Matrix4}
 The concrete integer 4x4 matrix representation used for basis combinator signatures. The primitive matrices are:
-$$ I_1 = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 0 \end{pmatrix}, \quad
-R_1 = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \end{pmatrix}, \quad
+\begin{gather*}
+I_1 = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 0 \end{pmatrix}, \quad
+R_1 = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \end{pmatrix}, \\
 A_1 = \begin{pmatrix} 0 & 0 & 0 & 0 \\ 1 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 0 & 0 \end{pmatrix}, \quad
-S_1 = \begin{pmatrix} 1 & 1 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix} $$
+S_1 = \begin{pmatrix} 1 & 1 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix}
+\end{gather*}
 \end{definition}
 
 \begin{theorem}[Idempotency and Nilpotency]
@@ -86,24 +88,75 @@ Every structure-preserving morphism from \texttt{MatrixKernel} to \texttt{ISAR\_
 The structural homomorphism \texttt{kernelMatrixView} never produces the rotation matrix $R_1$ or adjacency matrix $A_1$ from a pure ISK term.
 \end{theorem}
 
-\section{Tensor Semantics}
+\section{Tensor Denotation Semantics}
 
-\begin{definition}[Tensor Product and Denotation]
-\lean{ISAR.ExtTensor, ISAR.denot}
-The parallel tensor product semantics defined over Kronecker matrix products, quotiented as ExtTensor, and the denotational mapping denot.
+We bridge the discrete combinatory logic of the ISAR substrate with continuous analysis and matrix spaces by formalizing the denotational mapping of symbolic ISAR terms into an abstract rank-4 tensor space, where reductions map to extensional equality.
+
+\begin{definition}[Tensor Space Primitives]
+\lean{ISAR.ExtTensor}
+The abstract tensor space $\mathcal{T}$ is characterized by five primitive operators:
+\begin{itemize}
+    \item Identity: \texttt{t\_norm}
+    \item Constant: \texttt{t\_konst}
+    \item Duplicator: \texttt{t\_dup}
+    \item Swapper: \texttt{t\_swap}
+    \item Composition: \texttt{t\_comp}
+\end{itemize}
 \end{definition}
 
-At runtime, this tensor space is stored and manipulated inside a SQLite database. The core relations are defined by a sparse 4D tensor table `U` and a symbol table `NAMES`:
-\begin{verbatim}
-CREATE TABLE U (
-    i INTEGER, -- Term index / ID
-    s INTEGER, -- Source carrier coordinate (1..4)
-    a INTEGER, -- Adjacency / Argument coordinate (1..4)
-    r INTEGER, -- Rewrite / Reduction coordinate (1..4)
-    value REAL, -- Numeric weight
-    PRIMARY KEY(i, s, a, r)
-);
-\end{verbatim}
+\begin{definition}[Derived S in Tensor Space]
+\lean{ISAR.t_sₛ}
+\uses{ISAR.ExtTensor}
+The distributive combinator $\mathbf{S}$ in the tensor space is constructively derived using swapper, composition, and duplicator operators:
+\begin{align*}
+\text{t\_s}_{\text{s}} &\triangleq \text{t\_app}\Big(\text{t\_app}\big(\text{t\_comp}, \text{t\_app}(\text{t\_comp}, \text{t\_dup})\big), \\
+&\quad \text{t\_app}\big(\text{t\_app}(\text{t\_swap}, P), \text{t\_norm}\big)\Big)
+\end{align*}
+where:
+\[ P \triangleq \text{t\_app}\big(\text{t\_app}(\text{t\_comp}, \text{t\_comp}), \text{t\_app}(\text{t\_app}(\text{t\_comp}, \text{t\_comp}), \text{t\_swap})\big) \]
+\end{definition}
+
+\begin{definition}[Denotational Mapping]
+\lean{ISAR.denot}
+\uses{ISAR.ExtTensor, ISAR.t_sₛ}
+The structural denotational homomorphism mapping symbolic terms to the tensor space:
+$$\text{denot} : \text{ITerm} \to \text{TensorSpace}$$
+\end{definition}
+
+\begin{theorem}[Denotational Soundness]
+\lean{ISAR.denot_sound}
+\uses{ISAR.denot}
+One-step reduction in the symbolic calculus maps to extensional equivalence of denotations:
+$$\forall t, u, \quad t \to_I u \implies \text{denot } t \approx_{\text{ext}} \text{denot } u$$
+Thus, the denotational mapping factors uniquely through the Invariant Layer quotient:
+$$\text{InvariantLayer.toExtTensor} : \text{InvariantLayer} \to \text{ExtTensor}$$
+\end{theorem}
+
+\subsection{Sparse Matrix Operator Composition}
+In the concrete implementation of the axiomatic kernel (\url{scratch/isar_ski_kernel.py}), the emergent operator combinators are represented as products of the basic sparse matrices $I, R, A, S$:
+\begin{align*}
+\text{NORM} &\triangleq S \cdot I \\
+\text{APP} &\triangleq A \cdot R \\
+\text{DUP} &\triangleq S \cdot S \\
+\text{COMP} &\triangleq R \cdot A \cdot S \\
+\text{SWAP} &\triangleq R \cdot S \\
+\text{CONST} &\triangleq I \cdot S
+\end{align*}
+
+\subsection{Plex-Agent Tensor Primitives and Special Forms}
+Alternatively, the runtime environment and compiler stack defined in \url{tensor_primitives.py} specify four basic tensor primitives and four special forms derived from them:
+\begin{align*}
+\text{ATOM (0)} &\triangleq I \\
+\text{PAIR (1)} &\triangleq S \\
+\text{JOIN (2)} &\triangleq R \cdot A \\
+\text{NORM (3)} &\triangleq I \cdot R \cdot A \cdot S
+\end{align*}
+The special forms are defined as compositions of these primitives:
+\begin{align*}
+\text{LAMBDA} &\triangleq \text{JOIN} \cdot \text{PAIR} \cdot \text{NORM} \\
+\text{QUOTE} &\triangleq \text{ATOM} \cdot \text{NORM}
+\end{align*}
+along with conditional branching (\texttt{IF}) and variable bindings (\texttt{DEF}).
 
 \section{Continuous Universal Approximation}
 
@@ -118,7 +171,10 @@ $$\forall P \in \text{Polynomial } \mathbb{R}, \quad \sigma \neq P$$
 \begin{definition}[Raw Address Space]
 \lean{ISAR.RawAddress}
 The raw parameter configuration space $\text{RawAddress } d\ k$ representing a neural network configuration:
-$$\text{RawAddress } d\ k := \Sigma (N, T : \mathbb{N}), \quad (\text{Fin } T \to \text{Fin } 4 \to \mathbb{R}) \times C(\mathbb{R}^d, \text{GridState } N) \times C(\text{GridState } N, \mathbb{R}^k)$$
+\begin{align*}
+\text{RawAddress } d\ k &\triangleq \Sigma (N, T : \mathbb{N}), \quad (\text{Fin } T \to \text{Fin } 4 \to \mathbb{R}) \times C(\mathbb{R}^d, \text{GridState } N) \\
+&\quad \times C(\text{GridState } N, \mathbb{R}^k)
+\end{align*}
 \end{definition}
 
 \begin{definition}[Realization Map]

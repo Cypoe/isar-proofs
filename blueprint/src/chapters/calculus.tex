@@ -88,7 +88,10 @@ If a term $t$ reduces to two normal forms $n_1$ and $n_2$, then $n_1 = n_2$.
 \section{Conservative Basis Translation}
 
 The distributive combinator $s_s$ is not strictly necessary for the rewrite algebra. We constructively define the derived S combinator as:
-$$\text{derived\_s} \triangleq (\mathbf{comp} \cdot (\mathbf{comp} \cdot \mathbf{dup})) \cdot ((\mathbf{swap} \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot \mathbf{swap}))) \cdot \mathbf{norm})$$
+\begin{align*}
+\text{derived\_s} &\triangleq (\mathbf{comp} \cdot (\mathbf{comp} \cdot \mathbf{dup})) \\
+&\quad \cdot \big((\mathbf{swap} \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot \mathbf{swap}))) \cdot \mathbf{norm}\big)
+\end{align*}
 
 \begin{theorem}[Derived S reduction]
 \lean{ISAR.derived_s_beta}
@@ -171,3 +174,6 @@ A fuel-based normalization loop that computes the normal form.
 \uses{ISAR.cd_loop_fuel, ISAR.cd_size_lt_LinearIK}
 The optimal fuel limit computed from the term size is sufficient to guarantee complete normalization at runtime.
 \end{theorem}
+
+
+

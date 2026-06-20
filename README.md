@@ -158,14 +158,46 @@ In HVM2, programs are compiled into interaction nets to guarantee optimal, symme
 
 ---
 
+## Local Blueprint & PDF Generation
+
+The mathematical monograph paper (the blueprint) can be compiled locally via Docker (which avoids installing LaTeX distributions or elan/Lean in the compilation context):
+
+```powershell
+# Compile print.tex to print.pdf using Docker TeX Live image
+docker run --rm -v "${PWD}:/doc" -w /doc/blueprint/src texlive/texlive xelatex print.tex
+```
+Running this command twice will resolve all cross-references, outlines, and chapter structures, outputting a 21-page mathematical monograph PDF `print.pdf` inside `blueprint/src/`.
+
+---
+
+## Installation & Build CLI
+
+To standardize local blueprint builds, we provide a Python CLI wrapper:
+1. **Install the package locally**:
+   ```bash
+   pip install -e .
+   ```
+2. **Build the Lean project using the CLI**:
+   ```bash
+   isar-build
+   ```
+   This command executes `lake -R -Kenv=dev build` to compile the codebase in dev mode for document generation. It uses the `-R` (reconfigure) flag to force Lake to evaluate command-line options so that `meta if get_config? env = some "dev" then` checks out and links `doc-gen4` correctly.
+
+---
+
 ## Verification Status
 
-All modules compile successfully under the Lake package manager.
+All 22 Lean modules compile successfully under the Lake package manager.
 
 ### Build commands used
 ```powershell
 lake build
 ```
-All files are located in `src/` and are compiled in parallel in the correct dependency order.
+All files are located in `src/` and are compiled in parallel in the correct dependency order. All 71 declarations referenced in the LaTeX files are validated via:
+```powershell
+lake exe checkdecls blueprint/lean_decls
+```
+This check passes successfully with zero missing or mismatched declarations.
+
 
 
