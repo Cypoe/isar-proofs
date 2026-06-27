@@ -15,16 +15,12 @@ All theorems and modules in the repository are fully verified, **sorry-free**, a
 
 ## 🛠️ Project Links
 
-To explore the mathematical, physical, and formal details of the ISAR codebase:
-
-* **[Interactive Web Blueprint](./blueprint/)**: Browse the mathematical definition-dependency graph and see which sections are formally verified in Lean 4 (covering the unified monograph).
-* **[PDF Full Monograph](./blueprint_monograph.pdf)**: The full unified mathematical monograph of the ISAR calculus, set-theoretic interpretations, and continuous completions.
-* **Publications (ISAR Core Paper Triad)**:
-  * **[Paper A (TCS / PL): ISAR Semantic Kernel](./paper_a.pdf)**: A Quotient-Mediated Semantic Kernel for Closed Dialects (discrete kernel, confluence, quotients, category, dialects).
-  * **[Paper B (Logic / Philosophy): Reverse Rosetta & Decoder Theory](./paper_b.pdf)**: Logical and philosophical exploration of representation, decoder theory, closed vs. open systems.
-  * **[Paper C (Math / Applied): Structural Arithmetic & Continuous Approximation](./paper_c.pdf)**: Metric completion, continuous address spaces, matrix primitives, and the Universal Approximation Theorem.
-* **[Lean API Reference](./docs/)**: Auto-generated documentation for the full Lean 4 codebase, complete with formal definitions, types, and proof source links.
-* **[GitHub Source Repository](https://github.com/cypoe/isar-proofs)**: The main repository containing the complete Lean 4 implementation and proof sources.
+* **[Interactive Web Blueprint](./blueprint/)** — Browse the definition-dependency graph and see which sections are formally verified in Lean 4.
+* **[Blueprint PDF](./blueprint.pdf)** — The compiled print version of the blueprint monograph.
+* **[Lean API Reference](./docs/)** — Auto-generated documentation for the full Lean 4 codebase.
+* **[Formal Systems Zoo](./zoo/)** — Interactive exploration of the formal systems landscape: SKI, Iota, lambda, TRS, bytecode, and dialect interfaces.
+* **[Visualizations](./visualizations/)** — Diagrams and visual tools for the ISAR kernel and invariant layer geometry.
+* **[GitHub Source](https://github.com/cypoe/isar-proofs)** — The main repository containing the complete Lean 4 implementation and proof sources.
 
 ---
 
@@ -83,18 +79,14 @@ We extend the discrete calculus to continuous spaces and physical systems:
 To check the proofs locally, install Lean 4 via `elan` and run:
 
 ```bash
-# Clone the repository
 git clone https://github.com/cypoe/isar-proofs.git
 cd isar-proofs
-
-# Build the Lean modules
 lake build
 ```
 
 To build the HTML/PDF blueprint:
 
 ```bash
-# Compile web and print versions
 cd blueprint
 latexmk -pdf src/print.tex
 plastex -c plastex.cfg src/web.tex
