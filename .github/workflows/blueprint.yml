@@ -55,3 +55,4 @@ jobs:
         with:
           blueprint: true
           homepage: home_page
+          references: blueprint/src/references.bib
