@@ -45,9 +45,32 @@ jobs:
           lint: false
           mk_all-check: false
 
-      - name: Copy zoo and visualizations into home_page for Jekyll build
+      - name: Install TeX Live (latexmk + bibtex)
         run: |
-          cp -r zoo/ home_page/zoo/
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
+            texlive-science latexmk
+
+      - name: Compile all blueprint PDFs
+        working-directory: blueprint/src
+        run: |
+          latexmk -pdf -interaction=nonstopmode print_monograph.tex || true
+          latexmk -pdf -interaction=nonstopmode print_monograph.tex || true
+          latexmk -pdf -interaction=nonstopmode print_paper_a.tex   || true
+          latexmk -pdf -interaction=nonstopmode print_paper_a.tex   || true
+          latexmk -pdf -interaction=nonstopmode print_paper_b.tex   || true
+          latexmk -pdf -interaction=nonstopmode print_paper_b.tex   || true
+          latexmk -pdf -interaction=nonstopmode print_paper_c.tex   || true
+          latexmk -pdf -interaction=nonstopmode print_paper_c.tex   || true
+
+      - name: Copy PDFs and assets into home_page for Jekyll
+        run: |
+          cp blueprint/src/print_monograph.pdf home_page/blueprint.pdf
+          cp blueprint/src/print_paper_a.pdf   home_page/blueprint_paper_a.pdf
+          cp blueprint/src/print_paper_b.pdf   home_page/blueprint_paper_b.pdf
+          cp blueprint/src/print_paper_c.pdf   home_page/blueprint_paper_c.pdf
+          cp -r zoo/            home_page/zoo/
           cp -r visualizations/ home_page/visualizations/
 
       - name: Compile blueprint and documentation
@@ -55,4 +78,3 @@ jobs:
         with:
           blueprint: true
           homepage: home_page
-          references: blueprint/src/references.bib

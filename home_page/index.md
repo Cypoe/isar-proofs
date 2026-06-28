@@ -14,10 +14,13 @@ usemathjax: true
 ## Project Links
 
 * **[Interactive Blueprint](./blueprint/)** — Dependency graph of definitions and theorems, with Lean verification status per node.
-* **[Blueprint PDF](./blueprint.pdf)** — Full monograph (print version).
+* **[Blueprint Monograph PDF](./blueprint.pdf)** — Full monograph: all 22 modules, all phases.
+* **[Blueprint PDF — Paper A](./blueprint_paper_a.pdf)** — Core calculus, invariant layer, category theory, and dialect views.
+* **[Blueprint PDF — Paper B](./blueprint_paper_b.pdf)** — Set-theoretic interpretation, view pluralism, Futamura projections.
+* **[Blueprint PDF — Paper C](./blueprint_paper_c.pdf)** — Linear duplication, optimal kernels, matrix geometry, metric completion.
 * **[Lean API Docs](./docs/)** — Auto-generated documentation for the Lean 4 codebase.
 * **[Formal Systems Zoo](./zoo/)** — Interactive explorer: SKI, Iota, lambda, TRS, bytecode, and dialect morphisms.
-* **[Visualizations](./visualizations/)** — Kernel geometry, invariant layer diagrams, and combinator reduction flows.
+* **[Demos &amp; Visualizations](./visualizations/)** — Kernel geometry, invariant layer diagrams, and combinator reduction flows.
 * **[GitHub Source](https://github.com/cypoe/isar-proofs)** — Complete Lean 4 source and proof files.
 
 ---
@@ -65,10 +68,19 @@ cd isar-proofs
 lake build
 ```
 
-Blueprint (HTML + PDF):
+Blueprint (PDF + HTML):
 
 ```bash
 cd blueprint
-latexmk -pdf src/print.tex
-plastex -c src/plastex.cfg src/web.tex
+latexmk -pdf src/print_monograph.tex   # full monograph (run twice)
+latexmk -pdf src/print_paper_a.tex     # paper A
+latexmk -pdf src/print_paper_b.tex     # paper B
+latexmk -pdf src/print_paper_c.tex     # paper C
+plastex -c src/plastex.cfg src/web.tex # HTML blueprint
+```
+
+Validate all blueprint declarations against Lean source:
+
+```bash
+lake exe checkdecls blueprint/lean_decls
 ```
