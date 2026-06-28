@@ -14,8 +14,11 @@
   {% if jekyll.environment == "production" %}
   <link rel="stylesheet"
     href="{{ site.github.repository_name | append: '/assets/css/style.css?v=' | append: site.github.build_revision | relative_url }}">
+  <link rel="stylesheet"
+    href="{{ site.github.repository_name | append: '/assets/css/pygments.css?v=' | append: site.github.build_revision | relative_url }}">
   {% else %}
   <link rel="stylesheet" href="{{ 'assets/css/style.css?v=' | append: site.github.build_revision | relative_url }}">
+  <link rel="stylesheet" href="{{ 'assets/css/pygments.css?v=' | append: site.github.build_revision | relative_url }}">
   {% endif %}
   {% include head-custom.html %}
 </head>
@@ -28,11 +31,10 @@
     <h2 class="project-tagline">{{ page.description | default: site.description | default: site.github.project_tagline
       }}</h2>
     <a href="blueprint" class="btn">Blueprint (web)</a>
-    <a href="paper_a.pdf" class="btn">Paper A (Kernel)</a>
-    <a href="paper_b.pdf" class="btn">Paper B (Formalization)</a>
-    <a href="paper_c.pdf" class="btn">Paper C (Applications)</a>
-    <a href="blueprint_monograph.pdf" class="btn">Full Monograph</a>
+    <a href="blueprint.pdf" class="btn">Blueprint (PDF)</a>
     <a href="docs" class="btn">Documentation</a>
+    <a href="visualizations" class="btn">Demos</a>
+    <a href="zoo" class="btn">Zoo</a>
     {% if site.github.is_project_page %}
     <a href="{{ site.github.repository_url }}" class="btn">GitHub</a>
     {% endif %}

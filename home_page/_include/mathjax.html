@@ -6,6 +6,20 @@
       TeX: {
         equationNumbers: {
           autoNumber: "AMS"  <!-- Automatically number equations using AMS style -->
+        },
+        inlineMath: [['$$', '$$'], ['\\(', '\\)']],
+        macros: {
+          Prop: "{\\mathrm{Prop}}",
+          Type: "{\\mathrm{Type}}",
+          NN: "{\\mathbb{N}}",
+          ZZ: "{\\mathbb{Z}}",
+          RR: "{\\mathbb{R}}",
+          F: "{\\mathscr{F}}",
+          id: "{\\mathop{id}}",
+          Opens: "{\\mathop{Opens}}",
+          bold: ["{\\bf #1}", 1],
+          bm: ["{\\boldsymbol #1}", 1],
+          boldsymbol: ["{\\boldsymbol #1}", 1]
         }
       }
     });
