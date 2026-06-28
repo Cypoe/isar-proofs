@@ -121,12 +121,14 @@
   <p class="section-label">Live</p>
   <div class="grid">
 
+
+
     <div class="card">
       <span class="tag tag-kernel">kernel geometry</span>
-      <h2>IRAS Kernel Grid</h2>
-      <p>4&times;4 integer matrix representations of the I, R, A, S operators. Demonstrates idempotency ($I^2 = I$), nilpotency ($(IRAS)^2 = 0$), and gauge equivalence ($PK_1P^{-1} = K_2$) from <code>ISARMatrices.lean</code>.</p>
+      <h2>IRAS Rewrite Automaton</h2>
+      <p>Nonlinear Turing-like pattern generation and excitable cellular automata simulating discrete rewrite steps on the nilpotent operator grid.</p>
       <div class="card-footer">
-        <a class="card-link" href="./iras_kernel_grid_v2.html">Open</a>
+        <a class="card-link" href="./iras_rewrite_automaton.html">Open</a>
       </div>
     </div>
     
@@ -136,6 +138,15 @@
       <p>Step-by-step reduction of arbitrary <code>ITerm</code> expressions to normal form, with confluence path visualization. Linked to <code>ISAR.lean</code> confluence proof.</p>
       <div class="card-footer">
         <a class="card-link" href="./iterm_reducer.html">Open</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="tag tag-reduction">reduction</span>
+      <h2>ISAR Open Solver</h2>
+      <p>Interactive force-directed tree visualizer and leftmost-outermost reducer for open system combinator terms, tracking live carrier fingerprints.</p>
+      <div class="card-footer">
+        <a class="card-link" href="./isar-open-solver.html">Open</a>
       </div>
     </div>
 
@@ -156,9 +167,9 @@
     </div>
 
     <div class="card">
-      <span class="tag tag-kernel">geometry</span>
-      <h2>Convergence Visualizer</h2>
-      <p>Visualizes the convergence of term sequences in the metric address space toward attractor points.</p>
+      <span class="tag tag-kernel">kernel geometry</span>
+      <h2>Lorentz Convergence Proof</h2>
+      <p>Discrete-to-continuous wave embedding sweep showing length contraction ($1/\gamma$) and KL divergence shape fidelity as nodes $N \to \infty$.</p>
       <div class="card-footer"><a class="card-link" href="./convergence_proof.html">Open</a></div>
     </div>
   </div>

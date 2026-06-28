@@ -4,104 +4,111 @@
 <meta charset="UTF-8"/>
 <title>IRAS Rewrite Automaton</title>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300..700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#05070e;--surface:#0c0f1a;
+  --bg:#0b0a09;--surface:#121110;--surface2:#1a1917;
   --I:#4ecdc4;--R:#ffbe5b;--A:#c792ea;--S:#7dd26f;--fire:#ff4d6d;
-  --border:rgba(255,255,255,.07);--muted:#6e7280;--text:#d0d3da;
+  --border:rgba(255,255,255,.07);--muted:#858380;--text:#e6e4e0;
   --mono:"JetBrains Mono",ui-monospace,monospace;
+  --font:'Satoshi',system-ui,-apple-system,sans-serif;
 }
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
-  font-family:system-ui,-apple-system,sans-serif}
-#app{display:grid;grid-template-rows:34px 1fr;height:100vh}
-header{display:flex;align-items:center;gap:8px;padding:0 10px;
-  background:rgba(5,7,14,.98);border-bottom:1px solid var(--border);
-  font-family:var(--mono);font-size:11.5px;z-index:10}
-#dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;
+  font-family:var(--font)}
+#app{display:grid;grid-template-rows:48px 1fr;height:100vh}
+header{display:flex;align-items:center;gap:12px;padding:0 16px;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  font-size:13px;z-index:10}
+#dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;
   background:radial-gradient(circle at 30% 25%,#7ef7ff,#0d3f4d);
   box-shadow:0 0 8px rgba(94,242,255,.5)}
-#htitle{color:var(--I);letter-spacing:.07em;text-transform:uppercase}
-#hsub{color:var(--muted);font-size:10px;margin-left:4px}
-#hbtns{margin-left:auto;display:flex;gap:4px}
-button{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:4px;
-  border:1px solid var(--border);background:#0d1020;color:var(--text);cursor:pointer}
-button:hover{background:#161b2e}
+#htitle{font-weight:700;letter-spacing:-0.01em;color:var(--text)}
+#hsub{color:var(--muted);font-size:11px;margin-left:4px}
+#hbtns{margin-left:auto;display:flex;gap:6px;align-items:center}
+button, .back-btn{font-family:var(--font);font-size:12px;font-weight:500;padding:5px 12px;border-radius:6px;
+  border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;
+  transition:all 140ms ease;text-decoration:none}
+button:hover, .back-btn:hover{background:var(--border);border-color:var(--muted)}
 button.acc{border-color:var(--I);color:var(--I);background:rgba(78,205,196,.07)}
-button.acc:hover{background:var(--I);color:#020508}
-#body{display:grid;grid-template-columns:1fr 290px;overflow:hidden}
+button.acc:hover{background:var(--I);color:#0b0a09}
+.back-btn{display:inline-flex;align-items:center;justify-content:center;height:28px}
+
+#body{display:grid;grid-template-columns:1fr 310px;overflow:hidden}
 
 /* canvas area */
-#left{display:grid;grid-template-rows:1fr 120px;
-  background:radial-gradient(ellipse at 50% 20%,#0c1120,#030408)}
+#left{display:grid;grid-template-rows:1fr 130px;
+  background:radial-gradient(ellipse at 50% 20%,#161513,#0b0a09)}
 #cvwrap{position:relative;overflow:hidden}
 canvas#cv{width:100%;height:100%;display:block;cursor:crosshair;image-rendering:pixelated}
 /* mode pill */
-#mpill{position:absolute;top:7px;left:7px;font-family:var(--mono);font-size:10px;
-  padding:2px 8px;border-radius:4px;background:rgba(4,6,14,.85);
+#mpill{position:absolute;top:10px;left:10px;font-family:var(--mono);font-size:10px;
+  padding:3px 8px;border-radius:5px;background:rgba(11,10,9,.85);
   border:1px solid var(--border);color:var(--muted);pointer-events:none}
 /* fire counter */
-#fctr{position:absolute;top:7px;right:7px;font-family:var(--mono);font-size:10px;
-  padding:2px 8px;border-radius:4px;background:rgba(255,77,109,.08);
+#fctr{position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:10px;
+  padding:3px 8px;border-radius:5px;background:rgba(255,77,109,.08);
   border:1px solid rgba(255,77,109,.25);color:var(--fire);pointer-events:none}
 /* legend */
-#leg{position:absolute;left:7px;bottom:7px;padding:5px 9px;border-radius:6px;
-  background:rgba(3,5,12,.88);border:1px solid var(--border);
-  font-family:var(--mono);font-size:10px;color:var(--muted);
-  backdrop-filter:blur(6px);line-height:1.8;pointer-events:none}
-.lr{display:flex;align-items:center;gap:5px}
-.sw{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+#leg{position:absolute;left:10px;bottom:10px;padding:8px 12px;border-radius:8px;
+  background:rgba(11,10,9,.88);border:1px solid var(--border);
+  font-family:var(--mono);font-size:10.5px;color:var(--muted);
+  backdrop-filter:blur(8px);line-height:1.8;pointer-events:none}
+.lr{display:flex;align-items:center;gap:6px}
+.sw{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 .swI{background:var(--I)}.swR{background:var(--R)}.swA{background:var(--A)}
 .swS{background:var(--S)}.swF{background:var(--fire)}
 
 /* time-series */
-#tswrap{border-top:1px solid var(--border);background:rgba(4,6,13,.85);position:relative}
+#tswrap{border-top:1px solid var(--border);background:rgba(11,10,9,.85);position:relative}
 canvas#ts{width:100%;height:100%;display:block}
-#tsleg{position:absolute;top:4px;right:7px;font-family:var(--mono);font-size:9.5px;
-  color:var(--muted);display:flex;gap:8px;pointer-events:none}
-.tsl{display:flex;align-items:center;gap:3px}
+#tsleg{position:absolute;top:6px;right:10px;font-family:var(--mono);font-size:10px;
+  color:var(--muted);display:flex;gap:10px;pointer-events:none}
+.tsl{display:flex;align-items:center;gap:4px}
 .tsd{width:8px;height:2px;border-radius:1px}
 
 /* right panel */
 #right{display:flex;flex-direction:column;background:var(--surface);
   border-left:1px solid var(--border);overflow-y:auto}
-#stats{display:flex;flex-wrap:wrap;gap:3px;padding:5px 9px;
-  border-bottom:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--muted)}
-#stats .v{color:var(--text)}
-#panel{padding:9px;display:flex;flex-direction:column;gap:9px}
-h2{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
-  color:var(--muted);margin-bottom:2px}
-p,li{font-size:10.5px;line-height:1.55;color:#adb0b8}
-ul{padding-left:12px}
-code{font-family:var(--mono);font-size:9.5px;background:rgba(255,255,255,.04);
-  border:1px solid var(--border);border-radius:3px;padding:1px 3px}
-pre{font-family:var(--mono);font-size:9px;background:rgba(255,255,255,.03);
-  border:1px solid var(--border);border-radius:4px;padding:6px;
-  color:#8a8f99;line-height:1.65;overflow-x:auto;white-space:pre}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;margin-top:3px}
-.sl{display:flex;flex-direction:column;gap:1px}
+#stats{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;padding:6px 12px;
+  border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--muted)}
+#stats .v{color:var(--text);font-weight:600}
+#panel{padding:12px;display:flex;flex-direction:column;gap:12px}
+h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--muted);margin-bottom:4px}
+p,li{font-size:12px;line-height:1.6;color:var(--muted)}
+ul{padding-left:16px}
+code{font-family:var(--mono);font-size:11px;background:var(--surface2);
+  border:1px solid var(--border);border-radius:4px;padding:2px 4px}
+pre{font-family:var(--mono);font-size:10px;background:var(--surface2);
+  border:1px solid var(--border);border-radius:6px;padding:8px;
+  color:#9a9895;line-height:1.6;overflow-x:auto;white-space:pre}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:4px}
+.sl{display:flex;flex-direction:column;gap:2px}
 .sl label{display:flex;justify-content:space-between;
-  color:var(--muted);font-family:var(--mono);font-size:10px}
-input[type=range]{width:100%;accent-color:var(--I)}
-.trow{display:flex;align-items:center;gap:6px;
-  font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:4px}
-input[type=checkbox]{accent-color:var(--I);width:12px;height:12px}
+  color:var(--muted);font-family:var(--font);font-size:11px}
+input[type=range]{width:100%;accent-color:var(--I);cursor:pointer}
+.trow{display:flex;align-items:center;gap:8px;
+  font-size:11px;color:var(--muted);font-family:var(--font);margin-top:4px}
+input[type=checkbox]{accent-color:var(--I);width:14px;height:14px;cursor:pointer}
 .hi{color:var(--I)}
 .hr{color:var(--R)}
 .ha{color:var(--A)}
 .hf{color:var(--fire)}
-#note{font-size:10px;color:var(--muted);border-top:1px solid var(--border);
-  padding-top:6px;line-height:1.6}
-.modesec{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
-.mbtn{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px;
-  border:1px solid var(--border);background:#0d1020;color:var(--muted);cursor:pointer}
+#note{font-size:11px;color:var(--muted);border-top:1px solid var(--border);
+  padding-top:8px;line-height:1.6}
+.modesec{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.mbtn{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:5px;
+  border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer}
 .mbtn.active{border-color:var(--A);color:var(--A);background:rgba(199,146,234,.08)}
 </style>
 </head>
 <body>
 <div id="app">
 <header>
-  <div id="dot"></div>
+  <a href="./" class="back-btn">← Demos</a>
+  <div id="dot" style="margin-left: 4px;"></div>
   <span id="htitle">IRAS Rewrite Automaton</span>
   <span id="hsub">nilpotent kernel · nonlinear fire rule · U(K)²=0</span>
   <div id="hbtns">
@@ -118,7 +125,7 @@ input[type=checkbox]{accent-color:var(--I);width:12px;height:12px}
       <div id="mpill">mode: <span id="mname">ISAR-fire</span></div>
       <div id="fctr">fires/step: <span id="fct">0</span></div>
       <div id="leg">
-        <div style="color:var(--text);font-weight:600;margin-bottom:1px">drag → inject A</div>
+        <div style="color:var(--text);font-weight:600;margin-bottom:2px">drag → inject A</div>
         <div class="lr"><div class="sw swI"></div>I fixed-point (teal)</div>
         <div class="lr"><div class="sw swR"></div>R asymmetry (amber)</div>
         <div class="lr"><div class="sw swA"></div>A adjacency (purple)</div>
@@ -481,37 +488,41 @@ function doStep(){
 }
 
 // ── Render ────────────────────────────────────────────────────────
+// ── Render ────────────────────────────────────────────────────────
+var offscreenCv = document.createElement('canvas');
+offscreenCv.width = W;
+offscreenCv.height = H;
+var offscreenCtx = offscreenCv.getContext('2d');
+
 function renderField(){
   var cw=cv.width,ch=cv.height;
   if(cw<1||ch<1) return;
-  var img=ctx.createImageData(cw,ch), d=img.data;
-  for(var py=0;py<ch;py++){
-    var gy=Math.floor(py/ch*H);
-    for(var px=0;px<cw;px++){
-      var gx=Math.floor(px/cw*W), i=gi(gx,gy);
-      var r=5,g=6,b=14;
-      if(currentMode===0){
-        var Iv=fI[i],Rv=fR[i],Av=fA[i],Sv=fS[i],Fv=fFire[i];
-        r+=Iv*70; g+=Iv*190; b+=Iv*90;   // I teal
-        r+=Rv*240;g+=Rv*120;b+=Rv*15;    // R amber
-        r+=Av*110;g+=Av*50; b+=Av*190;   // A purple
-        r+=Sv*30; g+=Sv*100;b+=Sv*30;    // S green
-        r+=Fv*255;g+=Fv*60; b+=Fv*80;   // fire red
-      } else if(currentMode===1){
-        var U=gsU[i],V=gsV[i];
-        // coral/blue palette
-        r+=U*20; g+=U*40;  b+=U*80;
-        r+=V*220;g+=V*30;  b+=V*60;
-      } else {
-        var v=(exV[i]+3)/6, w=(exW[i]+2)/4;
-        r+=v*200; g+=v*60;  b+=v*120;
-        r+=w*30;  g+=w*120; b+=w*160;
-      }
-      var o=(py*cw+px)*4;
-      d[o]=Math.min(255,r|0);d[o+1]=Math.min(255,g|0);d[o+2]=Math.min(255,b|0);d[o+3]=255;
+  var img=offscreenCtx.createImageData(W,H), d=img.data;
+  for(var i=0;i<N;i++){
+    var r=5,g=6,b=14;
+    if(currentMode===0){
+      var Iv=fI[i],Rv=fR[i],Av=fA[i],Sv=fS[i],Fv=fFire[i];
+      r+=Iv*70; g+=Iv*190; b+=Iv*90;   // I teal
+      r+=Rv*240;g+=Rv*120;b+=Rv*15;    // R amber
+      r+=Av*110;g+=Av*50; b+=Av*190;   // A purple
+      r+=Sv*30; g+=Sv*100;b+=Sv*30;    // S green
+      r+=Fv*255;g+=Fv*60; b+=Fv*80;   // fire red
+    } else if(currentMode===1){
+      var U=gsU[i],V=gsV[i];
+      // coral/blue palette
+      r+=U*20; g+=U*40;  b+=U*80;
+      r+=V*220;g+=V*30;  b+=V*60;
+    } else {
+      var v=(exV[i]+3)/6, w=(exW[i]+2)/4;
+      r+=v*200; g+=v*60;  b+=v*120;
+      r+=w*30;  g+=w*120; b+=w*160;
     }
+    var o=i*4;
+    d[o]=Math.min(255,r|0);d[o+1]=Math.min(255,g|0);d[o+2]=Math.min(255,b|0);d[o+3]=255;
   }
-  ctx.putImageData(img,0,0);
+  offscreenCtx.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(offscreenCv,0,0,cw,ch);
 }
 
 var CH_COLORS=['#4ecdc4','#ffbe5b','#c792ea','#ff4d6d','rgba(255,255,255,0.4)'];
@@ -548,8 +559,14 @@ function renderTS(){
 // ── Sliders ───────────────────────────────────────────────────────
 var SLMAP={dI:'lI',dR:'lR',dA:'dAl',kp:'lK',lk:'lL',thr:'lT',beta:'lB',alpha:'lA2',rad:'lRad',spd:'lSpd'};
 function updateLabels(){
-  for(var id in SLMAP)
-    document.getElementById(SLMAP[id]).textContent=(+document.getElementById(id).value/100).toFixed(2);
+  for(var id in SLMAP) {
+    var val = +document.getElementById(id).value;
+    if (id === 'rad' || id === 'spd') {
+      document.getElementById(SLMAP[id]).textContent = val;
+    } else {
+      document.getElementById(SLMAP[id]).textContent = (val/100).toFixed(2);
+    }
+  }
 }
 for(var sid in SLMAP) document.getElementById(sid).addEventListener('input',updateLabels);
 updateLabels();

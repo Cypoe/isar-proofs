@@ -3,19 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <title>IRAS — Lorentz Convergence Proof</title>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#07070f;color:#d0d0f0;font-family:'Fira Mono',monospace;display:flex;flex-direction:column;height:100vh;overflow:hidden}
-  header{padding:8px 16px;background:#0e0e24;border-bottom:1px solid #252560;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-  header h1{font-size:13px;color:#7af;letter-spacing:.07em}
-  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  label{font-size:11px;color:#89a}
-  button{padding:4px 12px;background:#1a1e50;border:1px solid #3355bb;color:#adf;border-radius:4px;cursor:pointer;font-size:12px}
-  button:hover{background:#252a70}
-  button.active{background:#1a4a20;border-color:#3a3}
-  #panels{display:flex;flex:1;overflow:hidden;gap:1px;background:#111}
-  .panel{flex:1;display:flex;flex-direction:column;background:#07070f;overflow:hidden}
-  .panel-title{font-size:10px;color:#68a;padding:6px 10px;border-bottom:1px solid #151530;letter-spacing:.05em}
+  :root {
+    --bg:#07070f;
+    --surface:#0e0e24;
+    --border:#252560;
+    --primary:#7aafef;
+    --text:#d0d0f0;
+    --muted:#8080a8;
+    --font:'Satoshi',system-ui,sans-serif;
+  }
+  body{background:var(--bg);color:var(--text);font-family:var(--font);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  header{padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:48px}
+  header h1{font-size:13px;font-weight:700;color:var(--primary);letter-spacing:.07em;text-transform:uppercase}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  label{font-size:11px;color:var(--muted);font-weight:500}
+  button, .back-btn{padding:5px 12px;background:#1a1e50;border:1px solid #3355bb;color:#adf;border-radius:6px;cursor:pointer;font-size:12px;font-family:var(--font);font-weight:500;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+  button:hover, .back-btn:hover{background:#252a70;border-color:var(--primary)}
+  button.active{background:#1a4a20;border-color:#3a3;color:#bfb}
+  .back-btn{height:26px}
+  #panels{display:flex;flex:1;overflow:hidden;gap:1px;background:#151530}
+  .panel{flex:1;display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+  .panel-title{font-size:10px;font-family:monospace;color:#68a;padding:8px 12px;border-bottom:1px solid #151530;letter-spacing:.05em}
   canvas{display:block;width:100%;flex:1}
   #legend{position:absolute;bottom:28px;left:20px;font-size:10px;line-height:1.9;background:rgba(7,7,20,0.82);padding:6px 10px;border-radius:4px;border:1px solid #1a1a40}
   .dot{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
@@ -23,10 +34,11 @@
 </head>
 <body>
 <header>
-  <h1>IRAS Lorentz Convergence Proof · Discrete→Continuous Embedding</h1>
-  <div class="controls">
+  <a href="./" class="back-btn">← Demos</a>
+  <h1>Lorentz Convergence Proof</h1>
+  <div class="controls" style="margin-left: auto;">
     <button id="btnSweep" class="active">▶ Run Sweep</button>
-    <button id="btnAnim">↻ Animate N↑</button>
+    <button id="btnAnim">Animate N↑</button>
     <label>Wave nodes N:</label>
     <button id="btn8">8</button>
     <button id="btn24">24</button>
