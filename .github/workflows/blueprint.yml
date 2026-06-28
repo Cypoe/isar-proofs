@@ -54,19 +54,20 @@ jobs:
             texlive-latex-extra \
             texlive-fonts-recommended \
             texlive-science \
+            texlive-xetex \
             latexmk
 
       - name: Compile all blueprint PDFs
         working-directory: blueprint/src
         run: |
-          latexmk -pdf -interaction=nonstopmode print_monograph.tex
-          latexmk -pdf -interaction=nonstopmode print_monograph.tex
-          latexmk -pdf -interaction=nonstopmode print_paper_a.tex
-          latexmk -pdf -interaction=nonstopmode print_paper_a.tex
-          latexmk -pdf -interaction=nonstopmode print_paper_b.tex
-          latexmk -pdf -interaction=nonstopmode print_paper_b.tex
-          latexmk -pdf -interaction=nonstopmode print_paper_c.tex
-          latexmk -pdf -interaction=nonstopmode print_paper_c.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_monograph.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_monograph.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_paper_a.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_paper_a.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_paper_b.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_paper_b.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_paper_c.tex
+          latexmk -pdflatex=pdflatex -pdf -interaction=nonstopmode print_paper_c.tex
 
       - name: Copy PDFs and assets into home_page for Jekyll
         run: |
