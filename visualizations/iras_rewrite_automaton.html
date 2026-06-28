@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>IRAS Rewrite Automaton</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#05070e;--surface:#0c0f1a;
+  --I:#4ecdc4;--R:#ffbe5b;--A:#c792ea;--S:#7dd26f;--fire:#ff4d6d;
+  --border:rgba(255,255,255,.07);--muted:#6e7280;--text:#d0d3da;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,sans-serif}
+#app{display:grid;grid-template-rows:34px 1fr;height:100vh}
+header{display:flex;align-items:center;gap:8px;padding:0 10px;
+  background:rgba(5,7,14,.98);border-bottom:1px solid var(--border);
+  font-family:var(--mono);font-size:11.5px;z-index:10}
+#dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;
+  background:radial-gradient(circle at 30% 25%,#7ef7ff,#0d3f4d);
+  box-shadow:0 0 8px rgba(94,242,255,.5)}
+#htitle{color:var(--I);letter-spacing:.07em;text-transform:uppercase}
+#hsub{color:var(--muted);font-size:10px;margin-left:4px}
+#hbtns{margin-left:auto;display:flex;gap:4px}
+button{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:4px;
+  border:1px solid var(--border);background:#0d1020;color:var(--text);cursor:pointer}
+button:hover{background:#161b2e}
+button.acc{border-color:var(--I);color:var(--I);background:rgba(78,205,196,.07)}
+button.acc:hover{background:var(--I);color:#020508}
+#body{display:grid;grid-template-columns:1fr 290px;overflow:hidden}
+
+/* canvas area */
+#left{display:grid;grid-template-rows:1fr 120px;
+  background:radial-gradient(ellipse at 50% 20%,#0c1120,#030408)}
+#cvwrap{position:relative;overflow:hidden}
+canvas#cv{width:100%;height:100%;display:block;cursor:crosshair;image-rendering:pixelated}
+/* mode pill */
+#mpill{position:absolute;top:7px;left:7px;font-family:var(--mono);font-size:10px;
+  padding:2px 8px;border-radius:4px;background:rgba(4,6,14,.85);
+  border:1px solid var(--border);color:var(--muted);pointer-events:none}
+/* fire counter */
+#fctr{position:absolute;top:7px;right:7px;font-family:var(--mono);font-size:10px;
+  padding:2px 8px;border-radius:4px;background:rgba(255,77,109,.08);
+  border:1px solid rgba(255,77,109,.25);color:var(--fire);pointer-events:none}
+/* legend */
+#leg{position:absolute;left:7px;bottom:7px;padding:5px 9px;border-radius:6px;
+  background:rgba(3,5,12,.88);border:1px solid var(--border);
+  font-family:var(--mono);font-size:10px;color:var(--muted);
+  backdrop-filter:blur(6px);line-height:1.8;pointer-events:none}
+.lr{display:flex;align-items:center;gap:5px}
+.sw{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.swI{background:var(--I)}.swR{background:var(--R)}.swA{background:var(--A)}
+.swS{background:var(--S)}.swF{background:var(--fire)}
+
+/* time-series */
+#tswrap{border-top:1px solid var(--border);background:rgba(4,6,13,.85);position:relative}
+canvas#ts{width:100%;height:100%;display:block}
+#tsleg{position:absolute;top:4px;right:7px;font-family:var(--mono);font-size:9.5px;
+  color:var(--muted);display:flex;gap:8px;pointer-events:none}
+.tsl{display:flex;align-items:center;gap:3px}
+.tsd{width:8px;height:2px;border-radius:1px}
+
+/* right panel */
+#right{display:flex;flex-direction:column;background:var(--surface);
+  border-left:1px solid var(--border);overflow-y:auto}
+#stats{display:flex;flex-wrap:wrap;gap:3px;padding:5px 9px;
+  border-bottom:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--muted)}
+#stats .v{color:var(--text)}
+#panel{padding:9px;display:flex;flex-direction:column;gap:9px}
+h2{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--muted);margin-bottom:2px}
+p,li{font-size:10.5px;line-height:1.55;color:#adb0b8}
+ul{padding-left:12px}
+code{font-family:var(--mono);font-size:9.5px;background:rgba(255,255,255,.04);
+  border:1px solid var(--border);border-radius:3px;padding:1px 3px}
+pre{font-family:var(--mono);font-size:9px;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:4px;padding:6px;
+  color:#8a8f99;line-height:1.65;overflow-x:auto;white-space:pre}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;margin-top:3px}
+.sl{display:flex;flex-direction:column;gap:1px}
+.sl label{display:flex;justify-content:space-between;
+  color:var(--muted);font-family:var(--mono);font-size:10px}
+input[type=range]{width:100%;accent-color:var(--I)}
+.trow{display:flex;align-items:center;gap:6px;
+  font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:4px}
+input[type=checkbox]{accent-color:var(--I);width:12px;height:12px}
+.hi{color:var(--I)}
+.hr{color:var(--R)}
+.ha{color:var(--A)}
+.hf{color:var(--fire)}
+#note{font-size:10px;color:var(--muted);border-top:1px solid var(--border);
+  padding-top:6px;line-height:1.6}
+.modesec{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.mbtn{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px;
+  border:1px solid var(--border);background:#0d1020;color:var(--muted);cursor:pointer}
+.mbtn.active{border-color:var(--A);color:var(--A);background:rgba(199,146,234,.08)}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <div id="dot"></div>
+  <span id="htitle">IRAS Rewrite Automaton</span>
+  <span id="hsub">nilpotent kernel · nonlinear fire rule · U(K)²=0</span>
+  <div id="hbtns">
+    <button onclick="doReset()">Reset</button>
+    <button onclick="doSeed()">Seed</button>
+    <button onclick="doRandom()">Random</button>
+    <button id="pbtn" class="acc" onclick="togglePause()">Pause</button>
+  </div>
+</header>
+<div id="body">
+  <div id="left">
+    <div id="cvwrap">
+      <canvas id="cv"></canvas>
+      <div id="mpill">mode: <span id="mname">ISAR-fire</span></div>
+      <div id="fctr">fires/step: <span id="fct">0</span></div>
+      <div id="leg">
+        <div style="color:var(--text);font-weight:600;margin-bottom:1px">drag → inject A</div>
+        <div class="lr"><div class="sw swI"></div>I fixed-point (teal)</div>
+        <div class="lr"><div class="sw swR"></div>R asymmetry (amber)</div>
+        <div class="lr"><div class="sw swA"></div>A adjacency (purple)</div>
+        <div class="lr"><div class="sw swS"></div>S closure (green)</div>
+        <div class="lr"><div class="sw swF"></div>fire event (red flash)</div>
+      </div>
+    </div>
+    <div id="tswrap">
+      <canvas id="ts"></canvas>
+      <div id="tsleg">
+        <div class="tsl"><div class="tsd" style="background:var(--I)"></div>ΣI</div>
+        <div class="tsl"><div class="tsd" style="background:var(--R)"></div>ΣR</div>
+        <div class="tsl"><div class="tsd" style="background:var(--A)"></div>ΣA</div>
+        <div class="tsl"><div class="tsd" style="background:var(--fire)"></div>fires</div>
+        <div class="tsl"><div class="tsd" style="background:#fff;opacity:.4"></div>Δ</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="right">
+    <div id="stats">
+      <span>step <span class="v" id="st">0</span></span>
+      <span>ΣI <span class="v" id="sI">–</span></span>
+      <span>ΣR <span class="v" id="sR">–</span></span>
+      <span>ΣA <span class="v" id="sA">–</span></span>
+      <span>fires <span class="v" id="sf">–</span></span>
+      <span>Δ <span class="v" id="sD">–</span></span>
+    </div>
+    <div id="panel">
+
+      <div>
+        <h2>Rule modes</h2>
+        <p>Switch between three nonlinear rule sets — all derived from the same kernel.</p>
+        <div class="modesec">
+          <button class="mbtn active" id="m0" onclick="setMode(0)">ISAR-fire</button>
+          <button class="mbtn" id="m1" onclick="setMode(1)">Gray-Scott</button>
+          <button class="mbtn" id="m2" onclick="setMode(2)">Excitable</button>
+        </div>
+      </div>
+
+      <div>
+        <h2>ISAR-fire rule (default)</h2>
+        <pre>each cell per tick:
+  1. diffuse I (slow), R (fast), A (medium)
+  2. A += κ·(Ī·R̄)          ← kernel row [1,1,0,0]
+  3. if A > θ_fire:          ← nonlinear threshold
+       fire = true
+       I  -= α·I            ← rewrite consumes invariant
+       R  += β·(1-R)        ← asymmetry grows
+       S   = clamp(S+γ,0,1) ← closure records event
+       A  -= θ_fire         ← reset (refractory)
+  4. if proj ON: normalise ΣI</pre>
+        <p>Firing is the discrete rewrite step: <code>U(K)</code> applied once. Because <code>U(K)²=0</code>, a fired cell cannot immediately re-fire — it must recover through diffusion first.</p>
+      </div>
+
+      <div>
+        <h2>Parameters</h2>
+        <div class="g2">
+          <div class="sl">
+            <label><span class="hi">I diffusion</span><span id="lI"></span></label>
+            <input type="range" id="dI" min="1" max="60" value="8">
+          </div>
+          <div class="sl">
+            <label><span class="hr">R diffusion</span><span id="lR"></span></label>
+            <input type="range" id="dR" min="1" max="60" value="35">
+          </div>
+          <div class="sl">
+            <label><span class="ha">A diffusion</span><span id="dAl"></span></label>
+            <input type="range" id="dA" min="0" max="60" value="18">
+          </div>
+          <div class="sl">
+            <label><span class="ha">κ feed (I·R→A)</span><span id="lK"></span></label>
+            <input type="range" id="kp" min="0" max="80" value="28">
+          </div>
+          <div class="sl">
+            <label><span class="ha">A leak λ</span><span id="lL"></span></label>
+            <input type="range" id="lk" min="0" max="60" value="12">
+          </div>
+          <div class="sl">
+            <label><span class="hf">fire θ</span><span id="lT"></span></label>
+            <input type="range" id="thr" min="5" max="95" value="55">
+          </div>
+          <div class="sl">
+            <label><span class="hr">fire β (R gain)</span><span id="lB"></span></label>
+            <input type="range" id="beta" min="0" max="80" value="40">
+          </div>
+          <div class="sl">
+            <label><span class="hi">fire α (I loss)</span><span id="lA2"></span></label>
+            <input type="range" id="alpha" min="0" max="80" value="30">
+          </div>
+          <div class="sl">
+            <label><span>inject radius</span><span id="lRad"></span></label>
+            <input type="range" id="rad" min="1" max="10" value="4">
+          </div>
+          <div class="sl">
+            <label><span>speed (steps/f)</span><span id="lSpd"></span></label>
+            <input type="range" id="spd" min="1" max="8" value="2">
+          </div>
+        </div>
+        <div class="trow">
+          <input type="checkbox" id="projOn">
+          <label for="projOn">Invariant projection (ΣI conserved)</label>
+        </div>
+        <div class="trow">
+          <input type="checkbox" id="fireGlow" checked>
+          <label for="fireGlow">Flash fire events</label>
+        </div>
+      </div>
+
+      <div id="note">
+        <b>ISAR-fire</b>: Turing-like spots/waves from the kernel fire rule.<br/>
+        <b>Gray-Scott</b>: classic 2-chemical RD using U,V mapped to I,A.<br/>
+        <b>Excitable</b>: FitzHugh-Nagumo style, R = recovery variable.<br/><br/>
+        <b>Space</b> pause · <b>R</b> random · <b>S</b> seed · <b>0</b> reset<br/>
+        Drag on canvas to inject A-carrier.
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<script>
+// ── STATE (all vars first — no TDZ) ──────────────────────────────
+var W=120, H=80, N=W*H;
+var MAX_HIST=500;
+var hist=[], sumA0=null, stepN=0, _paused=false, dragging=false;
+var currentMode=0;
+
+var fI=new Float32Array(N), fR=new Float32Array(N);
+var fA=new Float32Array(N), fS=new Float32Array(N);
+var fFire=new Float32Array(N); // fire glow decay
+
+// Gray-Scott buffers (U=fI, V=fA reused; separate for GS)
+var gsU=new Float32Array(N), gsV=new Float32Array(N);
+
+// Excitable buffers
+var exV=new Float32Array(N), exW=new Float32Array(N);
+
+// ── Canvas ────────────────────────────────────────────────────────
+var cv=document.getElementById('cv');
+var ctx=cv.getContext('2d');
+var ts=document.getElementById('ts');
+var tctx=ts.getContext('2d');
+
+function resizeAll(){
+  var r1=cv.parentElement.getBoundingClientRect();
+  cv.width=Math.max(1,Math.floor(r1.width));
+  cv.height=Math.max(1,Math.floor(r1.height));
+  var r2=ts.parentElement.getBoundingClientRect();
+  ts.width=Math.max(1,Math.floor(r2.width));
+  ts.height=Math.max(1,Math.floor(r2.height));
+}
+new ResizeObserver(resizeAll).observe(document.getElementById('body'));
+resizeAll();
+
+// ── Helpers ───────────────────────────────────────────────────────
+function cl(x,lo,hi){return x<lo?lo:x>hi?hi:x;}
+function gi(x,y){return y*W+x;}
+function gs(arr,x,y){
+  if(x<0)x=0;else if(x>=W)x=W-1;
+  if(y<0)y=0;else if(y>=H)y=H-1;
+  return arr[gi(x,y)];
+}
+function lap(arr,x,y){
+  return gs(arr,x-1,y)+gs(arr,x+1,y)+gs(arr,x,y-1)+gs(arr,x,y+1)-4*arr[gi(x,y)];
+}
+function nb4(arr,x,y){
+  return(gs(arr,x-1,y)+gs(arr,x+1,y)+gs(arr,x,y-1)+gs(arr,x,y+1))*0.25;
+}
+function slv(id){return+document.getElementById(id).value/100;}
+function sli(id){return+document.getElementById(id).value;}
+
+// ── Init ──────────────────────────────────────────────────────────
+function clearAll(){
+  fI.fill(0);fR.fill(0);fA.fill(0);fS.fill(0);fFire.fill(0);
+  gsU.fill(1);gsV.fill(0);
+  exV.fill(-1.4);exW.fill(-0.6);
+  hist.length=0;sumA0=null;stepN=0;
+}
+function doReset(){clearAll();}
+
+function doSeed(){
+  clearAll();
+  if(currentMode===0){
+    // ISAR: random I+R, small A seed in center
+    for(var i=0;i<N;i++){fI[i]=0.5+Math.random()*0.5;fR[i]=0.1+Math.random()*0.2;}
+    for(var sy=H/2-4;sy<H/2+4;sy++)for(var sx=W/2-4;sx<W/2+4;sx++)fA[gi(sx,sy)]=1.0;
+  } else if(currentMode===1){
+    gsU.fill(1);gsV.fill(0);
+    // square seeds
+    for(var sy=H/2-5;sy<H/2+5;sy++)for(var sx=W/2-5;sx<W/2+5;sx++){
+      gsU[gi(sx,sy)]=0.5;gsV[gi(sx,sy)]=0.25+Math.random()*0.1;
+    }
+  } else {
+    exV.fill(-1.4);exW.fill(-0.6);
+    for(var sy=H/2-3;sy<H/2+3;sy++)for(var sx=W/2-3;sx<W/2+3;sx++)
+      exV[gi(sx,sy)]=1.5+Math.random()*0.5;
+  }
+}
+
+function doRandom(){
+  clearAll();
+  if(currentMode===0){
+    for(var i=0;i<N;i++){
+      fI[i]=0.3+Math.random()*0.7;
+      fR[i]=Math.random()*0.4;
+      fA[i]=Math.random()<0.05?Math.random()*0.8:0;
+    }
+  } else if(currentMode===1){
+    for(var i=0;i<N;i++){
+      gsU[i]=0.7+Math.random()*0.3;
+      gsV[i]=Math.random()<0.1?0.2+Math.random()*0.2:0;
+    }
+  } else {
+    for(var i=0;i<N;i++){
+      exV[i]=-2+Math.random()*4;
+      exW[i]=-1+Math.random()*2;
+    }
+  }
+}
+doSeed();
+
+// ── Mode switching ─────────────────────────────────────────────────
+function setMode(m){
+  currentMode=m;
+  ['m0','m1','m2'].forEach(function(id,i){
+    document.getElementById(id).className='mbtn'+(i===m?' active':'');
+  });
+  var names=['ISAR-fire','Gray-Scott','Excitable'];
+  document.getElementById('mname').textContent=names[m];
+  clearAll();
+  doSeed();
+}
+
+// ── Kernel step: ISAR-fire ─────────────────────────────────────────
+function stepISAR(){
+  var dI=slv('dI'), dR=slv('dR'), dAv=slv('dA');
+  var kappa=slv('kp'), leak=slv('lk');
+  var thr=slv('thr'), beta=slv('beta'), alpha=slv('alpha');
+  var proj=document.getElementById('projOn').checked;
+  var glow=document.getElementById('fireGlow').checked;
+
+  var nI=new Float32Array(N), nR=new Float32Array(N);
+  var nA=new Float32Array(N), nS=new Float32Array(N);
+  var totI=0,totR=0,totA=0,fires=0;
+
+  for(var y=0;y<H;y++){
+    for(var x=0;x<W;x++){
+      var i=gi(x,y);
+      var Iv=fI[i],Rv=fR[i],Av=fA[i],Sv=fS[i];
+      var IN=nb4(fI,x,y), RN=nb4(fR,x,y), AN=nb4(fA,x,y);
+
+      // 1. diffusion
+      var nIv=cl(Iv + dI*(IN-Iv), 0, 2);
+      var nRv=cl(Rv + dR*(RN-Rv), 0, 2);
+      var nAv=cl(Av*(1-leak) + dAv*(AN-Av) + kappa*IN*RN, 0, 4);
+      // NOTE: A feed is now I*R product (nonlinear) not sum
+
+      // 2. fire rule
+      if(nAv>thr){
+        fires++;
+        nIv=cl(nIv*(1-alpha), 0, 2);   // rewrite consumes I
+        nRv=cl(nRv+beta*(1-nRv), 0, 2); // asymmetry latches
+        Sv=cl(Sv+0.3, 0, 1);            // closure records
+        nAv-=thr;                        // refractory reset
+        if(glow) fFire[i]=1.0;
+      }
+      // fire glow decay
+      fFire[i]=cl(fFire[i]*0.7, 0, 1);
+
+      nS[i]=Sv; nI[i]=nIv; nR[i]=nRv; nA[i]=nAv;
+      totI+=nIv; totR+=nRv; totA+=nAv;
+    }
+  }
+
+  // invariant projection
+  if(proj && totI>1e-6){
+    var mean=totI/N, s2=0;
+    for(var i=0;i<N;i++){nI[i]=cl(nI[i]-mean*0.4,0,2);s2+=nI[i];}
+    var sc=totI/(s2+1e-9); totI=0;
+    for(var i=0;i<N;i++){nI[i]=cl(nI[i]*sc,0,2);totI+=nI[i];}
+  }
+
+  fI=nI;fR=nR;fA=nA;fS=nS;
+  return{totI:totI,totR:totR,totA:totA,fires:fires};
+}
+
+// ── Gray-Scott ─────────────────────────────────────────────────────
+// Classic: dU/dt = Du·∇²U - UV² + f(1-U)
+//          dV/dt = Dv·∇²V + UV² - (f+k)V
+// f=feed, k=kill mapped from sliders
+function stepGS(){
+  var Du=slv('dI')*0.5, Dv=slv('dA')*0.2;
+  var f=slv('kp')*0.06, k=slv('lk')*0.06+0.04;
+  var nU=new Float32Array(N), nV=new Float32Array(N);
+  var totU=0,totV=0;
+  for(var y=0;y<H;y++){
+    for(var x=0;x<W;x++){
+      var i=gi(x,y);
+      var U=gsU[i], V=gsV[i];
+      var lU=lap(gsU,x,y), lV=lap(gsV,x,y);
+      var uvv=U*V*V;
+      var nu=cl(U+Du*lU - uvv + f*(1-U), 0, 1);
+      var nv=cl(V+Dv*lV + uvv - (f+k)*V, 0, 1);
+      nU[i]=nu; nV[i]=nv;
+      totU+=nu; totV+=nv;
+    }
+  }
+  gsU=nU; gsV=nV;
+  return{totI:totU,totR:0,totA:totV,fires:0};
+}
+
+// ── FitzHugh-Nagumo (excitable) ────────────────────────────────────
+// dv/dt = v - v³/3 - w + I_ext + Dv·∇²v
+// dw/dt = ε(v + a - b·w)
+function stepExcitable(){
+  var Dv=slv('dI')*0.8;
+  var eps=slv('lk')*0.04+0.008;
+  var a=slv('thr')*0.01-0.5+0.7;
+  var b=slv('beta')*0.008+0.7;
+  var nV=new Float32Array(N), nW=new Float32Array(N);
+  var totV=0,fires=0;
+  for(var y=0;y<H;y++){
+    for(var x=0;x<W;x++){
+      var i=gi(x,y);
+      var v=exV[i], w=exW[i];
+      var lv=lap(exV,x,y);
+      var nv=cl(v + v - (v*v*v)/3 - w + Dv*lv, -3, 3);
+      var nw=w + eps*(v + a - b*w);
+      nV[i]=nv; nW[i]=nw;
+      totV+=(nv+3)/6;
+      if(nv>1.0) fires++;
+    }
+  }
+  exV=nV; exW=nW;
+  return{totI:totV,totR:0,totA:0,fires:fires};
+}
+
+// ── Master step ───────────────────────────────────────────────────
+function doStep(){
+  var res;
+  if(currentMode===0) res=stepISAR();
+  else if(currentMode===1) res=stepGS();
+  else res=stepExcitable();
+  stepN++;
+
+  var n=N;
+  var aI=res.totI/n, aR=res.totR/n, aA=res.totA/n;
+  if(sumA0===null) sumA0=aA;
+  var delta=(aA-sumA0)/(aI+0.5+1e-6);
+  hist.push({sI:aI,sR:aR,sA:aA,fires:res.fires/n*100,delta:delta});
+  if(hist.length>MAX_HIST) hist.shift();
+
+  document.getElementById('st').textContent=stepN;
+  document.getElementById('sI').textContent=aI.toFixed(3);
+  document.getElementById('sR').textContent=aR.toFixed(3);
+  document.getElementById('sA').textContent=aA.toFixed(3);
+  document.getElementById('sf').textContent=res.fires;
+  document.getElementById('fct').textContent=res.fires;
+  document.getElementById('sD').textContent=delta.toFixed(3);
+}
+
+// ── Render ────────────────────────────────────────────────────────
+function renderField(){
+  var cw=cv.width,ch=cv.height;
+  if(cw<1||ch<1) return;
+  var img=ctx.createImageData(cw,ch), d=img.data;
+  for(var py=0;py<ch;py++){
+    var gy=Math.floor(py/ch*H);
+    for(var px=0;px<cw;px++){
+      var gx=Math.floor(px/cw*W), i=gi(gx,gy);
+      var r=5,g=6,b=14;
+      if(currentMode===0){
+        var Iv=fI[i],Rv=fR[i],Av=fA[i],Sv=fS[i],Fv=fFire[i];
+        r+=Iv*70; g+=Iv*190; b+=Iv*90;   // I teal
+        r+=Rv*240;g+=Rv*120;b+=Rv*15;    // R amber
+        r+=Av*110;g+=Av*50; b+=Av*190;   // A purple
+        r+=Sv*30; g+=Sv*100;b+=Sv*30;    // S green
+        r+=Fv*255;g+=Fv*60; b+=Fv*80;   // fire red
+      } else if(currentMode===1){
+        var U=gsU[i],V=gsV[i];
+        // coral/blue palette
+        r+=U*20; g+=U*40;  b+=U*80;
+        r+=V*220;g+=V*30;  b+=V*60;
+      } else {
+        var v=(exV[i]+3)/6, w=(exW[i]+2)/4;
+        r+=v*200; g+=v*60;  b+=v*120;
+        r+=w*30;  g+=w*120; b+=w*160;
+      }
+      var o=(py*cw+px)*4;
+      d[o]=Math.min(255,r|0);d[o+1]=Math.min(255,g|0);d[o+2]=Math.min(255,b|0);d[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+}
+
+var CH_COLORS=['#4ecdc4','#ffbe5b','#c792ea','#ff4d6d','rgba(255,255,255,0.4)'];
+var CH_KEYS=['sI','sR','sA','fires','delta'];
+function renderTS(){
+  var w=ts.width,h=ts.height;
+  if(w<2||h<2) return;
+  tctx.fillStyle='rgba(5,7,14,0.93)';tctx.fillRect(0,0,w,h);
+  if(hist.length<2) return;
+  var mins={},maxs={};
+  CH_KEYS.forEach(function(k){mins[k]=Infinity;maxs[k]=-Infinity;});
+  hist.forEach(function(pt){
+    CH_KEYS.forEach(function(k){
+      if(pt[k]<mins[k])mins[k]=pt[k];
+      if(pt[k]>maxs[k])maxs[k]=pt[k];
+    });
+  });
+  var pad=8,uw=w-pad*2,uh=h-pad*2,n=hist.length;
+  tctx.strokeStyle='rgba(255,255,255,0.04)';tctx.lineWidth=1;
+  for(var gi2=0;gi2<=3;gi2++){var gy=pad+uh*(gi2/3);tctx.beginPath();tctx.moveTo(pad,gy);tctx.lineTo(w-pad,gy);tctx.stroke();}
+  CH_KEYS.forEach(function(k,ci){
+    var lo=mins[k],hi2=maxs[k],span=hi2-lo||1;
+    tctx.beginPath();tctx.strokeStyle=CH_COLORS[ci];
+    tctx.lineWidth=(k==='fires'||k==='delta')?1.4:1.1;
+    tctx.setLineDash(k==='delta'?[2,3]:[]);
+    for(var j=0;j<n;j++){
+      var x=pad+uw*(j/(n-1)), y=pad+uh*(1-(hist[j][k]-lo)/span);
+      j===0?tctx.moveTo(x,y):tctx.lineTo(x,y);
+    }
+    tctx.stroke();tctx.setLineDash([]);
+  });
+}
+
+// ── Sliders ───────────────────────────────────────────────────────
+var SLMAP={dI:'lI',dR:'lR',dA:'dAl',kp:'lK',lk:'lL',thr:'lT',beta:'lB',alpha:'lA2',rad:'lRad',spd:'lSpd'};
+function updateLabels(){
+  for(var id in SLMAP)
+    document.getElementById(SLMAP[id]).textContent=(+document.getElementById(id).value/100).toFixed(2);
+}
+for(var sid in SLMAP) document.getElementById(sid).addEventListener('input',updateLabels);
+updateLabels();
+
+// ── Injection ─────────────────────────────────────────────────────
+function gxy(e){
+  var r=cv.getBoundingClientRect();
+  return{x:Math.floor((e.clientX-r.left)/r.width*W),
+         y:Math.floor((e.clientY-r.top)/r.height*H)};
+}
+function inject(e){
+  var p=gxy(e),rad=sli('rad');
+  for(var dy=-rad;dy<=rad;dy++) for(var dx=-rad;dx<=rad;dx++){
+    var xx=p.x+dx,yy=p.y+dy;
+    if(xx<0||xx>=W||yy<0||yy>=H||dx*dx+dy*dy>rad*rad) continue;
+    var i=gi(xx,yy);
+    if(currentMode===0){ fA[i]+=1.5; }
+    else if(currentMode===1){ gsV[i]=cl(gsV[i]+0.5,0,1); gsU[i]=cl(gsU[i]-0.3,0,1); }
+    else { exV[i]+=1.5; }
+  }
+}
+cv.addEventListener('mousedown',function(e){dragging=true;inject(e);});
+cv.addEventListener('mousemove',function(e){if(dragging)inject(e);});
+window.addEventListener('mouseup',function(){dragging=false;});
+cv.addEventListener('touchstart',function(e){e.preventDefault();dragging=true;inject(e.touches[0]);},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(dragging)inject(e.touches[0]);},{passive:false});
+window.addEventListener('touchend',function(){dragging=false;});
+
+// ── Controls ──────────────────────────────────────────────────────
+function togglePause(){
+  _paused=!_paused;
+  document.getElementById('pbtn').textContent=_paused?'Resume':'Pause';
+}
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();togglePause();}
+  else if(e.key==='r'||e.key==='R') doRandom();
+  else if(e.key==='s'||e.key==='S') doSeed();
+  else if(e.key==='0') doReset();
+});
+
+// ── Loop ──────────────────────────────────────────────────────────
+function loop(){
+  if(!_paused){
+    var spd=Math.max(1,sli('spd'));
+    for(var i=0;i<spd;i++) doStep();
+  }
+  renderField();
+  renderTS();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISAR Open Rewriter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300..700&family=Inter:wght@300..600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root {
+  --bg:#0f0f0d; --surface:#161614; --surface2:#1c1c19; --border:rgba(255,255,255,0.07);
+  --text:#d4d3d0; --muted:#6b6a67; --faint:#3a3937;
+  --teal:#4f98a3; --teal-dim:#2a5a62; --orange:#fdab43; --orange-dim:#7a4e1a;
+  --purple:#a86fdf; --green:#6daa45; --red:#dd6974;
+  --font-mono:'JetBrains Mono',monospace; --font-body:'Inter',sans-serif;
+  --r:6px;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-body);font-size:14px}
+
+/* LAYOUT */
+#app{display:grid;grid-template-columns:1fr 320px;grid-template-rows:48px 1fr 180px;height:100vh}
+#topbar{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--border);background:var(--surface)}
+#canvas-wrap{position:relative;overflow:hidden;background:var(--bg)}
+canvas{display:block;width:100%;height:100%}
+#sidebar{grid-row:2/4;border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;background:var(--surface)}
+#trace-panel{border-top:1px solid var(--border);background:var(--surface2);overflow:hidden;display:flex;flex-direction:column}
+
+/* TOPBAR */
+#logo{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--teal);white-space:nowrap}
+#logo svg{flex-shrink:0}
+#input-wrap{flex:1;display:flex;align-items:center;gap:8px;max-width:600px}
+#term-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;font-family:var(--font-mono);font-size:13px;color:var(--text);outline:none}
+#term-input:focus{border-color:var(--teal)}
+.btn{padding:6px 14px;border-radius:var(--r);font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text);transition:all 140ms ease}
+.btn:hover{background:var(--faint);color:var(--text)}
+.btn.primary{background:var(--teal-dim);border-color:var(--teal);color:var(--teal)}
+.btn.primary:hover{background:var(--teal);color:#000}
+.btn.danger{background:transparent;border-color:var(--red);color:var(--red)}
+.btn.danger:hover{background:var(--red);color:#000}
+#presets{display:flex;gap:6px}
+.preset{padding:4px 10px;border-radius:var(--r);font-family:var(--font-mono);font-size:11px;cursor:pointer;border:1px solid var(--faint);background:transparent;color:var(--muted);transition:all 120ms}
+.preset:hover{border-color:var(--teal);color:var(--teal)}
+#speed-wrap{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+input[type=range]{width:70px;accent-color:var(--teal)}
+
+/* SIDEBAR */
+#sidebar h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 14px 8px;border-bottom:1px solid var(--border)}
+#carrier{padding:10px 14px;display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-family:var(--font-mono);font-size:12px}
+.kv{display:contents}
+.kv .k{color:var(--muted)}
+.kv .v{color:var(--text);text-align:right;font-weight:500}
+.kv .v.hi{color:var(--teal)}
+.kv .v.warn{color:var(--orange)}
+.kv .v.ok{color:var(--green)}
+#divider{height:1px;background:var(--border);margin:4px 0}
+#open-boundary{padding:10px 14px}
+#open-boundary h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+#boundary-list{display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto}
+.boundary-item{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-family:var(--font-mono);font-size:11px}
+.boundary-item .bterm{flex:1;color:var(--orange)}
+.boundary-item .bremove{cursor:pointer;color:var(--muted);font-size:14px;line-height:1}
+.boundary-item .bremove:hover{color:var(--red)}
+#inject-wrap{display:flex;gap:6px;margin-top:8px}
+#inject-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-family:var(--font-mono);font-size:11px;color:var(--text);outline:none}
+#inject-input:focus{border-color:var(--orange)}
+#inject-btn{padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid var(--orange-dim);background:transparent;color:var(--orange);transition:all 120ms}
+#inject-btn:hover{background:var(--orange);color:#000}
+#normal-form-wrap{padding:10px 14px;border-top:1px solid var(--border)}
+#normal-form-wrap h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+#normal-form{font-family:var(--font-mono);font-size:11px;color:var(--green);word-break:break-all;line-height:1.5;max-height:60px;overflow-y:auto}
+
+/* TRACE */
+#trace-panel h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 14px 6px;border-bottom:1px solid var(--border);flex-shrink:0}
+#trace-list{flex:1;overflow-y:auto;padding:6px 0}
+.trace-step{display:flex;align-items:baseline;gap:8px;padding:4px 14px;cursor:pointer;transition:background 100ms;border-left:2px solid transparent}
+.trace-step:hover{background:var(--surface2)}
+.trace-step.active{background:var(--surface2);border-left-color:var(--teal)}
+.trace-step .step-n{font-family:var(--font-mono);font-size:10px;color:var(--faint);min-width:24px;text-align:right}
+.trace-step .step-rule{font-size:10px;color:var(--purple);min-width:28px;font-family:var(--font-mono)}
+.trace-step .step-term{font-family:var(--font-mono);font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
+.trace-step .step-delta{font-size:10px;font-family:var(--font-mono);margin-left:auto}
+.delta-shrink{color:var(--green)}
+.delta-grow{color:var(--orange)}
+.delta-same{color:var(--muted)}
+
+/* status bar */
+#statusbar{position:absolute;bottom:8px;left:10px;font-size:11px;font-family:var(--font-mono);color:var(--muted);pointer-events:none}
+#normalised-badge{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;font-size:11px;font-weight:700;padding:4px 14px;border-radius:99px;display:none;font-family:var(--font-mono)}
+#overflow-badge{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:4px 14px;border-radius:99px;display:none;font-family:var(--font-mono)}
+
+/* scrollbars */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--faint);border-radius:2px}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- TOP BAR -->
+  <header id="topbar">
+    <div id="logo">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-label="ISAR">
+        <circle cx="10" cy="10" r="8" stroke="#4f98a3" stroke-width="1.2"/>
+        <path d="M10 4 L10 16 M4 10 L16 10" stroke="#4f98a3" stroke-width="1.2" stroke-linecap="round"/>
+        <circle cx="10" cy="10" r="2" fill="#4f98a3"/>
+      </svg>
+      ISAR Solver
+    </div>
+    <div id="input-wrap">
+      <input id="term-input" type="text" placeholder="Enter term: S K K x  or  i(i(i(ii)))  …" spellcheck="false">
+      <button class="btn primary" id="run-btn">Reduce</button>
+      <button class="btn" id="step-btn">Step</button>
+      <button class="btn danger" id="reset-btn">Reset</button>
+    </div>
+    <div id="presets">
+      <button class="preset" data-term="S K K">SKK=I</button>
+      <button class="preset" data-term="S (K S) K">B</button>
+      <button class="preset" data-term="S K">SK</button>
+      <button class="preset" data-term="K I">A</button>
+      <button class="preset" data-term="S (S (K S) K) (K I)">Y-step</button>
+      <button class="preset" data-term="i(i(i(ii)))">S(ι)</button>
+    </div>
+    <div id="speed-wrap">
+      <span>speed</span>
+      <input type="range" id="speed" min="1" max="10" value="5">
+    </div>
+  </header>
+
+  <!-- CANVAS -->
+  <main id="canvas-wrap">
+    <canvas id="gl"></canvas>
+    <div id="statusbar">nodes: <span id="node-count">0</span> · step: <span id="cur-step">0</span></div>
+    <div id="normalised-badge">✓ Normal Form</div>
+    <div id="overflow-badge">⚠ Reduction limit reached</div>
+  </main>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <h2>Carrier Fingerprint</h2>
+    <div id="carrier">
+      <div class="kv"><span class="k">S-weight</span><span class="v" id="cf-s">—</span></div>
+      <div class="kv"><span class="k">K-weight</span><span class="v" id="cf-k">—</span></div>
+      <div class="kv"><span class="k">I-weight</span><span class="v" id="cf-i">—</span></div>
+      <div class="kv"><span class="k">ι-weight</span><span class="v" id="cf-iota">—</span></div>
+      <div class="kv"><span class="k">App nodes</span><span class="v" id="cf-app">—</span></div>
+      <div class="kv"><span class="k">Free vars</span><span class="v" id="cf-free">—</span></div>
+      <div class="kv"><span class="k">Depth</span><span class="v" id="cf-depth">—</span></div>
+      <div class="kv"><span class="k">Size</span><span class="v" id="cf-size">—</span></div>
+      <div class="kv"><span class="k">Redexes</span><span class="v" id="cf-redex">—</span></div>
+      <div class="kv"><span class="k">Δ size</span><span class="v" id="cf-delta">—</span></div>
+    </div>
+    <div id="divider"></div>
+    <div id="open-boundary">
+      <h3>Open Boundary — inject term</h3>
+      <div id="boundary-list"></div>
+      <div id="inject-wrap">
+        <input id="inject-input" type="text" placeholder="e.g.  x  or  K z">
+        <button id="inject-btn">Inject</button>
+      </div>
+    </div>
+    <div id="normal-form-wrap">
+      <h3>Current term</h3>
+      <div id="normal-form">—</div>
+    </div>
+  </aside>
+
+  <!-- TRACE -->
+  <section id="trace-panel">
+    <h2>Reduction Trace</h2>
+    <div id="trace-list"></div>
+  </section>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  TERM REPRESENTATION
+//  Leaf: {t:'S'|'K'|'I'|'iota'|'var', name?:string}
+//  App:  {t:'app', f:Term, a:Term}
+// ═══════════════════════════════════════════════════════════
+const Leaf = (t, name) => ({t, name});
+const App  = (f, a)    => ({t:'app', f, a});
+
+function termEq(a,b){
+  if(a.t!==b.t) return false;
+  if(a.t==='app') return termEq(a.f,b.f)&&termEq(a.a,b.a);
+  return a.name===b.name;
+}
+
+function cloneTerm(t){
+  if(t.t==='app') return App(cloneTerm(t.f),cloneTerm(t.a));
+  return {...t};
+}
+
+function termSize(t){
+  if(t.t==='app') return 1+termSize(t.f)+termSize(t.a);
+  return 1;
+}
+
+function termDepth(t){
+  if(t.t==='app') return 1+Math.max(termDepth(t.f),termDepth(t.a));
+  return 0;
+}
+
+function countLeaves(t,pred){
+  if(t.t==='app') return countLeaves(t.f,pred)+countLeaves(t.a,pred);
+  return pred(t)?1:0;
+}
+
+function freeVars(t){
+  if(t.t==='var') return new Set([t.name]);
+  if(t.t==='app'){const a=freeVars(t.f);freeVars(t.a).forEach(v=>a.add(v));return a;}
+  return new Set();
+}
+
+function prettyPrint(t, prec=0){
+  if(t.t==='app'){
+    const s=prettyPrint(t.f,0)+' '+prettyPrint(t.a,1);
+    return prec>0?'('+s+')':s;
+  }
+  if(t.t==='iota') return 'ι';
+  return t.t==='var'?t.name:t.t;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PARSER  — handles S K I (parens) and i / ι for iota, vars
+// ═══════════════════════════════════════════════════════════
+function parse(src){
+  src = src.trim().replace(/ι/g,'i').replace(/\s+/g,' ');
+  let pos=0;
+  const peek=()=>pos<src.length?src[pos]:null;
+  const eat=()=>src[pos++];
+
+  function parseAtom(){
+    while(peek()===' ') eat();
+    if(!peek()) return null;
+    if(peek()==='('){
+      eat(); // (
+      const e=parseExpr();
+      while(peek()===' ') eat();
+      if(peek()===')') eat();
+      return e;
+    }
+    // read token
+    let tok='';
+    while(peek()&&peek()!==' '&&peek()!=='('&&peek()!==')') tok+=eat();
+    if(!tok) return null;
+    if(tok==='S') return Leaf('S');
+    if(tok==='K') return Leaf('K');
+    if(tok==='I') return Leaf('I');
+    if(tok==='i'||tok==='iota') return Leaf('iota');
+    // multi-char: try head  e.g. "SKK" → App(App(S,K),K)
+    if(tok.length>1){
+      // re-inject
+      const saved=pos; pos-=tok.length-1;
+      const head=parseAtom();
+      return head;
+    }
+    return Leaf('var',tok);
+  }
+
+  function parseExpr(){
+    const atoms=[];
+    while(true){
+      while(peek()===' ') eat();
+      if(!peek()||peek()===')') break;
+      const a=parseAtom();
+      if(!a) break;
+      atoms.push(a);
+    }
+    if(!atoms.length) return Leaf('var','?');
+    return atoms.reduce((f,a)=>App(f,a));
+  }
+
+  // Special: if input has i( patterns we need left-assoc application
+  // Re-parse with full parenthesised iota syntax
+  // i.e. "i(i(ii))" => App(iota, App(iota, App(iota,iota)))
+  // The generic parser handles this fine since i is a single char atom
+  // and parens group correctly. Let's verify by resetting.
+  pos=0;
+  return parseExpr();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ONE-STEP REDUCTION  (leftmost-outermost)
+//  Returns {term, rule} or null if normal form
+// ═══════════════════════════════════════════════════════════
+function reduce1(t){
+  // iota f  →  f S K
+  if(t.t==='app' && t.f.t==='iota'){
+    const f=t.a;
+    return {term: App(App(f,Leaf('S')),Leaf('K')), rule:'ι'};
+  }
+  // I x  →  x
+  if(t.t==='app' && t.f.t==='I'){
+    return {term: t.a, rule:'I'};
+  }
+  // K x y  →  x
+  if(t.t==='app' && t.f.t==='app' && t.f.f.t==='K'){
+    return {term: t.f.a, rule:'K'};
+  }
+  // S x y z  →  x z (y z)
+  if(t.t==='app' && t.f.t==='app' && t.f.f.t==='app' && t.f.f.f.t==='S'){
+    const x=t.f.f.a, y=t.f.a, z=t.a;
+    return {term: App(App(x,z),App(y,z)), rule:'S'};
+  }
+  // recurse leftmost
+  if(t.t==='app'){
+    const lf=reduce1(t.f);
+    if(lf) return {term: App(lf.term,t.a), rule:lf.rule};
+    const rf=reduce1(t.a);
+    if(rf) return {term: App(t.f,rf.term), rule:rf.rule};
+  }
+  return null;
+}
+
+// Count redexes
+function countRedexes(t){
+  if(t.t!=='app') return 0;
+  let n=0;
+  if(t.f.t==='iota') n++;
+  else if(t.f.t==='I') n++;
+  else if(t.f.t==='app'&&t.f.f.t==='K') n++;
+  else if(t.f.t==='app'&&t.f.f.t==='app'&&t.f.f.f.t==='S') n++;
+  return n+countRedexes(t.f)+countRedexes(t.a);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CARRIER FINGERPRINT
+// ═══════════════════════════════════════════════════════════
+function fingerprint(t, prevSize){
+  const size=termSize(t);
+  const delta=prevSize!=null?size-prevSize:null;
+  return {
+    S: countLeaves(t,l=>l.t==='S'),
+    K: countLeaves(t,l=>l.t==='K'),
+    I: countLeaves(t,l=>l.t==='I'),
+    iota: countLeaves(t,l=>l.t==='iota'),
+    app: (size-countLeaves(t,_=>true)),
+    free: freeVars(t).size,
+    depth: termDepth(t),
+    size,
+    redex: countRedexes(t),
+    delta,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CANVAS RENDERER  (2D, force-directed tree layout)
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('gl');
+const ctx = canvas.getContext('2d');
+
+let nodes=[], edges=[], animFrame=null;
+let camX=0, camY=0, camZoom=1;
+let dragging=false, dragStart={x:0,y:0}, camStart={x:0,y:0};
+
+function resize(){
+  canvas.width=canvas.clientWidth*devicePixelRatio;
+  canvas.height=canvas.clientHeight*devicePixelRatio;
+}
+window.addEventListener('resize',()=>{resize();buildLayout(currentTerm);draw();});
+resize();
+
+// Build a Reingold-Tilford style layout from the term
+let nodeId=0;
+function buildLayout(t){
+  nodeId=0;
+  nodes=[];edges=[];
+  if(!t) return;
+  const root=buildNode(t,null);
+  assignX(root,0);
+  // center
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  nodes.forEach(n=>{minX=Math.min(minX,n.x);maxX=Math.max(maxX,n.x);minY=Math.min(minY,n.y);maxY=Math.max(maxY,n.y);});
+  const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+  nodes.forEach(n=>{n.x-=cx;n.y-=cy;});
+  // auto-zoom
+  const W=canvas.width/devicePixelRatio, H=canvas.height/devicePixelRatio;
+  const spanX=maxX-minX||1, spanY=maxY-minY||1;
+  camZoom=Math.min((W-80)/spanX,(H-80)/spanY,2.5);
+  camX=0;camY=0;
+}
+
+function buildNode(t,parentId){
+  const id=nodeId++;
+  const depth=parentId!=null?nodes.find(n=>n.id===parentId).depth+1:0;
+  const isApp=t.t==='app';
+  const label=isApp?'@':t.t==='iota'?'ι':t.t==='var'?t.name:t.t;
+  const color=isApp?'#4f98a3':
+    t.t==='S'?'#a86fdf':t.t==='K'?'#fdab43':t.t==='I'?'#6daa45':
+    t.t==='iota'?'#dd6974':t.t==='var'?'#e8af34':'#aaa';
+  nodes.push({id,label,color,x:0,y:depth*60,depth,isApp,size:isApp?6:8,alpha:1});
+  if(parentId!=null) edges.push({a:parentId,b:id});
+  if(isApp){
+    buildNode(t.f,id);
+    buildNode(t.a,id);
+  }
+  return id;
+}
+
+// simple x-assign: give each leaf unique x, app = avg of children
+function assignX(nodeId,offset){
+  const node=nodes[nodeId];
+  // find children
+  const children=edges.filter(e=>e.a===nodeId).map(e=>e.b);
+  if(!children.length){
+    node.x=offset*50;
+    return offset+1;
+  }
+  let cur=offset;
+  children.forEach(c=>{cur=assignX(c,cur);});
+  const xs=children.map(c=>nodes[c].x);
+  node.x=(Math.min(...xs)+Math.max(...xs))/2;
+  return cur;
+}
+
+function draw(){
+  const W=canvas.width,H=canvas.height,dpr=devicePixelRatio;
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(W/2,H/2);
+  ctx.scale(camZoom*dpr,camZoom*dpr);
+  ctx.translate(camX,camY);
+
+  // edges
+  ctx.lineWidth=1/camZoom;
+  edges.forEach(e=>{
+    const a=nodes[e.a],b=nodes[e.b];
+    ctx.strokeStyle=`rgba(255,255,255,0.12)`;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  });
+
+  // nodes
+  nodes.forEach(n=>{
+    ctx.globalAlpha=n.alpha||1;
+    ctx.fillStyle=n.color;
+    ctx.beginPath();
+    if(n.isApp) ctx.rect(n.x-n.size/2,n.y-n.size/2,n.size,n.size);
+    else ctx.arc(n.x,n.y,n.size/2,0,Math.PI*2);
+    ctx.fill();
+    // label
+    ctx.fillStyle='rgba(255,255,255,0.7)';
+    ctx.font=`${9/camZoom}px JetBrains Mono,monospace`;
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(n.label,n.x,n.y-(n.size/2+5/camZoom));
+    ctx.globalAlpha=1;
+  });
+  ctx.restore();
+}
+
+// pan/zoom
+canvas.addEventListener('mousedown',e=>{dragging=true;dragStart={x:e.clientX,y:e.clientY};camStart={x:camX,y:camY}});
+canvas.addEventListener('mousemove',e=>{if(!dragging)return;camX=camStart.x+(e.clientX-dragStart.x)/camZoom;camY=camStart.y+(e.clientY-dragStart.y)/camZoom;draw();});
+canvas.addEventListener('mouseup',()=>dragging=false);
+canvas.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY>0?0.9:1.1;camZoom=Math.max(0.1,Math.min(10,camZoom*f));draw();},{passive:false});
+
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+let currentTerm=null;
+let traceHistory=[]; // [{term, rule, size}]
+let isRunning=false;
+let runTimer=null;
+let boundaryTerms=[]; // injected open-boundary terms
+
+function getDelay(){return 1100-document.getElementById('speed').value*100;}
+
+function setTerm(t){
+  currentTerm=t;
+  buildLayout(t);
+  updateSidebar();
+  draw();
+  document.getElementById('node-count').textContent=nodes.length;
+}
+
+function updateSidebar(){
+  if(!currentTerm){return;}
+  const prev=traceHistory.length>1?traceHistory[traceHistory.length-2].size:null;
+  const fp=fingerprint(currentTerm,prev);
+  const set=(id,val,cls)=>{const el=document.getElementById(id);el.textContent=val??'—';el.className='v'+(cls?' '+cls:'');};
+  set('cf-s',fp.S,fp.S>0?'hi':'');
+  set('cf-k',fp.K,fp.K>0?'hi':'');
+  set('cf-i',fp.I,fp.I>0?'hi':'');
+  set('cf-iota',fp.iota,fp.iota>0?'warn':'');
+  set('cf-app',fp.app);
+  set('cf-free',fp.free,fp.free>0?'warn':'');
+  set('cf-depth',fp.depth);
+  set('cf-size',fp.size);
+  set('cf-redex',fp.redex,fp.redex>0?'warn':'ok');
+  if(fp.delta!=null){
+    const sign=fp.delta>0?'+':'';
+    set('cf-delta',sign+fp.delta,fp.delta<0?'ok':fp.delta>0?'warn':'');
+  } else set('cf-delta','—');
+  document.getElementById('normal-form').textContent=prettyPrint(currentTerm);
+  document.getElementById('cur-step').textContent=traceHistory.length-1;
+}
+
+function addTrace(term, rule, prevSize){
+  const fp=fingerprint(term,prevSize);
+  traceHistory.push({term,rule,size:fp.size});
+  renderTrace();
+}
+
+function renderTrace(){
+  const list=document.getElementById('trace-list');
+  list.innerHTML='';
+  traceHistory.forEach((entry,i)=>{
+    const el=document.createElement('div');
+    el.className='trace-step'+(i===traceHistory.length-1?' active':'');
+    const prev=i>0?traceHistory[i-1].size:null;
+    const delta=prev!=null?entry.size-prev:null;
+    const deltaStr=delta!=null?(delta===0?'±0':(delta>0?'+'+delta:''+delta)):'init';
+    const deltaCls=delta==null?'delta-same':delta<0?'delta-shrink':delta>0?'delta-grow':'delta-same';
+    el.innerHTML=`<span class="step-n">${i}</span><span class="step-rule">${entry.rule||'—'}</span><span class="step-term">${prettyPrint(entry.term)}</span><span class="step-delta ${deltaCls}">${deltaStr}</span>`;
+    el.addEventListener('click',()=>{
+      setTerm(cloneTerm(entry.term));
+      document.querySelectorAll('.trace-step').forEach((e,j)=>e.classList.toggle('active',j===i));
+    });
+    list.appendChild(el);
+  });
+  list.scrollTop=list.scrollHeight;
+}
+
+function resetAll(){
+  currentTerm=null;traceHistory=[];boundaryTerms=[];isRunning=false;
+  if(runTimer) clearTimeout(runTimer);
+  nodes=[];edges=[];
+  draw();
+  document.getElementById('trace-list').innerHTML='';
+  document.getElementById('normal-form').textContent='—';
+  document.getElementById('normalised-badge').style.display='none';
+  document.getElementById('overflow-badge').style.display='none';
+  document.getElementById('boundary-list').innerHTML='';
+  ['cf-s','cf-k','cf-i','cf-iota','cf-app','cf-free','cf-depth','cf-size','cf-redex','cf-delta'].forEach(id=>document.getElementById(id).textContent='—');
+  document.getElementById('node-count').textContent='0';
+  document.getElementById('cur-step').textContent='0';
+}
+
+function startFromInput(){
+  const src=document.getElementById('term-input').value.trim();
+  if(!src) return;
+  resetAll();
+  try{
+    const t=parse(src);
+    addTrace(t,'init',null);
+    setTerm(t);
+  }catch(e){alert('Parse error: '+e.message);}
+}
+
+function stepOnce(){
+  if(!currentTerm) return false;
+  // apply open boundary: append injected terms as applications
+  let t=cloneTerm(currentTerm);
+  boundaryTerms.forEach(bt=>{t=App(t,cloneTerm(bt));});
+  if(boundaryTerms.length){
+    const prevSize=traceHistory.length?traceHistory[traceHistory.length-1].size:null;
+    addTrace(t,'inject',prevSize);
+    setTerm(t);
+    boundaryTerms=[];
+    renderBoundary();
+    return true;
+  }
+  const res=reduce1(t);
+  if(!res){
+    document.getElementById('normalised-badge').style.display='block';
+    isRunning=false;
+    return false;
+  }
+  const prevSize=traceHistory.length?traceHistory[traceHistory.length-1].size:null;
+  addTrace(res.term,res.rule,prevSize);
+  setTerm(res.term);
+  if(traceHistory.length>500){
+    document.getElementById('overflow-badge').style.display='block';
+    isRunning=false;
+    return false;
+  }
+  return true;
+}
+
+function runAuto(){
+  if(!isRunning) return;
+  const more=stepOnce();
+  if(more) runTimer=setTimeout(runAuto,getDelay());
+  else isRunning=false;
+}
+
+// Boundary
+function renderBoundary(){
+  const list=document.getElementById('boundary-list');
+  list.innerHTML='';
+  boundaryTerms.forEach((bt,i)=>{
+    const el=document.createElement('div');
+    el.className='boundary-item';
+    el.innerHTML=`<span class="bterm">${prettyPrint(bt)}</span><span class="bremove" title="remove">×</span>`;
+    el.querySelector('.bremove').addEventListener('click',()=>{boundaryTerms.splice(i,1);renderBoundary();});
+    list.appendChild(el);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EVENTS
+// ═══════════════════════════════════════════════════════════
+document.getElementById('run-btn').addEventListener('click',()=>{
+  if(!currentTerm){startFromInput();}
+  isRunning=true;
+  document.getElementById('normalised-badge').style.display='none';
+  document.getElementById('overflow-badge').style.display='none';
+  runAuto();
+});
+document.getElementById('step-btn').addEventListener('click',()=>{
+  if(!currentTerm) startFromInput();
+  else {document.getElementById('normalised-badge').style.display='none';document.getElementById('overflow-badge').style.display='none';stepOnce();}
+});
+document.getElementById('reset-btn').addEventListener('click',resetAll);
+document.getElementById('term-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){isRunning=true;startFromInput();document.getElementById('normalised-badge').style.display='none';document.getElementById('overflow-badge').style.display='none';runAuto();}
+});
+
+document.querySelectorAll('.preset').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.getElementById('term-input').value=btn.dataset.term;
+    resetAll();
+    startFromInput();
+    isRunning=true;
+    document.getElementById('normalised-badge').style.display='none';
+    runAuto();
+  });
+});
+
+document.getElementById('inject-btn').addEventListener('click',()=>{
+  const src=document.getElementById('inject-input').value.trim();
+  if(!src) return;
+  try{boundaryTerms.push(parse(src));renderBoundary();}catch(e){}
+  document.getElementById('inject-input').value='';
+});
+document.getElementById('inject-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){document.getElementById('inject-btn').click();}
+});
+
+draw();
+</script>
+</body>
+</html>

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IRAS — Lorentz Convergence Proof</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#07070f;color:#d0d0f0;font-family:'Fira Mono',monospace;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  header{padding:8px 16px;background:#0e0e24;border-bottom:1px solid #252560;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:13px;color:#7af;letter-spacing:.07em}
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  label{font-size:11px;color:#89a}
+  button{padding:4px 12px;background:#1a1e50;border:1px solid #3355bb;color:#adf;border-radius:4px;cursor:pointer;font-size:12px}
+  button:hover{background:#252a70}
+  button.active{background:#1a4a20;border-color:#3a3}
+  #panels{display:flex;flex:1;overflow:hidden;gap:1px;background:#111}
+  .panel{flex:1;display:flex;flex-direction:column;background:#07070f;overflow:hidden}
+  .panel-title{font-size:10px;color:#68a;padding:6px 10px;border-bottom:1px solid #151530;letter-spacing:.05em}
+  canvas{display:block;width:100%;flex:1}
+  #legend{position:absolute;bottom:28px;left:20px;font-size:10px;line-height:1.9;background:rgba(7,7,20,0.82);padding:6px 10px;border-radius:4px;border:1px solid #1a1a40}
+  .dot{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+</style>
+</head>
+<body>
+<header>
+  <h1>IRAS Lorentz Convergence Proof · Discrete→Continuous Embedding</h1>
+  <div class="controls">
+    <button id="btnSweep" class="active">▶ Run Sweep</button>
+    <button id="btnAnim">↻ Animate N↑</button>
+    <label>Wave nodes N:</label>
+    <button id="btn8">8</button>
+    <button id="btn24">24</button>
+    <button id="btn48">48</button>
+    <button id="btn96">96</button>
+    <button id="btn200">200</button>
+  </div>
+</header>
+<div id="panels">
+  <div class="panel" id="pLeft">
+    <div class="panel-title">LENGTH CONTRACTION · measured vs 1/γ · varying β &amp; N</div>
+    <canvas id="cvMain"></canvas>
+  </div>
+  <div class="panel" id="pRight">
+    <div class="panel-title">KL DIVERGENCE · shape fidelity vs β · varying N</div>
+    <canvas id="cvKL"></canvas>
+  </div>
+</div>
+<script>
+'use strict';
+
+const WAVE_SIGMA = 0.18;
+const BETA_STEPS = 200;
+const N_SERIES = [8, 16, 24, 48, 96, 200];
+const PALETTE = [
+  '#ff4466','#ff8844','#ffdd33','#44ff88','#44ccff','#aa88ff'
+];
+
+// ── Math helpers ──────────────────────────────────────────────────────────────
+function gamma(beta){ return 1/Math.sqrt(1-beta*beta+1e-14); }
+function invGamma(beta){ return Math.sqrt(1-beta*beta+1e-14); }
+
+function gaussianProfile(N, sigma, sigmaEff){
+  // Returns array of length N, normalised Gaussian with given sigma
+  const arr = [];
+  let sum = 0;
+  for(let i=0;i<N;i++){
+    const pos = i/(N-1) - 0.5;
+    const v = Math.exp(-0.5*(pos*pos)/(sigma*sigma));
+    arr.push(v); sum+=v;
+  }
+  const arrB = [];
+  let sumB = 0;
+  for(let i=0;i<N;i++){
+    const pos = i/(N-1) - 0.5;
+    const v = Math.exp(-0.5*(pos*pos)/(sigmaEff*sigmaEff));
+    arrB.push(v); sumB+=v;
+  }
+  return { P: arr.map(v=>v/sum), Q: arrB.map(v=>v/sumB) };
+}
+
+function spanCount(arr, threshold=0.1){
+  const mx = Math.max(...arr);
+  return arr.filter(v=>v>=threshold*mx).length;
+}
+
+function klDiv(P, Q){
+  const eps=1e-12;
+  let kl=0;
+  for(let i=0;i<P.length;i++){
+    const p=P[i]+eps, q=Q[i]+eps;
+    kl += p*Math.log(p/q);
+  }
+  return Math.max(0,kl);
+}
+
+// ── Sweep computation ───────────────────────────────────────────────────────
+function sweep(N_nodes){
+  const betas=[], theory=[], measured=[], kls=[];
+  for(let s=0;s<=BETA_STEPS;s++){
+    const beta = s/BETA_STEPS * 0.98;
+    const ig = invGamma(beta);
+    const sigmaEff = WAVE_SIGMA * ig; // contracted sigma in boosted frame
+    const {P, Q} = gaussianProfile(N_nodes, WAVE_SIGMA, sigmaEff);
+    const spanR = spanCount(P);
+    const spanB = spanCount(Q);
+    const meas = spanR > 0 ? spanB/spanR : 1;
+    betas.push(beta);
+    theory.push(ig);
+    measured.push(meas);
+    kls.push(klDiv(P, Q));
+  }
+  return {betas, theory, measured, kls};
+}
+
+// Pre-compute all series
+const allData = N_SERIES.map(n => ({N:n, ...sweep(n)}));
+
+// ── Canvas setup ────────────────────────────────────────────────────────────
+const cvMain = document.getElementById('cvMain');
+const cvKL   = document.getElementById('cvKL');
+const ctxM   = cvMain.getContext('2d');
+const ctxK   = cvKL.getContext('2d');
+
+function resizeCanvases(){
+  [cvMain, cvKL].forEach(cv=>{
+    cv.width  = cv.parentElement.clientWidth;
+    cv.height = cv.parentElement.clientHeight - 22; // minus title bar
+  });
+}
+window.addEventListener('resize', ()=>{ resizeCanvases(); drawAll(); });
+resizeCanvases();
+
+// ── Drawing ───────────────────────────────────────────────────────────────────
+const PAD = {l:52,r:24,t:20,b:44};
+
+function toScreen(cv, bx, by, bMax, yMin, yMax){
+  const W=cv.width, H=cv.height;
+  const pw=W-PAD.l-PAD.r, ph=H-PAD.t-PAD.b;
+  return [
+    PAD.l + bx/bMax * pw,
+    PAD.t + ph - (by-yMin)/(yMax-yMin)*ph
+  ];
+}
+
+function drawAxes(ctx, cv, xLabel, yLabel, yMin, yMax){
+  const W=cv.width, H=cv.height;
+  ctx.strokeStyle='#2a2a60'; ctx.lineWidth=1;
+  // Grid
+  for(let y=0;y<=5;y++){
+    const vy = yMin + (yMax-yMin)*y/5;
+    const [,sy] = toScreen(cv,0,vy,1,yMin,yMax);
+    ctx.beginPath(); ctx.setLineDash([3,5]);
+    ctx.moveTo(PAD.l,sy); ctx.lineTo(W-PAD.r,sy); ctx.stroke();
+    ctx.fillStyle='#5568a0'; ctx.font='9px Fira Mono,monospace';
+    ctx.fillText(vy.toFixed(2), 4, sy+3);
+  }
+  for(let x=0;x<=5;x++){
+    const vx=0.98*x/5;
+    const [sx] = toScreen(cv,vx,yMin,0.98,yMin,yMax);
+    ctx.beginPath(); ctx.setLineDash([3,5]);
+    ctx.moveTo(sx,PAD.t); ctx.lineTo(sx,H-PAD.b); ctx.stroke();
+    ctx.fillStyle='#5568a0'; ctx.font='9px Fira Mono,monospace';
+    ctx.fillText(vx.toFixed(2), sx-8, H-PAD.b+14);
+  }
+  ctx.setLineDash([]);
+  ctx.strokeStyle='#3344aa'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(PAD.l,PAD.t); ctx.lineTo(PAD.l,H-PAD.b); ctx.lineTo(W-PAD.r,H-PAD.b);
+  ctx.stroke();
+  ctx.fillStyle='#7090c0'; ctx.font='11px Fira Mono,monospace';
+  ctx.fillText(xLabel, W/2-20, H-6);
+  ctx.save(); ctx.translate(12, H/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText(yLabel, -30, 0); ctx.restore();
+}
+
+let visibleNs = new Set(N_SERIES);
+
+function drawMain(){
+  const cv=cvMain, ctx=ctxM;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  // bg
+  ctx.fillStyle='#07070f'; ctx.fillRect(0,0,cv.width,cv.height);
+  drawAxes(ctx,cv,'β (v/c)','contraction factor',0,1.05);
+
+  // Theoretical curve (white)
+  ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.lineWidth=2; ctx.setLineDash([]);
+  allData[0].betas.forEach((b,i)=>{
+    const [x,y]=toScreen(cv,b,allData[0].theory[i],0.98,0,1.05);
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }); ctx.stroke();
+
+  // Label
+  ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.font='9px Fira Mono,monospace';
+  ctx.fillText('1/γ (Lorentz theory)', PAD.l+8, PAD.t+14);
+
+  // Measured series
+  allData.forEach((d,idx)=>{
+    if(!visibleNs.has(d.N)) return;
+    const col = PALETTE[idx % PALETTE.length];
+    ctx.strokeStyle=col; ctx.lineWidth=1.2; ctx.setLineDash([4,3]);
+    ctx.beginPath();
+    d.betas.forEach((b,i)=>{
+      const [x,y]=toScreen(cv,b,d.measured[i],0.98,0,1.05);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }); ctx.stroke();
+
+    // Dots at every 20th sample
+    ctx.fillStyle=col;
+    d.betas.forEach((b,i)=>{
+      if(i%20!==0) return;
+      const [x,y]=toScreen(cv,b,d.measured[i],0.98,0,1.05);
+      ctx.beginPath(); ctx.arc(x,y,2.5,0,2*Math.PI); ctx.fill();
+    });
+  });
+
+  // Error band annotation at beta=0.8
+  const refBeta=0.8;
+  const ig=invGamma(refBeta);
+  const [xa,ya]=toScreen(cv,refBeta,ig,0.98,0,1.05);
+  ctx.strokeStyle='rgba(255,255,100,0.5)'; ctx.lineWidth=1; ctx.setLineDash([2,3]);
+  ctx.beginPath(); ctx.moveTo(xa,PAD.t); ctx.lineTo(xa,cv.height-PAD.b); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,220,80,0.8)'; ctx.font='9px Fira Mono,monospace';
+  ctx.fillText('β=0.8 → N↑ ⇒ converge', xa+4, ya-6);
+
+  drawLegend(ctx, cv);
+}
+
+function drawKL(){
+  const cv=cvKL, ctx=ctxK;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#07070f'; ctx.fillRect(0,0,cv.width,cv.height);
+
+  const klMax = 1.2;
+  drawAxes(ctx,cv,'β (v/c)','KL divergence',0,klMax);
+
+  // KL=0 reference
+  const [,yz]=toScreen(cv,0,0,0.98,0,klMax);
+  ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1.5; ctx.setLineDash([6,4]);
+  ctx.beginPath(); ctx.moveTo(PAD.l,yz); ctx.lineTo(cv.width-PAD.r,yz); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.font='9px Fira Mono,monospace';
+  ctx.fillText('KL=0 (perfect continuous embedding)', PAD.l+6, yz-5);
+
+  allData.forEach((d,idx)=>{
+    if(!visibleNs.has(d.N)) return;
+    const col=PALETTE[idx%PALETTE.length];
+    ctx.strokeStyle=col; ctx.lineWidth=1.4; ctx.setLineDash([]);
+    ctx.beginPath();
+    d.betas.forEach((b,i)=>{
+      const kl=Math.min(d.kls[i],klMax);
+      const [x,y]=toScreen(cv,b,kl,0.98,0,klMax);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }); ctx.stroke();
+  });
+
+  // Shade under N=200 as "residual quantization error"
+  const d200=allData.find(d=>d.N===200);
+  if(d200 && visibleNs.has(200)){
+    ctx.beginPath();
+    d200.betas.forEach((b,i)=>{
+      const kl=Math.min(d200.kls[i],klMax);
+      const [x,y]=toScreen(cv,b,kl,0.98,0,klMax);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    });
+    const [xe,ye]=toScreen(cv,0.98,0,0.98,0,klMax);
+    const [xs,ys]=toScreen(cv,0,0,0.98,0,klMax);
+    ctx.lineTo(xe,ye); ctx.lineTo(xs,ys); ctx.closePath();
+    ctx.fillStyle='rgba(170,136,255,0.07)';
+    ctx.fill();
+  }
+
+  // Annotation: continuum limit
+  const [ax,ay]=toScreen(cv,0.5,0.05,0.98,0,klMax);
+  ctx.fillStyle='rgba(140,255,140,0.7)'; ctx.font='9px Fira Mono,monospace';
+  ctx.fillText('N↑ ⇒ KL → 0  (continuum limit)', ax, ay);
+
+  drawLegend(ctx, cv);
+}
+
+function drawLegend(ctx, cv){
+  let lx=PAD.l+8, ly=PAD.t+30;
+  // Lorentz theory
+  ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.lineWidth=2; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx+24,ly); ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.8)'; ctx.font='9px Fira Mono,monospace';
+  ctx.fillText('1/γ theory', lx+28, ly+3);
+  ly+=14;
+  allData.forEach((d,idx)=>{
+    if(!visibleNs.has(d.N)) return;
+    const col=PALETTE[idx%PALETTE.length];
+    ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx+24,ly); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=col; ctx.font='9px Fira Mono,monospace';
+    ctx.fillText(`N=${d.N}`, lx+28, ly+3);
+    ly+=13;
+  });
+}
+
+function drawAll(){ drawMain(); drawKL(); }
+
+// ── Animation: cycle through N values to show convergence ───────────────────────
+let animating=false, animFrame=null, animIdx=0;
+const animNs=[8,16,24,48,96,200];
+
+function animStep(){
+  visibleNs = new Set([animNs[animIdx]]);
+  drawAll();
+  animIdx = (animIdx+1) % animNs.length;
+  animFrame = setTimeout(()=>requestAnimationFrame(animStep), 700);
+}
+
+document.getElementById('btnAnim').addEventListener('click',()=>{
+  if(animating){
+    clearTimeout(animFrame); animating=false;
+    visibleNs=new Set(N_SERIES);
+    document.getElementById('btnAnim').textContent='↻ Animate N↑';
+    document.getElementById('btnAnim').classList.remove('active');
+    drawAll();
+  } else {
+    animating=true; animIdx=0;
+    document.getElementById('btnAnim').textContent='⏸ Stop';
+    document.getElementById('btnAnim').classList.add('active');
+    animStep();
+  }
+});
+
+document.getElementById('btnSweep').addEventListener('click',()=>{
+  if(animating){ clearTimeout(animFrame); animating=false; }
+  visibleNs=new Set(N_SERIES);
+  document.getElementById('btnAnim').textContent='↻ Animate N↑';
+  document.getElementById('btnAnim').classList.remove('active');
+  drawAll();
+});
+
+// Per-N toggle buttons
+[8,24,48,96,200].forEach(n=>{
+  const b=document.getElementById('btn'+n);
+  if(!b) return;
+  b.addEventListener('click',()=>{
+    if(visibleNs.has(n)){ visibleNs.delete(n); b.classList.remove('active'); }
+    else { visibleNs.add(n); b.classList.add('active'); }
+    drawAll();
+  });
+  b.classList.add('active');
+});
+document.getElementById('btn8').classList.add('active');
+
+drawAll();
+</script>
+</body>
+</html>
