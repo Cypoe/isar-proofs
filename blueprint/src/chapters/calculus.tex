@@ -91,7 +91,7 @@ The derived combinator simulation and conservative translation are verified in \
 \begin{align*}
 \text{derived\_s} &\triangleq (\mathbf{comp} \cdot (\mathbf{comp} \cdot \mathbf{dup})) \\
 &\quad \cdot \big((\mathbf{swap} \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot ((\mathbf{comp} \cdot \mathbf{comp}) \cdot \mathbf{swap}))) \cdot \mathbf{norm}\big)
-\end{align}
+\end{align*}
 
 \begin{theorem}[Derived S reduction]
 \lean{ISAR.derived_s_beta}
