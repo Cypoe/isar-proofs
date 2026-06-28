@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>ITerm Reducer — ISAR</title>
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:#171614;--surface:#1c1b19;--surface2:#222120;--border:#393836;
+      --text:#cdccca;--muted:#797876;--faint:#5a5957;
+      --primary:#4f98a3;--primary-hl:color-mix(in oklab,#4f98a3 14%,#1c1b19);
+      --green:#6daa45;--gold:#e8af34;--purple:#a86fdf;--error:#dd6974;
+      --radius:.5rem;--font:'Satoshi',system-ui,sans-serif;
+    }
+    [data-theme=light]{
+      --bg:#f7f6f2;--surface:#f9f8f5;--surface2:#f3f0ec;--border:#d4d1ca;
+      --text:#28251d;--muted:#7a7974;--faint:#bab9b4;
+      --primary:#01696f;--primary-hl:color-mix(in oklab,#01696f 10%,#f9f8f5);
+      --green:#437a22;--gold:#d19900;--purple:#7a39bb;--error:#a13544;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{-webkit-font-smoothing:antialiased;scroll-behavior:smooth}
+    body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100dvh;line-height:1.6;font-size:1rem}
+    a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+    code,pre{font-family:'Fira Code','Cascadia Code',monospace;font-size:.85em}
+    .page{max-width:960px;margin:0 auto;padding:2rem 1.5rem 5rem}
+    header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:1rem;margin-bottom:2rem;gap:1rem;flex-wrap:wrap}
+    nav{display:flex;gap:1.25rem;font-size:.875rem}
+    nav a{color:var(--muted)}nav a:hover{color:var(--text)}
+    h1{font-size:clamp(1.6rem,1rem+2.5vw,2.4rem);font-weight:700;letter-spacing:-.02em;line-height:1.15;margin-bottom:.3rem}
+    h2{font-size:1rem;font-weight:600;letter-spacing:-.01em;margin-bottom:.5rem}
+    .subtitle{color:var(--muted);font-size:.9rem;max-width:62ch;margin-bottom:1.5rem}
+    .theorem-ref{font-size:.72rem;font-family:monospace;color:var(--purple);background:color-mix(in oklab,var(--purple) 12%,var(--surface));padding:.15em .5em;border-radius:.25rem;white-space:nowrap}
+    .toggle{background:none;border:1px solid var(--border);border-radius:.375rem;color:var(--muted);padding:.3rem .6rem;cursor:pointer;font-size:.875rem;transition:color 160ms,border-color 160ms}
+    .toggle:hover{color:var(--text);border-color:var(--text)}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem 1.5rem}
+    .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+    .btn{display:inline-flex;align-items:center;gap:.4em;background:var(--primary);color:#fff;border:none;border-radius:var(--radius);padding:.45rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer;transition:background 160ms}
+    .btn:hover{background:color-mix(in oklab,var(--primary) 80%,#000)}
+    .btn.ghost{background:none;border:1px solid var(--border);color:var(--text)}
+    .btn.ghost:hover{border-color:var(--primary);color:var(--primary)}
+    .btn.danger{background:var(--error)}
+    .btn.sm{padding:.3rem .7rem;font-size:.78rem}
+    @media(max-width:480px){.page{padding:1.25rem 1rem 3rem}}
+    .io-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+    @media(max-width:600px){.io-grid{grid-template-columns:1fr}}
+    textarea{width:100%;min-height:72px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;font-family:'Fira Code','Cascadia Code',monospace;font-size:.85rem;resize:vertical;outline:none;transition:border-color 160ms}
+    textarea:focus{border-color:var(--primary)}
+    .steps-wrap{margin-top:1rem;display:flex;flex-direction:column;gap:.4rem;max-height:440px;overflow-y:auto}
+    .step{display:flex;gap:.75rem;align-items:flex-start;font-size:.82rem;font-family:monospace;padding:.4rem .6rem;border-radius:.375rem;background:var(--surface2);border:1px solid transparent}
+    .step.redex{border-color:color-mix(in oklab,var(--gold) 35%,var(--border))}
+    .step.normal{background:color-mix(in oklab,var(--green) 8%,var(--surface2));border-color:color-mix(in oklab,var(--green) 30%,var(--border))}
+    .step.error{background:color-mix(in oklab,var(--error) 8%,var(--surface2));border-color:color-mix(in oklab,var(--error) 30%,var(--border))}
+    .step-n{color:var(--faint);min-width:2rem;text-align:right;padding-top:.05rem}
+    .step-rule{color:var(--gold);min-width:5rem}
+    .step-term{color:var(--text);word-break:break-all;flex:1}
+    .step.normal .step-term{color:var(--green)}
+    .badge{display:inline-flex;align-items:center;gap:.3em;font-size:.7rem;font-family:monospace;text-transform:uppercase;letter-spacing:.07em;padding:.2em .55em;border-radius:.25rem}
+    .badge-green{color:var(--green);background:color-mix(in oklab,var(--green) 12%,var(--surface))}
+    .badge-gold{color:var(--gold);background:color-mix(in oklab,var(--gold) 12%,var(--surface))}
+    .badge-muted{color:var(--muted);background:var(--surface2)}
+    .info-row{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-top:.75rem;font-size:.8rem;color:var(--muted)}
+    .presets{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem}
+    .preset-btn{font-size:.75rem;padding:.22rem .6rem;background:var(--surface2);border:1px solid var(--border);border-radius:.375rem;cursor:pointer;color:var(--muted);font-family:monospace;transition:border-color 160ms,color 160ms}
+    .preset-btn:hover{border-color:var(--primary);color:var(--primary)}
+    details{margin-top:1.25rem}
+    summary{font-size:.82rem;color:var(--muted);cursor:pointer;user-select:none;margin-bottom:.5rem}
+    .rules-table{width:100%;font-size:.8rem;font-family:monospace;border-collapse:collapse}
+    .rules-table td,.rules-table th{padding:.3rem .6rem;border:1px solid var(--border);text-align:left}
+    .rules-table th{color:var(--muted);font-weight:500;background:var(--surface2)}
+    .rules-table td:first-child{color:var(--gold)}
+  </style>
+</head>
+<body>
+<div class="page">
+<header>
+    <strong style="font-size:0.95rem;letter-spacing:-0.01em;">ISAR</strong>
+    <nav>
+      <a href="../">Home</a>
+      <a href="../blueprint/">Blueprint</a>
+      <a href="../visualizations/">Demos</a>
+      <a href="../docs/">Docs</a>
+    </nav>
+    <button class="toggle" data-theme-toggle aria-label="Toggle theme">&#9788;</button>
+  </header>
+  <h1>ITerm Reducer</h1>
+  <p class="subtitle">Step-by-step reduction of <code>ITerm</code> expressions to normal form. Rules from <span class="theorem-ref">ISAR.IStep</span> · confluence from <span class="theorem-ref">ISAR.IRed_confluence</span> · unique normal forms from <span class="theorem-ref">ISAR.isar_fragment_unique_normal_forms</span>.</p>
+
+  <div class="card">
+    <h2>Presets</h2>
+    <div class="presets" id="presets"></div>
+    <div class="io-grid">
+      <div>
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:.35rem;">Input term</div>
+        <textarea id="input" spellcheck="false" placeholder="e.g. comp · f · g · x"></textarea>
+      </div>
+      <div>
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:.35rem;">Normal form</div>
+        <textarea id="output" readonly spellcheck="false" placeholder="—"></textarea>
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn" onclick="runReduction()">&#9654; Reduce</button>
+      <button class="btn ghost" onclick="stepOnce()">Step once</button>
+      <button class="btn ghost sm" onclick="clearAll()">Clear</button>
+      <label style="font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:.4rem;cursor:pointer;">
+        <input type="checkbox" id="parallel" style="cursor:pointer"/> Parallel steps
+      </label>
+    </div>
+    <div class="info-row" id="info-row"></div>
+  </div>
+
+  <div class="steps-wrap" id="steps"></div>
+
+  <details>
+    <summary>Reduction rules (IStep)</summary>
+    <table class="rules-table">
+      <tr><th>Name</th><th>Pattern</th><th>Result</th></tr>
+      <tr><td>norm-elim</td><td>norm · x</td><td>x</td></tr>
+      <tr><td>konst-elim</td><td>konst · x · y</td><td>x</td></tr>
+      <tr><td>comp-elim</td><td>comp · f · g · x</td><td>f · (g · x)</td></tr>
+      <tr><td>dup-elim</td><td>dup · f · x</td><td>f · x · x</td></tr>
+      <tr><td>swap-elim</td><td>swap · f · x · y</td><td>f · y · x</td></tr>
+      <tr><td>ss-elim</td><td>ss · x · y · z</td><td>(x · z) · (y · z)</td></tr>
+    </table>
+  </details>
+</div>
+
+<script>
+// ── Term representation ──────────────────────────────────────────────────────
+// { tag: 'atom', name: string } | { tag: 'app', fn: Term, arg: Term }
+
+const ATOMS = ['norm','konst','comp','dup','swap','ss','s','k'];
+
+function atom(name){ return {tag:'atom',name} }
+function app(fn,arg){ return {tag:'app',fn,arg} }
+
+function termEq(a,b){
+  if(a.tag!==b.tag) return false;
+  if(a.tag==='atom') return a.name===b.name;
+  return termEq(a.fn,b.fn)&&termEq(a.arg,b.arg);
+}
+
+function showTerm(t){
+  if(t.tag==='atom') return t.name;
+  const fn = t.fn.tag==='app' ? '('+showTerm(t.fn)+')' : showTerm(t.fn);
+  const arg = t.arg.tag==='app' ? '('+showTerm(t.arg)+')' : showTerm(t.arg);
+  return fn+' · '+arg;
+}
+
+// ── Parser ────────────────────────────────────────────────────────────────────
+// Supports: atoms, (…), · or space as application (left-assoc)
+function parse(src){
+  const tokens = tokenize(src);
+  let pos=0;
+  function peek(){ return tokens[pos] }
+  function consume(){ return tokens[pos++] }
+  function parseExpr(){
+    let left = parseAtom();
+    while(pos<tokens.length && peek()!==')'){
+      if(peek()==='·'||peek()==='.'){ consume(); }
+      left = app(left, parseAtom());
+    }
+    return left;
+  }
+  function parseAtom(){
+    if(pos>=tokens.length) throw new Error('unexpected end');
+    const t = consume();
+    if(t==='('){
+      const inner = parseExpr();
+      if(peek()!==')') throw new Error('expected )');
+      consume();
+      return inner;
+    }
+    return atom(t);
+  }
+  const result = parseExpr();
+  if(pos<tokens.length) throw new Error('unexpected token: '+tokens[pos]);
+  return result;
+}
+
+function tokenize(src){
+  const out=[];
+  let i=0;
+  while(i<src.length){
+    if(/\s/.test(src[i])){ i++; continue; }
+    if(src[i]==='('||src[i]===')'){ out.push(src[i++]); continue; }
+    if(src[i]==='·'||src[i]==='.'){ out.push('·'); i++; continue; }
+    // word
+    let w='';
+    while(i<src.length&&!/[\s().·]/.test(src[i])) w+=src[i++];
+    if(w) out.push(w.toLowerCase());
+  }
+  return out;
+}
+
+// ── Head-spine helpers ────────────────────────────────────────────────────────
+function spine(t){
+  const args=[];
+  while(t.tag==='app'){args.unshift(t.arg);t=t.fn;}
+  return {head:t,args};
+}
+function rebuild(head,args){ return args.reduce((f,a)=>app(f,a),head); }
+
+// ── Single step (outermost-leftmost) ─────────────────────────────────────────
+// Returns {term, rule} or null if normal form
+function istep(t){
+  if(t.tag==='atom') return null;
+  const {head,args}=spine(t);
+  if(head.tag==='atom'){
+    switch(head.name){
+      case 'norm': if(args.length>=1){ const [x,...rest]=args; return {term:rebuild(x,rest),rule:'norm-elim'}; } break;
+      case 'konst': if(args.length>=2){ const [x,y,...rest]=args; return {term:rebuild(x,rest),rule:'konst-elim'}; } break;
+      case 'k':    if(args.length>=2){ const [x,y,...rest]=args; return {term:rebuild(x,rest),rule:'K-elim'}; } break;
+      case 'comp': if(args.length>=3){ const [f,g,x,...rest]=args; return {term:rebuild(app(f,app(g,x)),rest),rule:'comp-elim'}; } break;
+      case 'dup':  if(args.length>=2){ const [f,x,...rest]=args; return {term:rebuild(app(app(f,x),x),rest),rule:'dup-elim'}; } break;
+      case 'swap': if(args.length>=3){ const [f,x,y,...rest]=args; return {term:rebuild(app(app(f,y),x),rest),rule:'swap-elim'}; } break;
+      case 'ss':   if(args.length>=3){ const [x,y,z,...rest]=args; return {term:rebuild(app(app(x,z),app(y,z)),rest),rule:'ss-elim'}; } break;
+      case 's':    if(args.length>=3){ const [x,y,z,...rest]=args; return {term:rebuild(app(app(x,z),app(y,z)),rest),rule:'S-elim'}; } break;
+    }
+  }
+  // congruence: try fn first, then arg
+  const fnStep=istep(t.fn);
+  if(fnStep) return {term:app(fnStep.term,t.arg),rule:fnStep.rule};
+  const argStep=istep(t.arg);
+  if(argStep) return {term:app(t.fn,argStep.term),rule:argStep.rule};
+  return null;
+}
+
+// ── Full reduction ────────────────────────────────────────────────────────────
+const MAX_STEPS=200;
+function reduce(t){
+  const trace=[];
+  let cur=t;
+  for(let i=0;i<MAX_STEPS;i++){
+    const r=istep(cur);
+    if(!r){ trace.push({term:cur,rule:'normal',n:i}); break; }
+    trace.push({term:cur,rule:r.rule,n:i});
+    if(termEq(r.term,cur)){ trace.push({term:r.term,rule:'normal',n:i+1}); break; }
+    cur=r.term;
+    if(i===MAX_STEPS-1) trace.push({term:cur,rule:'limit',n:i+1});
+  }
+  return trace;
+}
+
+// ── UI ────────────────────────────────────────────────────────────────────────
+const PRESETS=[
+  {label:'norm · x',src:'norm · x'},
+  {label:'konst · a · b',src:'konst · a · b'},
+  {label:'comp · f · g · x',src:'comp · f · g · x'},
+  {label:'dup · f · x',src:'dup · f · x'},
+  {label:'swap · f · x · y',src:'swap · f · x · y'},
+  {label:'ss · x · y · z',src:'ss · x · y · z'},
+  {label:'K·I·K·x',src:'konst · norm · konst · x'},
+  {label:'S·K·K·x',src:'ss · konst · konst · x'},
+  {label:'comp·comp·f·g·h·x',src:'comp · (comp · f · g) · h · x'},
+];
+
+const presetsEl=document.getElementById('presets');
+PRESETS.forEach(p=>{
+  const b=document.createElement('button');
+  b.className='preset-btn'; b.textContent=p.label;
+  b.onclick=()=>{ document.getElementById('input').value=p.src; runReduction(); };
+  presetsEl.appendChild(b);
+});
+
+let _trace=[];
+let _stepPos=0;
+
+function runReduction(){
+  const src=document.getElementById('input').value.trim();
+  if(!src){ clearAll(); return; }
+  try{
+    const t=parse(src);
+    _trace=reduce(t);
+    _stepPos=_trace.length;
+    renderTrace(_trace);
+  } catch(e){
+    renderError(e.message);
+  }
+}
+
+function stepOnce(){
+  const src=document.getElementById('input').value.trim();
+  if(!src) return;
+  if(_trace.length===0){
+    try{ const t=parse(src); _trace=reduce(t); _stepPos=0; } catch(e){ renderError(e.message); return; }
+  }
+  if(_stepPos<_trace.length) _stepPos++;
+  renderTrace(_trace.slice(0,_stepPos));
+}
+
+function clearAll(){
+  _trace=[]; _stepPos=0;
+  document.getElementById('steps').innerHTML='';
+  document.getElementById('output').value='';
+  document.getElementById('info-row').innerHTML='';
+}
+
+function renderError(msg){
+  const s=document.getElementById('steps');
+  s.innerHTML=`<div class="step error"><span class="step-n">!</span><span class="step-term">Parse error: ${msg}</span></div>`;
+  document.getElementById('output').value='';
+}
+
+function renderTrace(trace){
+  const s=document.getElementById('steps');
+  const last=trace[trace.length-1];
+  document.getElementById('output').value=showTerm(last.term);
+  const isNormal=last.rule==='normal';
+  const isLimit=last.rule==='limit';
+  s.innerHTML=trace.map(step=>{
+    const cls=step.rule==='normal'?'normal':step.rule==='limit'?'error':'redex';
+    const ruleLabel=step.rule==='normal'?'◆ normal form':step.rule==='limit'?'⚠ limit':'→ '+step.rule;
+    return `<div class="step ${cls}">
+      <span class="step-n">${step.n}</span>
+      <span class="step-rule">${ruleLabel}</span>
+      <span class="step-term">${showTerm(step.term)}</span>
+    </div>`;
+  }).join('');
+  s.scrollTop=s.scrollHeight;
+
+  const info=document.getElementById('info-row');
+  const steps=trace.length-1;
+  const badge=isNormal
+    ?`<span class="badge badge-green">✓ normal form</span>`
+    :isLimit?`<span class="badge badge-gold">⚠ step limit</span>`
+    :`<span class="badge badge-muted">${steps} steps shown</span>`;
+  info.innerHTML=`${badge} <span>${steps} reduction step${steps===1?'':'s'}</span>`;
+}
+
+document.getElementById('input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); runReduction(); }
+});
+</script>
+  <script>
+  (function(){
+    const btn=document.querySelector('[data-theme-toggle]'),root=document.documentElement;
+    let t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+    root.setAttribute('data-theme',t);
+    btn&&btn.addEventListener('click',()=>{t=t==='dark'?'light':'dark';root.setAttribute('data-theme',t)});
+  })();
+  </script>
+</body>
+</html>

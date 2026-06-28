@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Dialect Comparator — ISAR</title>
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:#171614;--surface:#1c1b19;--surface2:#222120;--border:#393836;
+      --text:#cdccca;--muted:#797876;--faint:#5a5957;
+      --primary:#4f98a3;--primary-hl:color-mix(in oklab,#4f98a3 14%,#1c1b19);
+      --green:#6daa45;--gold:#e8af34;--purple:#a86fdf;--error:#dd6974;
+      --radius:.5rem;--font:'Satoshi',system-ui,sans-serif;
+    }
+    [data-theme=light]{
+      --bg:#f7f6f2;--surface:#f9f8f5;--surface2:#f3f0ec;--border:#d4d1ca;
+      --text:#28251d;--muted:#7a7974;--faint:#bab9b4;
+      --primary:#01696f;--primary-hl:color-mix(in oklab,#01696f 10%,#f9f8f5);
+      --green:#437a22;--gold:#d19900;--purple:#7a39bb;--error:#a13544;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{-webkit-font-smoothing:antialiased;scroll-behavior:smooth}
+    body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100dvh;line-height:1.6;font-size:1rem}
+    a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+    code,pre{font-family:'Fira Code','Cascadia Code',monospace;font-size:.85em}
+    .page{max-width:960px;margin:0 auto;padding:2rem 1.5rem 5rem}
+    header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:1rem;margin-bottom:2rem;gap:1rem;flex-wrap:wrap}
+    nav{display:flex;gap:1.25rem;font-size:.875rem}
+    nav a{color:var(--muted)}nav a:hover{color:var(--text)}
+    h1{font-size:clamp(1.6rem,1rem+2.5vw,2.4rem);font-weight:700;letter-spacing:-.02em;line-height:1.15;margin-bottom:.3rem}
+    h2{font-size:1rem;font-weight:600;letter-spacing:-.01em;margin-bottom:.5rem}
+    .subtitle{color:var(--muted);font-size:.9rem;max-width:62ch;margin-bottom:1.5rem}
+    .theorem-ref{font-size:.72rem;font-family:monospace;color:var(--purple);background:color-mix(in oklab,var(--purple) 12%,var(--surface));padding:.15em .5em;border-radius:.25rem;white-space:nowrap}
+    .toggle{background:none;border:1px solid var(--border);border-radius:.375rem;color:var(--muted);padding:.3rem .6rem;cursor:pointer;font-size:.875rem;transition:color 160ms,border-color 160ms}
+    .toggle:hover{color:var(--text);border-color:var(--text)}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem 1.5rem}
+    .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+    .btn{display:inline-flex;align-items:center;gap:.4em;background:var(--primary);color:#fff;border:none;border-radius:var(--radius);padding:.45rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer;transition:background 160ms}
+    .btn:hover{background:color-mix(in oklab,var(--primary) 80%,#000)}
+    .btn.ghost{background:none;border:1px solid var(--border);color:var(--text)}
+    .btn.ghost:hover{border-color:var(--primary);color:var(--primary)}
+    .btn.danger{background:var(--error)}
+    .btn.sm{padding:.3rem .7rem;font-size:.78rem}
+    @media(max-width:480px){.page{padding:1.25rem 1rem 3rem}}
+    .compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+    @media(max-width:640px){.compare-grid{grid-template-columns:1fr}}
+    .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);display:flex;flex-direction:column}
+    .panel-head{padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+    .panel-head select{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:.375rem;padding:.3rem .5rem;font-size:.82rem;flex:1;cursor:pointer;outline:none}
+    .panel-head select:focus{border-color:var(--primary)}
+    .panel-body{padding:1rem;flex:1;display:flex;flex-direction:column;gap:.6rem;font-size:.82rem}
+    .field{display:flex;flex-direction:column;gap:.2rem}
+    .field-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+    .field-val{font-family:monospace;color:var(--text);background:var(--surface2);padding:.3rem .6rem;border-radius:.3rem;border:1px solid var(--border);word-break:break-all}
+    .field-val.green{color:var(--green)}
+    .field-val.gold{color:var(--gold)}
+    .field-val.muted{color:var(--muted)}
+    .field-val.red{color:var(--error)}
+    .diff-section{margin-top:1rem}
+    .diff-table{width:100%;font-size:.8rem;border-collapse:collapse}
+    .diff-table th,.diff-table td{padding:.35rem .75rem;border:1px solid var(--border);text-align:left;vertical-align:top}
+    .diff-table th{background:var(--surface2);color:var(--muted);font-weight:500}
+    .diff-table td:first-child{color:var(--muted);width:28%;font-size:.75rem}
+    .match{background:color-mix(in oklab,var(--green) 6%,var(--surface))}
+    .diff{background:color-mix(in oklab,var(--gold) 6%,var(--surface))}
+    .iota-orbit{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.5rem}
+    .orbit-step{display:flex;flex-direction:column;align-items:center;gap:.15rem}
+    .orbit-node{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:.8rem;font-weight:700;border:2px solid}
+    .orbit-arrow{color:var(--muted);font-size:1rem;line-height:1;padding-top:6px}
+    .orbit-label{font-size:.65rem;color:var(--muted)}
+    .example-box{background:var(--surface2);border:1px solid var(--border);border-radius:.375rem;padding:.6rem .8rem;font-family:monospace;font-size:.78rem;white-space:pre;overflow-x:auto}
+    textarea{width:100%;min-height:56px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:.6rem;font-family:'Fira Code',monospace;font-size:.82rem;resize:vertical;outline:none;transition:border-color 160ms}
+    textarea:focus{border-color:var(--primary)}
+    .unify-result{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem 1rem;font-size:.82rem;margin-top:.75rem;min-height:48px}
+    .unify-result .label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:.3rem}
+    .shared-nf{font-family:monospace;color:var(--primary)}
+  </style>
+</head>
+<body>
+<div class="page">
+<header>
+    <strong style="font-size:0.95rem;letter-spacing:-0.01em;">ISAR</strong>
+    <nav>
+      <a href="../">Home</a>
+      <a href="../blueprint/">Blueprint</a>
+      <a href="../visualizations/">Demos</a>
+      <a href="../docs/">Docs</a>
+    </nav>
+    <button class="toggle" data-theme-toggle aria-label="Toggle theme">&#9788;</button>
+  </header>
+  <h1>Dialect Comparator</h1>
+  <p class="subtitle">Compare any two ISAR dialects side-by-side. Different surface syntax, same InvariantLayer quotient — extensionally equal terms collapse to the same normal form. <span class="theorem-ref">ISAR.morphism_uniqueness</span></p>
+
+  <div class="compare-grid">
+    <div class="panel">
+      <div class="panel-head">
+        <select id="sel-a" onchange="render()"></select>
+        <span style="font-size:.72rem;color:var(--muted)">dialect A</span>
+      </div>
+      <div class="panel-body" id="body-a"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <select id="sel-b" onchange="render()"></select>
+        <span style="font-size:.72rem;color:var(--muted)">dialect B</span>
+      </div>
+      <div class="panel-body" id="body-b"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem">
+    <h2>Cross-dialect unification</h2>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:.75rem">Enter an ITerm-kernel expression. Both dialects compile it to ITerm; the shared normal form in InvariantLayer demonstrates extensional collapse.</p>
+    <div class="row" style="gap:.75rem">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:.25rem">Kernel expression</div>
+        <textarea id="unify-input" rows="2" placeholder="e.g.  konst · x · y"></textarea>
+      </div>
+    </div>
+    <div class="row" style="margin-top:.5rem">
+      <button class="btn" onclick="unify()">Unify in InvariantLayer</button>
+      <button class="btn ghost sm" onclick="document.getElementById('unify-input').value='konst · x · y';unify()">konst·x·y</button>
+      <button class="btn ghost sm" onclick="document.getElementById('unify-input').value='comp · f · g · x';unify()">comp·f·g·x</button>
+      <button class="btn ghost sm" onclick="document.getElementById('unify-input').value='ss · konst · konst · x';unify()">S·K·K·x</button>
+    </div>
+    <div class="unify-result" id="unify-result"><span style="color:var(--muted)">—</span></div>
+  </div>
+
+  <div class="diff-section">
+    <h2 style="margin-bottom:.75rem">Feature matrix</h2>
+    <div id="diff-table-wrap"></div>
+  </div>
+
+  <div style="margin-top:1.5rem">
+    <h2 style="margin-bottom:.75rem">Barker's Iota orbit</h2>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:.75rem">Iterating ι-application produces a closed orbit mapping to the four ISAR basis matrices. <span class="theorem-ref">ISAR.Iota_Dialect</span></p>
+    <div class="iota-orbit" id="iota-orbit"></div>
+  </div>
+</div>
+
+<script>
+// ── Dialect data ──────────────────────────────────────────────────────────────
+const DIALECTS = {
+  lambda:{
+    name:'Lambda Calculus', lean:'ISAR.LTerm', file:'LambdaFragment.lean',
+    status:'proved', foundation:'De Bruijn indexed λ-calculus',
+    basis:'S via ss, K via konst, I via norm',
+    reduction:'β-reduction → ITerm step-simulation',
+    uniqueness:'Yes — compile_simulates_red',
+    extensionality:'Up to α-equivalence (de Bruijn handles this)',
+    fixed_points:'Y-combinator encodable',
+    turing_complete:'Yes',
+    example:'(λx. x) a  →β  a\ncompile (lam (app (var 0) a))  →*  a',
+  },
+  hf:{
+    name:'HF Sets (ZFC)', lean:'ISAR.HF_Kernel', file:'HFSetEncoding.lean',
+    status:'proved', foundation:'Hereditarily finite sets (ZFC minus infinity)',
+    basis:'∅ and ∪{·} constructors encoded via Ackermann bijection',
+    reduction:'Set-theoretic operations → InvariantLayer application',
+    uniqueness:'Yes — HF_Kernel_factorization',
+    extensionality:'{a,b} ≡op {b,a} in the quotient',
+    fixed_points:'N/A — set theory is not a term-rewriting dialect',
+    turing_complete:'No (bounded by HF)',
+    example:'HF_encode {a,b} ≡op HF_encode {b,a}\ndecode_layer(HF_encode c) = c',
+  },
+  trs:{
+    name:'SKI TRS', lean:'ISAR.TRS_Dialect', file:'TRSView.lean',
+    status:'implemented', foundation:'Pure SKI combinator term rewriting',
+    basis:'S, K, I atoms; I = norm, K = konst, S = ss',
+    reduction:'K x y → x, S x y z → (xz)(yz)',
+    uniqueness:'Implemented (no separate uniqueness proof)',
+    extensionality:'SK-beta equivalence',
+    fixed_points:'Y-combinator: S(K(SS)K)SS',
+    turing_complete:'Yes',
+    example:'S K K x  →  (K x)(K x)  →  x  (I-combinator)',
+  },
+  bytecode:{
+    name:'Stack Bytecode', lean:'ISAR.Bytecode_Dialect', file:'BytecodeView.lean',
+    status:'implemented', foundation:'Stack-based VM instruction sequences',
+    basis:'PUSH, APP, ABS instructions',
+    reduction:'Instruction execution → ITerm reduction',
+    uniqueness:'Implemented (no separate proof)',
+    extensionality:'Program equivalence via behavioral bisimulation',
+    fixed_points:'Loop via self-referential PUSH/APP',
+    turing_complete:'Yes (with sufficient instruction set)',
+    example:'PUSH f; PUSH x; APP  ≡  f · x in ITerm',
+  },
+  iota:{
+    name:"Barker's Iota", lean:'ISAR.Iota_Dialect', file:'IotaView.lean',
+    status:'implemented', foundation:'Single-combinator calculus ι = λx. x S K',
+    basis:'One atom ι; S and K derived',
+    reduction:'ι ι ι ι → S, ι ι ι → K (via orbit)',
+    uniqueness:'Orbit theorem implemented',
+    extensionality:'Four active combinators ↔ four ISAR matrices',
+    fixed_points:'ι (ι ι) is a fixed-point combinator',
+    turing_complete:'Yes (ι alone is universal)',
+    example:'ι → A → K → S → X → ι\n(closed orbit)',
+  },
+  quantity:{
+    name:'Quantity Kernel', lean:'—', file:'—',
+    status:'conjectural', foundation:'SI dimensional quantities + tensor products',
+    basis:'Conjectured: monoidal kernel over InvariantLayer',
+    reduction:'Dimensional analysis → kernel morphism (not yet formalized)',
+    uniqueness:'Conjectural',
+    extensionality:'kg·m/s² ≡ N (if encodable)',
+    fixed_points:'N/A',
+    turing_complete:'N/A',
+    example:'Exploratory — not yet formalized',
+  },
+};
+
+const FIELDS=[
+  {key:'foundation',label:'Foundation'},
+  {key:'basis',label:'Operator basis'},
+  {key:'reduction',label:'Reduction / compilation'},
+  {key:'uniqueness',label:'Unique morphism'},
+  {key:'extensionality',label:'Extensionality'},
+  {key:'fixed_points',label:'Fixed points'},
+  {key:'turing_complete',label:'Turing complete'},
+];
+
+const STATUS_COLOR={proved:'var(--green)',implemented:'var(--gold)',conjectural:'var(--faint)'};
+
+function fieldColor(k,v){
+  if(k==='turing_complete') return v==='Yes'?'green':v==='No'?'red':'muted';
+  if(k==='uniqueness') return v.startsWith('Yes')?'green':'muted';
+  if(k==='status') return {proved:'green',implemented:'gold',conjectural:'muted'}[v]||'muted';
+  return '';
+}
+
+// populate selects
+const ids=Object.keys(DIALECTS);
+['sel-a','sel-b'].forEach((sid,i)=>{
+  const sel=document.getElementById(sid);
+  ids.forEach(id=>{
+    const opt=document.createElement('option');
+    opt.value=id; opt.textContent=DIALECTS[id].name;
+    sel.appendChild(opt);
+  });
+  sel.value=ids[i];
+});
+
+function renderPanel(panelId, dialectId){
+  const d=DIALECTS[dialectId];
+  const body=document.getElementById(panelId);
+  const statusColor=STATUS_COLOR[d.status];
+  body.innerHTML=`
+    <div class="field">
+      <div class="field-label">Lean name</div>
+      <div class="field-val">${d.lean}</div>
+    </div>
+    <div class="field">
+      <div class="field-label">Status</div>
+      <div class="field-val" style="color:${statusColor}">${d.status}${d.file!=='—'?' · '+d.file:''}</div>
+    </div>
+    <div class="field">
+      <div class="field-label">Example</div>
+      <div class="example-box">${d.example}</div>
+    </div>
+  `;
+}
+
+function renderDiffTable(idA,idB){
+  const a=DIALECTS[idA], b=DIALECTS[idB];
+  const wrap=document.getElementById('diff-table-wrap');
+  const rows=FIELDS.map(f=>{
+    const va=a[f.key], vb=b[f.key];
+    const same=va===vb;
+    const cls=same?'match':'diff';
+    const ca=fieldColor(f.key,va), cb=fieldColor(f.key,vb);
+    return `<tr class="${cls}">
+      <td>${f.label}</td>
+      <td ${ca?`style="color:${ca==='green'?'var(--green)':ca==='gold'?'var(--gold)':ca==='red'?'var(--error)':'var(--muted)'}"`:''}">${va}</td>
+      <td ${cb?`style="color:${cb==='green'?'var(--green)':cb==='gold'?'var(--gold)':cb==='red'?'var(--error)':'var(--muted)'}"`:''}">${vb}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML=`<table class="diff-table">
+    <tr><th>Property</th><th>${a.name}</th><th>${b.name}</th></tr>
+    ${rows}
+  </table><div style="font-size:.72rem;color:var(--muted);margin-top:.4rem">Green row = same value; amber = differs</div>`;
+}
+
+function render(){
+  const a=document.getElementById('sel-a').value;
+  const b=document.getElementById('sel-b').value;
+  renderPanel('body-a',a);
+  renderPanel('body-b',b);
+  renderDiffTable(a,b);
+}
+
+// ── Iota orbit visualization ──────────────────────────────────────────────────
+const ORBIT=[
+  {sym:'I',label:'identity',desc:'I x = x',color:'var(--primary)'},
+  {sym:'A',label:'flip-const',desc:'A x y = y',color:'var(--gold)'},
+  {sym:'K',label:'const',desc:'K x y = x',color:'var(--green)'},
+  {sym:'S',label:'substitution',desc:'S f g x = f x (g x)',color:'var(--purple)'},
+  {sym:'X',label:'self-app kernel',desc:'X = ι ι',color:'var(--error)'},
+];
+const orbit=document.getElementById('iota-orbit');
+ORBIT.forEach((o,i)=>{
+  const step=document.createElement('div');
+  step.className='orbit-step';
+  step.innerHTML=`<div class="orbit-node" style="border-color:${o.color};color:${o.color}">${o.sym}</div>
+    <div class="orbit-label">${o.label}</div>`;
+  step.title=o.desc;
+  orbit.appendChild(step);
+  if(i<ORBIT.length-1){
+    const arr=document.createElement('div');
+    arr.className='orbit-arrow'; arr.innerHTML='&#8594;';
+    orbit.appendChild(arr);
+  }
+});
+const wrap=document.createElement('div');
+wrap.className='orbit-arrow'; wrap.innerHTML='&#8594; I';
+wrap.style.color='var(--muted)'; wrap.style.fontSize='.75rem'; wrap.style.paddingTop='6px';
+orbit.appendChild(wrap);
+
+// ── Unification ───────────────────────────────────────────────────────────────
+// Reuse same tiny ITerm reducer from demo 1
+function atom(n){return{tag:'atom',name:n}}
+function app(f,a){return{tag:'app',fn:f,arg:a}}
+function showTerm(t){
+  if(t.tag==='atom') return t.name;
+  const fn=t.fn.tag==='app'?'('+showTerm(t.fn)+')':showTerm(t.fn);
+  const ar=t.arg.tag==='app'?'('+showTerm(t.arg)+')':showTerm(t.arg);
+  return fn+' · '+ar;
+}
+function parse(src){
+  const toks=[];let i=0;
+  while(i<src.length){
+    if(/\s/.test(src[i])){i++;continue}
+    if(src[i]==='('||src[i]===')'){toks.push(src[i++]);continue}
+    if(src[i]==='·'||src[i]==='.'){toks.push('·');i++;continue}
+    let w='';while(i<src.length&&!/[\s().·]/.test(src[i]))w+=src[i++];
+    if(w)toks.push(w.toLowerCase());
+  }
+  let p=0;
+  function expr(){
+    let l=atm();
+    while(p<toks.length&&toks[p]!==')'){if(toks[p]==='·')p++;l=app(l,atm());}
+    return l;
+  }
+  function atm(){
+    if(p>=toks.length)throw new Error('unexpected end');
+    const t=toks[p++];
+    if(t==='('){const r=expr();if(toks[p]!==')')throw new Error('expected )');p++;return r;}
+    return atom(t);
+  }
+  const r=expr();if(p<toks.length)throw new Error('unexpected: '+toks[p]);return r;
+}
+function spine(t){const a=[];while(t.tag==='app'){a.unshift(t.arg);t=t.fn;}return{head:t,args:a};}
+function rebuild(h,a){return a.reduce((f,x)=>app(f,x),h);}
+function istep(t){
+  if(t.tag==='atom')return null;
+  const{head,args}=spine(t);
+  if(head.tag==='atom'){
+    switch(head.name){
+      case 'norm':if(args.length>=1){const[x,...r]=args;return{term:rebuild(x,r),rule:'norm-elim'};}break;
+      case 'konst':case 'k':if(args.length>=2){const[x,y,...r]=args;return{term:rebuild(x,r),rule:'konst'};}break;
+      case 'comp':if(args.length>=3){const[f,g,x,...r]=args;return{term:rebuild(app(f,app(g,x)),r),rule:'comp'};}break;
+      case 'dup':if(args.length>=2){const[f,x,...r]=args;return{term:rebuild(app(app(f,x),x),r),rule:'dup'};}break;
+      case 'swap':if(args.length>=3){const[f,x,y,...r]=args;return{term:rebuild(app(app(f,y),x),r),rule:'swap'};}break;
+      case 'ss':case 's':if(args.length>=3){const[x,y,z,...r]=args;return{term:rebuild(app(app(x,z),app(y,z)),r),rule:'ss'};}break;
+    }
+  }
+  const fs=istep(t.fn);if(fs)return{term:app(fs.term,t.arg),rule:fs.rule};
+  const as=istep(t.arg);if(as)return{term:app(t.fn,as.term),rule:as.rule};
+  return null;
+}
+function normalize(t){
+  let cur=t;
+  for(let i=0;i<200;i++){const r=istep(cur);if(!r)return cur;cur=r.term;}
+  return cur;
+}
+
+function unify(){
+  const src=document.getElementById('unify-input').value.trim();
+  const res=document.getElementById('unify-result');
+  if(!src){res.innerHTML='<span style="color:var(--muted)">—</span>';return;}
+  try{
+    const t=parse(src);
+    const nf=normalize(t);
+    const nfStr=showTerm(nf);
+    res.innerHTML=`<div class="label">Shared InvariantLayer representative</div>
+      <div class="shared-nf">${nfStr}</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:.35rem">All dialects that encode this expression share the normal form above in the quotient — regardless of surface syntax differences.</div>`;
+  } catch(e){
+    res.innerHTML=`<span style="color:var(--error)">Parse error: ${e.message}</span>`;
+  }
+}
+
+render();
+</script>
+  <script>
+  (function(){
+    const btn=document.querySelector('[data-theme-toggle]'),root=document.documentElement;
+    let t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+    root.setAttribute('data-theme',t);
+    btn&&btn.addEventListener('click',()=>{t=t==='dark'?'light':'dark';root.setAttribute('data-theme',t)});
+  })();
+  </script>
+</body>
+</html>

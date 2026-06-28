@@ -1,0 +1,338 @@
+
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Morphism Explorer — ISAR</title>
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:#171614;--surface:#1c1b19;--surface2:#222120;--border:#393836;
+      --text:#cdccca;--muted:#797876;--faint:#5a5957;
+      --primary:#4f98a3;--primary-hl:color-mix(in oklab,#4f98a3 14%,#1c1b19);
+      --green:#6daa45;--gold:#e8af34;--purple:#a86fdf;--error:#dd6974;
+      --radius:.5rem;--font:'Satoshi',system-ui,sans-serif;
+    }
+    [data-theme=light]{
+      --bg:#f7f6f2;--surface:#f9f8f5;--surface2:#f3f0ec;--border:#d4d1ca;
+      --text:#28251d;--muted:#7a7974;--faint:#bab9b4;
+      --primary:#01696f;--primary-hl:color-mix(in oklab,#01696f 10%,#f9f8f5);
+      --green:#437a22;--gold:#d19900;--purple:#7a39bb;--error:#a13544;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{-webkit-font-smoothing:antialiased;scroll-behavior:smooth}
+    body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100dvh;line-height:1.6;font-size:1rem}
+    a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+    code,pre{font-family:'Fira Code','Cascadia Code',monospace;font-size:.85em}
+    .page{max-width:960px;margin:0 auto;padding:2rem 1.5rem 5rem}
+    header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:1rem;margin-bottom:2rem;gap:1rem;flex-wrap:wrap}
+    nav{display:flex;gap:1.25rem;font-size:.875rem}
+    nav a{color:var(--muted)}nav a:hover{color:var(--text)}
+    h1{font-size:clamp(1.6rem,1rem+2.5vw,2.4rem);font-weight:700;letter-spacing:-.02em;line-height:1.15;margin-bottom:.3rem}
+    h2{font-size:1rem;font-weight:600;letter-spacing:-.01em;margin-bottom:.5rem}
+    .subtitle{color:var(--muted);font-size:.9rem;max-width:62ch;margin-bottom:1.5rem}
+    .theorem-ref{font-size:.72rem;font-family:monospace;color:var(--purple);background:color-mix(in oklab,var(--purple) 12%,var(--surface));padding:.15em .5em;border-radius:.25rem;white-space:nowrap}
+    .toggle{background:none;border:1px solid var(--border);border-radius:.375rem;color:var(--muted);padding:.3rem .6rem;cursor:pointer;font-size:.875rem;transition:color 160ms,border-color 160ms}
+    .toggle:hover{color:var(--text);border-color:var(--text)}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem 1.5rem}
+    .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+    .btn{display:inline-flex;align-items:center;gap:.4em;background:var(--primary);color:#fff;border:none;border-radius:var(--radius);padding:.45rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer;transition:background 160ms}
+    .btn:hover{background:color-mix(in oklab,var(--primary) 80%,#000)}
+    .btn.ghost{background:none;border:1px solid var(--border);color:var(--text)}
+    .btn.ghost:hover{border-color:var(--primary);color:var(--primary)}
+    .btn.danger{background:var(--error)}
+    .btn.sm{padding:.3rem .7rem;font-size:.78rem}
+    @media(max-width:480px){.page{padding:1.25rem 1rem 3rem}}
+    .diagram-wrap{position:relative;width:100%;height:340px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:1rem}
+    svg.diagram{width:100%;height:100%}
+    .node circle{transition:r 160ms,fill 160ms}
+    .node text{pointer-events:none;font-family:'Satoshi',system-ui,sans-serif;font-size:12px;fill:var(--text)}
+    .node.terminal circle{fill:color-mix(in oklab,var(--primary) 20%,var(--surface2));stroke:var(--primary);stroke-width:2}
+    .node.terminal text{fill:var(--primary);font-weight:700}
+    .node.dialect circle{fill:var(--surface2);stroke:var(--border);stroke-width:1.5}
+    .node.dialect.active circle{fill:color-mix(in oklab,var(--gold) 15%,var(--surface2));stroke:var(--gold);stroke-width:2}
+    .node.dialect.active text{fill:var(--gold)}
+    .arrow{stroke:var(--border);stroke-width:1.5;fill:none;transition:stroke 200ms,stroke-width 200ms}
+    .arrow.unique{stroke:var(--primary);stroke-width:2;stroke-dasharray:none}
+    .arrow.factored{stroke:var(--green);stroke-width:1.5;stroke-dasharray:5 3}
+    .arrow-label{font-family:'Fira Code','Cascadia Code',monospace;font-size:10px;fill:var(--muted)}
+    .arrow-label.unique{fill:var(--primary)}
+    .arrow-label.factored{fill:var(--green)}
+    .legend{display:flex;gap:1rem;flex-wrap:wrap;font-size:.75rem;color:var(--muted);margin-bottom:1rem}
+    .legend-item{display:flex;align-items:center;gap:.35rem}
+    .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+    .info-panel{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;font-size:.85rem;min-height:80px}
+    .info-panel h3{font-size:.875rem;font-weight:600;margin-bottom:.35rem}
+    .info-panel .meta{color:var(--muted);font-size:.78rem;margin-bottom:.4rem}
+    .info-panel .tag{display:inline-block;font-size:.7rem;font-family:monospace;padding:.15em .5em;border-radius:.25rem;margin-right:.35rem}
+    .tag-proved{color:var(--green);background:color-mix(in oklab,var(--green) 12%,var(--surface))}
+    .tag-impl{color:var(--gold);background:color-mix(in oklab,var(--gold) 12%,var(--surface))}
+    .tag-conj{color:var(--muted);background:var(--surface)}
+    .dialects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.6rem;margin-bottom:1rem}
+    .dialect-card{background:var(--surface);border:1px solid var(--border);border-radius:.375rem;padding:.7rem 1rem;cursor:pointer;transition:border-color 160ms,background 160ms;font-size:.82rem}
+    .dialect-card:hover,.dialect-card.active{border-color:var(--gold);background:color-mix(in oklab,var(--gold) 8%,var(--surface))}
+    .dialect-card .dc-name{font-weight:600;margin-bottom:.2rem}
+    .dialect-card .dc-lean{font-family:monospace;font-size:.7rem;color:var(--muted)}
+    .morphism-table{width:100%;font-size:.8rem;border-collapse:collapse;margin-top:.75rem}
+    .morphism-table th,.morphism-table td{padding:.35rem .6rem;border:1px solid var(--border);text-align:left}
+    .morphism-table th{background:var(--surface2);color:var(--muted);font-weight:500}
+    .morphism-table td:first-child{font-family:monospace;color:var(--primary)}
+  </style>
+</head>
+<body>
+<div class="page">
+<header>
+    <strong style="font-size:0.95rem;letter-spacing:-0.01em;">ISAR</strong>
+    <nav>
+      <a href="../">Home</a>
+      <a href="../blueprint/">Blueprint</a>
+      <a href="../visualizations/">Demos</a>
+      <a href="../docs/">Docs</a>
+    </nav>
+    <button class="toggle" data-theme-toggle aria-label="Toggle theme">&#9788;</button>
+  </header>
+  <h1>Morphism Explorer</h1>
+  <p class="subtitle">The InvariantLayer is the <em>terminal object</em> in the category of admissible semantic kernels. Every dialect admits a <em>unique</em> structure-preserving morphism into it. <span class="theorem-ref">ISAR.morphism_uniqueness</span></p>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--primary)"></div>InvariantLayer (terminal)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--gold)"></div>Dialect (selected)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--border)"></div>Dialect (other)</div>
+    <svg width="32" height="12"><line x1="0" y1="6" x2="30" y2="6" stroke-width="2" stroke="var(--primary)"/><polygon points="27,3 32,6 27,9" fill="var(--primary)"/></svg>
+    <span style="font-size:.75rem;color:var(--muted)">Unique morphism !</span>
+    <svg width="32" height="12"><line x1="0" y1="6" x2="30" y2="6" stroke-width="1.5" stroke="var(--green)" stroke-dasharray="5 3"/><polygon points="27,3 32,6 27,9" fill="var(--green)"/></svg>
+    <span style="font-size:.75rem;color:var(--muted)">Encoding path</span>
+  </div>
+
+  <div class="diagram-wrap">
+    <svg class="diagram" id="diag" viewBox="0 0 800 320"></svg>
+  </div>
+
+  <div class="info-panel" id="info-panel">
+    <div style="color:var(--muted);font-size:.85rem;">Select a dialect to see its factorization details.</div>
+  </div>
+
+  <div class="dialects-grid" id="dialects-grid"></div>
+
+  <details>
+    <summary>Morphism map (all dialects)</summary>
+    <table class="morphism-table">
+      <tr><th>Dialect</th><th>Lean name</th><th>Morphism theorem</th><th>Status</th></tr>
+      <tr><td>Lambda calculus</td><td>ISAR.compile</td><td>compile_simulates_red</td><td><span class="tag tag-proved">proved</span></td></tr>
+      <tr><td>HF Sets (ZFC fragment)</td><td>ISAR.HF_Kernel</td><td>HF_Kernel_factorization</td><td><span class="tag tag-proved">proved</span></td></tr>
+      <tr><td>SKI TRS</td><td>ISAR.TRS_Dialect</td><td>—</td><td><span class="tag tag-impl">implemented</span></td></tr>
+      <tr><td>Stack Bytecode</td><td>ISAR.Bytecode_Dialect</td><td>—</td><td><span class="tag tag-impl">implemented</span></td></tr>
+      <tr><td>Barker's Iota</td><td>ISAR.Iota_Dialect</td><td>orbit: I→A→K→S→X→I</td><td><span class="tag tag-impl">implemented</span></td></tr>
+      <tr><td>Quantity Kernel</td><td>—</td><td>—</td><td><span class="tag tag-conj">conjectural</span></td></tr>
+    </table>
+  </details>
+</div>
+
+<script>
+// ── Dialect data ──────────────────────────────────────────────────────────────
+const DIALECTS = [
+  {
+    id:'lambda', label:'Lambda Calculus', lean:'ISAR.LTerm',
+    morphism:'compile', theorem:'compile_simulates_red',
+    status:'proved', file:'LambdaFragment.lean',
+    desc:'Bracket abstraction compiles λ-terms (de Bruijn indices) into ITerm. The compiler faithfully simulates every β-reduction step in the substrate.',
+    facts:[
+      'compile : LTerm → ITerm',
+      't →β u  ⟹  compile t →* compile u',
+      'Uses konst for K, ss for S via bracket abstraction'
+    ]
+  },
+  {
+    id:'hf', label:'HF Sets (ZFC)', lean:'ISAR.HF_Kernel',
+    morphism:'HF_encode', theorem:'HF_Kernel_factorization',
+    status:'proved', file:'HFSetEncoding.lean',
+    desc:'Hereditarily finite sets (ZFC without infinity) encode into the InvariantLayer. Extensionally equal sets — e.g. {a,b} and {b,a} — project to the same equivalence class.',
+    facts:[
+      'HF_encode : HF → InvariantLayer',
+      'decode_layer(HF_encode c) = c',
+      '{a,b} ≡op {b,a} in the quotient'
+    ]
+  },
+  {
+    id:'trs', label:'SKI TRS', lean:'ISAR.TRS_Dialect',
+    morphism:'trs_encode', theorem:'—',
+    status:'implemented', file:'TRSView.lean',
+    desc:'Pure SKI term rewriting system embedded as a dialect. S and K rules map directly onto ss and konst.',
+    facts:['TTerm (S,K,I atoms)','K x y → x maps to konst','S x y z → (xz)(yz) maps to ss']
+  },
+  {
+    id:'bytecode', label:'Stack Bytecode', lean:'ISAR.Bytecode_Dialect',
+    morphism:'bytecode_compile', theorem:'—',
+    status:'implemented', file:'BytecodeView.lean',
+    desc:'Stack-based VM instruction sequences compiled into ITerm and decompiled back. Provides a concrete operational model over the substrate.',
+    facts:['Instruction set: PUSH, APP, ABS','compile ∘ decompile = id (implemented)']
+  },
+  {
+    id:'iota', label:"Barker's Iota", lean:'ISAR.Iota_Dialect',
+    morphism:'iota_encode', theorem:'iota_orbit',
+    status:'implemented', file:'IotaView.lean',
+    desc:'Single-combinator calculus ι = λx. x S K. Repeated application cycles through the closed orbit I→A→K→S→X→I, mapping onto the four ISAR basis matrices.',
+    facts:['ι applied once gives A (flip-const)','Orbit: I→A→K→S→X→I','Four carriers ↔ four ISAR matrices']
+  },
+  {
+    id:'quantity', label:'Quantity Kernel', lean:'—',
+    morphism:'quantity_morphism', theorem:'—',
+    status:'conjectural', file:'—',
+    desc:'Dimensional quantities (SI units, tensor products) as a semantic kernel. The morphism into InvariantLayer is conjectural — requires formalizing a monoidal structure over the substrate.',
+    facts:['Exploratory / not yet formalized','Would require monoidal kernel extension']
+  },
+];
+
+const STATUS_COLOR={proved:'var(--green)',implemented:'var(--gold)',conjectural:'var(--faint)'};
+const STATUS_TAG={proved:'tag-proved',implemented:'tag-impl',conjectural:'tag-conj'};
+
+// ── Diagram layout ────────────────────────────────────────────────────────────
+// Terminal node at center-right; dialects arranged in a semicircle on the left
+const SVG_W=800, SVG_H=320;
+const TERMINAL = {x:640, y:160, label:'InvariantLayer', sub:'ISKSubtype / OperEq'};
+const DIALECT_POSITIONS = DIALECTS.map((_,i)=>{
+  const n=DIALECTS.length;
+  const angle = Math.PI*0.15 + (Math.PI*0.7/(n-1))*i;
+  return { x: 120 + Math.cos(Math.PI-angle)*60, y: SVG_H/2 + Math.sin(Math.PI-angle)*120 };
+});
+
+let selectedId = null;
+
+function renderDiagram(activeId){
+  const svg=document.getElementById('diag');
+  svg.innerHTML='';
+
+  // defs: arrowhead markers
+  const defs=document.createElementNS('http://www.w3.org/2000/svg','defs');
+  function mkMarker(id,color){
+    const m=document.createElementNS('http://www.w3.org/2000/svg','marker');
+    m.setAttribute('id',id); m.setAttribute('markerWidth','8'); m.setAttribute('markerHeight','6');
+    m.setAttribute('refX','7'); m.setAttribute('refY','3'); m.setAttribute('orient','auto');
+    const p=document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    p.setAttribute('points','0 0, 8 3, 0 6'); p.setAttribute('fill',color);
+    m.appendChild(p); return m;
+  }
+  defs.appendChild(mkMarker('arr-primary','#4f98a3'));
+  defs.appendChild(mkMarker('arr-green','#6daa45'));
+  defs.appendChild(mkMarker('arr-border','#393836'));
+  svg.appendChild(defs);
+
+  // arrows
+  DIALECTS.forEach((d,i)=>{
+    const pos=DIALECT_POSITIONS[i];
+    const isActive=d.id===activeId;
+    const dx=TERMINAL.x-pos.x, dy=TERMINAL.y-pos.y;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    const ux=dx/len,uy=dy/len;
+    const x1=pos.x+ux*26, y1=pos.y+uy*26;
+    const x2=TERMINAL.x-ux*42, y2=TERMINAL.y-uy*42;
+    const mid={x:(x1+x2)/2,y:(y1+y2)/2};
+
+    const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',x1); line.setAttribute('y1',y1);
+    line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+    line.setAttribute('class','arrow'+(isActive?' unique':''));
+    line.setAttribute('marker-end',isActive?'url(#arr-primary)':'url(#arr-border)');
+    svg.appendChild(line);
+
+    if(isActive){
+      const label=document.createElementNS('http://www.w3.org/2000/svg','text');
+      label.setAttribute('x',mid.x+5); label.setAttribute('y',mid.y-5);
+      label.setAttribute('class','arrow-label unique');
+      label.setAttribute('text-anchor','middle');
+      label.textContent='∃! '+d.morphism;
+      svg.appendChild(label);
+    }
+  });
+
+  // terminal node
+  const tg=document.createElementNS('http://www.w3.org/2000/svg','g');
+  tg.setAttribute('class','node terminal');
+  const tc=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  tc.setAttribute('cx',TERMINAL.x); tc.setAttribute('cy',TERMINAL.y); tc.setAttribute('r',38);
+  const tl=document.createElementNS('http://www.w3.org/2000/svg','text');
+  tl.setAttribute('x',TERMINAL.x); tl.setAttribute('y',TERMINAL.y-5);
+  tl.setAttribute('text-anchor','middle'); tl.setAttribute('font-size','11');
+  tl.setAttribute('font-weight','700'); tl.textContent='InvariantLayer';
+  const tl2=document.createElementNS('http://www.w3.org/2000/svg','text');
+  tl2.setAttribute('x',TERMINAL.x); tl2.setAttribute('y',TERMINAL.y+10);
+  tl2.setAttribute('text-anchor','middle'); tl2.setAttribute('font-size','9');
+  tl2.setAttribute('fill','#797876'); tl2.textContent='ISKSubtype / OperEq';
+  tg.appendChild(tc); tg.appendChild(tl); tg.appendChild(tl2);
+  svg.appendChild(tg);
+
+  // dialect nodes
+  DIALECTS.forEach((d,i)=>{
+    const pos=DIALECT_POSITIONS[i];
+    const isActive=d.id===activeId;
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class','node dialect'+(isActive?' active':''));
+    g.style.cursor='pointer';
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',pos.x); c.setAttribute('cy',pos.y); c.setAttribute('r',24);
+    const l=document.createElementNS('http://www.w3.org/2000/svg','text');
+    l.setAttribute('x',pos.x); l.setAttribute('y',pos.y+1);
+    l.setAttribute('text-anchor','middle'); l.setAttribute('dominant-baseline','middle');
+    l.setAttribute('font-size','9.5');
+    // wrap long label
+    const words=d.label.split(' ');
+    if(words.length>2){
+      const t1=words.slice(0,Math.ceil(words.length/2)).join(' ');
+      const t2=words.slice(Math.ceil(words.length/2)).join(' ');
+      l.innerHTML=`<tspan x="${pos.x}" dy="-5">${t1}</tspan><tspan x="${pos.x}" dy="12">${t2}</tspan>`;
+    } else {
+      l.textContent=d.label;
+    }
+    g.appendChild(c); g.appendChild(l);
+    g.addEventListener('click',()=>selectDialect(d.id));
+    svg.appendChild(g);
+  });
+}
+
+function selectDialect(id){
+  selectedId=id;
+  renderDiagram(id);
+  document.querySelectorAll('.dialect-card').forEach(el=>{
+    el.classList.toggle('active',el.dataset.id===id);
+  });
+  const d=DIALECTS.find(x=>x.id===id);
+  const panel=document.getElementById('info-panel');
+  panel.innerHTML=`
+    <h3>${d.label}</h3>
+    <div class="meta">
+      <span class="tag ${STATUS_TAG[d.status]}">${d.status}</span>
+      <span style="font-family:monospace;font-size:.75rem;color:var(--muted)">${d.lean}</span>
+      ${d.file!=='—'?`<span style="margin-left:.5rem;font-family:monospace;font-size:.72rem;color:var(--faint)">${d.file}</span>`:''}
+    </div>
+    <p style="margin-bottom:.5rem">${d.desc}</p>
+    <ul style="list-style:none;display:flex;flex-direction:column;gap:.25rem">
+      ${d.facts.map(f=>`<li style="font-family:monospace;font-size:.78rem;color:var(--primary)">· ${f}</li>`).join('')}
+    </ul>
+    ${d.theorem!=='—'?`<div style="margin-top:.5rem"><span class="theorem-ref">ISAR.${d.theorem}</span></div>`:''}
+  `;
+}
+
+// build cards
+const grid=document.getElementById('dialects-grid');
+DIALECTS.forEach(d=>{
+  const el=document.createElement('div');
+  el.className='dialect-card'; el.dataset.id=d.id;
+  el.innerHTML=`<div class="dc-name">${d.label}</div><div class="dc-lean">${d.lean}</div>
+    <div style="margin-top:.4rem"><span class="tag ${STATUS_TAG[d.status]}" style="font-size:.65rem">${d.status}</span></div>`;
+  el.addEventListener('click',()=>selectDialect(d.id));
+  grid.appendChild(el);
+});
+
+renderDiagram(null);
+</script>
+  <script>
+  (function(){
+    const btn=document.querySelector('[data-theme-toggle]'),root=document.documentElement;
+    let t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+    root.setAttribute('data-theme',t);
+    btn&&btn.addEventListener('click',()=>{t=t==='dark'?'light':'dark';root.setAttribute('data-theme',t)});
+  })();
+  </script>
+</body>
+</html>
