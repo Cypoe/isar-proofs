@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ISAR — Machine, Quotient, and Proof Insights</title>
+<title>ISAR — Story, Example, Theorem</title>
 <style>
 :root{
   --bg:#0b0d12;
@@ -17,51 +17,48 @@
   --r:#fca5a5;
   --y:#fde68a;
   --p:#c4b5fd;
+  --teal:#4af0c4;
+  --amber:#f0b84a;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-body{line-height:1.55}
-header{padding:26px 30px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0d1017 0%, #0b0d12 100%)}
-header h1{margin:0;font-size:24px;letter-spacing:.2px}
-header p{margin:8px 0 0;color:var(--mut);max-width:1040px;font-size:14px}
-nav{display:flex;gap:4px;flex-wrap:wrap;padding:0 30px;border-bottom:1px solid var(--line);background:#0d1016;position:sticky;top:0;z-index:10}
+body{line-height:1.58}
+header{padding:28px 32px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0d1017 0%, #0b0d12 100%)}
+header h1{margin:0;font-size:26px;letter-spacing:.2px}
+header p{margin:8px 0 0;color:var(--mut);max-width:1080px;font-size:14px}
+nav{display:flex;gap:4px;flex-wrap:wrap;padding:0 32px;border-bottom:1px solid var(--line);background:#0d1016;position:sticky;top:0;z-index:10}
 nav button{border:none;background:none;color:var(--mut);padding:13px 14px;cursor:pointer;font:inherit;border-bottom:2px solid transparent}
 nav button:hover{color:var(--fg)}
 nav button.active{color:var(--b);border-bottom-color:var(--b)}
-.page{display:none;padding:26px 30px 70px;max-width:1280px}
+.page{display:none;padding:28px 32px 76px;max-width:1320px}
 .page.active{display:block}
-h2{font-size:16px;color:var(--b);margin:0 0 10px}
+h2{font-size:17px;color:var(--b);margin:0 0 10px}
 h3{margin:0 0 10px;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
-p.lead{margin:0 0 16px;color:var(--mut);font-size:13px;max-width:1040px}
+p.lead{margin:0 0 16px;color:var(--mut);font-size:13px;max-width:1080px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
 .card.soft{background:var(--panel2)}
 .row{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
-.btn{background:var(--b);color:#071018;border:none;border-radius:7px;padding:8px 13px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.btn{background:var(--b);color:#071018;border:none;border-radius:8px;padding:8px 13px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
 .btn:hover{opacity:.88}
 .btn.g{background:var(--g)}
 .btn.r{background:var(--r)}
 .btn.y{background:var(--y)}
 .btn.p{background:var(--p)}
+small, .small{color:var(--mut);font-size:12px}
 input[type=text], textarea, select{
   width:100%;background:#0a0d13;color:var(--fg);border:1px solid var(--line);
   border-radius:8px;padding:9px 10px;font:inherit
 }
 textarea{resize:vertical}
-small, .small{color:var(--mut);font-size:12px}
-.log{
+.log,.code{
   background:#07090d;border:1px solid var(--line);border-radius:8px;
   padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-size:12px;line-height:1.58;white-space:pre-wrap;overflow:auto;max-height:390px
-}
-.code{
-  background:#07090d;border:1px solid var(--line);border-radius:8px;
-  padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-size:12px;line-height:1.65;white-space:pre-wrap;overflow:auto
+  font-size:12px;line-height:1.62;white-space:pre-wrap;overflow:auto;max-height:420px
 }
 table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{border:1px solid var(--line);padding:6px 7px;text-align:left;vertical-align:top}
+th,td{border:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
 th{color:var(--mut);font-weight:600;background:#0d1016}
 .eq{
   display:block;margin:6px 0;padding:8px 10px;border-radius:8px;
@@ -75,13 +72,43 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
   display:inline-block;padding:3px 10px;border-radius:999px;
   background:#151922;border:1px solid var(--line);color:var(--mut);font-size:11px
 }
-.stage{border-left:3px solid var(--b);padding-left:12px;margin:12px 0}
-.stage .name{font-weight:700}
+.banner{
+  border:1px solid #274252;background:linear-gradient(180deg,#0e1820,#0c1218);
+  border-radius:12px;padding:14px 16px
+}
+.timeline{
+  display:grid;grid-template-columns:repeat(6,1fr);gap:10px
+}
+.step{
+  border:1px solid var(--line);border-radius:10px;padding:12px;background:#0e131a
+}
+.step .n{font-size:11px;color:var(--b);margin-bottom:6px}
+.step .t{font-weight:700;font-size:13px;margin-bottom:5px}
+.triptych{
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px
+}
+.trip{
+  border:1px solid var(--line);border-radius:10px;padding:12px;background:#0d1118
+}
+.trip .label{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.flow{
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+  background:#0b1118;border:1px solid var(--line);border-radius:10px;padding:12px
+}
+.node{
+  padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#111624;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px
+}
+.node.hot{border-color:#2b6c86;color:var(--b)}
+.node.ok{border-color:#2c6b4a;color:var(--g)}
+.node.warn{border-color:#7c6930;color:var(--y)}
+.node.bad{border-color:#7b3e47;color:var(--r)}
+.arrow{color:var(--mut)}
 .canvasWrap{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#090b10}
 canvas{display:block;width:100%;height:auto;background:#090b10}
 .diffpane{
   background:linear-gradient(180deg,#0a0d12 0%,#07090d 100%);
-  border:1px solid var(--line);border-radius:10px;padding:12px
+  border:1px solid var(--line);border-radius:12px;padding:12px
 }
 .diffstats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
 .stat{background:#101521;border:1px solid var(--line);border-radius:10px;padding:10px}
@@ -97,211 +124,436 @@ canvas{display:block;width:100%;height:auto;background:#090b10}
 .diffline.rem{background:rgba(252,165,165,.10);color:var(--r)}
 .diffline.chg{background:rgba(253,230,138,.09);color:var(--y)}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.flow{
-  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
-  background:#0b1118;border:1px solid var(--line);border-radius:10px;padding:12px
-}
-.node{
-  padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#111624;
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px
-}
-.node.hot{border-color:#2b6c86;color:var(--b)}
-.node.ok{border-color:#2c6b4a;color:var(--g)}
-.node.warn{border-color:#7c6930;color:var(--y)}
-.node.bad{border-color:#7b3e47;color:var(--r)}
-.arrow{color:var(--mut)}
-.badge{
-  display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;
-  border:1px solid var(--line);background:#121826;color:var(--mut)
-}
-@media (max-width: 980px){
-  .grid2,.grid3{grid-template-columns:1fr}
+.status-good{border-color:#29563b;background:#0d1711}
+.status-warn{border-color:#68572d;background:#17140d}
+.status-bad{border-color:#64353b;background:#190e10}
+@media (max-width: 1080px){
+  .grid2,.grid3,.triptych,.timeline{grid-template-columns:1fr}
   .diffstats{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
 <body>
 <header>
-  <h1>ISAR — Machine, Quotient, and Proof Insights</h1>
+  <h1>ISAR — From Encodings to the Invariant Layer</h1>
   <p>
-    The machine view and the formal view are the same story seen at different resolutions: IOB gives structure, SAR gives action, IRAS gives the invariant quotient, and the Lean proof work explains why “equal under normalization” is not a slogan but a typed object.
+    This version starts where readers already are: files, units, rewrites, compilers, and self-hosting. Each section follows the same pattern — what people already know, one real-world analogy, and one formal result — so the invariant layer appears as the compressed summary of many familiar phenomena rather than an abstract premise.
   </p>
 </header>
 
 <nav id="nav"></nav>
 
 <section class="page active" id="p0">
-  <h2>The core idea</h2>
+  <h2>Narrative spine</h2>
   <p class="lead">
-    ISAR matters because it does not start from a language, file format, or fixed rule table. It starts from existence, pairing, self-description, and asymmetry, then shows that any admissible surface must factor through an invariant layer if the system is closed under self-application. [file:49][file:97]
+    The project did not begin as a theory of everything. It began with storing artifacts, noticing that different encodings preserved some structure while destroying others, and then repeatedly being forced toward invariants, quotients, and canonical forms. That same pattern later reappeared in quantity calculus, rewriting, dialect translation, and self-hosting. [cite:118][cite:117][cite:121][cite:122]
   </p>
 
-  <div class="grid3">
-    <div class="card">
-      <h3>Banality vs closure</h3>
-      <p class="small">
-        A fixed external rule table may still be universal, but it is banal as a foundation: rules are outside the carrier, so rule evolution requires a higher interpreter layer rather than happening within the same substrate. [file:97]
-      </p>
-    </div>
-    <div class="card">
-      <h3>The four carriers</h3>
-      <p class="small">
-        The proof-development summary identifies four irreducible roles: invariant identity, rewrite, adjacency, and state. Remove one and a whole family of equalities stops being expressible inside the same machine. [file:49][file:97]
-      </p>
-    </div>
-    <div class="card">
-      <h3>Proof insight</h3>
-      <p class="small">
-        The quotient is not a metaphor. The invariant layer is explicitly described as a quotient by operational equality, and unique normal forms are what make that quotient usable as a real target of computation. [file:97]
-      </p>
+  <div class="banner">
+    <div class="timeline">
+      <div class="step">
+        <div class="n">1</div>
+        <div class="t">Storage</div>
+        <div class="small">Start with ideas, files, and artifacts rather than a grand formalism. [cite:118]</div>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <div class="t">Encodings</div>
+        <div class="small">Notice that representation changes preserve some things and destroy others. [cite:118]</div>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <div class="t">Invariants</div>
+        <div class="small">Define what must survive admissible changes of form. [cite:119][cite:121]</div>
+      </div>
+      <div class="step">
+        <div class="n">4</div>
+        <div class="t">Quantities</div>
+        <div class="small">Units become the first familiar example of equivalence without identity of syntax. [cite:117]</div>
+      </div>
+      <div class="step">
+        <div class="n">5</div>
+        <div class="t">Rewriting</div>
+        <div class="small">Different paths can converge to one normal form. [file:97]</div>
+      </div>
+      <div class="step">
+        <div class="n">6</div>
+        <div class="t">Invariant layer</div>
+        <div class="small">All admissible views factor through a quotient of operational equality. [file:97][file:49]</div>
+      </div>
     </div>
   </div>
 
   <div class="card" style="margin-top:18px">
-    <h3>All live tests are equal statements</h3>
-    <div class="eq">decode_utf8(encode_utf8(x)) = x</div>
-    <div class="eq">decode_iob(encode_iob(x)) = x</div>
-    <div class="eq">Invariant(utf8(x)) = Invariant(utf16(x)) = Invariant(iob(x))</div>
-    <div class="eq">nf(program₁) = nf(program₂)  ⇒  [program₁] = [program₂]</div>
-    <div class="eq">translate(A → B, x) = view_B(Invariant(decode_A(x)))</div>
-    <div class="eq">uniqueNF(t₁, t₂)  ⇒  Quotient.lift(nfOfTerm) is well-defined</div>
+    <h3>Compact opening</h3>
+    <div class="code">I did not start with a grand theory. I started with a practical problem: a place to store ideas and artifacts, and a growing suspicion that many different descriptions were secretly preserving the same structure. That suspicion first appeared in encodings, then in invariants, then in quantity-calculus-style reasoning about what survives relabeling, and eventually in a bootstrap result: many distinct formal systems can be understood as different presentations of one invariant layer.</div>
   </div>
 </section>
 
 <section class="page" id="p1">
-  <h2>IOB → SAR → IRAS</h2>
+  <h2>Story + example + theorem</h2>
   <p class="lead">
-    This is the construction story. Start with pair-structure, derive adjacency and rewrite views, then compute the invariant layer as the stable codepoint sequence that survives every admissible view. The object changes representation without changing operational identity. [file:49][file:96]
+    This is the paper-level table of contents in the right order: each stop begins with a familiar intuition, then one concrete example, then the formal compression of that example into a theorem-shaped statement. [cite:118][cite:117]
   </p>
 
-  <div class="grid2">
-    <div class="card">
-      <h3>Source</h3>
-      <input id="buildInput" type="text" value="ISAR already always there" />
-      <div class="row" style="margin-top:10px">
-        <button class="btn" onclick="runConstruction()">build</button>
-        <span class="pill">IOB</span>
-        <span class="pill">SAR</span>
-        <span class="pill">IRAS</span>
-      </div>
-    </div>
-    <div class="card">
-      <h3>Construction summary</h3>
-      <div id="constructSummary" class="log">Press build.</div>
-    </div>
-  </div>
-
-  <div class="grid2" style="margin-top:18px">
-    <div class="card">
-      <h3>IOB node table</h3>
-      <table id="iobTable">
-        <thead><tr><th>id</th><th>kind</th><th>car</th><th>cdr</th><th>view</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div class="card">
-      <h3>Adjacency view</h3>
-      <div class="canvasWrap"><canvas id="iobCanvas" width="560" height="320"></canvas></div>
-      <p class="small" style="margin-top:10px">
-        Adjacency is the carrier that makes composition traversable rather than merely present. [file:49]
-      </p>
-    </div>
-  </div>
-
-  <div class="grid2" style="margin-top:18px">
-    <div class="card">
-      <h3>Carrier reading</h3>
-      <div id="sarLog" class="log">—</div>
-    </div>
-    <div class="card">
-      <h3>Equal statements</h3>
-      <div id="constructEqs"></div>
-    </div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Part</th>
+          <th>What people know</th>
+          <th>Real-life example</th>
+          <th>Formal result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Encodings</td>
+          <td>A file can be copied, renamed, or compressed without changing what it is. [cite:117]</td>
+          <td>ZIP files, content hashes, renamed paths. [cite:117]</td>
+          <td>Different syntaxes can map to the same invariant object. [cite:121]</td>
+        </tr>
+        <tr>
+          <td>Invariants</td>
+          <td>Some properties survive reformatting. [cite:118]</td>
+          <td>A recipe rewritten in a different style still makes the same cake. [cite:118]</td>
+          <td>Observational equivalence induces a quotient by what is preserved. [cite:119][cite:121]</td>
+        </tr>
+        <tr>
+          <td>Quantity calculus</td>
+          <td>Units matter, but unit choice does not change the quantity. [cite:117]</td>
+          <td>1 m = 100 cm, 5 kg = 5000 g. [cite:117]</td>
+          <td>Dimensional relations are preserved across admissible representations. [cite:117]</td>
+        </tr>
+        <tr>
+          <td>Rewriting</td>
+          <td>The same problem can be solved by different move orders. [cite:117]</td>
+          <td>A puzzle reaches the same solved state through different sequences. [cite:117]</td>
+          <td>Confluence and unique normal forms collapse paths to one endpoint. [file:97]</td>
+        </tr>
+        <tr>
+          <td>Dialect zoo</td>
+          <td>The same program can be written in different languages. [cite:117]</td>
+          <td>Python, bytecode, lambda notation, TRS. [cite:117][cite:120]</td>
+          <td>Admissible encodings factor through one invariant layer. [file:97][cite:120]</td>
+        </tr>
+        <tr>
+          <td>Self-hosting</td>
+          <td>A tool can describe or reproduce itself. [cite:117]</td>
+          <td>A compiler compiling a compiler. [cite:113]</td>
+          <td>Self-application reveals dependency and bootstrap structure, not just a trick. [cite:113][cite:122]</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
 <section class="page" id="p2">
-  <h2>Unique factoring across encodings</h2>
+  <h2>Quantity as first hook</h2>
   <p class="lead">
-    Different encodings are treated as admissible dialects. Rather than writing bespoke translators for each pair, the demo decodes each representation, factors through one invariant codepoint sequence, and reconstructs the target view from there. This mirrors the view-unification theorem described in the proof notes. [file:97]
+    Quantity calculus should come early because it is the cleanest place where readers already accept the core idea: the object is not the notation. “5 kilograms” and “5000 grams” are different surface forms of the same quantity relation, which makes dimensional structure the first accessible example of invariant thinking. [cite:117]
   </p>
 
-  <div class="grid2">
-    <div class="card">
-      <h3>Source text</h3>
-      <input id="reprInput" type="text" value="ISAR Δ 口を開く" />
-      <div class="row" style="margin-top:10px">
-        <button class="btn" onclick="runRepresentations()">compute</button>
-        <button class="btn p" onclick="randomSample()">sample</button>
-      </div>
+  <div class="triptych">
+    <div class="trip">
+      <div class="label">What people know</div>
+      <p class="small">Changing units changes the description, not the thing measured. [cite:117]</p>
+      <div class="eq">5 kg = 5000 g</div>
+      <div class="eq">1 m = 100 cm</div>
     </div>
-    <div class="card">
-      <h3>Equality tests</h3>
-      <div id="reprTests">—</div>
+    <div class="trip">
+      <div class="label">Real-life analogy</div>
+      <p class="small">A road is not made longer because a map switches from miles to kilometers. The labels move; the relation stays. [cite:117]</p>
     </div>
-  </div>
-
-  <div class="grid3" style="margin-top:18px">
-    <div class="card">
-      <h3>UTF-8</h3>
-      <div id="utf8Log" class="log">—</div>
-    </div>
-    <div class="card">
-      <h3>UTF-16</h3>
-      <div id="utf16Log" class="log">—</div>
-    </div>
-    <div class="card">
-      <h3>IOB pair-list</h3>
-      <div id="pairLog" class="log">—</div>
+    <div class="trip">
+      <div class="label">Formal result</div>
+      <p class="small">This becomes the first quotient-style discipline: admissible transformations preserve dimensional relations, so the relational object matters more than the particular notation. [cite:117]</p>
     </div>
   </div>
 
   <div class="card" style="margin-top:18px">
-    <h3>View unification</h3>
-    <div id="factorLog" class="log">—</div>
+    <h3>Why it belongs here</h3>
+    <div class="log">Quantity calculus is the first place where the reader already believes the theorem informally.
+
+They already know:
+  the same quantity can wear different units
+
+So the paper can say:
+  representation != object
+  preserved relation = object of interest
+
+That makes later claims about syntax, rewriting, and dialect translation feel like generalizations of something ordinary rather than alien abstractions. [cite:117]</div>
   </div>
 </section>
 
 <section class="page" id="p3">
-  <h2>Compilation as quotient</h2>
+  <h2>Encodings and invariants</h2>
   <p class="lead">
-    Two different sources compile to different trees, reduce by actual arithmetic rewrite steps, and are compared by normal form. The equality being tested is not textual similarity but shared invariant class after normalization. [file:97]
+    The layman hook is simple: a document can survive renaming, recompression, or format conversion. The formal move is to stop treating that as folklore and instead define the observational equivalence under which those surface changes are declared irrelevant. [cite:118][cite:119][cite:121]
   </p>
 
   <div class="grid2">
     <div class="card">
-      <h3>Expression A</h3>
-      <input id="exprA" type="text" value="2 + 3 * 4" />
+      <h3>What people already believe</h3>
+      <div class="eq">rename(file) = same content</div>
+      <div class="eq">zip(file) = same document, new encoding</div>
+      <div class="eq">screenshot(pdf) ≈ same visible content</div>
+      <p class="small" style="margin-top:10px">
+        Everyday computing already assumes an invariant object beneath changing representations. [cite:117][cite:118]
+      </p>
     </div>
+
     <div class="card">
-      <h3>Expression B</h3>
-      <input id="exprB" type="text" value="(3 * 4) + 2" />
+      <h3>Formal compression</h3>
+      <div class="log">Fix an observational equivalence:
+  x ~ y  iff  they preserve the same admissible behavior
+
+Then define:
+  invariant object = equivalence class [x]
+
+This is the paper move:
+  not “many formats are convenient”
+  but “many formats are views of the same quotient object” [cite:121][cite:119]</div>
     </div>
   </div>
 
-  <div class="row" style="margin-top:10px">
-    <button class="btn" onclick="compileCompare()">compile → normalize → compare</button>
-  </div>
-
-  <div class="grid2" style="margin-top:18px">
-    <div class="card">
-      <h3>Compilation traces</h3>
-      <div id="compileTrace" class="log">—</div>
-    </div>
-    <div class="card">
-      <h3>Equal statements</h3>
-      <div id="compileTests">—</div>
-    </div>
+  <div class="card" style="margin-top:18px">
+    <h3>One-line bridge</h3>
+    <div class="code">Once the right observational equivalence is fixed, the quotient is no longer a convenience for the analyst; it is the canonical object that all admissible views must respect. [cite:121][cite:119]</div>
   </div>
 </section>
 
 <section class="page" id="p4">
-  <h2>Styled sparse diff</h2>
+  <h2>Rewriting and normal form</h2>
   <p class="lead">
-    The diff is restored as a first-class visual panel. It computes deltas on both codepoints and UTF-8 bytes, treats position as the key, and makes sparse delta encoding visible as “store only non-matching coordinates.” [file:96]
+    Rewriting is where the proof shape becomes visible. Different paths can lead to the same endpoint, and once confluence and uniqueness of normal form are in place, the quotient by operational equality becomes mathematically stable rather than merely intuitive. [file:97]
   </p>
 
   <div class="grid2">
+    <div class="card">
+      <h3>Layman picture</h3>
+      <p class="small">
+        Two people can solve a puzzle in different move orders and still end at the same solved state. [cite:117]
+      </p>
+      <div class="eq">path₁(problem) = solved</div>
+      <div class="eq">path₂(problem) = solved</div>
+      <div class="eq">nf(path₁(problem)) = nf(path₂(problem))</div>
+    </div>
+
+    <div class="card">
+      <h3>Proof insight</h3>
+      <div class="flow">
+        <div class="node hot">ParStep</div>
+        <div class="arrow">→</div>
+        <div class="node hot">cd</div>
+        <div class="arrow">→</div>
+        <div class="node ok">diamond</div>
+        <div class="arrow">→</div>
+        <div class="node ok">uniqueNF</div>
+        <div class="arrow">→</div>
+        <div class="node ok">Quotient.lift</div>
+      </div>
+      <p class="small" style="margin-top:12px">
+        The proof notes describe a parallel reduction relation, a constructive common descendant <span class="mono">cd</span>, a diamond theorem, and then uniqueness of normal form. That is what licenses the invariant layer as a quotient by operational equality. [file:97]
+      </p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Quotient statement</h3>
+    <div class="eq">t₁ ~ t₂  iff  nf(t₁) = nf(t₂)</div>
+    <div class="eq">InvariantLayer = Quotient(ISKSubtype, OperEqSetoid)</div>
+    <div class="eq">canonicalRep([t]) = nfOfTerm(t)</div>
+  </div>
+</section>
+
+<section class="page" id="p5">
+  <h2>Dialects and factorization</h2>
+  <p class="lead">
+    This is where the monograph’s “dialect zoo” becomes intuitive. Different languages, notations, and encodings are not being compared by ad hoc translation; they are shown to factor through a shared invariant medium. That is why the encoder → kernel → quotient → decoder chain is the napkin equation of the whole story. [cite:120][cite:121][file:97]
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>What people know</h3>
+      <p class="small">
+        The same algorithm can exist as Python, bytecode, lambda terms, or some lower-level intermediate form. [cite:117]
+      </p>
+      <div class="eq">idea = Python = bytecode = λ-term  ?</div>
+      <p class="small">Not syntactically equal, but often operationally the same. [cite:120]</p>
+    </div>
+
+    <div class="card">
+      <h3>Formal result</h3>
+      <div class="log">Translation is not primarily:
+  A -> B
+
+It is:
+  A -> InvariantLayer -> B
+
+This is the terminal-object reading:
+  every admissible dialect maps into the canonical kernel uniquely,
+  then views are recovered from there. [file:97][cite:120][cite:121]</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Napkin equation</h3>
+    <div class="eq">Encoder → Kernel → Quotient → Decoder</div>
+    <div class="eq">translate(A → B, x) = view_B(Invariant(decode_A(x)))</div>
+  </div>
+</section>
+
+<section class="page" id="p6">
+  <h2>Self-hosting and quines</h2>
+  <p class="lead">
+    The quine point should not read as a magic trick. The useful insight is that self-description exposes dependency structure: what is genuinely closed under self-application, what still leans on a host language, and where the bootstrap boundary actually lives. That is the stronger and more honest story for Plex and the monograph. [cite:113][cite:122][cite:123]
+  </p>
+
+  <div class="triptych">
+    <div class="trip">
+      <div class="label">What people know</div>
+      <p class="small">A manual can describe how to build the machine that prints the manual. A compiler can compile a compiler. [cite:113]</p>
+    </div>
+    <div class="trip">
+      <div class="label">Real-life analogy</div>
+      <p class="small">The interesting question is not whether something can copy itself, but what substrate it still depends on while doing so. [cite:122]</p>
+    </div>
+    <div class="trip">
+      <div class="label">Formal reading</div>
+      <p class="small">Self-application is informative because it reveals hierarchy and bootstrap structure. It distinguishes trivial reproduction from a genuinely closed semantic substrate. [cite:113][cite:122]</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Recommended framing</h3>
+    <div class="log">Do not say:
+  “quine = miracle”
+
+Say:
+  self-description revealed the bootstrap layer
+
+Then separate:
+  theorem      = view-independent rewrite kernel
+  runtime      = implementation target
+  language     = still an open design surface
+
+That matches the project split:
+  ISAR is the kernel theorem
+  Plex is the family of practical dialects and runtimes. [cite:122][cite:123]</div>
+  </div>
+</section>
+
+<section class="page" id="p7">
+  <h2>Invariant layer theorem</h2>
+  <p class="lead">
+    Only after the reader has seen encodings, quantities, rewriting, and dialect translation should the invariant layer be named as the universal compression of the recurring pattern. In the project notes it is described both as a quotient by operational equality and as the terminal object among admissible dialect kernels. [file:49][file:97]
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Axiomatic reading</h3>
+      <div class="log">From the axiomatic notes:
+
+- Existence and self-description force distinction and asymmetry.
+- The minimal closed substrate requires four carriers:
+    invariant, rewrite, adjacency, state.
+- The observable system is the quotient by operational equivalence.
+- The kernel is terminal among admissible substrates. [file:49]</div>
+    </div>
+
+    <div class="card">
+      <h3>Proof-development reading</h3>
+      <div class="log">From the proof summary:
+
+- InvariantLayer = Quotient(ISKSubtype, OperEqSetoid)
+- uniqueNF makes nfOfTerm constant on equivalence classes
+- Quotient.lift nfOfTerm defines the canonical representative
+- every admissible dialect factors through the ISAR kernel uniquely [file:97]</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Formal centerpiece</h3>
+    <div class="eq">InvariantLayer = Quotient(ISKSubtype, OperEqSetoid)</div>
+    <div class="eq">t₁ ~ t₂  iff  nf(t₁) = nf(t₂)</div>
+    <div class="eq">∀ admissible A,B: hom(A,B) = view_B ∘ Invariant ∘ decode_A</div>
+  </div>
+</section>
+
+<section class="page" id="p8">
+  <h2>Proof status</h2>
+  <p class="lead">
+    The monograph feedback was right that the credibility hinge is the boundary between what is proved and what is interpretive. This page makes that explicit: the quotient story is formal, the constructive canonical representative is almost closed but still has one seam, and broader modeling claims should remain clearly marked as extrapolation or application. [cite:115][cite:114][file:97]
+  </p>
+
+  <div class="grid3">
+    <div class="card status-good">
+      <h3>Proved core</h3>
+      <div class="small">
+        Operational equality, quotient view, unique normal-form discipline, and admissible-dialect factorization are presented as the formal spine. [file:97][cite:114]
+      </div>
+    </div>
+    <div class="card status-warn">
+      <h3>Constructive seam</h3>
+      <div class="small">
+        The proof notes explicitly say that <span class="mono">nfOfTerm</span> and <span class="mono">canonicalRep</span> are still <span class="mono">noncomputable</span> because they use <span class="mono">Classical.choose</span>; the concrete normalizer still needs to be threaded into the quotient lift. [file:97]
+      </div>
+    </div>
+    <div class="card status-bad">
+      <h3>Interpretive layer</h3>
+      <div class="small">
+        Broader physical, continuous, or modeling claims should stay visibly outside the Lean-proved core unless they are stated as assumptions, conjectures, or application hypotheses. [cite:115][cite:114]
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Recommended paper sentence</h3>
+    <div class="code">The formal contribution of this paper is the quotient-mediated semantic kernel and its factorization properties across admissible representations. Broader modeling claims are presented separately as interpretations or extensions, not as mechanically verified consequences of the Lean development. [cite:115][cite:114]</div>
+  </div>
+</section>
+
+<section class="page" id="p9">
+  <h2>Paper-ready intro</h2>
+  <p class="lead">
+    This turns the previous feedback into actual prose you can drop into the monograph. It preserves the discovery arc, keeps the theorem earned, and avoids sounding like the paper begins with a pre-announced framework looking for examples. [cite:118][cite:117][cite:119]
+  </p>
+
+  <div class="card">
+    <h3>Intro paragraph</h3>
+    <div class="code">I did not start with a theory of computation or physics. I started with a place to store things, and then noticed that every useful representation preserved some structure while hiding other structure. That simple observation led first to encodings, then to invariants, then to a quantity-calculus-style way of treating relational structure as primary, and eventually to a bootstrap result: many different formal systems can be seen as different presentations of the same invariant layer. This paper develops that pattern formally. We define an observational equivalence on admissible representations, show how normal forms and quotients make representation-independent behavior explicit, and prove that a broad class of encodings factor through a common invariant layer.</div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Arc sentence</h3>
+    <div class="code">We began with representations, noticed invariants, rediscovered quantity calculus from first principles, and ended with a minimal quotient structure through which many systems — from rewriting to self-hosting to physical quantities — factor uniquely. [cite:117]</div>
+  </div>
+</section>
+
+<section class="page" id="p10">
+  <h2>Interactive examples</h2>
+  <p class="lead">
+    These are still useful, but now they sit under the conceptual spine instead of trying to carry it alone. The role of the demos is to make the quotient visible after the reader already knows why it matters. [cite:121][file:96][file:97]
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Encoding equality</h3>
+      <input id="reprInput" type="text" value="ISAR Δ 口を開く" />
+      <div class="row" style="margin-top:10px">
+        <button class="btn" onclick="runRepresentations()">compute</button>
+      </div>
+      <div id="reprTests" style="margin-top:12px">—</div>
+    </div>
+
+    <div class="card">
+      <h3>Factorization log</h3>
+      <div id="factorLog" class="log">—</div>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:18px">
     <div class="card">
       <h3>State A</h3>
       <textarea id="diffA" rows="3">ISAR substrate</textarea>
@@ -314,9 +566,6 @@ canvas{display:block;width:100%;height:auto;background:#090b10}
 
   <div class="row" style="margin-top:10px">
     <button class="btn" onclick="runStyledDiff()">compute sparse diff</button>
-    <span class="pill">position = key</span>
-    <span class="pill">delta = sparse subtraction</span>
-    <span class="pill">dedup = same coordinate</span>
   </div>
 
   <div class="diffpane" style="margin-top:18px">
@@ -340,7 +589,7 @@ canvas{display:block;width:100%;height:auto;background:#090b10}
 
     <div class="grid2" style="margin-top:16px">
       <div class="card soft">
-        <h3>Tensor A / Tensor B</h3>
+        <h3>Tensor view</h3>
         <div id="tensorLogs" class="log">—</div>
       </div>
       <div class="card soft">
@@ -351,132 +600,19 @@ canvas{display:block;width:100%;height:auto;background:#090b10}
   </div>
 </section>
 
-<section class="page" id="p5">
-  <h2>What the Lean development actually adds</h2>
-  <p class="lead">
-    This is the direct bridge from the demos to the proof repo insights: parallel reduction, diamond witness, unique normal forms, quotient lifting, admissible dialect unification, and the remaining constructive seam. [file:97]
-  </p>
-
-  <div class="grid2">
-    <div class="card">
-      <h3>Operational insight</h3>
-      <div class="flow">
-        <div class="node hot">ParStep</div>
-        <div class="arrow">→</div>
-        <div class="node hot">cd</div>
-        <div class="arrow">→</div>
-        <div class="node ok">diamond</div>
-        <div class="arrow">→</div>
-        <div class="node ok">uniqueNF</div>
-        <div class="arrow">→</div>
-        <div class="node ok">Quotient.lift</div>
-      </div>
-      <p class="small" style="margin-top:12px">
-        The proof summary says the parallel reduction relation supports a constructive common-descendant witness <span class="mono">cd</span>, which in turn yields a diamond theorem and finally uniqueness of normal forms. That is exactly the mathematical reason the invariant layer can collapse surface differences safely. [file:97]
-      </p>
-    </div>
-
-    <div class="card">
-      <h3>Category-theoretic insight</h3>
-      <div class="flow">
-        <div class="node">Dialect A</div>
-        <div class="arrow">→</div>
-        <div class="node warn">decode</div>
-        <div class="arrow">→</div>
-        <div class="node hot">ISAR kernel</div>
-        <div class="arrow">→</div>
-        <div class="node warn">viewof</div>
-        <div class="arrow">→</div>
-        <div class="node">Dialect B</div>
-      </div>
-      <p class="small" style="margin-top:12px">
-        The development summary explicitly phrases this as a terminal-object condition for admissible dialects: translation is mediated by the canonical kernel, not by bespoke pairwise adapters. [file:97]
-      </p>
-    </div>
-  </div>
-
-  <div class="grid2" style="margin-top:18px">
-    <div class="card">
-      <h3>Lean-flavored proof sketch</h3>
-      <div class="code" id="leanSketch"></div>
-    </div>
-    <div class="card">
-      <h3>What remains open</h3>
-      <div class="log" id="openSeam"></div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h3>Live proof-shaped equalities</h3>
-    <div id="proofLiveTests"></div>
-  </div>
-</section>
-
-<section class="page" id="p6">
-  <h2>Counterexamples and conditions</h2>
-  <p class="lead">
-    The claim is not that four labels are aesthetically pleasing. The claim is that if one carrier is removed, one concrete family of equalities stops being definable or verifiable in the same closed substrate. [file:97][file:49]
-  </p>
-
-  <div class="grid2">
-    <div class="card">
-      <h3>Remove one carrier</h3>
-      <select id="carrierSelect">
-        <option value="I">Remove I — invariant</option>
-        <option value="R">Remove R — rewrite</option>
-        <option value="A">Remove A — adjacency</option>
-        <option value="S">Remove S — state</option>
-      </select>
-      <div class="row" style="margin-top:10px">
-        <button class="btn r" onclick="testRemoval()">run failure test</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>Failure reason</h3>
-      <div id="removalWhy" class="log">—</div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h3>Computed failure statements</h3>
-    <div id="removalTests">—</div>
-  </div>
-</section>
-
-<section class="page" id="p7">
-  <h2>Why it matters in hindsight</h2>
-  <p class="lead">
-    The machine story and the proof story now line up: the demos repeatedly compute the same pattern that the formal development abstracts. Build a representation, normalize it, identify what survives, and compare survivors rather than surfaces. [file:97]
-  </p>
-
-  <div class="grid2">
-    <div class="card">
-      <h3>Machine reading</h3>
-      <div class="log" id="proofLogA"></div>
-    </div>
-    <div class="card">
-      <h3>Formal reading</h3>
-      <div class="log" id="proofLogB"></div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h3>Final equal statements</h3>
-    <div id="proofTests"></div>
-  </div>
-</section>
-
 <script>
 const pages=[
-  ['p0','0 · Overview'],
-  ['p1','1 · Construction'],
-  ['p2','2 · Factoring'],
-  ['p3','3 · Quotient Compile'],
-  ['p4','4 · Styled Diff'],
-  ['p5','5 · Lean Insights'],
-  ['p6','6 · Conditions'],
-  ['p7','7 · Hindsight']
+  ['p0','0 · Spine'],
+  ['p1','1 · Table'],
+  ['p2','2 · Quantities'],
+  ['p3','3 · Encodings'],
+  ['p4','4 · Rewriting'],
+  ['p5','5 · Dialects'],
+  ['p6','6 · Self-hosting'],
+  ['p7','7 · Invariant Layer'],
+  ['p8','8 · Proof Status'],
+  ['p9','9 · Intro Draft'],
+  ['p10','10 · Demos']
 ];
 const nav=document.getElementById('nav');
 pages.forEach(([id,label], idx)=>{
@@ -507,30 +643,23 @@ function cps(str){ return Array.from(str).map(ch=>ch.codePointAt(0)); }
 function utf8Bytes(str){ return Array.from(new TextEncoder().encode(str)); }
 function utf16Units(str){ const out=[]; for(let i=0;i<str.length;i++) out.push(str.charCodeAt(i)); return out; }
 function decodeUtf8(arr){ return new TextDecoder().decode(new Uint8Array(arr)); }
-function decodeUtf16(arr){ return String.fromCharCode(...arr); }
 function eqLine(lhs, rhs, ok){
   return `<div class="eq ${ok?'pass':'fail'}">${esc(lhs)} = ${esc(rhs)}  ${ok?'✓':'✗'}</div>`;
 }
-function invariantOfString(str){
-  const arr=cps(str);
-  return {codepoints:arr, hash:simpleHash(arr), text:str};
-}
-
-/* ---------- IOB helpers ---------- */
 function buildPairListFromString(str){
   const chars=Array.from(str);
   let nextId=1;
   const nodes=[], atomIds=[];
   chars.forEach((ch, idx)=>{
     nodes.push({id:nextId, kind:'atom', car:null, cdr:null, view:`${idx}:${ch}`});
-    atomIds.push(nextId); nextId++;
+    atomIds.push(nextId++);
   });
   let tail=null;
   for(let i=atomIds.length-1;i>=0;i--){
     nodes.push({id:nextId, kind:'pair', car:atomIds[i], cdr:tail, view:`cons(${atomIds[i]}, ${tail??'nil'})`});
-    tail=nextId; nextId++;
+    tail=nextId++;
   }
-  return {nodes, root:tail, atomIds};
+  return {nodes, root:tail};
 }
 function decodePairList(pairObj){
   const byId=new Map(pairObj.nodes.map(n=>[n.id,n]));
@@ -538,219 +667,52 @@ function decodePairList(pairObj){
   while(cur!==null){
     const p=byId.get(cur);
     if(!p || p.kind!=='pair') break;
-    const a=byId.get(p.car);
-    out.push(a.view.split(':').slice(1).join(':'));
+    out.push(byId.get(p.car).view.split(':').slice(1).join(':'));
     cur=p.cdr;
   }
   return out.join('');
 }
-function drawIOB(pairObj){
-  const cv=document.getElementById('iobCanvas');
-  const ctx=cv.getContext('2d');
-  ctx.clearRect(0,0,cv.width,cv.height);
-  const nodes=pairObj.nodes, atoms=nodes.filter(n=>n.kind==='atom'), pairs=nodes.filter(n=>n.kind==='pair');
-  const pos=new Map();
-  atoms.forEach((n,i)=>pos.set(n.id,{x:70+(i%8)*58,y:80+Math.floor(i/8)*74}));
-  pairs.forEach((n,i)=>pos.set(n.id,{x:80+(i%6)*76,y:240+Math.floor(i/6)*54}));
-  ctx.lineWidth=1.5; ctx.strokeStyle='#32405f';
-  pairs.forEach(n=>{
-    const p=pos.get(n.id);
-    if(n.car){ const c=pos.get(n.car); if(c){ ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(c.x,c.y); ctx.stroke(); }}
-    if(n.cdr){ const d=pos.get(n.cdr); if(d){ ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(d.x,d.y); ctx.stroke(); }}
-  });
-  nodes.forEach(n=>{
-    const p=pos.get(n.id);
-    ctx.beginPath(); ctx.arc(p.x,p.y,16,0,Math.PI*2);
-    ctx.fillStyle=n.kind==='atom'?'rgba(125,211,252,.15)':'rgba(134,239,172,.12)';
-    ctx.fill();
-    ctx.strokeStyle=n.kind==='atom'?'#7dd3fc':'#86efac'; ctx.stroke();
-    ctx.fillStyle='#d8e0f0'; ctx.font='11px ui-monospace, Menlo, monospace'; ctx.textAlign='center';
-    ctx.fillText(String(n.id),p.x,p.y+4);
-    ctx.fillStyle='#7a8299'; ctx.font='10px ui-monospace, Menlo, monospace';
-    const label=n.kind==='atom'?n.view.split(':').slice(1).join(':'):('•');
-    ctx.fillText(label,p.x,p.y+28);
-  });
+function invariantOfString(str){
+  const arr=cps(str);
+  return {codepoints:arr, hash:simpleHash(arr), text:str};
 }
-function runConstruction(){
-  const src=document.getElementById('buildInput').value;
-  const pairObj=buildPairListFromString(src);
-  const decoded=decodePairList(pairObj);
-  const inv=invariantOfString(decoded);
-
-  const tb=document.querySelector('#iobTable tbody');
-  tb.innerHTML='';
-  pairObj.nodes.forEach(n=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${n.id}</td><td>${n.kind}</td><td>${n.car??'—'}</td><td>${n.cdr??'nil'}</td><td>${esc(n.view)}</td>`;
-    tb.appendChild(tr);
-  });
-  drawIOB(pairObj);
-
-  const adjacency=pairObj.nodes.filter(n=>n.kind==='pair').map(n=>`(${n.id} → ${n.car}, ${n.cdr??'nil'})`);
-  document.getElementById('constructSummary').textContent=
-`IOB seed: ${src.length} atoms + ${src.length} cons-pairs
-root pair id: ${pairObj.root}
-
-decode_iob(encode_iob("${src}")) = "${decoded}"
-
-Invariant layer:
-  code points = [${inv.codepoints.join(', ')}]
-  digest      = ${inv.hash}`;
-
-  document.getElementById('sarLog').textContent=
-`S — State
-  "${decoded}"
-
-A — Adjacency
-  ${adjacency.join('\n  ')}
-
-R — Rewrite / normalization
-  pair-chain -> linear stream -> canonical text
-
-I — Invariant
-  [${inv.codepoints.join(', ')}] / ${inv.hash}
-
-This is IOB -> SAR -> IRAS in one concrete object.`;
-
-  document.getElementById('constructEqs').innerHTML = [
-    eqLine(`decode_iob(encode_iob("${src}"))`, `"${decoded}"`, decoded===src),
-    eqLine(`Invariant(iob("${src}"))`, inv.hash, true),
-    eqLine(`State(decode_iob(encode_iob("${src}")))`, `"${src}"`, decoded===src),
-    eqLine(`IRAS("${src}").I`, inv.hash, true)
-  ].join('');
-}
-runConstruction();
-
-/* ---------- representation factoring ---------- */
 function runRepresentations(){
   const src=document.getElementById('reprInput').value;
-  const b8=utf8Bytes(src), u16=utf16Units(src), p=buildPairListFromString(src);
-  const d8=decodeUtf8(b8), d16=decodeUtf16(u16), dp=decodePairList(p);
-
+  const b8=utf8Bytes(src);
+  const p=buildPairListFromString(src);
+  const d8=decodeUtf8(b8);
+  const dp=decodePairList(p);
   const invText=invariantOfString(src);
   const inv8=invariantOfString(d8);
-  const inv16=invariantOfString(d16);
   const invP=invariantOfString(dp);
-
-  document.getElementById('utf8Log').textContent =
-`bytes = ${b8.length}
-${b8.map((x,i)=>`[${i}] 0x${x.toString(16).padStart(2,'0')}`).join('\n')}`;
-
-  document.getElementById('utf16Log').textContent =
-`code units = ${u16.length}
-${u16.map((x,i)=>`[${i}] 0x${x.toString(16).padStart(4,'0')}`).join('\n')}`;
-
-  document.getElementById('pairLog').textContent =
-`root = ${p.root}
-${p.nodes.map(n=>`${n.id}\t${n.kind}\tcar=${n.car??'—'}\tcdr=${n.cdr??'nil'}\t${n.view}`).join('\n')}`;
 
   document.getElementById('reprTests').innerHTML = [
     eqLine(`decode_utf8(encode_utf8("${src}"))`, `"${d8}"`, d8===src),
-    eqLine(`decode_utf16(encode_utf16("${src}"))`, `"${d16}"`, d16===src),
     eqLine(`decode_iob(encode_iob("${src}"))`, `"${dp}"`, dp===src),
     eqLine(`Invariant(text("${src}"))`, invText.hash, true),
     eqLine(`Invariant(utf8("${src}"))`, inv8.hash, inv8.hash===invText.hash),
-    eqLine(`Invariant(utf16("${src}"))`, inv16.hash, inv16.hash===invText.hash),
     eqLine(`Invariant(iob("${src}"))`, invP.hash, invP.hash===invText.hash)
   ].join('');
 
   document.getElementById('factorLog').textContent =
-`Admissible-dialect translation pattern
-
-A = UTF-8
-B = UTF-16
-C = IOB list
+`A = UTF-8
+B = IOB pair-list
 I = invariant codepoint sequence
 
 hom_A→B(x) = view_B(Invariant(decode_A(x)))
-hom_A→C(x) = view_C(Invariant(decode_A(x)))
 
-Concrete hashes
-  I(text)  = ${invText.hash}
-  I(utf8)  = ${inv8.hash}
-  I(utf16) = ${inv16.hash}
-  I(iob)   = ${invP.hash}
+Concrete:
+  I(text) = ${invText.hash}
+  I(utf8) = ${inv8.hash}
+  I(iob)  = ${invP.hash}
 
-No bespoke byte→pair or pair→utf16 translator is needed.
-Every admissible translation factors through one invariant.`;
-}
-function randomSample(){
-  const samples=['ISAR Δ 口を開く','already always there','same invariant, new surface','pair -> rewrite -> quotient'];
-  document.getElementById('reprInput').value=samples[Math.floor(Math.random()*samples.length)];
-  runRepresentations();
+This is the factorization pattern:
+  encoding changes
+  invariant stays
+  decoder respects quotient`;
 }
 runRepresentations();
 
-/* ---------- compile quotient ---------- */
-function app(f,x){ return {op:'@',f,x}; }
-function parseExpr(str){
-  let i=0;
-  function skip(){ while(str[i]===' ') i++; }
-  function num(){ skip(); let j=i; while(j<str.length && /[0-9]/.test(str[j])) j++; const n=parseInt(str.slice(i,j),10); i=j; return n; }
-  function factor(){ skip(); if(str[i]==='('){ i++; const e=add(); skip(); if(str[i]!==')') throw new Error('missing )'); i++; return e; } return num(); }
-  function mul(){ let left=factor(); skip(); while(str[i]==='*'){ i++; left=app(app('MUL',left),factor()); skip(); } return left; }
-  function add(){ let left=mul(); skip(); while(str[i]==='+'){ i++; left=app(app('PLUS',left),mul()); skip(); } return left; }
-  const out=add(); skip(); return out;
-}
-function astStr(t){
-  if(typeof t==='number') return String(t);
-  if(t.op==='@') return '('+astStr(t.f)+' '+astStr(t.x)+')';
-  return String(t);
-}
-function stepArith(t){
-  if(typeof t==='number') return null;
-  if(!t || t.op!=='@') return null;
-  const f=t.f;
-  if(f && f.op==='@' && f.f==='PLUS' && typeof f.x==='number' && typeof t.x==='number') return f.x + t.x;
-  if(f && f.op==='@' && f.f==='MUL'  && typeof f.x==='number' && typeof t.x==='number') return f.x * t.x;
-  const rf=stepArith(f); if(rf!==null) return app(rf,t.x);
-  const rx=stepArith(t.x); if(rx!==null) return app(f,rx);
-  return null;
-}
-function normalizeArith(t){
-  const trace=[astStr(t)];
-  let cur=t;
-  for(let n=0;n<128;n++){
-    const nxt=stepArith(cur);
-    if(nxt===null) break;
-    cur=nxt; trace.push(astStr(cur));
-  }
-  return {normal:cur, trace};
-}
-function compileCompare(){
-  const a=document.getElementById('exprA').value;
-  const b=document.getElementById('exprB').value;
-  let A,B,ra,rb;
-  try{
-    A=parseExpr(a); B=parseExpr(b);
-    ra=normalizeArith(A); rb=normalizeArith(B);
-  }catch(e){
-    document.getElementById('compileTrace').textContent='Parse error: '+e.message;
-    document.getElementById('compileTests').innerHTML='<div class="eq fail">parse(error) = error ✗</div>';
-    return;
-  }
-  document.getElementById('compileTrace').textContent =
-`A source: ${a}
-A AST:    ${astStr(A)}
-A trace:  ${ra.trace.join('  →  ')}
-A nf:     ${ra.normal}
-
-B source: ${b}
-B AST:    ${astStr(B)}
-B trace:  ${rb.trace.join('  →  ')}
-B nf:     ${rb.normal}`;
-
-  document.getElementById('compileTests').innerHTML = [
-    eqLine(`nf("${a}")`, String(ra.normal), true),
-    eqLine(`nf("${b}")`, String(rb.normal), true),
-    eqLine(`[ "${a}" ]`, `[ "${b}" ]`, ra.normal===rb.normal),
-    eqLine(`Invariant(compile("${a}"))`, simpleHash([ra.normal]), true),
-    eqLine(`Invariant(compile("${b}"))`, simpleHash([rb.normal]), simpleHash([ra.normal])===simpleHash([rb.normal]))
-  ].join('');
-}
-compileCompare();
-
-/* ---------- styled diff ---------- */
 function diffArrays(a,b, hexWidth=2){
   const max=Math.max(a.length,b.length);
   let same=0, add=0, rem=0, chg=0, html='';
@@ -773,7 +735,8 @@ function runStyledDiff(){
   const B=document.getElementById('diffB').value;
   const cpA=Array.from(A), cpB=Array.from(B);
   const byteA=utf8Bytes(A), byteB=utf8Bytes(B);
-  const dcp=diffArrays(cpA,cpB,4), dby=diffArrays(byteA,byteB,2);
+  const dcp=diffArrays(cpA,cpB,4);
+  const dby=diffArrays(byteA,byteB,2);
 
   document.getElementById('sameN').textContent=dcp.same;
   document.getElementById('addN').textContent=dcp.add;
@@ -794,149 +757,18 @@ ${cps(B).map((v,i)=>`(${i},0,0,r=${v}) value=1   "${Array.from(B)[i]}"`).join('\
   const d=dby.add+dby.rem+dby.chg;
   document.getElementById('diffCost').textContent =
 `Sparse byte delta
-  d = ${d} changed byte positions
+  changed positions d = ${d}
   address bits = ceil(log2(${n}+1)) = ${bits}
-  cost = d × (${bits} + 8) bits = ${d*(bits+8)} bits ≈ ${((d*(bits+8))/8).toFixed(2)} bytes
+  cost = d × (${bits} + 8) bits = ${d*(bits+8)} bits
 
-Dense re-encode
-  full payload = ${n} bytes
+Dense full payload
+  = ${n} bytes
 
 Interpretation
-  same coordinate  -> no delta entry
-  changed coordinate -> one sparse entry
-  position is identity for the diff`;
+  unchanged coordinates do not travel
+  changed coordinates are the semantic payload`;
 }
 runStyledDiff();
-
-/* ---------- proof repo insights ---------- */
-document.getElementById('leanSketch').textContent =
-`-- Parallel reduction shape from the proof notes
-inductive ParStep : Term -> Term -> Prop
-| refl  : ParStep t t
-| app   : ParStep f f' -> ParStep x x' -> ParStep (App f x) (App f' x')
-| normI : ParStep (App I x) x
-...
-
--- constructive common descendant
-def cd : Term -> Term
-| App I x   => x
-| App f x   => App (cd f) (cd x)
-| t         => t
-
-theorem diamond :
-  ParStep t u -> ParStep t v ->
-  ∃ w, ParStep u w ∧ ParStep v w := ...
-
-theorem uniqueNF :
-  OperEq t u -> nfOf t = nfOf u := ...
-
-def InvariantLayer := Quotient OperEqSetoid
-
-def canonicalRep :
-  InvariantLayer -> Term :=
-  Quotient.lift nfOfTerm ...`;
-
-document.getElementById('openSeam').textContent =
-`Actual insight from the proof summary
-
-1. The quotient view is already mathematically pinned down:
-     InvariantLayer = Quotient(ISKSubtype, OperEqSetoid)
-
-2. The key reason this works is unique normal forms:
-     if t₁ ~ t₂, then nfOfTerm t₁ = nfOfTerm t₂
-
-3. The canonical representative descends only because uniqueNF proves
-   constancy on equivalence classes.
-
-4. One seam remains open in the summary:
-   nfOfTerm and canonicalRep are marked noncomputable because they currently
-   use Classical.choose to extract a normal form from an existence proof.
-
-5. The constructive witness is already nearby:
-   a concrete normalization strategy, described in the notes as cd in ISAR.lean,
-   still needs to be wired back through Quotient.lift.
-
-That is the difference between “the quotient exists” and
-“the quotient computes by an explicit evaluator.”`;
-
-document.getElementById('proofLiveTests').innerHTML = [
-  eqLine(`ParStep(t,u) ∧ ParStep(t,v)`, `∃w. ParStep(u,w) ∧ ParStep(v,w)`, true),
-  eqLine(`OperEq(t₁,t₂)`, `nfOfTerm(t₁) = nfOfTerm(t₂)`, true),
-  eqLine(`Quotient.lift(nfOfTerm)`, `well-defined`, true),
-  eqLine(`translate(A→B,x)`, `view_B(Invariant(decode_A(x)))`, true),
-  eqLine(`canonicalRep([t])`, `nfOfTerm(t)`, true)
-].join('');
-
-/* ---------- removal tests ---------- */
-function testRemoval(){
-  const c=document.getElementById('carrierSelect').value;
-  let why='', tests='';
-  if(c==='I'){
-    why=`Without I, there is no quotient target.
-You can still transform terms, but you cannot name the stable thing they agree on.
-The equal statement “[x] = [y]” disappears with the invariant layer.`;
-    tests+=eqLine('Invariant(utf8(x))', 'undefined', false);
-    tests+=eqLine('Invariant(iob(x))', 'undefined', false);
-    tests+=eqLine('Quotient.lift(nfOfTerm)', 'undefined', false);
-  }
-  if(c==='R'){
-    why=`Without R, no path collapses.
-Syntax remains syntax, encodings remain encodings, and no normal form is computed.
-The statement “same under normalization” is no longer meaningful internally.`;
-    tests+=eqLine('nf(program)', 'stuck', false);
-    tests+=eqLine('uniqueNF(t₁,t₂)', 'unprovable', false);
-    tests+=eqLine('translate(A→B,x)', 'undefined', false);
-  }
-  if(c==='A'){
-    why=`Without A, the machine loses compositional shape.
-No car/cdr traversal, no pair-chain decode, no typed application tree.
-You have tokens, but not a machine-readable arrangement of them.`;
-    tests+=eqLine('decode_iob(encode_iob(x))', 'undefined', false);
-    tests+=eqLine('compile(AST)', 'ill-formed', false);
-    tests+=eqLine('App-congruence', 'fails', false);
-  }
-  if(c==='S'){
-    why=`Without S, there is nothing repeatable to observe or render.
-You may still have identities and internal relations, but no stable user-facing state to compare, decode, or display.`;
-    tests+=eqLine('render(x)', 'undefined', false);
-    tests+=eqLine('decode_utf8(encode_utf8(x))', 'unobservable', false);
-    tests+=eqLine('State(invariant)', 'undefined', false);
-  }
-  document.getElementById('removalWhy').textContent=why;
-  document.getElementById('removalTests').innerHTML=tests;
-}
-testRemoval();
-
-/* ---------- hindsight ---------- */
-document.getElementById('proofLogA').textContent =
-`Machine reading
-
-representation -> normalize -> survivor -> equality
-
-Every live panel does this:
-  text / utf8 / utf16 / iob / ast
-      -> decode or reduce
-      -> invariant or normal form
-      -> equality statement`;
-
-document.getElementById('proofLogB').textContent =
-`Formal reading
-
-ParStep       gives a parallel reduction relation
-cd            gives a common descendant witness
-diamond       gives joinability
-uniqueNF      makes normalization class-invariant
-Quotient      packages that class as a type
-view-unify    makes cross-dialect translation factor through the kernel
-open seam     make canonicalRep constructive rather than classical`;
-
-document.getElementById('proofTests').innerHTML = [
-  eqLine('t₁ ~ t₂', 'nf(t₁) = nf(t₂)', true),
-  eqLine('Invariant(text(x))', 'Invariant(utf8(x))', true),
-  eqLine('Invariant(text(x))', 'Invariant(iob(x))', true),
-  eqLine('hom_A→B(x)', 'view_B(Invariant(decode_A(x)))', true),
-  eqLine('machine story', 'proof story', true)
-].join('');
 </script>
 </body>
 </html>
