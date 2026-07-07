@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ISAR Substrate — Full Interactive Demo</title>
+<style>
+  :root{--bg:#0b0d12;--panel:#12151c;--line:#23283a;--fg:#d8e0f0;--accent:#7dd3fc;--accent2:#fca5a5;--accent3:#86efac;--mut:#7a8299;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:'JetBrains Mono',Consolas,monospace;font-size:13px;line-height:1.5}
+  header{padding:24px 32px;border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:20px;letter-spacing:.5px}
+  header p{margin:6px 0 0;color:var(--mut);font-size:12.5px;max-width:900px}
+  nav{display:flex;gap:4px;padding:0 32px;border-bottom:1px solid var(--line);background:#0e1117;flex-wrap:wrap}
+  nav button{background:none;border:none;color:var(--mut);padding:12px 16px;cursor:pointer;font-family:inherit;font-size:12.5px;border-bottom:2px solid transparent}
+  nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  nav button:hover{color:var(--fg)}
+  section{display:none;padding:28px 32px 60px;max-width:1180px}
+  section.active{display:block}
+  h2{font-size:15px;color:var(--accent);margin:28px 0 10px;border-left:3px solid var(--accent);padding-left:10px}
+  h2:first-of-type{margin-top:0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+  .panel h3{margin:0 0 10px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+  canvas{display:block;background:#0a0c11;border-radius:6px;border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td,th{border:1px solid var(--line);padding:4px 8px;text-align:center}
+  th{color:var(--mut);font-weight:normal}
+  button.act{background:var(--accent);color:#0b0d12;border:none;padding:7px 14px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;margin:4px 4px 4px 0}
+  button.act:hover{opacity:.85}
+  button.act.alt{background:var(--accent2)}
+  button.act.alt2{background:var(--accent3)}
+  textarea,input[type=text]{width:100%;background:#0a0c11;border:1px solid var(--line);color:var(--fg);border-radius:5px;padding:8px;font-family:inherit;font-size:12.5px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  .pill{display:inline-block;background:#1a1f2b;border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--mut)}
+  .diffline{font-family:monospace;padding:2px 6px;border-radius:3px}
+  .add{background:rgba(134,239,172,.12);color:var(--accent3)}
+  .rem{background:rgba(252,165,165,.12);color:var(--accent2)}
+  .same{color:var(--mut)}
+  .annot{color:var(--mut);font-size:12px;margin-top:8px}
+  code{color:var(--accent);background:#0a0c11;padding:1px 5px;border-radius:3px}
+  .small{font-size:11px;color:var(--mut)}
+  .log{background:#06070a;border:1px solid var(--line);border-radius:6px;padding:10px;font-size:11.5px;max-height:200px;overflow:auto;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>ISAR Substrate — Interactive Walkthrough</h1>
+  <p>The four-carrier rank-4 kernel (Invariant · Rewrite · Adjacency · State), shown live as kernel matrices, a relational node graph (IOB), and a sparse compute tensor (U) — followed by a parallel reduction, a distributed merge, and a tensor↔text codec with diffing.</p>
+</header>
+<nav id="nav"></nav>
+
+<section id="s1">
+  <h2>1 · ISAR Kernel — the four axiomatic matrices</h2>
+  <p class="small">Each carrier is a 4×4 matrix. Together they form the rank-4 tensor <code>K = [I,R,A,S]</code>. This is fixed at boot — axiomatic, never mutated, ~256 bytes total.</p>
+  <div class="grid" id="kernelGrid"></div>
+  <div class="annot">Click any cell to toggle it and see how the composite invariant signature (hash) changes — this models how a single bit-flip in the axioms invalidates the whole substrate's identity.</div>
+  <div class="row"><span class="pill">Composite signature: <span id="kernelSig">—</span></span></div>
+</section>
+
+<section id="s2">
+  <h2>2 · IOB — the relational node graph</h2>
+  <p class="small"><code>node(id, is_pair, car_id, cdr_id)</code>. Atoms are leaves, pairs are edges. This is C_A — adjacency / structure — and it is the layer you diff, merge, and ship as a <code>.plex</code> subgraph.</p>
+  <div class="grid">
+    <div class="panel">
+      <h3>Graph view</h3>
+      <canvas id="iobCanvas" width="540" height="320"></canvas>
+      <div class="row">
+        <button class="act" onclick="iobAddPair()">PAIR(a,b) → new node</button>
+        <button class="act alt" onclick="iobRemoveLeaf()">remove leaf node</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>node table</h3>
+      <table id="iobTable"><thead><tr><th>id</th><th>is_pair</th><th>car</th><th>cdr</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+</section>
+
+<section id="s3">
+  <h2>3 · U-tensor — the sparse compute substrate</h2>
+  <p class="small">Rank-4 sparse COO: <code>(i,s,a,r,value)</code>. This is C_R / C_S in motion — the only table that gets hot, parallel, GPU-bound writes.</p>
+  <div class="grid">
+    <div class="panel">
+      <h3>Sparse COO entries</h3>
+      <table id="uTable"><thead><tr><th>i</th><th>s</th><th>a</th><th>r</th><th>value</th></tr></thead><tbody></tbody></table>
+      <div class="row"><button class="act" onclick="addRandomEntry()">add random entry</button></div>
+    </div>
+    <div class="panel">
+      <h3>Dense projection (i × r slice, s=a=0)</h3>
+      <canvas id="uCanvas" width="320" height="320"></canvas>
+      <div class="small">Brightness = value. This is what "querying" the tensor looks like — fix two axes, render the rest.</div>
+    </div>
+  </div>
+</section>
+
+<section id="s4">
+  <h2>4 · Compute example — parallel contraction (einsum)</h2>
+  <p class="small">The same contraction that the SQL view <code>ucontract</code> computes via joins can run as a parallel tensor op. This box runs it in-browser (JS typed arrays stand in for a GPU kernel) and shows step count vs sequential joins.</p>
+  <div class="panel">
+    <div class="row">
+      <button class="act" onclick="runContractionDemo()">run contraction: U[i,s,a,r] · I[i] · S[s] · A[a] → R[r]</button>
+    </div>
+    <div class="log" id="computeLog">Click run — this contracts the current U-tensor against input/select/action vectors and shows the resulting r-axis output, timed against a naive sequential loop.</div>
+  </div>
+</section>
+
+<section id="s5">
+  <h2>5 · Distributed example — detach, ship, merge</h2>
+  <p class="small">Two independently evolved subgraphs (Peer A, Peer B) get merged. Conflicts only occur when the <b>same node_id</b> has a different C_R value. Labels (C_S) never conflict — they just accumulate.</p>
+  <div class="grid">
+    <div class="panel">
+      <h3>Peer A subgraph</h3>
+      <table id="peerA"><thead><tr><th>id</th><th>value (C_R)</th><th>label (C_S)</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <h3>Peer B subgraph</h3>
+      <table id="peerB"><thead><tr><th>id</th><th>value (C_R)</th><th>label (C_S)</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+  <div class="row"><button class="act" onclick="mergePeers()">merge A ∪ B</button></div>
+  <div class="panel" style="margin-top:12px">
+    <h3>Merge result</h3>
+    <table id="mergeResult"><thead><tr><th>id</th><th>resolved value</th><th>labels</th><th>status</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<section id="s6">
+  <h2>6 · Tensor ↔ Text codec, and diff</h2>
+  <p class="small">Type text below. It is encoded into a flat U-tensor (one node per character, C_I = position, C_R = codepoint, C_S = glyph). Edit the text and see the structural diff between the two tensor states — exactly the "delta compression" argument from the napkin.</p>
+  <div class="panel">
+    <div class="row">
+      <div style="flex:1"><label class="small">State A (original)</label><textarea id="textA" rows="2">ISAR substrate</textarea></div>
+    </div>
+    <div class="row">
+      <div style="flex:1"><label class="small">State B (edited)</label><textarea id="textB" rows="2">ISAR Δ substrate v2</textarea></div>
+    </div>
+    <div class="row">
+      <button class="act" onclick="encodeAndDiff()">encode both → tensor → diff</button>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="panel">
+      <h3>Tensor A (COO, truncated)</h3>
+      <div class="log" id="tensorALog">—</div>
+    </div>
+    <div class="panel">
+      <h3>Tensor B (COO, truncated)</h3>
+      <div class="log" id="tensorBLog">—</div>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:14px">
+    <h3>Structural diff (Δ = sparse index-level subtraction)</h3>
+    <div class="log" id="diffLog">—</div>
+  </div>
+</section>
+
+<script>
+const sections=['s1','s2','s3','s4','s5','s6'];
+const titles=['1 · ISAR Kernel','2 · IOB Graph','3 · U-Tensor','4 · Compute','5 · Distributed','6 · Tensor↔Text + Diff'];
+const nav=document.getElementById('nav');
+sections.forEach((id,i)=>{
+  const b=document.createElement('button');
+  b.textContent=titles[i];
+  b.onclick=()=>{sections.forEach(s=>document.getElementById(s).classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    [...nav.children].forEach(c=>c.classList.remove('active')); b.classList.add('active');};
+  nav.appendChild(b);
+});
+document.getElementById('s1').classList.add('active'); nav.children[0].classList.add('active');
+
+const kernels={
+  S:[[1,0,0,1],[0,1,0,0],[0,0,1,0],[1,0,0,1]],
+  A:[[0,0,0,1],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+  R:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,1,0]],
+  I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,1]]
+};
+const colors={S:'#7dd3fc',A:'#fca5a5',R:'#86efac',I:'#fde68a'};
+function renderKernel(){
+  const grid=document.getElementById('kernelGrid'); grid.innerHTML='';
+  Object.keys(kernels).forEach(name=>{
+    const p=document.createElement('div'); p.className='panel';
+    p.innerHTML=`<h3>${name} matrix (${ {S:'Closure',A:'Adjacency',R:'Rewrite/Resolution',I:'Identity'}[name] })</h3>`;
+    const tbl=document.createElement('table');
+    for(let i=0;i<4;i++){
+      const tr=document.createElement('tr');
+      for(let j=0;j<4;j++){
+        const td=document.createElement('td');
+        const v=kernels[name][i][j];
+        td.textContent=v;
+        td.style.cursor='pointer';
+        td.style.background=v?colors[name]+'33':'transparent';
+        td.style.color=v?colors[name]:'#444';
+        td.onclick=()=>{kernels[name][i][j]=v?0:1; renderKernel();};
+        tr.appendChild(td);
+      }
+      tbl.appendChild(tr);
+    }
+    p.appendChild(tbl); grid.appendChild(p);
+  });
+  let sig=0;
+  Object.keys(kernels).forEach((name,idx)=>{
+    kernels[name].forEach(row=>row.forEach(v=>{sig+= v* Math.pow(2,idx);}));
+  });
+  document.getElementById('kernelSig').textContent='0x'+sig.toString(16).toUpperCase().padStart(4,'0');
+}
+renderKernel();
+
+let iobNodes=[
+  {id:1,is_pair:0,car:null,cdr:null,x:90,y:60,label:'atom:a'},
+  {id:2,is_pair:0,car:null,cdr:null,x:90,y:240,label:'atom:b'},
+  {id:3,is_pair:1,car:1,cdr:2,x:260,y:150,label:'pair(1,2)'},
+];
+let iobNextId=4;
+function renderIOB(){
+  const cv=document.getElementById('iobCanvas'); const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.strokeStyle='#3a4156'; ctx.lineWidth=1.5;
+  iobNodes.filter(n=>n.is_pair).forEach(n=>{
+    const car=iobNodes.find(x=>x.id===n.car), cdr=iobNodes.find(x=>x.id===n.cdr);
+    [car,cdr].forEach(t=>{ if(t){ ctx.beginPath(); ctx.moveTo(n.x,n.y); ctx.lineTo(t.x,t.y); ctx.stroke(); }});
+  });
+  iobNodes.forEach(n=>{
+    ctx.beginPath(); ctx.arc(n.x,n.y,18,0,7);
+    ctx.fillStyle=n.is_pair? '#fca5a533':'#7dd3fc33';
+    ctx.fill(); ctx.strokeStyle=n.is_pair?'#fca5a5':'#7dd3fc'; ctx.stroke();
+    ctx.fillStyle='#d8e0f0'; ctx.font='11px monospace'; ctx.textAlign='center';
+    ctx.fillText(n.id,n.x,n.y+4);
+    ctx.fillStyle='#7a8299'; ctx.font='10px monospace';
+    ctx.fillText(n.label,n.x,n.y+32);
+  });
+  const tbody=document.querySelector('#iobTable tbody'); tbody.innerHTML='';
+  iobNodes.forEach(n=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${n.id}</td><td>${n.is_pair}</td><td>${n.car??'—'}</td><td>${n.cdr??'—'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+function iobAddPair(){
+  const leaves=iobNodes.filter(n=>!n.is_pair);
+  if(leaves.length<2){ iobNodes.push({id:iobNextId,is_pair:0,car:null,cdr:null,x:50+Math.random()*400,y:30+Math.random()*280,label:'atom:'+iobNextId}); iobNextId++; renderIOB(); return; }
+  const a=leaves[Math.floor(Math.random()*leaves.length)];
+  let b=leaves[Math.floor(Math.random()*leaves.length)];
+  const pair={id:iobNextId,is_pair:1,car:a.id,cdr:b.id,x:50+Math.random()*440,y:30+Math.random()*280,label:`pair(${a.id},${b.id})`};
+  iobNodes.push(pair); iobNextId++; renderIOB();
+}
+function iobRemoveLeaf(){
+  const leaves=iobNodes.filter(n=>!n.is_pair && !iobNodes.some(p=>p.is_pair&&(p.car===n.id||p.cdr===n.id)));
+  if(leaves.length){ iobNodes=iobNodes.filter(n=>n.id!==leaves[0].id); renderIOB(); }
+}
+renderIOB();
+
+let uTensor=[];
+for(let k=0;k<10;k++){ uTensor.push({i:Math.floor(Math.random()*4),s:Math.floor(Math.random()*4),a:Math.floor(Math.random()*4),r:Math.floor(Math.random()*4),value:+(Math.random()).toFixed(2)}); }
+function renderU(){
+  const tbody=document.querySelector('#uTable tbody'); tbody.innerHTML='';
+  uTensor.forEach(e=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${e.i}</td><td>${e.s}</td><td>${e.a}</td><td>${e.r}</td><td>${e.value}</td>`;
+    tbody.appendChild(tr);
+  });
+  const cv=document.getElementById('uCanvas'); const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const cell=80;
+  for(let i=0;i<4;i++)for(let r=0;r<4;r++){
+    const e=uTensor.find(x=>x.i===i&&x.r===r&&x.s===0&&x.a===0);
+    const v=e?e.value:0;
+    ctx.fillStyle=`rgba(125,211,252,${v})`;
+    ctx.fillRect(r*cell,i*cell,cell-2,cell-2);
+    ctx.strokeStyle='#23283a'; ctx.strokeRect(r*cell,i*cell,cell-2,cell-2);
+    ctx.fillStyle='#7a8299'; ctx.font='10px monospace';
+    ctx.fillText(`i${i}r${r}`,r*cell+4,i*cell+14);
+  }
+}
+function addRandomEntry(){ uTensor.push({i:Math.floor(Math.random()*4),s:0,a:0,r:Math.floor(Math.random()*4),value:+(Math.random()).toFixed(2)}); renderU(); }
+renderU();
+
+function runContractionDemo(){
+  const log=document.getElementById('computeLog');
+  const I=[1,0.5,0,0.2], S=[1,0,0.3,0], A=[0.5,1,0,0];
+  let t0=performance.now();
+  const rOut={};
+  uTensor.forEach(e=>{ rOut[e.r]=(rOut[e.r]||0)+ e.value*I[e.i]*S[e.s]*A[e.a]; });
+  let tVec=performance.now()-t0;
+
+  t0=performance.now();
+  const seqOut={};
+  for(let r=0;r<4;r++){
+    let sum=0;
+    for(let i=0;i<4;i++)for(let s=0;s<4;s++)for(let a=0;a<4;a++){
+      const e=uTensor.find(x=>x.i===i&&x.s===s&&x.a===a&&x.r===r);
+      if(e) sum+=e.value*I[i]*S[s]*A[a];
+    }
+    seqOut[r]=sum;
+  }
+  let tSeq=performance.now()-t0;
+
+  log.textContent =
+`U-tensor: ${uTensor.length} sparse entries, contracted against I,S,A vectors → R axis
+
+Vectorized (single pass, GPU-style):  ${tVec.toFixed(3)} ms
+  R = ` + JSON.stringify(rOut,null,0) + `
+
+Naive sequential (nested loop, 4×4×4 lookups per r):  ${tSeq.toFixed(3)} ms
+  R = ` + JSON.stringify(seqOut,null,0) + `
+
+Same result, different cost. This is the gap between SQL joins (sequential, index-bound)
+and a true tensor contraction (parallel, GPU-bound) — the same logical operation
+'U[i,s,a,r]·I[i]·S[s]·A[a] → R[r]' just expressed differently.`;
+}
+
+let peerA=[{id:'sk_0042',value:'NORM(mouth_open)',label:'en:mouth_open'},
+           {id:'sk_0043',value:'NORM(eyes_closed)',label:'en:eyes_closed'},
+           {id:'tx_0007',value:'v1.0',label:'en:texture_diffuse'}];
+let peerB=[{id:'sk_0042',value:'NORM(mouth_open)',label:'ja:口を開く'},
+           {id:'sk_0099',value:'NORM(brow_raise)',label:'en:brow_raise'},
+           {id:'tx_0007',value:'v1.1',label:'en:texture_diffuse'}];
+function renderPeers(){
+  const fill=(tid,data)=>{ const tb=document.querySelector('#'+tid+' tbody'); tb.innerHTML='';
+    data.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.id}</td><td>${r.value}</td><td>${r.label}</td>`; tb.appendChild(tr);});};
+  fill('peerA',peerA); fill('peerB',peerB);
+}
+function mergePeers(){
+  const ids=new Set([...peerA.map(r=>r.id),...peerB.map(r=>r.id)]);
+  const tb=document.querySelector('#mergeResult tbody'); tb.innerHTML='';
+  ids.forEach(id=>{
+    const a=peerA.find(r=>r.id===id), b=peerB.find(r=>r.id===id);
+    let value, labels=[], status;
+    if(a&&b){
+      labels=[a.label,b.label];
+      if(a.value===b.value){ value=a.value; status='clean (same C_R, labels unioned)'; }
+      else { value=a.value+' / '+b.value; status='⚠ C_R conflict — needs resolver'; }
+    } else {
+      const only=a||b; value=only.value; labels=[only.label]; status='additive (only one peer had it)';
+    }
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${id}</td><td>${value}</td><td>${labels.join(', ')}</td><td>${status}</td>`;
+    tb.appendChild(tr);
+  });
+}
+renderPeers();
+
+function encodeText(str){
+  const out=[];
+  for(let k=0;k<str.length;k++){
+    out.push({i:k, s:0, a:0, r:str.codePointAt(k), value:1, glyph:str[k]});
+  }
+  return out;
+}
+function logTensor(t){
+  return t.slice(0,40).map(e=>`(${e.i},${e.s},${e.a},r=${e.r}) value=1  C_S="${e.glyph}"`).join('\n') + (t.length>40?'\n...':'');
+}
+function encodeAndDiff(){
+  const a=document.getElementById('textA').value;
+  const b=document.getElementById('textB').value;
+  const ta=encodeText(a), tb=encodeText(b);
+  document.getElementById('tensorALog').textContent = logTensor(ta) || '(empty)';
+  document.getElementById('tensorBLog').textContent = logTensor(tb) || '(empty)';
+
+  const maxLen=Math.max(ta.length,tb.length);
+  let lines=[];
+  let adds=0, rems=0, sames=0;
+  for(let k=0;k<maxLen;k++){
+    const ea=ta[k], eb=tb[k];
+    if(ea && eb && ea.r===eb.r){ lines.push({cls:'same', text:`i=${k}  same   r=${ea.r}  "${ea.glyph}"`}); sames++; }
+    else if(ea && eb){ lines.push({cls:'rem', text:`i=${k}  Δ      r:${ea.r}→${eb.r}   "${ea.glyph}" → "${eb.glyph}"`}); adds++; rems++; }
+    else if(ea && !eb){ lines.push({cls:'rem', text:`i=${k}  - removed r=${ea.r} "${ea.glyph}"`}); rems++; }
+    else if(!ea && eb){ lines.push({cls:'add', text:`i=${k}  + added   r=${eb.r} "${eb.glyph}"`}); adds++; }
+  }
+  const diffDiv=document.getElementById('diffLog');
+  diffDiv.innerHTML = lines.map(l=>`<div class="diffline ${l.cls}">${l.text}</div>`).join('') +
+    `\n\nΔ summary: ${adds} additions/changes, ${rems} removals/changes, ${sames} unchanged out of ${maxLen} index positions.\n` +
+    `Sparse delta encoding would store only the ${adds+rems} non-matching index positions — ` +
+    `not the full ${maxLen}-length string, proving the "diff = sparse subtraction" claim concretely.`;
+}
+encodeAndDiff();
+</script>
+</body>
+</html>
