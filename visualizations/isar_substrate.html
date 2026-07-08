@@ -104,47 +104,64 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 </section>
 
 <section class="page" id="pKernel">
-  <h2>Kernel: why the gauge, not the bit-count, is the proof</h2>
-  <p class="lead">
-    The real ISAR axiom isn't "K is sparse" or even "K is nilpotent" — it's that the quotient projection Π is idempotent (Π∘Π = Π). Because ISAR_Kernel is proven to be the <em>terminal object</em> in the category of admissible kernels, any two correct implementations must be conjugate: K₂ = P·K₁·P⁻¹ for some invertible P. That conjugacy is the actual correctness test — not bit-count, not raw distinctness of the derived operators.
-  </p>
-
-  <div class="hook">
-    <div class="know"><div class="lbl">what you already know</div><p>Rotating your viewpoint doesn't change an object's mass or shape — only its coordinates.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>Switching from Cartesian to polar coordinates changes every number in your equations but never changes the physical trajectory they describe.</p></div>
-    <div class="form"><div class="lbl">formal result</div><p>Similar matrices (K₂ = P·K₁·P⁻¹) are forced to share rank and every trace of every power: tr(K₁ⁿ) = tr(K₂ⁿ) for all n. If a candidate kernel's rank or power-traces don't match the canonical kernel's, no invertible P can possibly conjugate one into the other — it is not the same object, full stop.</p></div>
-  </div>
-
-  <div class="row" style="margin:12px 0">
-    <button class="btn" id="btnV1" onclick="selectVersion(1)">Version 1 (isar_categorical_proof.py)</button>
-    <button class="btn ghost" id="btnV2" onclick="selectVersion(2)">Version 2 (verify_isar_ZFC.py)</button>
-    <button class="btn r" id="btnBad" onclick="selectVersion('bad')">Counterexample (isar_ski_kernel-2.py)</button>
-  </div>
-
-  <div class="grid4" id="kernelMatrices"></div>
-
-  <div class="card" style="margin-top:14px">
-    <h3>Step 1 — I idempotent, K's basic invariants</h3>
-    <div id="closureLog" class="log">—</div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h3>Step 2 — the derived combinator layer</h3>
-    <p class="small">Six operators, each a specific product of two carriers: <code>NORM=S·I</code>, <code>APP=A·R</code>, <code>COMP=R·A·S</code>, <code>DUP=S·S</code>, <code>SWAP=R·S</code>, <code>CONST=I·S</code>. These are what the kernel is for — reduction, application, composition, duplication, argument order, and constants, all falling out of one non-commutative product.</p>
-    <div id="runtimeLog" class="log">—</div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h3>Step 3 — the terminality test: is this kernel gauge-conjugate to the canonical one?</h3>
-    <p class="small">This computes rank(K) and tr(K), tr(K²), tr(K³), tr(K⁴) for the selected/edited kernel and compares them against the fixed canonical kernel K₁ from <code>isar_categorical_proof.py</code>. A match is necessary (not sufficient) for K = P·K₁·P⁻¹ to have a solution — a mismatch is a proof that it does not.</p>
-    <div id="gaugeLog" class="log">—</div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h3>Equal statements</h3>
-    <div id="kernelTests">—</div>
+  <div class="grid2">
+    
+    <div class="card">
+      <h3>Canonical ISAR Kernel (Lean-verified)</h3>
+      <p class="small">
+      These four matrices are <code>I1, R1, A1, S1</code> from <code>ISARMatrices-5.lean</code>.
+      <code>K1_nilpotent : (I1*R1*A1*S1)*(I1*R1*A1*S1) = zero</code> is proved by <code>rfl</code> in Lean —
+      i.e. verified by direct computation, not search.
+      </p>
+      <pre class="log" id="canonicalMatrices"></pre>
+      <pre class="log" id="derivedOpsOut"></pre>
+    </div>
+  
+    <div class="card">
+      <h3>Terminality &amp; Gauge-Conjugacy Test</h3>
+      <p class="small">
+      <strong>ISSUE 2 fixed:</strong> Correctness is no longer "K is nilpotent" in isolation — that was a derived fact of
+      this one representative. The real axiom, per <code>InvariantLayer-3.lean</code>, is that the quotient
+      <code>Π</code> (operational-equivalence normalization) is idempotent. Per <code>KernelCategory.lean</code>'s
+      <code>ISAR_Kernel_terminal</code> theorem, ISAR_Kernel is the <em>terminal object</em> in the category of admissible
+      kernels — meaning any other correct kernel K′ must factor through it via a unique morphism, which at the matrix
+      level forces K′ to be <strong>similar</strong> to K (same rank, same eigenvalues, conjugate via invertible P).
+      </p>
+      <p class="small">
+      <code>ISARMatrices-5.lean</code> exhibits this gauge witness explicitly:
+      <code>P·K1·P⁻¹ = K2</code>, proved by <code>rfl</code>, where P is the lower-triangular matrix
+      <code>[[1,0,0,0],[1,1,0,0],[0,0,1,0],[0,0,0,1]]</code>.
+      </p>
+      <button class="btn" onclick="testGaugeConjugacy()">Test a candidate kernel for terminality</button>
+      <pre class="log"  id="gaugeOut"></pre>
+    </div>
+    <div class="card">
+      <h3>Known Non-Admissible Kernel</h3>
+      <p class="small">
+      <strong>ISSUE 3 fixed:</strong> <code>isar_ski_kernel-2.py</code>'s R and A matrices produce
+      K with rank 2 and nonzero eigenvalues, versus the canonical K's rank 1, all-zero spectrum.
+      These are similarity invariants — no gauge transform can reconcile them.
+      Per the terminality theorem, this file's kernel is a <em>different, non-admissible</em> rewrite system,
+      not a legitimate ISAR gauge choice. It's kept in the page as a labeled counterexample so readers can see
+      what a terminality failure looks like, rather than presenting three "equally valid" conventions as before.
+      </p>
+    </div>
+    <div class="card" id="strange-loop-note">
+      <h3>Why Trust a Finite Proof of an Infinite System</h3>
+      <p class="small">
+      <strong>ISSUE 4 fixed:</strong> Lean 4 is itself a terminating, strongly-normalizing typed λ-calculus (CIC),
+      yet it is being used to certify ISAR, a Turing-complete substrate capable of divergence. This isn't a
+      contradiction: Lean never <em>executes</em> divergent ISAR terms — it only reasons about the finite,
+      well-founded induction of individual reduction steps (<code>IRed</code>) and the idempotence of the
+      invariant-layer quotient. Execution and reasoning are decoupled, which is what lets a terminating
+      metalanguage certify a non-terminating object language. The gauge equivalence <code>P·K1·P⁻¹ = K2</code>
+      proved by <code>rfl</code> is the concrete, checkable shadow of the abstract terminal-object uniqueness proved
+      in <code>KernelCategory.lean</code>.
+      </p>
+    </div>
   </div>
 </section>
+
 
 <section class="page" id="p1">
   <h2>Units: the invariant you already believe in</h2>
@@ -514,30 +531,6 @@ function eqLine(lhs, rhs, ok){ return `<div class="eq ${ok?'pass':'fail'}">${esc
 function invariantOfString(str){ const arr=cps(str); return {codepoints:arr, hash:simpleHash(arr), text:str}; }
 
 /* ---- Kernel: terminality/gauge-conjugacy as the real correctness test ---- */
-const CARRIERS=['I','R','A','S'];
-
-const V1={
-  I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
-  R:[[1,0,0,0],[0,0,0,0],[0,1,0,0],[0,0,1,0]],
-  A:[[0,0,0,0],[1,0,0,0],[0,1,0,0],[0,0,0,0]],
-  S:[[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
-};
-const V2={
-  I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
-  R:[[1,0,0,0],[0,0,0,1],[0,0,1,0],[0,0,0,0]],
-  A:[[0,0,0,0],[1,0,0,0],[0,1,0,0],[0,0,0,0]],
-  S:[[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
-};
-const BAD={
-  I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
-  R:[[0,0,0,1],[1,0,0,0],[0,1,0,0],[0,0,1,0]],
-  A:[[0,1,0,0],[1,0,0,0],[0,0,0,1],[0,0,1,0]],
-  S:[[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
-};
-
-let activeVersion=1;
-let kernelState=JSON.parse(JSON.stringify(V1));
-
 function matMul(A,B){
   const n=A.length; const out=Array.from({length:n},()=>Array(n).fill(0));
   for(let i=0;i<n;i++) for(let j=0;j<n;j++){ let v=0; for(let k=0;k<n;k++) v+=A[i][k]*B[k][j]; out[i][j]=v; }
@@ -570,109 +563,87 @@ function matrixRank(M){
   return rank;
 }
 
-function invariantSignature(K){
-  return {
-    rank: matrixRank(K),
-    tr1: trace(K),
-    tr2: trace(matPow(K,2)),
-    tr3: trace(matPow(K,3)),
-    tr4: trace(matPow(K,4))
+/* ---- ISSUE 1: Canonical tensor is the SOURCE, everything else is DERIVED ---- */
+const CANON = {
+  I: [[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
+  R: [[1,0,0,0],[0,0,0,0],[0,1,0,0],[0,0,1,0]],
+  A: [[0,0,0,0],[1,0,0,0],[0,1,0,0],[0,0,0,0]],
+  S: [[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
+};
+
+function matToStr(M){ return M.map(r=>r.join(' ')).join('\n'); }
+
+function renderCanonical(){
+  const K = chain(CANON.I, CANON.R, CANON.A, CANON.S);
+  let out = `I =\n${matToStr(CANON.I)}\n\nR =\n${matToStr(CANON.R)}\n\nA =\n${matToStr(CANON.A)}\n\nS =\n${matToStr(CANON.S)}\n\n`;
+  out += `K = I·R·A·S =\n${matToStr(K)}\n\n`;
+  out += `K·K =\n${matToStr(matMul(K,K))}\n`;
+  out += `K nilpotent (matches Lean K1_nilpotent): ${matEqInt(matMul(K,K), zero4())}\n`;
+  out += `I idempotent (matches Lean I1_idempotent): ${matEqInt(matMul(CANON.I,CANON.I), CANON.I)}`;
+  document.getElementById('canonicalMatrices').textContent = out;
+
+  /* ---- Derived combinators computed FROM the canonical tensor, not hardcoded ---- */
+  const ops = {
+    NORM:  matMul(CANON.S, CANON.I),
+    APP:   matMul(CANON.A, CANON.R),
+    COMP:  chain(CANON.R, CANON.A, CANON.S),
+    DUP:   matMul(CANON.S, CANON.S),
+    SWAP:  matMul(CANON.R, CANON.S),
+    CONST: matMul(CANON.I, CANON.S),
   };
+  let opsOut = "Derived combinators (each computed live from I,R,A,S above):\n\n";
+  for(const [name, M] of Object.entries(ops)){
+    opsOut += `${name} =\n${matToStr(M)}\n\n`;
+  }
+  const vals = Object.values(ops);
+  let distinct = true, anyZero = false;
+  for(const v of vals) if(isZero(v)) anyZero = true;
+  for(let i=0;i<vals.length;i++) for(let j=i+1;j<vals.length;j++)
+    if(matEqInt(vals[i],vals[j])) distinct = false;
+  opsOut += `All six distinct: ${distinct}\nAny zero: ${anyZero}`;
+  document.getElementById('derivedOpsOut').textContent = opsOut;
 }
-function sigEqual(a,b){ return a.rank===b.rank && a.tr1===b.tr1 && a.tr2===b.tr2 && a.tr3===b.tr3 && a.tr4===b.tr4; }
-function sigStr(s){ return `rank=${s.rank}, tr(K)=${s.tr1}, tr(K²)=${s.tr2}, tr(K³)=${s.tr3}, tr(K⁴)=${s.tr4}`; }
+renderCanonical();
 
-const K1_canonical = chain(V1.I,V1.R,V1.A,V1.S);
-const canonicalSig = invariantSignature(K1_canonical);
-
-function selectVersion(v){
-  activeVersion=v;
-  const src = v===1?V1 : v===2?V2 : BAD;
-  kernelState=JSON.parse(JSON.stringify(src));
-  document.getElementById('btnV1').className = v===1 ? 'btn' : 'btn ghost';
-  document.getElementById('btnV2').className = v===2 ? 'btn' : 'btn ghost';
-  document.getElementById('btnBad').className = v==='bad' ? 'btn r' : 'btn ghost';
-  runKernelChain();
-}
-
-function renderKernel(){
-  const wrap=document.getElementById('kernelMatrices');
-  wrap.innerHTML='';
-  CARRIERS.forEach(c=>{
-    const card=document.createElement('div');
-    card.className='card kernelCard';
-    const h=document.createElement('h4');
-    h.textContent=c+(c==='I'?' — invariant':c==='R'?' — rewrite':c==='A'?' — adjacency':' — selection');
-    card.appendChild(h);
-    const grid=document.createElement('div');
-    grid.className='kernelGrid';
-    for(let r=0;r<4;r++) for(let col=0;col<4;col++){
-      const cell=document.createElement('div');
-      cell.className='kbit'+(kernelState[c][r][col]?' on':'');
-      cell.onclick=()=>{ kernelState[c][r][col]=kernelState[c][r][col]?0:1; runKernelChain(); };
-      grid.appendChild(cell);
-    }
-    card.appendChild(grid);
-    wrap.appendChild(card);
-  });
+function eigRealPart2x2ish(M){
+  // crude char-poly based eigenvalue check for 4x4 integer matrices via numeric power iteration/trace+det heuristics
+  // for exposition we report rank + trace + trace(K^2) as similarity invariants (all preserved under conjugation)
+  const tr = M[0][0]+M[1][1]+M[2][2]+M[3][3];
+  const M2 = matMul(M,M);
+  const tr2 = M2[0][0]+M2[1][1]+M2[2][2]+M2[3][3];
+  return {trace:tr, trace_sq:tr2};
 }
 
-function derivedOps(I,R,A,S){
-  return {
-    NORM: chain(S,I),
-    APP:  chain(A,R),
-    COMP: chain(R,A,S),
-    DUP:  chain(S,S),
-    SWAP: chain(R,S),
-    CONST:chain(I,S)
+function testGaugeConjugacy(candidateIRAS){
+  // default: run the known non-admissible counterexample from isar_ski_kernel-2.py
+  const cand = candidateIRAS || {
+    I: [[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
+    R: [[0,0,0,1],[1,0,0,0],[0,1,0,0],[0,0,1,0]],
+    A: [[0,1,0,0],[1,0,0,0],[0,0,0,1],[0,0,1,0]],
+    S: [[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
   };
+  const Kref = chain(CANON.I, CANON.R, CANON.A, CANON.S);
+  const Kcand = chain(cand.I, cand.R, cand.A, cand.S);
+
+  const refInv = eigRealPart2x2ish(Kref);
+  const candInv = eigRealPart2x2ish(Kcand);
+  const refRank = matrixRank(Kref);
+  const candRank = matrixRank(Kcand);
+
+  let out = `Reference K (canonical, Lean-proved nilpotent):\n${matToStr(Kref)}\n`;
+  out += `  rank=${refRank}, trace=${refInv.trace}, trace(K²)=${refInv.trace_sq}\n\n`;
+  out += `Candidate K (from isar_ski_kernel-2.py):\n${matToStr(Kcand)}\n`;
+  out += `  rank=${candRank}, trace=${candInv.trace}, trace(K²)=${candInv.trace_sq}\n\n`;
+
+  const conjugable = (refRank === candRank) && (refInv.trace === candInv.trace) && (refInv.trace_sq === candInv.trace_sq);
+  out += conjugable
+    ? "PASSES terminality check: same similarity invariants — a gauge P may exist, this kernel could be admissible."
+    : "FAILS terminality check: similarity invariants differ (rank and/or trace(K²) mismatch).\n" +
+      "By ISAR_Kernel_terminal (KernelCategory.lean), any correct kernel must be conjugate to the canonical one.\n" +
+      "Since no invertible P can change rank or trace, this candidate is NOT an admissible ISAR kernel —\n" +
+      "it represents a different (non-terminal) rewrite system, not a variant of ISAR.";
+  document.getElementById('gaugeOut').textContent = out;
 }
-
-function runKernelChain(){
-  renderKernel();
-  const {I,R,A,S}=kernelState;
-
-  const iIdem = matEqInt(matMul(I,I), I);
-  const K = chain(I,R,A,S);
-  const kNilpotent = matEqInt(matMul(K,K), zero4());
-  const kNonzero = !isZero(K);
-
-  const label = activeVersion==='bad' ? 'Counterexample (isar_ski_kernel-2.py)' : `Version ${activeVersion}`;
-  document.getElementById('closureLog').textContent=
-`${label} selected
-
-I idempotent  (I·I = I):        ${iIdem ? 'YES' : 'NO'}
-K = I·R·A·S:                    ${matStr(K)}
-K nilpotent   (K·K = 0):        ${kNilpotent ? 'YES' : 'NO'}
-K nonzero     (K ≠ 0):          ${kNonzero ? 'YES' : 'NO'}`;
-
-  const ops = derivedOps(I,R,A,S);
-  document.getElementById('runtimeLog').textContent=
-    Object.entries(ops).map(([name,m])=>`${name} = ${matStr(m)}   ${isZero(m)?'⚠ degenerate (all zero)':''}`).join('\n');
-
-  const sig = invariantSignature(K);
-  const match = sigEqual(sig, canonicalSig);
-  document.getElementById('gaugeLog').textContent=
-`Canonical K₁ signature (isar_categorical_proof.py):
-  ${sigStr(canonicalSig)}
-
-Selected kernel signature:
-  ${sigStr(sig)}
-
-Signatures match: ${match ? 'YES' : 'NO'}
-${match
-    ? '→ Necessary condition for K = P·K₁·P⁻¹ holds. (V1 and V2 both pass — this is exactly the gauge equivalence proven in ISARMatrices.lean.)'
-    : '→ No invertible P can satisfy K = P·K₁·P⁻¹. This kernel is not conjugate to the canonical one — by the terminal-object theorem, it is not a correct ISAR kernel, regardless of how its derived combinators look.'}`;
-
-  document.getElementById('kernelTests').innerHTML=[
-    eqLine('I·I', 'I  (idempotent)', iIdem),
-    eqLine('K nonzero', 'true', kNonzero),
-    eqLine('signature(K)', 'signature(K₁)  (gauge-conjugate)', match),
-    eqLine('all six combinators', 'nonzero', Object.values(ops).every(m=>!isZero(m)))
-  ].join('');
-}
-
-selectVersion(1);
 
 /* ---- Units ---- */
 function runQuantity(){
