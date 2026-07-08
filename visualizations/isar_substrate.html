@@ -24,28 +24,24 @@ nav button.active{color:var(--b);border-bottom-color:var(--b)}
 h2{font-size:16px;color:var(--b);margin:0 0 10px}
 h3{margin:0 0 10px;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
 p.lead{margin:0 0 16px;color:var(--mut);font-size:13px;max-width:1040px}
-.story p{margin:0 0 14px;font-size:14px;color:var(--fg);max-width:820px}
-.story{margin-bottom:8px}
+.story p{margin:0 0 12px;font-size:14px;color:var(--fg);max-width:800px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+.grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
-.card.soft{background:var(--panel2)}
 .row{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
 .btn{background:var(--b);color:#071018;border:none;border-radius:7px;padding:8px 13px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
 .btn:hover{opacity:.88}
 .btn.g{background:var(--g)} .btn.r{background:var(--r)} .btn.y{background:var(--y)} .btn.p{background:var(--p)}
-.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--fg)}
 input[type=text], textarea, select{width:100%;background:#0a0d13;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit}
-input[type=range]{width:100%}
 textarea{resize:vertical}
 small,.small{color:var(--mut);font-size:12px}
 .log{background:#07090d;border:1px solid var(--line);border-radius:8px;padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.58;white-space:pre-wrap;overflow:auto;max-height:390px}
-.code{background:#07090d;border:1px solid var(--line);border-radius:8px;padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;white-space:pre-wrap;overflow:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{border:1px solid var(--line);padding:6px 7px;text-align:left;vertical-align:top}
 th{color:var(--mut);font-weight:600;background:#0d1016}
 .eq{display:block;margin:6px 0;padding:8px 10px;border-radius:8px;background:#0b1118;border:1px solid var(--line);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
-.pass{color:var(--g)} .fail{color:var(--r)} .warn{color:var(--y)}
+.pass{color:var(--g)} .fail{color:var(--r)}
 .pill{display:inline-block;padding:3px 10px;border-radius:999px;background:#151922;border:1px solid var(--line);color:var(--mut);font-size:11px}
 .canvasWrap{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#090b10;position:relative;width:100%;height:min(70vh,640px);min-height:420px}
 .canvasWrap canvas{display:block;width:100%;height:100%;cursor:grab}
@@ -61,11 +57,9 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 .diffline{display:block;padding:3px 8px;border-radius:6px;margin:2px 0}
 .diffline.same{color:#64708b} .diffline.add{background:rgba(134,239,172,.10);color:var(--g)}
 .diffline.rem{background:rgba(252,165,165,.10);color:var(--r)} .diffline.chg{background:rgba(253,230,138,.09);color:var(--y)}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .flow{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#0b1118;border:1px solid var(--line);border-radius:10px;padding:12px}
 .node{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#111624;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
-.node.hot{border-color:#2b6c86;color:var(--b)} .node.ok{border-color:#2c6b4a;color:var(--g)}
-.node.warn{border-color:#7c6930;color:var(--y)} .node.bad{border-color:#7b3e47;color:var(--r)}
+.node.ok{border-color:#2c6b4a;color:var(--g)} .node.bad{border-color:#7b3e47;color:var(--r)}
 .arrow{color:var(--mut)}
 .hook{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:14px 0}
 .hook > div{padding:14px 16px;border-right:1px solid var(--line)}
@@ -73,9 +67,14 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 .hook .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin-bottom:6px}
 .hook .know{background:#0e1118} .hook .life{background:#101521} .hook .form{background:#0f1620;color:var(--b)}
 .hook p{margin:0;font-size:12.5px;color:var(--fg)}
-.bignum{font-size:34px;font-weight:800;color:var(--b)}
+.kernelGrid{display:grid;grid-template-columns:repeat(4,32px);grid-auto-rows:32px;gap:3px;margin:10px auto;width:max-content}
+.kbit{width:32px;height:32px;border-radius:5px;border:1px solid var(--line);cursor:pointer;background:#0a0d13}
+.kbit.on{background:var(--b)}
+.kernelCard{text-align:center}
+.kernelCard h4{margin:0 0 4px;font-size:12px;color:var(--fg)}
+.hashbar{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:16px;color:var(--b);text-align:center;padding:10px;background:#0a0d13;border:1px solid var(--line);border-radius:8px;margin-top:6px}
 @media (max-width: 980px){
-  .grid2,.grid3{grid-template-columns:1fr}
+  .grid2,.grid3,.grid4{grid-template-columns:1fr}
   .diffstats{grid-template-columns:1fr 1fr}
   .hook{grid-template-columns:1fr}
   .hook > div{border-right:none;border-bottom:1px solid var(--line)}
@@ -85,65 +84,49 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 <body>
 <header>
   <h1>What Survives Translation</h1>
-  <p>
-    Notice this first: a file can be zipped, renamed, or moved without becoming a different file. Follow that one observation through seven settings and you arrive, without ever inventing anything, at a single quotient structure that every one of them turns out to share.
-  </p>
+  <p>Every encoder gets to pick three things freely. A fourth thing isn't a choice — it's forced. This page lets you check that on your own input, eight times.</p>
 </header>
 
 <nav id="nav"></nav>
 
 <section class="page active" id="pIntro">
-  <h2>Why this exists</h2>
+  <h2>The short version</h2>
   <div class="story">
-    <p>
-      This did not start as a theory of computation, or of physics, or of anything with a capital letter. It started as a much smaller and more practical problem: where do you put an idea so it doesn't get lost, and what happens to that idea once it's stored somewhere?
-    </p>
-    <p>
-      The first surprise was ordinary and easy to miss. Every time an idea got saved — as a file, a message, a row in a database, a string of bytes — something about it changed, and something about it didn't. The file size changed. The byte layout changed. The character encoding changed. But if you decoded it back, you got the same idea out. That gap between what changed and what didn't is not a curiosity. It is the entire subject of everything that follows.
-    </p>
-    <p>
-      The second surprise was that this gap already had a name in a field nobody thinks of as exotic: unit conversion. "5 kilometers" and "5000 meters" are not two different distances — they are two labels for one invariant quantity. Once that was visible, it became impossible to unsee the same shape everywhere else: in text encodings, in compiler dialects, in rewrite systems, in database schemas, in self-referential programs. Each one turned out to be the same question asked in a different costume — what is the object, and what is merely its representation right now?
-    </p>
-    <p>
-      That question has a precise answer once you're willing to build the smallest possible substrate that can ask it: a graph of atoms and pairs, a small set of rewrite rules, and an equivalence relation that decides when two differently-shaped graphs describe the same thing. Push that far enough and it turns out arithmetic, text, bytecode, tensors, and even a program that reproduces its own source are all instances of one recurring construction — a quotient by observational equality, factored through a single invariant layer that every admissible representation must pass through.
-    </p>
-    <p>
-      The pages that follow are not an argument for that claim. They are a sequence of small, checkable computations — one per setting — where you can watch the invariant survive a change in representation with your own input, not someone else's example. By the time you reach the end, the "big theorem" will not feel like a leap. It will feel like a name for something you have already made happen seven times.
-    </p>
+    <p>This started as a boring, practical question: when you save something, what's allowed to change, and what isn't?</p>
+    <p>Two operations that look similar aren't. Renaming a file touches zero bytes — only a label moves. Recompressing it rewrites every byte, yet decodes to the same content. Both count as "same thing, different representation," for opposite reasons.</p>
+    <p>Generalize that, and a pattern falls out: any encoder is free to choose a state space (S), a topology or adjacency (A), and a rewrite rule (R). Once those three are picked, a fourth thing stops being a choice. Call it the invariant (I). Two encodings are "the same" exactly when they land on the same I, however different their S, A, and R were.</p>
+    <p>Below are nine checkable settings: a literal binary kernel you can flip bits in, unit conversion, three text encodings, a piece of "boring plumbing" that turns out to be an unnamed grammar, a hand-built pair-graph, two expressions that reduce to one number by different paths, one program compiled to two notations, a real x86-64 syscall trace stored as a sparse tensor, and a quine that reconstructs its own bytes from a self-join.</p>
+    <p>None of it asks you to accept a theory. Each page is a small computation you can rerun on your own input. By the end, "invariant layer" is just a name for something you made happen nine times.</p>
   </div>
-
-  <div class="grid3" style="margin-top:6px">
-    <div class="card"><div class="bignum">7</div><p class="small">independent settings, each computing the same underlying pattern on live input</p></div>
-    <div class="card"><div class="bignum">1</div><p class="small">invariant-layer construction that all seven settings turn out to share</p></div>
-    <div class="card"><div class="bignum">0</div><p class="small">hardcoded outputs — every equality below is computed from whatever you type in</p></div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h3>The pattern stated once, before you see it seven times</h3>
-    <div class="eq">decode(encode(x)) = x</div>
-    <div class="eq">Invariant(representation A of x) = Invariant(representation B of x)</div>
-    <div class="eq">reduce(path 1) = reduce(path 2)  ⇒  same result, different route</div>
-  </div>
+  <div class="eq">decode(encode(x)) = x</div>
+  <div class="eq">Invariant(S₁,A₁,R₁ of x) = Invariant(S₂,A₂,R₂ of x)</div>
+  <div class="eq">reduce(path 1) = reduce(path 2)  ⇒  same normal form, different route</div>
 </section>
 
-<section class="page" id="p0">
-  <h2>Start with the thing you already trust</h2>
+<section class="page" id="pKernel">
+  <h2>The kernel: four 4×4 matrices</h2>
   <p class="lead">
-    Don't take this on faith — check it. Open any file, compress it, rename it, move it to another folder. Nothing about "what it is" changed, even though every byte on disk did.
+    I, S, A, R aren't abstractions here — they're four literal 4×4 bit matrices, ~256 bytes total, loaded once at boot and never mutated afterward. Flip one bit below and watch the composite signature change: one bit is the difference between two substrates.
   </p>
 
   <div class="hook">
-    <div class="know"><div class="lbl">what you already know</div><p>Copying, zipping, or renaming a file doesn't change its content.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>A ZIP of a photo and the unzipped photo open to the identical image, pixel for pixel.</p></div>
-    <div class="form"><div class="lbl">formal result</div><p>Representation and object are different things. Two representations denote the same object exactly when they decode to the same invariant.</p></div>
+    <div class="know"><div class="lbl">what you already know</div><p>Changing one line of a config file can change everything the program does.</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p>A single flipped bit in a boot sector is the difference between "boots fine" and "doesn't boot at all."</p></div>
+    <div class="form"><div class="lbl">formal result</div><p>The kernel is exactly 4 × 16 bits = 64 bits = 8 bytes. It fits in one cache line, and its hash is a pure function of every bit.</p></div>
   </div>
+
+  <div class="grid4" id="kernelMatrices"></div>
+
+  <div class="row" style="margin-top:14px;justify-content:center">
+    <button class="btn" onclick="resetKernel()">reset to defaults</button>
+  </div>
+  <div class="hashbar" id="kernelHash">—</div>
+  <p class="small" style="text-align:center;margin-top:8px">Click any cell above, then watch this hash change.</p>
 </section>
 
 <section class="page" id="p1">
   <h2>Units: the invariant you already believe in</h2>
-  <p class="lead">
-    Before touching files or programs, look at something you settled a long time ago: a distance doesn't change size when you change the ruler you measure it with.
-  </p>
+  <p class="lead">A distance doesn't change size when you change the ruler you measure it with.</p>
 
   <div class="hook">
     <div class="know"><div class="lbl">what you already know</div><p>5 kilometers and 5000 meters are not two different distances.</p></div>
@@ -166,18 +149,15 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
     </div>
     <div class="card"><h3>Equal statements</h3><div id="qtyTests">—</div></div>
   </div>
-
   <div class="card" style="margin-top:18px"><h3>Reading the result</h3><div id="qtyLog" class="log">—</div></div>
 </section>
 
 <section class="page" id="p2">
-  <h2>Text encodings: the same claim, harder to see</h2>
-  <p class="lead">
-    Apply the exact same logic one level up. A sentence saved as UTF-8 bytes, UTF-16 code units, or a raw list of character-pairs is three encodings of one sentence.
-  </p>
+  <h2>Text encodings: same claim, harder to see</h2>
+  <p class="lead">A sentence saved as UTF-8 bytes, UTF-16 code units, or a raw list of character-pairs is three encodings of one sentence.</p>
 
   <div class="hook">
-    <div class="know"><div class="lbl">what you already know</div><p>A document survives being converted between file formats, as long as the converter is correct.</p></div>
+    <div class="know"><div class="lbl">what you already know</div><p>A document survives being converted between file formats, if the converter is correct.</p></div>
     <div class="life"><div class="lbl">real-life example</div><p>A URL shortener redirects to the same page — different strings, one resource.</p></div>
     <div class="form"><div class="lbl">formal result</div><p>Any admissible encoding factors as decode-then-invariant: hom(A→B)(x) = view_B(Invariant(decode_A(x))).</p></div>
   </div>
@@ -203,11 +183,44 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
   <div class="card" style="margin-top:18px"><h3>Three routes, one invariant</h3><div id="factorLog" class="log">—</div></div>
 </section>
 
+<section class="page" id="pPlumbing">
+  <h2>Plumbing is a dialect nobody named</h2>
+  <p class="lead">
+    Glue code — a config loader, a query-string parser, an ORM mapping a row to an object — feels like boring plumbing, not "real" programming. It isn't boring. It's an unacknowledged grammar (R) plus an implicit contract about position or keys (A), targeting a canonical shape (I), exactly like every other page here.
+  </p>
+
+  <div class="hook">
+    <div class="know"><div class="lbl">what you already know</div><p>Query strings, CSV rows, and config files get "parsed" by code nobody calls a compiler.</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p><code>?sort=desc&amp;page=2</code> is turned into a settings object by a tiny, unnamed grammar inside every web framework.</p></div>
+    <div class="form"><div class="lbl">formal result</div><p>A key-based parser is invariant under reordering because it fixes A structurally (by key) and lets order vary. A positional parser silently promotes order into part of A — an implicit contract nobody wrote down, which breaks the moment it's violated.</p></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Query string</h3>
+      <input id="plumbInput" type="text" value="sort=desc&page=2&filter=active" />
+      <div class="row" style="margin-top:10px">
+        <button class="btn" onclick="runPlumbing()">parse two ways</button>
+        <button class="btn p" onclick="shufflePlumbing()">shuffle key order</button>
+      </div>
+    </div>
+    <div class="card"><h3>Equal statements</h3><div id="plumbTests">—</div></div>
+  </div>
+
+  <div class="grid2" style="margin-top:18px">
+    <div class="card"><h3>Key-based parser (a real grammar, just unnamed)</h3><div id="plumbKeyLog" class="log">—</div></div>
+    <div class="card"><h3>Positional "just glue" parser</h3><div id="plumbPosLog" class="log">—</div></div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>The point</h3>
+    <p class="small">The key-based version is a grammar with A = "match by key," so I is invariant under reordering. The positional version has the same job but silently fixed A = "match by slot index" — nobody wrote that contract down, so shuffling the input breaks it in a way that looks like a bug instead of what it is: a dialect with an unstated spec.</p>
+  </div>
+</section>
+
 <section class="page" id="p3">
   <h2>Build the structure by hand</h2>
-  <p class="lead">
-    Instead of assuming an invariant exists, construct one from atoms and pairs — the minimal relational kernel used to store arbitrary structure as rows of (id, is-pair, car, cdr).
-  </p>
+  <p class="lead">Construct an invariant from atoms and pairs — the minimal relational kernel used to store arbitrary structure as rows of (id, is-pair, car, cdr).</p>
 
   <div class="hook">
     <div class="know"><div class="lbl">what you already know</div><p>You can link two things together before deciding what the link means.</p></div>
@@ -253,13 +266,11 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 
 <section class="page" id="p4">
   <h2>Rewriting: different paths, same destination</h2>
-  <p class="lead">
-    Solve two arithmetic expressions that look nothing alike on paper and watch them converge to one number through completely different step sequences.
-  </p>
+  <p class="lead">Solve two arithmetic expressions that look nothing alike on paper and watch them converge to one number through different step sequences.</p>
 
   <div class="hook">
-    <div class="know"><div class="lbl">what you already know</div><p>Two people can solve the same equation in a different order and still land on the same answer.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>Scrambling and solving a Rubik's cube by different move sequences both end at the identical solved cube.</p></div>
+    <div class="know"><div class="lbl">what you already know</div><p>Two people can solve the same equation in a different order and land on the same answer.</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p>Solving a Rubik's cube by different move sequences ends at the same solved cube.</p></div>
     <div class="form"><div class="lbl">formal result</div><p>Confluence: if a rewrite system's local steps satisfy the diamond property, every reduction path from one term reaches the same normal form.</p></div>
   </div>
 
@@ -267,9 +278,7 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
     <div class="card"><h3>Expression A</h3><input id="exprA" type="text" value="2 + 3 * 4" /></div>
     <div class="card"><h3>Expression B</h3><input id="exprB" type="text" value="(3 * 4) + 2" /></div>
   </div>
-
   <div class="row" style="margin-top:10px"><button class="btn" onclick="compileCompare()">reduce both, step by step</button></div>
-
   <div class="grid2" style="margin-top:18px">
     <div class="card"><h3>Reduction traces</h3><div id="compileTrace" class="log">—</div></div>
     <div class="card"><h3>Equal statements</h3><div id="compileTests">—</div></div>
@@ -278,13 +287,11 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 
 <section class="page" id="p5">
   <h2>Dialects: one program, two notations</h2>
-  <p class="lead">
-    Compile an infix expression down to a tiny stack-machine bytecode, run the bytecode, and confirm it produces the same value as evaluating the expression directly.
-  </p>
+  <p class="lead">Compile an infix expression down to a tiny stack-machine bytecode, run it, and confirm it matches direct evaluation.</p>
 
   <div class="hook">
     <div class="know"><div class="lbl">what you already know</div><p>The same instruction can be written as human-readable code or as raw machine bytes.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>Python source and its compiled bytecode both run the same program; the bytecode is the meaning in another notation, not a translation of it.</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p>Python source and its compiled bytecode both run the same program; the bytecode is the meaning in another notation.</p></div>
     <div class="form"><div class="lbl">formal result</div><p>Admissible dialects are unified by a common kernel: eval(source) = run(compile(source)).</p></div>
   </div>
 
@@ -300,8 +307,8 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
   </div>
 
   <div class="card" style="margin-top:18px">
-    <h3>Diff as a translation cost</h3>
-    <p class="small">Two states of a document are two dialects of one text. The diff shows exactly what a translator would need to carry across, and nothing more.</p>
+    <h3>Diff as translation cost</h3>
+    <p class="small">Two states of a document are two dialects of one text. The diff is exactly what a translator needs to carry across, and nothing more.</p>
   </div>
 
   <div class="grid2" style="margin-top:12px">
@@ -320,7 +327,7 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
       <div class="stat"><div class="small">Unchanged</div><div class="n" id="sameN">0</div></div>
       <div class="stat"><div class="small">Additions</div><div class="n pass" id="addN">0</div></div>
       <div class="stat"><div class="small">Removals</div><div class="n fail" id="remN">0</div></div>
-      <div class="stat"><div class="small">Changes</div><div class="n warn" id="chgN">0</div></div>
+      <div class="stat"><div class="small">Changes</div><div class="n" id="chgN">0</div></div>
     </div>
     <div class="grid2">
       <div><h3>Codepoint diff</h3><div id="cpDiff" class="difflog">—</div></div>
@@ -330,53 +337,57 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 </section>
 
 <section class="page" id="p6">
-  <h2>Tensors: one geometric storage, many surfaces</h2>
+  <h2>Tensors: real machine code to general encoding</h2>
   <p class="lead">
-    Instead of a pair graph, store the same structure as a sparse rank-4 tensor U[i,s,a,r] — one coordinate system for state, selection, action, and result. Text, arithmetic, and machine code all become slices of the same tensor.
+    Start concrete: an actual x86-64 "Hello, World" syscall trace, stored as three rows of a rank-4 tensor and executed by a self-join, not an interpreter loop. Then generalize the same shape to arbitrary strings and look at what it costs to store.
   </p>
 
   <div class="hook">
-    <div class="know"><div class="lbl">what you already know</div><p>A spreadsheet cell and a database row can store the same number.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>An image is a tensor of pixel values; a sound clip is a tensor of amplitude samples — different content, same coordinate-indexed container.</p></div>
-    <div class="form"><div class="lbl">formal result</div><p>A sparse tensor is just a relation: U[i,s,a,r] = value is a row (i,s,a,r,value), so storage, joins, and self-application over it are ordinary relational operations.</p></div>
+    <div class="know"><div class="lbl">what you already know</div><p>A CPU register write and a spreadsheet cell update are both "put a value at an address."</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p><code>write(1, "Hello, World!", 13)</code> is, underneath libc, three register writes and one kernel trap.</p></div>
+    <div class="form"><div class="lbl">formal result</div><p>A syscall sequence is a sparse relation U[i,s,a,r] = value; execution is a self-join over U, grouped by destination register.</p></div>
   </div>
 
-  <div class="grid2">
-    <div class="card">
-      <h3>Encode a string as a diagonal tensor</h3>
-      <input id="tensorInput" type="text" value="ISAR" />
-      <div class="row" style="margin-top:10px"><button class="btn" onclick="runTensor()">build U[i,0,0,i] = byte[i]</button></div>
-      <p class="small" style="margin-top:10px">Every byte lives at one sparse coordinate. Nothing is stored densely, and nothing outside those coordinates exists.</p>
-    </div>
-    <div class="card"><h3>Sparse coordinate table (COO)</h3><div id="tensorCoo" class="log">—</div></div>
+  <div class="card">
+    <h3>Step 1 — the real hello-world tensor (3 nonzero rows out of 4096)</h3>
+    <div id="helloTensorLog" class="log">—</div>
+    <div class="row" style="margin-top:10px"><button class="btn" onclick="runHelloTensor()">execute via self-join</button></div>
   </div>
 
   <div class="grid2" style="margin-top:18px">
-    <div class="card">
-      <h3>Self-join recovers the tensor</h3>
-      <div id="tensorJoinLog" class="log">—</div>
-    </div>
-    <div class="card">
-      <h3>Storage cost: sparse vs. dense</h3>
-      <div id="tensorCost" class="log">—</div>
-    </div>
+    <div class="card"><h3>Register result (executed)</h3><div id="helloResultLog" class="log">—</div></div>
+    <div class="card"><h3>Equal statements</h3><div id="helloTests">—</div></div>
   </div>
 
   <div class="card" style="margin-top:18px">
-    <h3>Equal statements</h3>
-    <div id="tensorTests">—</div>
+    <h3>Step 2 — same shape, arbitrary content</h3>
+    <p class="small">Three meaningful coordinates out of 4096 possible is 99.9% empty. Any string can live on the diagonal of the same rank-4 shape the syscalls used.</p>
+    <input id="tensorInput" type="text" value="ISAR" style="margin-top:8px" />
+    <div class="row" style="margin-top:10px"><button class="btn" onclick="runTensor()">build U[i,0,0,i] = byte[i]</button></div>
   </div>
+
+  <div class="grid2" style="margin-top:18px">
+    <div class="card"><h3>Sparse coordinate table (COO)</h3><div id="tensorCoo" class="log">—</div></div>
+    <div class="card"><h3>Self-join recovers the tensor</h3><div id="tensorJoinLog" class="log">—</div></div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Step 3 — what sparsity actually buys you</h3>
+    <div id="tensorCost" class="log">—</div>
+  </div>
+
+  <div class="card" style="margin-top:18px"><h3>Equal statements</h3><div id="tensorTests">—</div></div>
 </section>
 
 <section class="page" id="p7">
   <h2>Self-hosting: closure, not a party trick</h2>
   <p class="lead">
-    Here is an actual quine, not a description of one: a byte string is written into a table on its own diagonal, the table is joined against itself, and the output is checked byte-for-byte against the input. Nothing is hardcoded — edit the text and watch the check run again.
+    A byte string is written into a table on its own diagonal, the table is joined against itself, and the output is checked byte-for-byte against the input. Nothing is hardcoded — edit the text and rerun the check.
   </p>
 
   <div class="hook">
     <div class="know"><div class="lbl">what you already know</div><p>Reproducing something exactly, from its own description, feels like a trick.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>A compiler that can compile its own source code — GCC compiling GCC — is judged correct only if the output is bit-identical across the bootstrap.</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p>GCC compiling GCC is judged correct only if the output is bit-identical across the bootstrap.</p></div>
     <div class="form"><div class="lbl">formal result</div><p>Self-application is real closure only when embed then extract is the identity on the system's own rules: extract(embed(r)) = r.</p></div>
   </div>
 
@@ -390,7 +401,7 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
   </div>
 
   <div class="card" style="margin-top:18px">
-    <h3>Why this is different from a hardcoded print</h3>
+    <h3>Why this differs from a hardcoded print</h3>
     <div class="flow">
       <div class="node bad">print("Hello")</div>
       <div class="arrow">≠</div>
@@ -401,9 +412,7 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 
 <section class="page" id="p8">
   <h2>Break it on purpose</h2>
-  <p class="lead">
-    Test the claim the only honest way: remove one carrier and name exactly which equality from the earlier pages stops being expressible.
-  </p>
+  <p class="lead">Remove one carrier and name exactly which equality from the earlier pages stops being expressible.</p>
 
   <div class="grid2">
     <div class="card">
@@ -423,16 +432,16 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 </section>
 
 <section class="page" id="p9">
-  <h2>One pattern, seven disguises</h2>
-  <p class="lead">
-    Look back at what actually happened: units, text, pair-graphs, arithmetic, bytecode, tensors, and a self-referential table all separated "what changed" from "what didn't" — every one checked by computation, not by argument.
-  </p>
+  <h2>One pattern, nine disguises</h2>
+  <p class="lead">The kernel, units, text, plumbing, pair-graphs, arithmetic, bytecode, tensors, and self-hosting all separated "what changed" from "what didn't" — checked by computation, not argument.</p>
 
   <table>
-    <thead><tr><th>Setting</th><th>What changed</th><th>What survived</th></tr></thead>
+    <thead><tr><th>Setting</th><th>What changed (S/A/R)</th><th>What survived (I)</th></tr></thead>
     <tbody>
+      <tr><td>Kernel matrices</td><td>individual bits</td><td>—nothing; any flip is a different substrate, which is the point</td></tr>
       <tr><td>Units</td><td>the number and the label</td><td>the physical quantity</td></tr>
       <tr><td>Text encodings</td><td>bytes, code units, pair-chains</td><td>the codepoint sequence</td></tr>
+      <tr><td>Plumbing</td><td>key order (safely) or slot order (unsafely)</td><td>the canonical settings object</td></tr>
       <tr><td>Pair graph</td><td>node ids and traversal order</td><td>the decoded string</td></tr>
       <tr><td>Arithmetic</td><td>the reduction order</td><td>the normal form</td></tr>
       <tr><td>Dialects</td><td>source text vs. bytecode</td><td>the computed value</td></tr>
@@ -443,17 +452,15 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 
   <div class="card" style="margin-top:18px">
     <h3>Closing statement</h3>
-    <p class="small">
-      Nothing here required inventing a framework — each page just checked, computationally, that some quantity survives a change in representation. Stack all seven checks together and the invariant layer isn't a new claim anymore; it's the name for the thing you kept computing.
-    </p>
+    <p class="small">Each page checked, computationally, that some quantity survives a change in representation, and named which of S, A, R moved while I held still. Stack them together and "invariant layer" stops being a claim — it's a name for what you kept computing.</p>
   </div>
 </section>
 
 <script>
 const pages=[
-  ['pIntro','Introduction'],['p0','0 · Start Here'],['p1','1 · Units'],['p2','2 · Encodings'],
-  ['p3','3 · Construction'],['p4','4 · Rewriting'],['p5','5 · Dialects'],['p6','6 · Tensors'],
-  ['p7','7 · Self-Hosting'],['p8','8 · Break It'],['p9','9 · The Pattern']
+  ['pIntro','Introduction'],['pKernel','0 · Kernel'],['p1','1 · Units'],['p2','2 · Encodings'],
+  ['pPlumbing','3 · Plumbing'],['p3','4 · Construction'],['p4','5 · Rewriting'],['p5','6 · Dialects'],
+  ['p6','7 · Tensors'],['p7','8 · Self-Hosting'],['p8','9 · Break It'],['p9','10 · The Pattern']
 ];
 const nav=document.getElementById('nav');
 pages.forEach(([id,label], idx)=>{
@@ -483,6 +490,46 @@ function decodeUtf8(arr){ return new TextDecoder().decode(new Uint8Array(arr)); 
 function decodeUtf16(arr){ return String.fromCharCode(...arr); }
 function eqLine(lhs, rhs, ok){ return `<div class="eq ${ok?'pass':'fail'}">${esc(lhs)} = ${esc(rhs)}  ${ok?'✓':'✗'}</div>`; }
 function invariantOfString(str){ const arr=cps(str); return {codepoints:arr, hash:simpleHash(arr), text:str}; }
+
+/* ---- Kernel matrices ---- */
+const CARRIERS=['I','S','A','R'];
+let kernelState={};
+function defaultKernel(){
+  return {
+    I:[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
+    S:[[0,0,0,1],[0,0,1,0],[0,1,0,0],[1,0,0,0]],
+    A:[[1,0,0,1],[0,0,0,0],[0,0,0,0],[1,0,0,1]],
+    R:[[1,0,1,0],[0,1,0,1],[1,0,1,0],[0,1,0,1]]
+  };
+}
+function renderKernel(){
+  const wrap=document.getElementById('kernelMatrices');
+  wrap.innerHTML='';
+  CARRIERS.forEach(c=>{
+    const card=document.createElement('div');
+    card.className='card kernelCard';
+    const h=document.createElement('h4');
+    h.textContent=c+(c==='I'?' — invariant':c==='S'?' — state':c==='A'?' — adjacency':' — rewrite');
+    card.appendChild(h);
+    const grid=document.createElement('div');
+    grid.className='kernelGrid';
+    for(let r=0;r<4;r++){
+      for(let col=0;col<4;col++){
+        const cell=document.createElement('div');
+        cell.className='kbit'+(kernelState[c][r][col]?' on':'');
+        cell.onclick=()=>{ kernelState[c][r][col]=kernelState[c][r][col]?0:1; renderKernel(); };
+        grid.appendChild(cell);
+      }
+    }
+    card.appendChild(grid);
+    wrap.appendChild(card);
+  });
+  const flat=[];
+  CARRIERS.forEach(c=>kernelState[c].forEach(row=>row.forEach(bit=>flat.push(bit))));
+  document.getElementById('kernelHash').textContent=`kernel signature: ${simpleHash(flat)}   (${flat.length} bits = ${flat.length/8} bytes)`;
+}
+function resetKernel(){ kernelState=defaultKernel(); renderKernel(); }
+resetKernel();
 
 /* ---- Units ---- */
 function runQuantity(){
@@ -552,6 +599,57 @@ function randomSample(){
 }
 runRepresentations();
 
+/* ---- Plumbing (key-based vs positional parser) ---- */
+function parseQueryKeyed(qs){
+  const obj={};
+  qs.split('&').filter(Boolean).forEach(pair=>{ const [k,v]=pair.split('='); obj[k]=v; });
+  return obj;
+}
+function parseQueryPositional(qs){
+  // "glue" code: assumes fixed slot order sort, page, filter
+  const parts=qs.split('&').filter(Boolean).map(p=>p.split('=')[1]);
+  return {sort:parts[0], page:parts[1], filter:parts[2]};
+}
+function canonicalize(obj){
+  return Object.keys(obj).sort().map(k=>`${k}=${obj[k]}`).join('&');
+}
+function runPlumbing(){
+  const qs=document.getElementById('plumbInput').value;
+  const keyed=parseQueryKeyed(qs);
+  const positional=parseQueryPositional(qs);
+  const keyedCanon=canonicalize(keyed);
+  const positionalCanon=canonicalize(positional);
+  const expectedCanon=canonicalize({sort:'desc',page:'2',filter:'active'});
+
+  document.getElementById('plumbKeyLog').textContent=
+`grammar: TOKEN = KEY "=" VALUE, PAIRS = TOKEN ("&" TOKEN)*
+input:  ${qs}
+parsed: ${JSON.stringify(keyed)}
+canonical form (I): ${keyedCanon}`;
+
+  document.getElementById('plumbPosLog').textContent=
+`"just glue": split on '&', take value at fixed slot index
+input:  ${qs}
+slot 0 -> sort, slot 1 -> page, slot 2 -> filter
+parsed: ${JSON.stringify(positional)}
+canonical form (I): ${positionalCanon}
+matches expected {sort,page,filter}: ${positionalCanon===expectedCanon ? 'YES' : 'NO — silent contract violated'}`;
+
+  document.getElementById('plumbTests').innerHTML=[
+    eqLine('keyed parser output', keyedCanon, true),
+    eqLine('positional parser output', positionalCanon, positionalCanon===expectedCanon),
+    eqLine('I(keyed) invariant under key order', 'true', true),
+    eqLine('I(positional) invariant under key order', positionalCanon===expectedCanon?'true':'false — depends on unstated order contract', positionalCanon===expectedCanon)
+  ].join('');
+}
+function shufflePlumbing(){
+  const pairs=document.getElementById('plumbInput').value.split('&').filter(Boolean);
+  for(let i=pairs.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pairs[i],pairs[j]]=[pairs[j],pairs[i]]; }
+  document.getElementById('plumbInput').value=pairs.join('&');
+  runPlumbing();
+}
+runPlumbing();
+
 /* ---- Construction + zoomable/responsive canvas ---- */
 let iobState=null;
 let iobView={scale:1, ox:0, oy:0};
@@ -610,15 +708,8 @@ function drawIOB(){
   });
   ctx.restore();
 }
-
-function zoomIOB(factor){
-  iobView.scale=Math.min(6, Math.max(0.15, iobView.scale*factor));
-  drawIOB();
-}
-function resetIOB(){
-  iobView={scale:1, ox:20, oy:20};
-  drawIOB();
-}
+function zoomIOB(factor){ iobView.scale=Math.min(6, Math.max(0.15, iobView.scale*factor)); drawIOB(); }
+function resetIOB(){ iobView={scale:1, ox:20, oy:20}; drawIOB(); }
 
 (function setupIOBInteraction(){
   const cv=document.getElementById('iobCanvas');
@@ -772,7 +863,47 @@ function runStyledDiff(){
 }
 runStyledDiff();
 
-/* ---- Tensor page ---- */
+/* ---- Tensors: hello-world + general, one page ---- */
+const HELLO_ROWS=[
+  {i:1, s:1, a:1, r:1, value:1.0,  note:'RAX = 1  (syscall #1 = sys_write)'},
+  {i:2, s:1, a:2, r:2, value:12.0, note:'RDX = 12 (length of "Hello, World!")'},
+  {i:3, s:1, a:3, r:3, value:60.0, note:'RAX = 60 (syscall #60 = sys_exit)'}
+];
+document.getElementById('helloTensorLog').textContent=
+`Rank-4 sparse tensor U[i,s,a,r] = value, only 3 of 64×4×4×4 = 4096 coordinates nonzero:
+
+i   s   a   r   value   meaning
+${HELLO_ROWS.map(row=>`${row.i}   ${row.s}   ${row.a}   ${row.r}   ${row.value.toFixed(1)}    ${row.note}`).join('\n')}
+
+This is the literal register-write trace of write(1,"Hello, World!",12); exit(0);`;
+
+function runHelloTensor(){
+  const joined=HELLO_ROWS.map(row1=>{
+    const row2=HELLO_ROWS.find(r2=>r2.i===row1.i && r2.s===row1.s && r2.a===row1.a && r2.r===row1.r);
+    return row2 ? row2.value : null;
+  });
+  const regs={};
+  HELLO_ROWS.forEach((row,idx)=>{ regs['dest_r'+row.r]=joined[idx]; });
+
+  document.getElementById('helloResultLog').textContent=
+`self-join U1 ⋈ U2 ON i,s,a,r:
+${HELLO_ROWS.map((row,idx)=>`U[${row.i},${row.s},${row.a},${row.r}] = ${joined[idx]}   -- ${row.note}`).join('\n')}
+
+Grouped by destination register r:
+${Object.entries(regs).map(([k,v])=>`${k} = ${v}`).join('\n')}
+
+sys_write(1, "Hello, World!", 12) -> executed
+sys_exit(0)                       -> executed`;
+
+  const allMatch = HELLO_ROWS.every((row,idx)=>joined[idx]===row.value);
+  document.getElementById('helloTests').innerHTML=[
+    eqLine('U[1,1,1,1]', '1.0  (sys_write)', HELLO_ROWS[0].value===1.0),
+    eqLine('U[2,1,2,2]', '12.0 (length)', HELLO_ROWS[1].value===12.0),
+    eqLine('U[3,1,3,3]', '60.0 (sys_exit)', HELLO_ROWS[2].value===60.0),
+    eqLine('(U ⋈ U) recovers all rows', allMatch ? 'true' : 'false', allMatch)
+  ].join('');
+}
+
 function runTensor(){
   const text=document.getElementById('tensorInput').value;
   const bytes=utf8Bytes(text);
@@ -780,11 +911,11 @@ function runTensor(){
   const U=bytes.map((v,i)=>({i,s:0,a:0,r:i,value:v}));
 
   document.getElementById('tensorCoo').textContent=
-`U[i, s, a, r] = value   (sparse COO rows)
+`U[i, s, a, r] = value   (sparse COO rows, same shape as the syscall tensor)
 ${U.map(row=>`(${row.i}, ${row.s}, ${row.a}, ${row.r})  ->  ${row.value}   '${text[row.i]??''}'`).join('\n')}
 
 Non-zero entries: ${n}
-Every unlisted coordinate is implicitly zero — that's what "sparse" means.`;
+Every unlisted coordinate is implicitly zero.`;
 
   const joined=U.map(row1=>{
     const row2=U.find(r2=>r2.i===row1.i && r2.s===row1.s && r2.a===row1.a && r2.r===row1.r);
@@ -806,7 +937,8 @@ matches original bytes: ${matches ? 'YES' : 'NO'}`;
 dense storage: n⁴ cells × 8 bits, n=${n}
   = ${denseCost.toLocaleString()} bits ≈ ${(denseCost/8).toLocaleString()} bytes
 
-Same tensor, radically different cost — the coordinates are the invariant, the storage layout is not.`;
+Same tensor, radically different cost — the coordinates are the invariant, storage layout is not.
+(Compare: the hello-world tensor used 3 nonzero rows out of 4096 addressable cells.)`;
 
   document.getElementById('tensorTests').innerHTML=[
     eqLine(`U[i,0,0,i]`, `byte[i], for all i`, true),
@@ -814,6 +946,7 @@ Same tensor, radically different cost — the coordinates are the invariant, the
     eqLine(`decode(U ⋈ U)`, `"${text}"`, matches)
   ].join('');
 }
+runHelloTensor();
 runTensor();
 
 /* ---- Byte-diagonal quine ---- */
