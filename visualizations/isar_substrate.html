@@ -104,24 +104,41 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 </section>
 
 <section class="page" id="pKernel">
-  <h2>The kernel: four 4×4 matrices</h2>
+  <h2>Kernel: bits → algebra → tensor → runtime</h2>
   <p class="lead">
-    I, S, A, R aren't abstractions here — they're four literal 4×4 bit matrices, ~256 bytes total, loaded once at boot and never mutated afterward. Flip one bit below and watch the composite signature change: one bit is the difference between two substrates.
+    Nothing here resets to a preset, and nothing here uses boolean closure — that was a modeling error in an earlier draft. The checks below are real integer matrix multiplication, the same operation your isar.py and Lean bridge perform: I idempotent, A involutive, R of finite order, and U = I·R·A·S composed directly.
   </p>
 
   <div class="hook">
-    <div class="know"><div class="lbl">what you already know</div><p>Changing one line of a config file can change everything the program does.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>A single flipped bit in a boot sector is the difference between "boots fine" and "doesn't boot at all."</p></div>
-    <div class="form"><div class="lbl">formal result</div><p>The kernel is exactly 4 × 16 bits = 64 bits = 8 bytes. It fits in one cache line, and its hash is a pure function of every bit.</p></div>
+    <div class="know"><div class="lbl">what you already know</div><p>Multiplying a rotation matrix by itself four times can bring you back to where you started.</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p>Rotating a square 90° four times returns it to its original orientation — a permutation matrix of order 4, exactly what R needs to be here.</p></div>
+    <div class="form"><div class="lbl">formal result</div><p>Valid ISAR carriers satisfy: I@I = I (idempotent invariant), A@A = Identity (involutive adjacency/asymmetry), R has finite multiplicative order (cyclic rewrite), and U = I@R@A@S is the composed kernel — checked by literal matrix multiplication, not by an unrelated boolean fixed-point heuristic.</p></div>
   </div>
 
   <div class="grid4" id="kernelMatrices"></div>
 
-  <div class="row" style="margin-top:14px;justify-content:center">
-    <button class="btn" onclick="resetKernel()">reset to defaults</button>
+  <div class="card" style="margin-top:14px">
+    <h3>Step 1 — algebraic checks on each carrier (real matrix multiplication)</h3>
+    <div id="closureLog" class="log">—</div>
   </div>
-  <div class="hashbar" id="kernelHash">—</div>
-  <p class="small" style="text-align:center;margin-top:8px">Click any cell above, then watch this hash change.</p>
+
+  <div class="grid2" style="margin-top:18px">
+    <div class="card">
+      <h3>Step 2 — tensor semantics: U = I·R·A·S</h3>
+      <p class="small">U is the direct matrix product of the four carriers, in that order. Its non-zero cells are the addressable tensor coordinates.</p>
+      <div id="tensorFromKernelLog" class="log">—</div>
+    </div>
+    <div class="card">
+      <h3>Step 3 — combinator layer: real derived operators</h3>
+      <p class="small">These are the operators your kernel actually derives — not a stand-in self-application test. Each one is a specific product of two carriers, matching the SKI_kernel module: <code>NORM=S·I</code>, <code>APP=A·R</code>, <code>COMP=R·A·S</code>, <code>DUP=S·S</code>, <code>SWAP=R·S</code>, <code>CONST=I·S</code>.</p>
+      <div id="runtimeLog" class="log">—</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Equal statements — asserted live, not assumed</h3>
+    <div id="kernelTests">—</div>
+  </div>
 </section>
 
 <section class="page" id="p1">
@@ -491,17 +508,27 @@ function decodeUtf16(arr){ return String.fromCharCode(...arr); }
 function eqLine(lhs, rhs, ok){ return `<div class="eq ${ok?'pass':'fail'}">${esc(lhs)} = ${esc(rhs)}  ${ok?'✓':'✗'}</div>`; }
 function invariantOfString(str){ const arr=cps(str); return {codepoints:arr, hash:simpleHash(arr), text:str}; }
 
-/* ---- Kernel matrices ---- */
+/* ---- Kernel: bits -> real matrix algebra -> tensor -> runtime ---- */
 const CARRIERS=['I','S','A','R'];
-let kernelState={};
-function defaultKernel(){
-  return {
-    I:[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
-    S:[[0,0,0,1],[0,0,1,0],[0,1,0,0],[1,0,0,0]],
-    A:[[1,0,0,1],[0,0,0,0],[0,0,0,0],[1,0,0,1]],
-    R:[[1,0,1,0],[0,1,0,1],[1,0,1,0],[0,1,0,1]]
-  };
+let kernelState={
+  I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
+  R:[[0,0,0,1],[1,0,0,0],[0,1,0,0],[0,0,1,0]],
+  A:[[0,1,0,0],[1,0,0,0],[0,0,0,1],[0,0,1,0]],
+  S:[[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
+};
+
+function matMul(A,B){
+  const n=A.length; const out=Array.from({length:n},()=>Array(n).fill(0));
+  for(let i=0;i<n;i++) for(let j=0;j<n;j++){ let v=0; for(let k=0;k<n;k++) v+=A[i][k]*B[k][j]; out[i][j]=v; }
+  return out;
 }
+function matEqInt(A,B){ return A.every((row,i)=>row.every((v,j)=>v===B[i][j])); }
+function identity4(){ return [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]; }
+function matPow(M,k){ let R=identity4(); for(let n=0;n<k;n++) R=matMul(R,M); return R; }
+function findOrder(M,maxK=8){ for(let k=1;k<=maxK;k++){ if(matEqInt(matPow(M,k), identity4())) return k; } return null; }
+function matStr(M){ return M.map(r=>r.join(' ')).join(' / '); }
+function nnzCoords(M){ const c=[]; for(let i=0;i<4;i++) for(let j=0;j<4;j++) if(M[i][j]!==0) c.push([i,j]); return c; }
+
 function renderKernel(){
   const wrap=document.getElementById('kernelMatrices');
   wrap.innerHTML='';
@@ -513,23 +540,99 @@ function renderKernel(){
     card.appendChild(h);
     const grid=document.createElement('div');
     grid.className='kernelGrid';
-    for(let r=0;r<4;r++){
-      for(let col=0;col<4;col++){
-        const cell=document.createElement('div');
-        cell.className='kbit'+(kernelState[c][r][col]?' on':'');
-        cell.onclick=()=>{ kernelState[c][r][col]=kernelState[c][r][col]?0:1; renderKernel(); };
-        grid.appendChild(cell);
-      }
+    for(let r=0;r<4;r++) for(let col=0;col<4;col++){
+      const cell=document.createElement('div');
+      cell.className='kbit'+(kernelState[c][r][col]?' on':'');
+      cell.onclick=()=>{ kernelState[c][r][col]=kernelState[c][r][col]?0:1; runKernelChain(); };
+      grid.appendChild(cell);
     }
     card.appendChild(grid);
     wrap.appendChild(card);
   });
-  const flat=[];
-  CARRIERS.forEach(c=>kernelState[c].forEach(row=>row.forEach(bit=>flat.push(bit))));
-  document.getElementById('kernelHash').textContent=`kernel signature: ${simpleHash(flat)}   (${flat.length} bits = ${flat.length/8} bytes)`;
 }
-function resetKernel(){ kernelState=defaultKernel(); renderKernel(); }
-resetKernel();
+
+/* (keep matMul, matEqInt, identity4, matPow, findOrder, matStr, nnzCoords, renderKernel as-is) */
+
+function runKernelChain(){
+  renderKernel();
+  const {I,S,A,R}=kernelState;
+
+  const iIdem = matEqInt(matMul(I,I), I);
+  const aInvolutive = matEqInt(matMul(A,A), identity4());
+  const rOrder = findOrder(R);
+  const sIdentityDiff = !matEqInt(matMul(S,I), matMul(I,S));
+
+  document.getElementById('closureLog').textContent=
+`I idempotent  (I@I = I):            ${iIdem ? 'YES' : 'NO'}
+   I@I = ${matStr(matMul(I,I))}
+
+A involutive  (A@A = Identity):      ${aInvolutive ? 'YES' : 'NO'}
+   A@A = ${matStr(matMul(A,A))}
+
+R finite order (Rᵏ = Identity):      ${rOrder ? `YES, order = ${rOrder}` : 'NO — no cycle found within 8 steps'}
+
+S,I noncommutative (S@I ≠ I@S):      ${sIdentityDiff ? 'YES' : 'NO — degenerate, S and I commute'}
+   S@I = ${matStr(matMul(S,I))}
+   I@S = ${matStr(matMul(I,S))}`;
+
+  const U = matMul(matMul(matMul(I,R),A),S);
+  const uCoords = nnzCoords(U);
+  document.getElementById('tensorFromKernelLog').textContent=
+`U = I@R@A@S  (direct composition, order matters)
+${matStr(U)}
+
+non-zero coordinates: ${uCoords.length} / 16
+${uCoords.map(c=>`(${c[0]},${c[1]}) = ${U[c[0]][c[1]]}`).join('\n')}`;
+
+  // real derived operators, matching SKI_kernel.py exactly
+  const NORM = matMul(S,I);
+  const APP  = matMul(A,R);
+  const COMP = matMul(matMul(R,A),S);
+  const DUP  = matMul(S,S);
+  const SWAP = matMul(R,S);
+  const CONST= matMul(I,S);
+
+  const normIdem = matEqInt(matMul(NORM,NORM), NORM);
+  const constIdem = matEqInt(matMul(CONST,CONST), CONST);
+  const appOrder = findOrder(APP);
+  const uDecomposes = matEqInt(U, matMul(I,COMP));
+  const dupDoubles = DUP[0][1] === 2*S[0][1];
+
+  document.getElementById('runtimeLog').textContent=
+`NORM = S@I   (normalization)
+${matStr(NORM)}
+   idempotent (NORM@NORM = NORM): ${normIdem ? 'YES' : 'NO'}
+
+APP = A@R    (application)
+${matStr(APP)}
+   finite order: ${appOrder ? `YES, order = ${appOrder}` : 'NO'}
+
+COMP = R@A@S (composition)
+${matStr(COMP)}
+   U decomposes as I@COMP: ${uDecomposes ? 'YES' : 'NO'}
+
+DUP = S@S    (duplication / W)
+${matStr(DUP)}
+   off-diagonal doubles S's (DUP[0,1] = 2·S[0,1]): ${dupDoubles ? 'YES' : 'NO'}
+
+SWAP = R@S   (argument swap / C)
+${matStr(SWAP)}
+
+CONST = I@S  (constant / K)
+${matStr(CONST)}
+   idempotent (CONST@CONST = CONST): ${constIdem ? 'YES' : 'NO'}`;
+
+  document.getElementById('kernelTests').innerHTML=[
+    eqLine('I@I', 'I  (idempotent)', iIdem),
+    eqLine('A@A', 'Identity  (involutive)', aInvolutive),
+    eqLine('order(R)', rOrder ? String(rOrder) : 'none — degenerate carrier', !!rOrder),
+    eqLine('NORM@NORM', 'NORM  (S@I idempotent)', normIdem),
+    eqLine('order(APP)', appOrder ? String(appOrder) : 'none', !!appOrder),
+    eqLine('U', 'I@COMP  (decomposes through R@A@S)', uDecomposes),
+    eqLine('CONST@CONST', 'CONST  (I@S idempotent)', constIdem)
+  ].join('');
+}
+runKernelChain();
 
 /* ---- Units ---- */
 function runQuantity(){
