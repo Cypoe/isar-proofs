@@ -104,39 +104,44 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 </section>
 
 <section class="page" id="pKernel">
-  <h2>Kernel: bits → algebra → tensor → runtime</h2>
+  <h2>Kernel: why the gauge, not the bit-count, is the proof</h2>
   <p class="lead">
-    Nothing here resets to a preset, and nothing here uses boolean closure — that was a modeling error in an earlier draft. The checks below are real integer matrix multiplication, the same operation your isar.py and Lean bridge perform: I idempotent, A involutive, R of finite order, and U = I·R·A·S composed directly.
+    The real ISAR axiom isn't "K is sparse" or even "K is nilpotent" — it's that the quotient projection Π is idempotent (Π∘Π = Π). Because ISAR_Kernel is proven to be the <em>terminal object</em> in the category of admissible kernels, any two correct implementations must be conjugate: K₂ = P·K₁·P⁻¹ for some invertible P. That conjugacy is the actual correctness test — not bit-count, not raw distinctness of the derived operators.
   </p>
 
   <div class="hook">
-    <div class="know"><div class="lbl">what you already know</div><p>Multiplying a rotation matrix by itself four times can bring you back to where you started.</p></div>
-    <div class="life"><div class="lbl">real-life example</div><p>Rotating a square 90° four times returns it to its original orientation — a permutation matrix of order 4, exactly what R needs to be here.</p></div>
-    <div class="form"><div class="lbl">formal result</div><p>Valid ISAR carriers satisfy: I@I = I (idempotent invariant), A@A = Identity (involutive adjacency/asymmetry), R has finite multiplicative order (cyclic rewrite), and U = I@R@A@S is the composed kernel — checked by literal matrix multiplication, not by an unrelated boolean fixed-point heuristic.</p></div>
+    <div class="know"><div class="lbl">what you already know</div><p>Rotating your viewpoint doesn't change an object's mass or shape — only its coordinates.</p></div>
+    <div class="life"><div class="lbl">real-life example</div><p>Switching from Cartesian to polar coordinates changes every number in your equations but never changes the physical trajectory they describe.</p></div>
+    <div class="form"><div class="lbl">formal result</div><p>Similar matrices (K₂ = P·K₁·P⁻¹) are forced to share rank and every trace of every power: tr(K₁ⁿ) = tr(K₂ⁿ) for all n. If a candidate kernel's rank or power-traces don't match the canonical kernel's, no invertible P can possibly conjugate one into the other — it is not the same object, full stop.</p></div>
+  </div>
+
+  <div class="row" style="margin:12px 0">
+    <button class="btn" id="btnV1" onclick="selectVersion(1)">Version 1 (isar_categorical_proof.py)</button>
+    <button class="btn ghost" id="btnV2" onclick="selectVersion(2)">Version 2 (verify_isar_ZFC.py)</button>
+    <button class="btn r" id="btnBad" onclick="selectVersion('bad')">Counterexample (isar_ski_kernel-2.py)</button>
   </div>
 
   <div class="grid4" id="kernelMatrices"></div>
 
   <div class="card" style="margin-top:14px">
-    <h3>Step 1 — algebraic checks on each carrier (real matrix multiplication)</h3>
+    <h3>Step 1 — I idempotent, K's basic invariants</h3>
     <div id="closureLog" class="log">—</div>
   </div>
 
-  <div class="grid2" style="margin-top:18px">
-    <div class="card">
-      <h3>Step 2 — tensor semantics: U = I·R·A·S</h3>
-      <p class="small">U is the direct matrix product of the four carriers, in that order. Its non-zero cells are the addressable tensor coordinates.</p>
-      <div id="tensorFromKernelLog" class="log">—</div>
-    </div>
-    <div class="card">
-      <h3>Step 3 — combinator layer: real derived operators</h3>
-      <p class="small">These are the operators your kernel actually derives — not a stand-in self-application test. Each one is a specific product of two carriers, matching the SKI_kernel module: <code>NORM=S·I</code>, <code>APP=A·R</code>, <code>COMP=R·A·S</code>, <code>DUP=S·S</code>, <code>SWAP=R·S</code>, <code>CONST=I·S</code>.</p>
-      <div id="runtimeLog" class="log">—</div>
-    </div>
+  <div class="card" style="margin-top:18px">
+    <h3>Step 2 — the derived combinator layer</h3>
+    <p class="small">Six operators, each a specific product of two carriers: <code>NORM=S·I</code>, <code>APP=A·R</code>, <code>COMP=R·A·S</code>, <code>DUP=S·S</code>, <code>SWAP=R·S</code>, <code>CONST=I·S</code>. These are what the kernel is for — reduction, application, composition, duplication, argument order, and constants, all falling out of one non-commutative product.</p>
+    <div id="runtimeLog" class="log">—</div>
   </div>
 
   <div class="card" style="margin-top:18px">
-    <h3>Equal statements — asserted live, not assumed</h3>
+    <h3>Step 3 — the terminality test: is this kernel gauge-conjugate to the canonical one?</h3>
+    <p class="small">This computes rank(K) and tr(K), tr(K²), tr(K³), tr(K⁴) for the selected/edited kernel and compares them against the fixed canonical kernel K₁ from <code>isar_categorical_proof.py</code>. A match is necessary (not sufficient) for K = P·K₁·P⁻¹ to have a solution — a mismatch is a proof that it does not.</p>
+    <div id="gaugeLog" class="log">—</div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Equal statements</h3>
     <div id="kernelTests">—</div>
   </div>
 </section>
@@ -508,26 +513,87 @@ function decodeUtf16(arr){ return String.fromCharCode(...arr); }
 function eqLine(lhs, rhs, ok){ return `<div class="eq ${ok?'pass':'fail'}">${esc(lhs)} = ${esc(rhs)}  ${ok?'✓':'✗'}</div>`; }
 function invariantOfString(str){ const arr=cps(str); return {codepoints:arr, hash:simpleHash(arr), text:str}; }
 
-/* ---- Kernel: bits -> real matrix algebra -> tensor -> runtime ---- */
-const CARRIERS=['I','S','A','R'];
-let kernelState={
+/* ---- Kernel: terminality/gauge-conjugacy as the real correctness test ---- */
+const CARRIERS=['I','R','A','S'];
+
+const V1={
+  I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
+  R:[[1,0,0,0],[0,0,0,0],[0,1,0,0],[0,0,1,0]],
+  A:[[0,0,0,0],[1,0,0,0],[0,1,0,0],[0,0,0,0]],
+  S:[[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
+};
+const V2={
+  I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
+  R:[[1,0,0,0],[0,0,0,1],[0,0,1,0],[0,0,0,0]],
+  A:[[0,0,0,0],[1,0,0,0],[0,1,0,0],[0,0,0,0]],
+  S:[[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
+};
+const BAD={
   I:[[1,0,0,0],[0,0,0,0],[0,0,1,0],[0,0,0,0]],
   R:[[0,0,0,1],[1,0,0,0],[0,1,0,0],[0,0,1,0]],
   A:[[0,1,0,0],[1,0,0,0],[0,0,0,1],[0,0,1,0]],
   S:[[1,1,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
 };
 
+let activeVersion=1;
+let kernelState=JSON.parse(JSON.stringify(V1));
+
 function matMul(A,B){
   const n=A.length; const out=Array.from({length:n},()=>Array(n).fill(0));
   for(let i=0;i<n;i++) for(let j=0;j<n;j++){ let v=0; for(let k=0;k<n;k++) v+=A[i][k]*B[k][j]; out[i][j]=v; }
   return out;
 }
+function chain(...mats){ return mats.reduce((a,b)=>matMul(a,b)); }
 function matEqInt(A,B){ return A.every((row,i)=>row.every((v,j)=>v===B[i][j])); }
-function identity4(){ return [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]; }
-function matPow(M,k){ let R=identity4(); for(let n=0;n<k;n++) R=matMul(R,M); return R; }
-function findOrder(M,maxK=8){ for(let k=1;k<=maxK;k++){ if(matEqInt(matPow(M,k), identity4())) return k; } return null; }
+function zero4(){ return [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]; }
+function isZero(M){ return M.every(row=>row.every(v=>v===0)); }
 function matStr(M){ return M.map(r=>r.join(' ')).join(' / '); }
-function nnzCoords(M){ const c=[]; for(let i=0;i<4;i++) for(let j=0;j<4;j++) if(M[i][j]!==0) c.push([i,j]); return c; }
+function trace(M){ return M[0][0]+M[1][1]+M[2][2]+M[3][3]; }
+function matPow(M,k){ let R=[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]; for(let n=0;n<k;n++) R=matMul(R,M); return R; }
+
+function matrixRank(M){
+  const A = M.map(row=>row.map(Number));
+  let rank=0;
+  for(let col=0; col<4 && rank<4; col++){
+    let pivot=-1;
+    for(let r=rank; r<4; r++){ if(Math.abs(A[r][col])>1e-9){ pivot=r; break; } }
+    if(pivot===-1) continue;
+    [A[rank],A[pivot]]=[A[pivot],A[rank]];
+    for(let r=0;r<4;r++){
+      if(r!==rank && Math.abs(A[r][col])>1e-9){
+        const f=A[r][col]/A[rank][col];
+        for(let c=0;c<4;c++) A[r][c]-=f*A[rank][c];
+      }
+    }
+    rank++;
+  }
+  return rank;
+}
+
+function invariantSignature(K){
+  return {
+    rank: matrixRank(K),
+    tr1: trace(K),
+    tr2: trace(matPow(K,2)),
+    tr3: trace(matPow(K,3)),
+    tr4: trace(matPow(K,4))
+  };
+}
+function sigEqual(a,b){ return a.rank===b.rank && a.tr1===b.tr1 && a.tr2===b.tr2 && a.tr3===b.tr3 && a.tr4===b.tr4; }
+function sigStr(s){ return `rank=${s.rank}, tr(K)=${s.tr1}, tr(K²)=${s.tr2}, tr(K³)=${s.tr3}, tr(K⁴)=${s.tr4}`; }
+
+const K1_canonical = chain(V1.I,V1.R,V1.A,V1.S);
+const canonicalSig = invariantSignature(K1_canonical);
+
+function selectVersion(v){
+  activeVersion=v;
+  const src = v===1?V1 : v===2?V2 : BAD;
+  kernelState=JSON.parse(JSON.stringify(src));
+  document.getElementById('btnV1').className = v===1 ? 'btn' : 'btn ghost';
+  document.getElementById('btnV2').className = v===2 ? 'btn' : 'btn ghost';
+  document.getElementById('btnBad').className = v==='bad' ? 'btn r' : 'btn ghost';
+  runKernelChain();
+}
 
 function renderKernel(){
   const wrap=document.getElementById('kernelMatrices');
@@ -536,7 +602,7 @@ function renderKernel(){
     const card=document.createElement('div');
     card.className='card kernelCard';
     const h=document.createElement('h4');
-    h.textContent=c+(c==='I'?' — invariant':c==='S'?' — state':c==='A'?' — adjacency':' — rewrite');
+    h.textContent=c+(c==='I'?' — invariant':c==='R'?' — rewrite':c==='A'?' — adjacency':' — selection');
     card.appendChild(h);
     const grid=document.createElement('div');
     grid.className='kernelGrid';
@@ -551,88 +617,62 @@ function renderKernel(){
   });
 }
 
-/* (keep matMul, matEqInt, identity4, matPow, findOrder, matStr, nnzCoords, renderKernel as-is) */
+function derivedOps(I,R,A,S){
+  return {
+    NORM: chain(S,I),
+    APP:  chain(A,R),
+    COMP: chain(R,A,S),
+    DUP:  chain(S,S),
+    SWAP: chain(R,S),
+    CONST:chain(I,S)
+  };
+}
 
 function runKernelChain(){
   renderKernel();
-  const {I,S,A,R}=kernelState;
+  const {I,R,A,S}=kernelState;
 
   const iIdem = matEqInt(matMul(I,I), I);
-  const aInvolutive = matEqInt(matMul(A,A), identity4());
-  const rOrder = findOrder(R);
-  const sIdentityDiff = !matEqInt(matMul(S,I), matMul(I,S));
+  const K = chain(I,R,A,S);
+  const kNilpotent = matEqInt(matMul(K,K), zero4());
+  const kNonzero = !isZero(K);
 
+  const label = activeVersion==='bad' ? 'Counterexample (isar_ski_kernel-2.py)' : `Version ${activeVersion}`;
   document.getElementById('closureLog').textContent=
-`I idempotent  (I@I = I):            ${iIdem ? 'YES' : 'NO'}
-   I@I = ${matStr(matMul(I,I))}
+`${label} selected
 
-A involutive  (A@A = Identity):      ${aInvolutive ? 'YES' : 'NO'}
-   A@A = ${matStr(matMul(A,A))}
+I idempotent  (I·I = I):        ${iIdem ? 'YES' : 'NO'}
+K = I·R·A·S:                    ${matStr(K)}
+K nilpotent   (K·K = 0):        ${kNilpotent ? 'YES' : 'NO'}
+K nonzero     (K ≠ 0):          ${kNonzero ? 'YES' : 'NO'}`;
 
-R finite order (Rᵏ = Identity):      ${rOrder ? `YES, order = ${rOrder}` : 'NO — no cycle found within 8 steps'}
-
-S,I noncommutative (S@I ≠ I@S):      ${sIdentityDiff ? 'YES' : 'NO — degenerate, S and I commute'}
-   S@I = ${matStr(matMul(S,I))}
-   I@S = ${matStr(matMul(I,S))}`;
-
-  const U = matMul(matMul(matMul(I,R),A),S);
-  const uCoords = nnzCoords(U);
-  document.getElementById('tensorFromKernelLog').textContent=
-`U = I@R@A@S  (direct composition, order matters)
-${matStr(U)}
-
-non-zero coordinates: ${uCoords.length} / 16
-${uCoords.map(c=>`(${c[0]},${c[1]}) = ${U[c[0]][c[1]]}`).join('\n')}`;
-
-  // real derived operators, matching SKI_kernel.py exactly
-  const NORM = matMul(S,I);
-  const APP  = matMul(A,R);
-  const COMP = matMul(matMul(R,A),S);
-  const DUP  = matMul(S,S);
-  const SWAP = matMul(R,S);
-  const CONST= matMul(I,S);
-
-  const normIdem = matEqInt(matMul(NORM,NORM), NORM);
-  const constIdem = matEqInt(matMul(CONST,CONST), CONST);
-  const appOrder = findOrder(APP);
-  const uDecomposes = matEqInt(U, matMul(I,COMP));
-  const dupDoubles = DUP[0][1] === 2*S[0][1];
-
+  const ops = derivedOps(I,R,A,S);
   document.getElementById('runtimeLog').textContent=
-`NORM = S@I   (normalization)
-${matStr(NORM)}
-   idempotent (NORM@NORM = NORM): ${normIdem ? 'YES' : 'NO'}
+    Object.entries(ops).map(([name,m])=>`${name} = ${matStr(m)}   ${isZero(m)?'⚠ degenerate (all zero)':''}`).join('\n');
 
-APP = A@R    (application)
-${matStr(APP)}
-   finite order: ${appOrder ? `YES, order = ${appOrder}` : 'NO'}
+  const sig = invariantSignature(K);
+  const match = sigEqual(sig, canonicalSig);
+  document.getElementById('gaugeLog').textContent=
+`Canonical K₁ signature (isar_categorical_proof.py):
+  ${sigStr(canonicalSig)}
 
-COMP = R@A@S (composition)
-${matStr(COMP)}
-   U decomposes as I@COMP: ${uDecomposes ? 'YES' : 'NO'}
+Selected kernel signature:
+  ${sigStr(sig)}
 
-DUP = S@S    (duplication / W)
-${matStr(DUP)}
-   off-diagonal doubles S's (DUP[0,1] = 2·S[0,1]): ${dupDoubles ? 'YES' : 'NO'}
-
-SWAP = R@S   (argument swap / C)
-${matStr(SWAP)}
-
-CONST = I@S  (constant / K)
-${matStr(CONST)}
-   idempotent (CONST@CONST = CONST): ${constIdem ? 'YES' : 'NO'}`;
+Signatures match: ${match ? 'YES' : 'NO'}
+${match
+    ? '→ Necessary condition for K = P·K₁·P⁻¹ holds. (V1 and V2 both pass — this is exactly the gauge equivalence proven in ISARMatrices.lean.)'
+    : '→ No invertible P can satisfy K = P·K₁·P⁻¹. This kernel is not conjugate to the canonical one — by the terminal-object theorem, it is not a correct ISAR kernel, regardless of how its derived combinators look.'}`;
 
   document.getElementById('kernelTests').innerHTML=[
-    eqLine('I@I', 'I  (idempotent)', iIdem),
-    eqLine('A@A', 'Identity  (involutive)', aInvolutive),
-    eqLine('order(R)', rOrder ? String(rOrder) : 'none — degenerate carrier', !!rOrder),
-    eqLine('NORM@NORM', 'NORM  (S@I idempotent)', normIdem),
-    eqLine('order(APP)', appOrder ? String(appOrder) : 'none', !!appOrder),
-    eqLine('U', 'I@COMP  (decomposes through R@A@S)', uDecomposes),
-    eqLine('CONST@CONST', 'CONST  (I@S idempotent)', constIdem)
+    eqLine('I·I', 'I  (idempotent)', iIdem),
+    eqLine('K nonzero', 'true', kNonzero),
+    eqLine('signature(K)', 'signature(K₁)  (gauge-conjugate)', match),
+    eqLine('all six combinators', 'nonzero', Object.values(ops).every(m=>!isZero(m)))
   ].join('');
 }
-runKernelChain();
+
+selectVersion(1);
 
 /* ---- Units ---- */
 function runQuantity(){
