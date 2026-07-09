@@ -84,30 +84,54 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 <body>
 <header>
   <h1>What Survives Translation</h1>
-  <p>Every encoder gets to pick three things freely. A fourth thing isn't a choice — it's forced. This page lets you check that on your own input, eight times.</p>
+  <p class="subtitle">
+    When data is renamed, re-encoded, recompiled, reduced, or moved to a new machine, what stays the same?
+    An encoding can choose its state, its wiring, and its rewrite rule. What it cannot choose is the invariant those choices force.
+  </p>
 </header>
 
 <nav id="nav"></nav>
 
 <section class="page active" id="pIntro">
-  <h2>The short version</h2>
   <div class="story">
-    <p>This started as a boring, practical question: when you save something, what's allowed to change, and what isn't?</p>
-    <p>Two operations that look similar aren't. Renaming a file touches zero bytes — only a label moves. Recompressing it rewrites every byte, yet decodes to the same content. Both count as "same thing, different representation," for opposite reasons.</p>
-    <p>Generalize that, and a pattern falls out: any encoder is free to choose a state space (S), a topology or adjacency (A), and a rewrite rule (R). Once those three are picked, a fourth thing stops being a choice. Call it the invariant (I). Two encodings are "the same" exactly when they land on the same I, however different their S, A, and R were.</p>
-    <p>Below are nine checkable settings: a literal binary kernel you can flip bits in, unit conversion, three text encodings, a piece of "boring plumbing" that turns out to be an unnamed grammar, a hand-built pair-graph, two expressions that reduce to one number by different paths, one program compiled to two notations, a real x86-64 syscall trace stored as a sparse tensor, and a quine that reconstructs its own bytes from a self-join.</p>
-    <p>None of it asks you to accept a theory. Each page is a small computation you can rerun on your own input. By the end, "invariant layer" is just a name for something you made happen nine times.</p>
+    <h2>Abstract</h2>
+    <p>Computers constantly change representation. A file is compressed, a program is compiled, a term is reduced, a graph is serialized, a trace is stored in a different layout. Most of the visible structure changes. The practical question is: what, exactly, is allowed to change without changing the thing itself?</p>
+    <p>This page gives one answer: an encoding may choose a state space, a wiring or adjacency, and a rewrite rule. Once those are fixed, an invariant is forced. Two representations count as the same only when they preserve that invariant, even if their bytes, labels, syntax, or local reduction paths look completely different.</p>
+    <p>The examples below are meant to be rerun, not merely read. Each one shows the same idea in a different setting: identity separated from labels, structure separated from presentation, and computation understood as a change of representation that preserves an underlying object.</p>
+
+    <h2>Introduction</h2>
+    <p> Start with something mundane. Renaming a file changes a path but not its bytes. Recompressing it changes every byte but preserves the decoded content. Reformatting source code changes spacing but not execution. Compiling a program changes nearly everything you can inspect locally, yet the compiled result is still expected to preserve what the program does.</p>
+    <p>These are all versions of the same question: when two representations differ, what makes them representations of the same thing rather than different things? The usual answer is informal — “they behave the same,” or “they decode the same,” or “they reduce to the same result.” This page makes that answer concrete by treating each encoding as a choice of state, adjacency, and rewrite, and then asking what remains invariant across those choices.</p>
+    <p>From that point of view, identity is not a filename, a glyph, a syntax tree, a memory address, or a byte pattern. Those are all representations. The invariant layer is whatever survives when those representations are translated, normalized, or recombined.</p>
+    <p>The sections below move from familiar computing examples to more structural ones. You can flip bits, compare encodings, inspect graphs, follow reductions, and watch different representations converge. The goal is not to ask for belief. The goal is to make the invariant visible.</p>
+
+    <h2>The short version</h2>
+    <p>  An encoding can change names, layout, topology, and rewrite strategy. What makes two encodings the same is the invariant that survives those changes.
+    Pick a way to store something, and three choices are yours: what states look like, how they connect,
+    and what rule moves you between them. A fourth thing comes out the other side unchosen — the same
+    every time, no matter how the first three were picked. This page hands you nine different encoders
+    and lets you find that fourth thing yourself, on your own input, in your browser.</p>
+    <p>Computers are always translating. Files are renamed, compressed, parsed, serialized, compiled, reduced, and shipped across different storage and execution formats. The visible form changes constantly. The useful question is what stays the same through those changes.</p>
+    <p>One answer shows up again and again: an encoding may choose a state space, a topology, and a rewrite rule. Once those are fixed, an invariant is no longer a matter of taste. Two encodings represent the same thing exactly when that invariant survives the translation between them.</p>
+    <p>The sections below make that claim concrete with small computations. Some use text, some graphs, some reduction paths, some machine-level structure. None of them require accepting a theory in advance. Each one is a check you can run and inspect for yourself.</p>
+    <div class="eq">decode(encode(x)) = x</div>
+    <div class="eq">Invariant(S₁,A₁,R₁ of x) = Invariant(S₂,A₂,R₂ of x)</div>
+    <div class="eq">reduce(path 1) = reduce(path 2)  ⇒  same normal form, different route</div>
   </div>
-  <div class="eq">decode(encode(x)) = x</div>
-  <div class="eq">Invariant(S₁,A₁,R₁ of x) = Invariant(S₂,A₂,R₂ of x)</div>
-  <div class="eq">reduce(path 1) = reduce(path 2)  ⇒  same normal form, different route</div>
 </section>
 
 <section class="page" id="pKernel">
-  <h2>Kernel: why the gauge, not the bit-count, is the proof</h2>
+  <h2>Kernel: what stays the same across representations</h2>
   <p class="lead">
-    The real ISAR axiom isn't "K is sparse" or even "K is nilpotent" — it's that the quotient projection Π is idempotent (Π∘Π = Π). Because ISAR_Kernel is proven to be the <em>terminal object</em> in the category of admissible kernels, any two correct implementations must be conjugate: K₂ = P·K₁·P⁻¹ for some invertible P. That conjugacy is the actual correctness test — not bit-count, not raw distinctness of the derived operators.
+  Everywhere else on this page, you pick three things and a fourth falls out. Here, that fourth
+  thing gets a name and a precise test. The kernel doesn't have to be small, and it doesn't have
+  to be sparse — those are just properties this particular one happens to have. What it has to be
+  is <strong>the same kernel</strong> no matter which coordinates you write it in. Two implementations
+  count as the same exactly when one can be turned into the other by a plain change of coordinates —
+  a matrix P with <code>K₂ = P·K₁·P⁻¹</code>. That relationship, not bit-count and not how the matrices
+  look on the page, is the actual test below. Try to break it.
   </p>
+
 
   <div class="hook">
     <div class="know"><div class="lbl">what you already know</div><p>Rotating your viewpoint doesn't change an object's mass or shape — only its coordinates.</p></div>
@@ -115,19 +139,25 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
     <div class="form"><div class="lbl">formal result</div><p>Similar matrices (K₂ = P·K₁·P⁻¹) are forced to share rank and every trace of every power: tr(K₁ⁿ) = tr(K₂ⁿ) for all n. If a candidate kernel's rank or power-traces don't match the canonical kernel's, no invertible P can possibly conjugate one into the other — it is not the same object, full stop.</p></div>
   </div>
 
-  <div class="row" style="margin:12px 0">
-    <button class="btn" id="btnV1" onclick="selectVersion(1)">Version 1 (isar_categorical_proof.py)</button>
-    <button class="btn ghost" id="btnV2" onclick="selectVersion(2)">Version 2 (verify_isar_ZFC.py)</button>
-    <button class="btn r" id="btnBad" onclick="selectVersion('bad')">Counterexample (isar_ski_kernel-2.py)</button>
-  </div>
+  <p>A kernel is not defined by being small, sparse, or visually neat. It is defined by preserving the same invariant under change of coordinates.</p>
+  <p>The central fact is simple: a representation can change, but its invariant cannot. Two kernels count as the same kernel only when one is a gauge transform of the other — the same structure written in different coordinates. In matrix form, that means there is an invertible matrix <code>P</code> such that <code>K₂ = P·K₁·P⁻¹</code>.</p>
+  <p>That is why gauge is the proof and bit-count is not. A cheaper encoding may use fewer ones, fewer bytes, or a different layout, but none of that shows it preserves the same object. The real test is whether the invariant survives translation. If it does, the representation changed and the kernel did not. If it does not, then you are looking at a different system.</p>
+  <p>This section starts from the canonical kernel, derives its operators directly from it, and then checks candidate kernels against that invariant. The point is not to hunt for the sparsest matrix. The point is to separate coordinate choices from the thing coordinates are trying to describe.</p>
 
   <div class="card" id="canonical-kernel" style="margin-top:14px">
     <h3>The ISAR Kernel</h3>
     <p class="small">
-    The kernel is defined by four 4×4 matrices <code>I, R, A, S</code>. Their product
-    <code>K = I·R·A·S</code> is nilpotent (<code>K·K = 0</code>), and <code>I</code> is idempotent
-    (<code>I·I = I</code>). Every other operator in the system is derived from these four matrices
-    by composition — nothing below is stored independently.
+    At the foundation sits a single computational kernel, built from four 4×4 matrices: <code>I</code>, <code>R</code>,
+    <code>A</code>, and <code>S</code>. These four matrices are the only primitives — everything else the system
+    does is a consequence of composing them.
+    </p>
+    <p class="small">
+    Their product, <code>K = I·R·A·S</code>, is <em>nilpotent</em>: applying it twice always collapses to zero
+    (<code>K·K = 0</code>). This means the kernel never loops back on itself indefinitely — every computation
+    it drives terminates in a well-defined sense. Separately, <code>I</code> is <em>idempotent</em>
+    (<code>I·I = I</code>), meaning it behaves as a stable projection rather than something that keeps transforming
+    its input the more you apply it. Together, these two properties are what make the kernel a coherent
+    foundation rather than an arbitrary set of matrices.
     </p>
     <pre class="log" id="canonicalMatrices"></pre>
     <pre class="log" id="derivedOpsOut"></pre>
@@ -136,12 +166,21 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
   <div class="card" id="terminality-check" style="margin-top:14px">
     <h3>Validity Criterion</h3>
     <p class="small">
-    A kernel is valid if it is <em>similar</em> to the canonical kernel — related by an invertible
-    matrix P such that <code>P·K·P⁻¹ = K_canonical</code>. Similar matrices always share the same
-    rank and trace, so any candidate kernel whose rank or trace differs from the canonical kernel's
-    cannot be brought into agreement by any choice of coordinates. Matching pairwise-distinct
-    combinator outputs is necessary but not sufficient — the underlying matrix must also pass this
-    similarity test.
+    It's natural to ask whether some other set of four matrices could serve the same role — perhaps something
+    smaller or sparser. The answer depends on what "the same role" actually requires.
+    </p>
+    <p class="small">
+    Two matrices are considered equivalent if one can be turned into the other by a simple change of coordinates —
+    formally, if there's an invertible matrix P such that <code>P·K·P⁻¹</code> equals the other kernel. This kind
+    of transformation never changes certain intrinsic properties of a matrix, no matter which coordinates you choose:
+    its rank and its trace stay fixed. That gives a simple, reliable test. If a candidate kernel's rank or trace
+    doesn't match the canonical kernel's, no amount of coordinate-juggling can make them equivalent — they are
+    simply different objects, not two views of the same one.
+    </p>
+    <p class="small">
+    This test is stricter than just checking that the six derived operators come out distinct and nonzero.
+    A kernel can pass that weaker check while still being a fundamentally different structure underneath —
+    distinctness alone doesn't guarantee the deeper algebraic identity holds.
     </p>
     <button onclick="testGaugeConjugacy()">Test a candidate kernel</button>
     <pre class="log" id="gaugeOut"></pre>
@@ -149,24 +188,32 @@ th{color:var(--mut);font-weight:600;background:#0d1016}
 
   <div class="card">
     <section id="counterexample-note">
-      <h3>Counterexample</h3>
+      <h3>An Instructive Failure</h3>
       <p class="small">
-      The candidate above has K of rank 2 with nonzero trace(K²), against the canonical kernel's
-      rank 1 and trace(K²) = 0. Since these values are invariant under any change of coordinates,
-      this candidate cannot be a valid ISAR kernel — it computes something structurally different,
-      even though its six derived operators happen to be pairwise distinct and nonzero.
+      The example loaded above illustrates exactly this distinction. Its kernel has rank 2 and a nonzero
+      trace of K², compared to the canonical kernel's rank 1 and trace of zero. Its six derived operators
+      still come out pairwise distinct and nonzero — so a shallow check would wave it through — but the rank
+      and trace mismatch is unambiguous. This is not a smaller or more efficient version of the same kernel;
+      it's a different rewrite system that happens to produce superficially similar-looking output.
       </p>
     </section>
 
     <section id="strange-loop-note">
-      <h3>Verification Across Systems</h3>
+      <h3>Independent Verification</h3>
       <p class="small">
-      The nilpotence and idempotence properties above are checked computationally on this page, and
-      also hold as machine-checked theorems in a separate proof assistant that reasons about the
-      kernel's reduction behavior without executing it — the two verification paths are independent
-      and agree.
+      The nilpotence and idempotence properties shown above aren't just checked by running numbers through this
+      page — they're also established as formally verified theorems in a separate, independent proof system that
+      reasons about the kernel's behavior symbolically rather than by direct computation. The two methods arrive
+      at the same conclusion through entirely different means, which is a stronger form of confidence than either
+      approach could offer alone.
       </p>
     </section>
+  </div>
+
+  <div class="row" style="margin:12px 0">
+    <button class="btn" id="btnV1" onclick="selectVersion(1)">Version 1 (isar_categorical_proof.py)</button>
+    <button class="btn ghost" id="btnV2" onclick="selectVersion(2)">Version 2 (verify_isar_ZFC.py)</button>
+    <button class="btn r" id="btnBad" onclick="selectVersion('bad')">Counterexample (isar_ski_kernel-2.py)</button>
   </div>
 
   <div class="grid4" id="kernelMatrices" style="margin-top:14px" ></div>
