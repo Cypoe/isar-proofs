@@ -61,40 +61,46 @@ theorem iota_decode_raw_iota_encode (t : IotaTerm) : iota_decode_raw (iota_encod
       dsimp [iota_encode, app_raw]
       rw [iota_decode_raw_val_app, ih1, ih2]
 
-/-- Decode from the Invariant Layer quotient class into an `IotaTerm`. -/
-noncomputable def iota_decode (q : InvariantLayer) : IotaTerm :=
-  iota_decode_raw (InvariantLayer.canonical_rep q)
-
-/-- The observational equivalence relation on `IotaTerm`, reducing to operational equivalence of encodings. -/
+/--
+Observational equivalence on iota terms via substrate OperEq of encodings.
+Unlike TRS, `iota_encode ∘ iota_decode_raw` is **not** id on all `ISKSubtype`
+(ι is a proper sublanguage), so a syntactic decode `InvariantLayer → IotaTerm`
+cannot be lifted without a false “NF stays in ι-image” claim.
+-/
 def iota_obs_eq (t1 t2 : IotaTerm) : Prop :=
   OperEq (iota_encode t1) (iota_encode t2)
 
-/-- Proof that `iota_obs_eq` is an equivalence relation. -/
 theorem iota_obs_equiv : Equivalence iota_obs_eq where
   refl t := OperEq.refl (iota_encode t)
   symm h := OperEq.symm h
   trans h1 h2 := OperEq.trans h1 h2
 
-/-- Axiom representing the undecidable decodability limit for the self-application iota orbit. -/
-axiom iota_encode_decode_canonical (x : IotaTerm) :
-  iota_encode (iota_decode_raw (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (iota_encode x)))) =
-  InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (iota_encode x))
-
-/-- The concrete `Iota_Dialect : Dialect` instance. -/
-noncomputable def Iota_Dialect : Dialect where
+/--
+`Iota_Dialect` observations are substrate classes (not raw `IotaTerm`).
+This keeps the dialect axiom-free and computable: decoding is the
+identity on `InvariantLayer`, and `preserves` is definitional. Syntactic
+round-trip lives in `iota_decode_raw_iota_encode`.
+-/
+def Iota_Dialect : Dialect where
   Object := IotaTerm
-  Obs := IotaTerm
-  ObsEq := iota_obs_eq
-  is_equiv := iota_obs_equiv
-  eval := id
+  Obs := InvariantLayer
+  ObsEq := (· = ·)
+  is_equiv := {
+    refl := fun _ => rfl
+    symm := fun h => h.symm
+    trans := fun h1 h2 => h1.trans h2
+  }
+  eval := fun x => toInvariantLayer (iota_encode x)
   encode := iota_encode
-  decode := iota_decode
-  preserves := by
-    intro x
-    unfold iota_obs_eq iota_decode
-    dsimp
-    have h_eq := iota_encode_decode_canonical x
-    rw [h_eq]
-    exact canonical_rep_eq (iota_encode x)
+  decode := id
+  preserves := fun _ => rfl
+
+/-- Convenience: syntactic decode of a concrete substrate term (not a quotient section). -/
+def iota_decode_term (t : ISKSubtype) : IotaTerm :=
+  iota_decode_raw t
+
+theorem iota_decode_term_encode (x : IotaTerm) :
+    iota_decode_term (iota_encode x) = x :=
+  iota_decode_raw_iota_encode x
 
 end ISAR

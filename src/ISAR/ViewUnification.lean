@@ -63,7 +63,7 @@ Any observational isomorphism between two admissible dialects D1 and D2 induces
 a category-theoretic KernelIsomorphism between their corresponding Kernels.
 The translation morphisms are constructed canonicaly using the substrate as the universal medium.
 -/
-noncomputable def isomorphism_unification (AD1 AD2 : AdmissibleDialect) (_iso : ObservationalIsomorphism AD1.D AD2.D) :
+def isomorphism_unification (AD1 AD2 : AdmissibleDialect) (_iso : ObservationalIsomorphism AD1.D AD2.D) :
     KernelIsomorphism AD1.toKernel AD2.toKernel where
   hom1 := dialect_canonical_hom AD1 AD2
   hom2 := dialect_canonical_hom AD2 AD1
@@ -92,7 +92,7 @@ noncomputable def isomorphism_unification (AD1 AD2 : AdmissibleDialect) (_iso : 
    3. Exposing TRS & Bytecode as Admissible Dialects
    ========================================================= -/
 
-noncomputable def TRS_AdmissibleDialect : AdmissibleDialect where
+def TRS_AdmissibleDialect : AdmissibleDialect where
   D := TRS_Dialect
   view_of := decode_raw
   view_eq := trs_obs_eq
@@ -112,7 +112,7 @@ noncomputable def TRS_AdmissibleDialect : AdmissibleDialect where
     exact OperEq.refl (trs_encode obj)
   decode_eq _ _ h := h
 
-noncomputable def Bytecode_AdmissibleDialect : AdmissibleDialect where
+def Bytecode_AdmissibleDialect : AdmissibleDialect where
   D := Bytecode_Dialect
   view_of t := decompile (decode_raw t)
   view_eq := bytecode_obs_eq

@@ -59,10 +59,6 @@ theorem trs_encode_decode_raw (t : ISKSubtype) : trs_encode (decode_raw t) = t :
   have h_val := trs_encode_decode_raw_val val property
   exact Subtype.ext h_val
 
-/-- Decode from the Invariant Layer quotient class into a `TTerm`. -/
-noncomputable def trs_decode (q : InvariantLayer) : TTerm :=
-  decode_raw (InvariantLayer.canonical_rep q)
-
 /-- The observational equivalence relation on `TTerm`, reducing to operational equivalence of encodings. -/
 def trs_obs_eq (t1 t2 : TTerm) : Prop :=
   OperEq (trs_encode t1) (trs_encode t2)
@@ -73,23 +69,47 @@ theorem trs_obs_equiv : Equivalence trs_obs_eq where
   symm h := OperEq.symm h
   trans h1 h2 := OperEq.trans h1 h2
 
-/-- The concrete `TRS_Dialect : Dialect` instance. -/
-noncomputable def TRS_Dialect : Dialect where
+/-- Setoid of TRS observations (OperEq of encodings). -/
+def trsObsSetoid : Setoid TTerm where
+  r := trs_obs_eq
+  iseqv := trs_obs_equiv
+
+/-- Observation space: `TTerm` modulo observational equivalence. -/
+abbrev TTermObs := Quotient trsObsSetoid
+
+/--
+Decode an OperEq-class to a TRS observation.
+Well-defined because `trs_encode ∘ decode_raw = id` on `ISKSubtype`, so OperEq
+of substrate terms induces `trs_obs_eq` of decodings — no `canonical_rep` / choice.
+-/
+def trs_decode (q : InvariantLayer) : TTermObs :=
+  Quotient.lift
+    (fun t : ISKSubtype => Quotient.mk trsObsSetoid (decode_raw t))
+    (fun a b (h : OperEq a b) => by
+      apply Quotient.sound
+      change trs_obs_eq (decode_raw a) (decode_raw b)
+      unfold trs_obs_eq
+      simpa [trs_encode_decode_raw] using h)
+    q
+
+/-- The concrete `TRS_Dialect : Dialect` instance (computable; OperEq observations). -/
+def TRS_Dialect : Dialect where
   Object := TTerm
-  Obs := TTerm
-  ObsEq := trs_obs_eq
-  is_equiv := trs_obs_equiv
-  eval := id
+  Obs := TTermObs
+  ObsEq := (· = ·)
+  is_equiv := {
+    refl := fun _ => rfl
+    symm := fun h => h.symm
+    trans := fun h1 h2 => h1.trans h2
+  }
+  eval := Quotient.mk trsObsSetoid
   encode := trs_encode
   decode := trs_decode
   preserves := by
     intro x
-    unfold trs_obs_eq trs_decode
-    dsimp
-    have h_eq : trs_encode (decode_raw (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (trs_encode x)))) =
-                InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (trs_encode x)) := by
-      exact trs_encode_decode_raw _
-    rw [h_eq]
-    exact canonical_rep_eq (trs_encode x)
+    -- `trs_decode (⟦encode x⟧) = ⟦decode_raw (encode x)⟧ = ⟦x⟧`
+    change Quotient.mk trsObsSetoid (decode_raw (trs_encode x)) =
+      Quotient.mk trsObsSetoid x
+    rw [decode_raw_trs_encode]
 
 end ISAR

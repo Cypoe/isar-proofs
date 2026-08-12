@@ -104,30 +104,59 @@ theorem bytecode_obs_equiv : Equivalence bytecode_obs_eq where
   symm h := OperEq.symm h
   trans h1 h2 := OperEq.trans h1 h2
 
-/-- Decode a quotient class of the substrate into a bytecode program. -/
-noncomputable def decode_bytecode (q : InvariantLayer) : List Instruction :=
-  decompile (trs_decode q)
+/-- Setoid of bytecode observations. -/
+def bytecodeObsSetoid : Setoid (List Instruction) where
+  r := bytecode_obs_eq
+  iseqv := bytecode_obs_equiv
 
-/-- The concrete `Bytecode_Dialect : Dialect` instance. -/
-noncomputable def Bytecode_Dialect : Dialect where
+/-- Observation space: bytecode programs modulo observational equivalence. -/
+abbrev BytecodeObs := Quotient bytecodeObsSetoid
+
+/-- Substrate term → bytecode program (computable). -/
+def decode_bytecode_raw (t : ISKSubtype) : List Instruction :=
+  decompile (decode_raw t)
+
+/--
+Decode an OperEq-class to a bytecode observation.
+Well-defined via `compile ∘ decompile = id` and `trs_encode ∘ decode_raw = id`.
+-/
+def decode_bytecode (q : InvariantLayer) : BytecodeObs :=
+  Quotient.lift
+    (fun t : ISKSubtype => Quotient.mk bytecodeObsSetoid (decode_bytecode_raw t))
+    (fun a b (h : OperEq a b) => by
+      apply Quotient.sound
+      change bytecode_obs_eq (decode_bytecode_raw a) (decode_bytecode_raw b)
+      unfold bytecode_obs_eq decode_bytecode_raw
+      rw [compile_bytecode_decompile, compile_bytecode_decompile]
+      simpa [trs_encode_decode_raw] using h)
+    q
+
+/-- The concrete `Bytecode_Dialect : Dialect` instance (computable; OperEq observations). -/
+def Bytecode_Dialect : Dialect where
   Object := List Instruction
-  Obs := List Instruction
-  ObsEq := bytecode_obs_eq
-  is_equiv := bytecode_obs_equiv
-  eval := id
+  Obs := BytecodeObs
+  ObsEq := (· = ·)
+  is_equiv := {
+    refl := fun _ => rfl
+    symm := fun h => h.symm
+    trans := fun h1 h2 => h1.trans h2
+  }
+  eval := fun p => Quotient.mk bytecodeObsSetoid p
   encode := fun p => trs_encode (compile_bytecode p)
   decode := decode_bytecode
   preserves := by
     intro x
-    unfold bytecode_obs_eq decode_bytecode
-    dsimp
-    have h_comp : ∀ t, compile_bytecode (decompile t) = t := compile_bytecode_decompile
-    rw [h_comp]
-    unfold trs_decode
-    have h_eq : trs_encode (decode_raw (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (trs_encode (compile_bytecode x))))) =
-                InvariantLayer.canonical_rep (Quotient.mk operEqSetoid (trs_encode (compile_bytecode x))) := by
-      exact trs_encode_decode_raw _
-    rw [h_eq]
-    exact canonical_rep_eq (trs_encode (compile_bytecode x))
+    change Quotient.mk bytecodeObsSetoid
+        (decode_bytecode_raw (trs_encode (compile_bytecode x))) =
+      Quotient.mk bytecodeObsSetoid x
+    unfold decode_bytecode_raw
+    have hdec : decode_raw (trs_encode (compile_bytecode x)) = compile_bytecode x :=
+      decode_raw_trs_encode (compile_bytecode x)
+    rw [hdec]
+    apply Quotient.sound
+    change bytecode_obs_eq (decompile (compile_bytecode x)) x
+    unfold bytecode_obs_eq
+    rw [compile_bytecode_decompile]
+    exact OperEq.refl _
 
 end ISAR

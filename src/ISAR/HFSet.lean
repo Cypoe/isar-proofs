@@ -3,8 +3,17 @@ inductive HF : Type where
   | insert : HF → HF → HF
 deriving DecidableEq, Repr
 
-axiom Nat.testBit_zero_number (i : Nat) : (0 : Nat).testBit i = false
-axiom Nat.testBit_shiftl (a i : Nat) : (1 <<< a).testBit i = (i == a)
+/-- Bit 0 of zero is always false (Lean core `Nat.zero_testBit`). -/
+theorem Nat.testBit_zero_number (i : Nat) : (0 : Nat).testBit i = false :=
+  Nat.zero_testBit i
+
+/-- Single-bit mask: `(1 <<< a)` has bit `i` set iff `i = a`. -/
+theorem Nat.testBit_shiftl (a i : Nat) : (1 <<< a).testBit i = (i == a) := by
+  rw [Nat.shiftLeft_eq, Nat.one_mul, Nat.testBit_two_pow]
+  by_cases h : a = i
+  · subst h; simp
+  · have hi : ¬ i = a := fun hij => h hij.symm
+    simp [h, hi]
 
 def toNat : HF → Nat
   | .empty => 0

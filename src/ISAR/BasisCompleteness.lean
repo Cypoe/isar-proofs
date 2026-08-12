@@ -152,11 +152,11 @@ def term_signature_val : ITerm → Matrix4
   | .app f x => term_signature_val f * term_signature_val x
 
 /-- Bijective term signature mapping in the substrate. -/
-noncomputable def term_signature (t : ISKSubtype) : Fin 4 → Fin 4 → Int :=
+def term_signature (t : ISKSubtype) : Fin 4 → Fin 4 → Int :=
   fromMatrix4 (term_signature_val t.val)
 
 /-- The matrix representative of a substrate term. -/
-noncomputable def term_matrix (t : ISKSubtype) : Matrix4 :=
+def term_matrix (t : ISKSubtype) : Matrix4 :=
   toMatrix4 (term_signature t)
 
 /-- Theorem: The identity term I maps to I1. -/

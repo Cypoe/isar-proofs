@@ -4,6 +4,47 @@ This document provides a comprehensive inventory of proof dependencies, first-pr
 
 ---
 
+## Inventory: `sorry` / `axiom` / `noncomputable` (after fixes)
+
+Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`. Full JGS BTA for all ISAR remains **open** (not claimed).
+
+### Sorry
+
+| Item | Status | Notes |
+| :--- | :--- | :--- |
+| *(none)* | **OK** | Comments only say “sorry-free”; no `sorry` tactics. |
+
+### Axioms (classified)
+
+| Location | Item | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `HFSet.lean` | `testBit_zero_number`, `testBit_shiftl` | **fixed → theorems** | Now `Nat.zero_testBit` / `testBit_two_pow` proofs. |
+| `IotaView.lean` | `iota_encode_decode_canonical` | **fixed → removed** | Was a false-risk “NF stays in ι-image” claim. Dialect now observes `InvariantLayer` (computable `id` decode). |
+| `HolonomicCompose.lean` | `exp_exp_not_holonomic` | **OK** | Named Stanley/Bell analytic fact; not in Mathlib. |
+| `HFSetEncoding.lean` | `subToNat`/`natToSub`/`fromNat`/`layerToNat` (+ inverses) | **OK** | Modeling countable bijection bridges; not derived. |
+| `QuantityKernel.lean` | `quantityToNat` / `natQuantity` (+ inverses) | **OK** | Same style bridge (Quantity has `String`/`Float`). |
+| `TensorSemantics.lean` | `TensorSpace`, `ExtEq`, combinators, β-laws, `obs_*` | **OK** | Abstract denotational model. |
+| `ISARApproximation.lean` | `ISAR_UAT`, limit/embedding/bijection axioms | **OK** | Analytic UAT / topological completion interface. |
+
+### Noncomputable (classified)
+
+| Location | Item | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `TRSView` / `BytecodeView` / `IotaView` dialects | Dialect defs | **fixed → computable** | OperEq-quotient observations (`Quotient.lift`); no `canonical_rep`. |
+| `ViewUnification` | `TRS_`/`Bytecode_AdmissibleDialect`, `isomorphism_unification` | **fixed → computable** | Follow dialects. |
+| `BasisCompleteness` | `term_signature`, `term_matrix` | **fixed → computable** | Were unnecessarily marked. |
+| `InvariantLayer` | `nf_of_term`, `canonical_rep` | **OK (necessary)** | `Classical.choose` on `HasNF` / `Quotient.exists_rep`. Explicit `cd` path: `canonical_nf` / `cd_loop_fuel`. |
+| `AdmissibleRecurrence` | `recurrence_to_Kernel` | **OK (necessary)** | Uses `canonical_rep` section. |
+| `HFSetEncoding` / `HFSetSemantics` / `ZFCInterpretation` / `QuantityKernel` | encode/decode/kernels | **OK** | Via encoding axioms + `canonical_rep`. |
+| `ViewUnification` | `encode_from_sig`, `eval_to_nf`, SN dialect bridge | **OK** | `Classical.choose` / WF recursion choice. |
+| `Holonomic*.lean` | `noncomputable section` | **OK (necessary)** | Mathlib analysis / `ℝ` / C∞. |
+| `ISARApproximation` | continuous maps / realizations | **OK (necessary)** | Topology on `ℝ`. |
+| `TensorSemantics` | `denot`, quotients | **OK** | Built on axiomatic tensor carrier. |
+
+**Necessity summary:** remaining `noncomputable` is Classical.choice / `exists_rep` for OperEq sections, Mathlib analysis, or axiom-backed bridges — not silent gaps.
+
+---
+
 ## Vacuity audit (headline theorems)
 
 Sorry-free compilation does **not** imply non-vacuous content. Checklist for main claims:
