@@ -107,10 +107,11 @@ Setup for object-level Futamura projections.
 `spec` is the meta specializer; `specTerm` is its reflection as an `ITerm`;
 `mix` is the characterizing equation; `selfApp` says evaluating `specTerm` implements `spec`.
 
-`TrivialPE` below is a sorry-free instance (tagged residual + recursive unpack) proving that
-mix+selfApp do not imply optimization (`¬ Nontrivial`). A real self-applicable optimizing
-ISAR `specTerm` (binding-time analysis / Jones–Gomard–Sestoft) remains future work; the
-projections below are the mix instantiations.
+`TrivialPE` is a sorry-free non-optimizing instance (`¬ Nontrivial`).
+`OptimizingPE` is a sorry-free fragment specializer with proved `Nontrivial`
+(identity / konstβ folds + tagged residual fallback). Full Jones–Gomard–Sestoft BTA
+for all of ISAR remains dissertation-scale future work; the projections below are
+the mix instantiations.
 -/
 structure PESetup where
   eval : ITerm → ITerm → Option ITerm
@@ -223,6 +224,126 @@ theorem trivial_spec_not_shrinking :
 theorem TrivialPE_not_nontrivial : ¬ Nontrivial TrivialPE := by
   rintro ⟨p, s, hlt⟩
   exact trivial_spec_not_shrinking ⟨p, s, hlt⟩
+
+/-! ### Optimizing fragment PE (identity / konstβ folding)
+
+Not a full Jones–Gomard–Sestoft BTA for all of ISAR. This is a principled
+**optimizing** specializer on a fragment:
+
+* Peel `norm · body` (identity elimination) and `(konst · x) · y` (konstβ / dead elim).
+* Atomic combinators (except `swap`, reserved as `specTerm`) residualize to themselves.
+* Remaining programs get a `dup`-tagged residual (same packaging as `TrivialPE`).
+
+`mix` / `selfApp` hold by computation on this evaluator; `Nontrivial` is witnessed by
+stripping a `norm` redex. Full self-applicable optimizing mix for the whole calculus
+remains dissertation-scale future work.
+-/
+
+/-- Meta specializer with static identity / konstβ folds. -/
+def opt_spec (p s : ITerm) : ITerm :=
+  match p with
+  | ITerm.app ITerm.norm body => opt_spec body s
+  | ITerm.app (ITerm.app ITerm.konst x) _y => opt_spec x s
+  | ITerm.norm => ITerm.norm
+  | ITerm.konst => ITerm.konst
+  | ITerm.sₛ => ITerm.sₛ
+  | ITerm.dup => ITerm.dup
+  | ITerm.comp => ITerm.comp
+  | ITerm.var n => ITerm.var n
+  | _ => ITerm.app ITerm.dup (pair p s)
+
+/--
+Object-level evaluator matching `opt_spec`:
+* `swap` on `pair p s` implements `selfApp`.
+* Tagged residuals unpack via mix.
+* Program-position `norm` / `konstβ` peels mirror `opt_spec`.
+* Atomic values are data-insensitive (so constant residuals satisfy mix).
+-/
+def opt_run : ITerm → ITerm → ITerm
+  | ITerm.swap, data =>
+      match data with
+      | ITerm.app (ITerm.app ITerm.konst p) s => opt_spec p s
+      | _ => ITerm.app ITerm.swap data
+  | ITerm.app ITerm.dup (ITerm.app (ITerm.app ITerm.konst p) s), d =>
+      opt_run p (pair s d)
+  | ITerm.app ITerm.norm body, d =>
+      opt_run body d
+  | ITerm.app (ITerm.app ITerm.konst x) _y, d =>
+      opt_run x d
+  | ITerm.norm, _ => ITerm.norm
+  | ITerm.konst, _ => ITerm.konst
+  | ITerm.sₛ, _ => ITerm.sₛ
+  | ITerm.dup, _ => ITerm.dup
+  | ITerm.comp, _ => ITerm.comp
+  | ITerm.var n, _ => ITerm.var n
+  | p, d => ITerm.app p d
+
+def opt_eval (prog data : ITerm) : Option ITerm :=
+  some (opt_run prog data)
+
+theorem opt_mix (p s d : ITerm) :
+    opt_eval (opt_spec p s) d = opt_eval p (pair s d) := by
+  cases p with
+  | var _ => rfl
+  | norm => rfl
+  | konst => rfl
+  | dup => rfl
+  | swap => rfl
+  | comp => rfl
+  | sₛ => rfl
+  | app f x =>
+      cases f with
+      | norm =>
+          have h := opt_mix x s d
+          simpa [opt_spec, opt_eval, opt_run] using h
+      | app f1 x1 =>
+          cases f1 with
+          | konst =>
+              have h := opt_mix x1 s d
+              simpa [opt_spec, opt_eval, opt_run] using h
+          | var _ => rfl
+          | norm => rfl
+          | dup => rfl
+          | swap => rfl
+          | comp => rfl
+          | sₛ => rfl
+          | app _ _ => rfl
+      | var _ => rfl
+      | konst => rfl
+      | dup => rfl
+      | swap => rfl
+      | comp => rfl
+      | sₛ => rfl
+termination_by term_size p
+decreasing_by
+  all_goals (simp [term_size]; omega)
+
+theorem opt_selfApp (p s : ITerm) :
+    opt_eval ITerm.swap (pair p s) = some (opt_spec p s) := by
+  rfl
+
+/-- Optimizing fragment `PESetup`: mix/selfApp by induction/`rfl`; `Nontrivial` below. -/
+def OptimizingPE : PESetup where
+  eval := opt_eval
+  spec := opt_spec
+  specTerm := ITerm.swap
+  mix := opt_mix
+  selfApp := opt_selfApp
+
+/-- Witness program: `norm · konst` strips to `konst`. -/
+def opt_witness_p : ITerm := ITerm.app ITerm.norm ITerm.konst
+
+theorem opt_spec_norm_konst (s : ITerm) :
+    opt_spec opt_witness_p s = ITerm.konst := by
+  rfl
+
+theorem pe_cost_opt_witness (s : ITerm) :
+    pe_cost (opt_spec opt_witness_p s) < pe_cost opt_witness_p := by
+  simp only [opt_witness_p, opt_spec, pe_cost, term_size]
+  omega
+
+theorem OptimizingPE_nontrivial : Nontrivial OptimizingPE :=
+  ⟨opt_witness_p, ITerm.konst, pe_cost_opt_witness ITerm.konst⟩
 
 theorem specialize_ISKTerm (t : ITerm) (ht : ISKTerm t) (s_env : Nat → Option ITerm) :
     specialize t s_env = t := by
