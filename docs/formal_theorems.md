@@ -6,7 +6,7 @@ This document presents the formal mathematical foundations of the ISAR system. A
 
 ## 1. Syntax and Operational Semantics
 
-The core term algebra $T$ is defined inductively in **[Kernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/Kernel.lean)** as `ITerm`:
+The core term algebra $T$ is defined inductively in **[Kernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/Kernel.lean)** as `ITerm`:
 
 $$ t, u \in \text{ITerm} ::= \text{var}(n) \mid \text{norm} \mid \text{konst} \mid \text{dup} \mid \text{swap} \mid \text{comp} \mid s_s \mid t \cdot u $$
 
@@ -31,7 +31,7 @@ $$ \twoheadrightarrow_I \ \triangleq \ (\to_I)^* $$
 
 ## 2. Confluence & Normalization
 
-To prove confluence, we define the **Parallel Reduction** relation `ParStep` ($\Rightarrow$) in **[Kernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/Kernel.lean)**, which allows simultaneous contractions of multiple redexes in a single step:
+To prove confluence, we define the **Parallel Reduction** relation `ParStep` ($\Rightarrow$) in **[Kernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/Kernel.lean)**, which allows simultaneous contractions of multiple redexes in a single step:
 
 * **Reflexivity**: $x \Rightarrow x$ (`refl`)
 * **Contractions**:
@@ -42,7 +42,7 @@ To prove confluence, we define the **Parallel Reduction** relation `ParStep` ($\
 * **Congruence**: $f \cdot x \Rightarrow f' \cdot x'$ if $f \Rightarrow f'$ and $x \Rightarrow x'$ (`app`)
 
 ### Complete Development and Confluence
-We define the **complete development** function `cd` recursively on terms. The main theorems verified in **[Kernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/Kernel.lean)** are:
+We define the **complete development** function `cd` recursively on terms. The main theorems verified in **[Kernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/Kernel.lean)** are:
 
 * **Takahashi's Lemma** (`ParStep_cd`): If $x \Rightarrow y$, then $y \Rightarrow \text{cd}(x)$.
 * **Confluence of Parallel Step** (`ParStep_confluent`): If $x \Rightarrow y_1$ and $x \Rightarrow y_2$, there exists $z$ such that $y_1 \Rightarrow z$ and $y_2 \Rightarrow z$.
@@ -53,7 +53,7 @@ We define the **complete development** function `cd` recursively on terms. The m
 
 ## 3. Combinator Embedding and Universality
 
-The S combinator is not strictly necessary for the rewrite algebra. We define the **derived S combinator** `derived_s` in **[Kernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/Kernel.lean)** as:
+The S combinator is not strictly necessary for the rewrite algebra. We define the **derived S combinator** `derived_s` in **[Kernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/Kernel.lean)** as:
 
 $$ \text{derived\_s} \ \triangleq \ (\text{comp} \cdot (\text{comp} \cdot \text{dup})) \cdot ((\text{swap} \cdot ((\text{comp} \cdot \text{comp}) \cdot ((\text{comp} \cdot \text{comp}) \cdot \text{swap}))) \cdot \text{norm}) $$
 
@@ -70,13 +70,13 @@ We verify the following core theorems:
 
 ## 4. Admissible Dialects & Kernel Category
 
-The semantic views are structured category-theoretically in **[KernelCategory.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/KernelCategory.lean)**:
+The semantic views are structured category-theoretically in **[KernelCategory.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/KernelCategory.lean)**:
 
 * **Kernel**: A semantic decoder view mapping a carrier type $C$, an equivalence relation $\approx$, and a decode function:
   $$ \text{decode} : C \to \text{ITerm} $$
   subject to soundness and congruence axioms.
 * **KernelHom**: A morphism $h : C_1 \to C_2$ between carrier types preserving both the application operation and the decoding mapping.
-* **InvariantLayer**: The operational quotient type constructed in **[InvariantLayer.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/InvariantLayer.lean)** modulo `OperEq` (joinability). We prove `app_congruence`, establishing that:hat:
+* **InvariantLayer**: The operational quotient type constructed in **[InvariantLayer.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/InvariantLayer.lean)** modulo `OperEq` (joinability). We prove `app_congruence`, establishing that:hat:
   $$ [f] \cdot [x] \ \triangleq \ [f \cdot x] $$
   is a well-defined application operator on the quotient.
 

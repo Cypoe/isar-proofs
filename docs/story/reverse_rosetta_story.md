@@ -77,7 +77,7 @@ Reduction                               Kernel + Quotient
    v                                      v
 TTerm NF <----------decode----------- InvariantLayer [T]
 ```
-Verified in [TRSView.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/TRSView.lean), symbolic rewrite terms of the pure SKI combinators are constructively compiled into `ISKSubtype`, showing that decompilation over the inductive proof `ISKTerm` is the exact inverse.
+Verified in [TRSView.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/TRSView.lean), symbolic rewrite terms of the pure SKI combinators are constructively compiled into `ISKSubtype`, showing that decompilation over the inductive proof `ISKTerm` is the exact inverse.
 
 ### D. Stack VM Bytecode
 ```
@@ -87,7 +87,7 @@ VM Execution                            Kernel + Quotient
    v                                      v
 Final Stack <-------decode----------- InvariantLayer [T]
 ```
-Verified in [BytecodeView.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/BytecodeView.lean), post-fix stack instructions (like `push_I`, `push_K`, `push_S`, `app`) compile to `TTerm` and then the substrate, showing that execution and compilation are inverse views.
+Verified in [BytecodeView.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/BytecodeView.lean), post-fix stack instructions (like `push_I`, `push_K`, `push_S`, `app`) compile to `TTerm` and then the substrate, showing that execution and compilation are inverse views.
 
 ---
 
@@ -110,7 +110,7 @@ This distinction explains why executable systems (closed languages) can be decom
 
 ## 5. Structural Arithmetic and Quantity Calculus
 
-In [QuantityKernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/QuantityKernel.lean), we define arithmetic not by declaring numbers as primitive ontological atoms, but by treating **quantities as stable observables of relational structure**. 
+In [QuantityKernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/QuantityKernel.lean), we define arithmetic not by declaring numbers as primitive ontological atoms, but by treating **quantities as stable observables of relational structure**. 
 
 We decompose a quantity $Q$ into four stacked layers:
 $$Q = (S, Y, M, E)$$

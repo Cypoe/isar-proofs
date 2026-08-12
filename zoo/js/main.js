@@ -478,7 +478,6 @@ function renderDetail() {
       <div class="tab-headers">
         <button class="tab-btn ${state.detailTab === 'anatomy' ? 'active' : ''}" id="tabBtnAnatomy" data-tab="anatomy">Anatomy</button>
         <button class="tab-btn ${state.detailTab === 'lab' ? 'active' : ''}" id="tabBtnLab" data-tab="lab">Interactive Lab</button>
-        <button class="tab-btn ${state.detailTab === 'occam' ? 'active' : ''}" id="tabBtnOccam" data-tab="occam">Occam Lens</button>
       </div>
       <div id="anatomyContent" style="display:${state.detailTab === 'anatomy' ? 'block' : 'none'}">
         <div style="display:grid;gap:var(--space-5)">
@@ -511,24 +510,19 @@ function renderDetail() {
         </div>
       </div>
       <div id="labContent" style="display:${state.detailTab === 'lab' ? 'block' : 'none'}"></div>
-      <div id="occamContent" style="display:${state.detailTab === 'occam' ? 'block' : 'none'}"></div>
     </div>`;
 
   const btnAnatomy = document.getElementById('tabBtnAnatomy');
   const btnLab = document.getElementById('tabBtnLab');
-  const btnOccam = document.getElementById('tabBtnOccam');
   const divAnatomy = document.getElementById('anatomyContent');
   const divLab = document.getElementById('labContent');
-  const divOccam = document.getElementById('occamContent');
 
   btnAnatomy.addEventListener('click', () => {
     state.detailTab = 'anatomy';
     btnAnatomy.classList.add('active');
     btnLab.classList.remove('active');
-    btnOccam.classList.remove('active');
     divAnatomy.style.display = 'block';
     divLab.style.display = 'none';
-    divOccam.style.display = 'none';
     if (reductionTimer) {
       clearInterval(reductionTimer);
       reductionTimer = null;
@@ -539,28 +533,13 @@ function renderDetail() {
     state.detailTab = 'lab';
     btnLab.classList.add('active');
     btnAnatomy.classList.remove('active');
-    btnOccam.classList.remove('active');
     divAnatomy.style.display = 'none';
     divLab.style.display = 'block';
-    divOccam.style.display = 'none';
     renderLab(s);
-  });
-
-  btnOccam.addEventListener('click', () => {
-    state.detailTab = 'occam';
-    btnOccam.classList.add('active');
-    btnAnatomy.classList.remove('active');
-    btnLab.classList.remove('active');
-    divAnatomy.style.display = 'none';
-    divLab.style.display = 'none';
-    divOccam.style.display = 'block';
-    renderOccamLens(s);
   });
 
   if (state.detailTab === 'lab') {
     renderLab(s);
-  } else if (state.detailTab === 'occam') {
-    renderOccamLens(s);
   }
 }
 
@@ -1203,61 +1182,6 @@ Semantics Style: ${s.encoding}
       `;
     }
     container.innerHTML = `<div class="lab-container">${contentHTML}</div>`;
-  }
-}
-
-function renderOccamLens(s) {
-  const container = document.getElementById('occamContent');
-  if (!container) return;
-  
-  const pCount = s.occam?.parameterCount || "0 (No parameters)";
-  const pVol = s.occam?.parameterVolume || "None (Discrete system)";
-  const flex = s.occam?.flexibility || "Strictly bounded";
-  const comp = s.occam?.compressionLength || "Minimal";
-  const marg = s.occam?.marginalLikelihood || "Maximum evidence (unparameterized)";
-
-  container.innerHTML = `
-    <div class="lab-container">
-      <h4 style="margin-bottom:var(--space-2)">Bayesian Evidence & Occam Penalty Profile</h4>
-      <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-bottom:var(--space-4)">
-        A specimen's Bayesian evidence (marginal likelihood) scores its validity against observed data \\(D\\):
-      </p>
-      
-      <div style="padding:var(--space-4); background:var(--color-surface-offset); border-radius:var(--radius-md); border:1px solid var(--color-border); margin-bottom:var(--space-4); text-align:center; font-family:var(--font-mono); font-size:var(--text-lg); color:var(--color-primary)">
-        \\[p(D \\mid M) = \\int p(D \\mid \\theta, M) p(\\theta \\mid M) d\\theta\\]
-      </div>
-      
-      <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-bottom:var(--space-5)">
-        The penalty arises because highly flexible models spread their prior probability mass \\(p(\\theta \\mid M)\\) over a large parameter volume, leaving less mass for the specific parameters that match the data.
-      </p>
-      
-      <div style="display:grid;grid-template-columns:1fr;gap:var(--space-3)">
-        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
-          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Parameter Count</strong>
-          <span style="font-size:var(--text-sm);color:var(--color-text)">${pCount}</span>
-        </div>
-        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
-          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Prior Volume / Range</strong>
-          <span style="font-size:var(--text-sm);color:var(--color-text)">${pVol}</span>
-        </div>
-        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
-          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Expressive Flexibility</strong>
-          <span style="font-size:var(--text-sm);color:var(--color-text)">${flex}</span>
-        </div>
-        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
-          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Compression Length</strong>
-          <span style="font-size:var(--text-sm);color:var(--color-text)">${comp}</span>
-        </div>
-        <div style="background:var(--color-surface-2);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-md)">
-          <strong style="color:var(--color-purple);font-size:var(--text-sm);display:block;margin-bottom:4px">Marginal Likelihood (Occam Score)</strong>
-          <span style="font-size:var(--text-sm);color:var(--color-text)">${marg}</span>
-        </div>
-      </div>
-    </div>
-  `;
-  
-  if (window.MathJax) {
-    window.MathJax.typesetPromise([container]).catch(err => console.log('MathJax typesetting error:', err));
   }
 }
 

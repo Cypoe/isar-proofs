@@ -13,19 +13,19 @@ As the repository grows into a professional proof-specification library under Le
 We make the following structural decisions:
 1. **Source Organization (Option A)**:
    - All library source files are moved to `src/ISAR/`.
-   - The entry point [src/ISAR.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR.lean) contains only imports/exports of the library submodules.
-   - The core syntax file `ISAR.lean` is renamed to [Kernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/Kernel.lean).
+   - The entry point [src/ISAR.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR.lean) contains only imports/exports of the library submodules.
+   - The core syntax file `ISAR.lean` is renamed to [Kernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/Kernel.lean).
 2. **Namespace Conflict Resolution**:
    - **`compile`**: Renamed `compile` in `BytecodeView.lean` to `compile_bytecode` and updated references in `ViewUnification.lean` to prevent conflicts with `LambdaFragment.lean`.
    - **`decode_raw` / `decode_raw_val`**: Renamed `decode_raw` in `IotaView.lean` to `iota_decode_raw` and `decode_raw_val` to `iota_decode_raw_val` to prevent conflicts with `TRSView.lean`.
    - **`subst`**: Renamed environment substitution `subst` in `Futamura.lean` to `subst_env` to prevent conflicts with lambda calculus term substitution in `LambdaFragment.lean`.
 3. **Workspace Segregation**:
-   - **Tests**: Moved all standalone `test_*.lean` files to [test/](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/test/) at the root directory, completely separate from the library target.
-   - **ADRs**: Moved Architectural Decision Records (ADRs) to [docs/adr/](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/docs/adr/).
+   - **Tests**: Moved all standalone `test_*.lean` files to [test/](https://github.com/Cypoe/ISAR-proofs/blob/master/test/) at the root directory, completely separate from the library target.
+   - **ADRs**: Moved Architectural Decision Records (ADRs) to [docs/adr/](https://github.com/Cypoe/ISAR-proofs/blob/master/docs/adr/).
    - **RFCs & Stories**: Moved other markdown files to `docs/rfc/` and `docs/story/`.
-   - **Scratch Scripts**: Moved all Python/CSV files to [scratch/](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/scratch/).
+   - **Scratch Scripts**: Moved all Python/CSV files to [scratch/](https://github.com/Cypoe/ISAR-proofs/blob/master/scratch/).
 4. **Lake Configuration**:
-   - Switched from `lakefile.toml` to [lakefile.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/lakefile.lean) to allow conditional dependencies.
+   - Switched from `lakefile.toml` to [lakefile.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/lakefile.lean) to allow conditional dependencies.
    - Added `mathlib`, `checkdecls`, and development dependency `doc-gen4`.
 
 ## Consequences

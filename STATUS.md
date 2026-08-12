@@ -4,6 +4,42 @@ This document provides a comprehensive inventory of proof dependencies, first-pr
 
 ---
 
+## Vacuity audit (headline theorems)
+
+Sorry-free compilation does **not** imply non-vacuous content. Checklist for main claims:
+
+| Claim | Status | Notes |
+| :--- | :--- | :--- |
+| `IRed_confluence` / `isar_fragment_unique_normal_forms` | Substantive | Parallel reduction / complete development; not `rfl`. |
+| `morphism_uniqueness` / `ISAR_Kernel_terminal` | Conditional | Unique morphisms into `ISAR_Kernel` **relative to the `Kernel` interface**. If that interface is too weak, the category collapses and everything looks terminal — schedule a false-variant (degenerate Kernel) as a regression test. Expected axioms today may include `propext` / `Classical.choice` via quotient infrastructure. |
+| `futamura_first` (subst layer) | Substantive but narrow | Mix equation at the meta-level specializer; does not by itself give optimizing PE. |
+| `futamura_second` / `futamura_third` (pre-PESetup) | Formulation-sensitive | Honest form needs object-level `specTerm` + `selfApp` + **nontriviality**; trivial specializers satisfy mix alone. |
+| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations; `identity_spec_not_shrinking` shows cost vacuity without a full `PESetup` toy instance. Real self-applicable ISAR `specTerm` is future work. |
+| `recurrence_to_Kernel` | Bridge | Formerly used `Quotient.out` (AC). Rewired through lift-to-`InvariantLayer` + cd-based representative where available. |
+| `fixed_point` in SARI (`I ↔ no R-step`) | Often definitional | See §4; treat as modeling choice, not deep content. |
+| HF encoding axioms in `HFSetEncoding` | Axiomatic bridges | Not derived; do not market as proved. |
+
+Procedure for re-check after edits: `#print axioms morphism_uniqueness` (and peers) in a Lean session — reject `sorryAx`; expect `Classical.choice` / `propext` until fully constructive sections land.
+
+**Literature posture:** Rutten–Aczel (coalgebras), Abramsky–Ong (applicative bisimilarity), Jones/Gomard/Sestoft (partial evaluation). No Wolfram / quine-substrate framing on the public surface; the quine whitepaper is withdrawn from the homepage.
+
+---
+
+## 0. Holonomic closure algebra (Python + Lean)
+
+| Artifact | Notes |
+| :--- | :--- |
+| [`scratch/isar_holonomic_closure_algebra.py`](scratch/isar_holonomic_closure_algebra.py) | Exploratory SymPy kernel. Self-test: `python scratch/isar_holonomic_closure_algebra.py`. |
+| [`docs/holonomic_closure_and_isar_session.md`](docs/holonomic_closure_and_isar_session.md) | Session record + Lean inventory (§12). |
+| [`src/ISAR/Holonomic.lean`](src/ISAR/Holonomic.lean) | Certificate API. |
+| [`src/ISAR/HolonomicClosure.lean`](src/ISAR/HolonomicClosure.lean) | Integral / product / sum closure theorems. |
+| [`src/ISAR/HolonomicInstances.lean`](src/ISAR/HolonomicInstances.lean) | All Python self-test residual certificates (proved). |
+| [`src/ISAR/HolonomicCompose.lean`](src/ISAR/HolonomicCompose.lean) | Composition refusal; sole analytic axiom `exp_exp_not_holonomic`. |
+
+**Water-tight inventory:** every residual-zero claim from the Python self-test (exp, gaussian, product, sum `exp+gaussian`, Fresnel `sin(x²)`, mixed product `sin(x²)·gaussian`, double-integral shift, compose refuse) is a Lean theorem with no `sorry`. The only named axiom in the holonomic stack is `exp_exp_not_holonomic` (Stanley/Bell non-holonomicity of `exp∘exp`, not yet in Mathlib). Build: `lake build ISAR`.
+
+---
+
 ## 1. Index of Proof Dependencies
 
 The logical chain of verified Lean 4 files is structured as follows:
@@ -11,29 +47,31 @@ The logical chain of verified Lean 4 files is structured as follows:
 ```mermaid
 graph TD
     Kernel["Kernel.lean (SKI & basic reductions)"] --> Invariant["InvariantLayer.lean (Quotient space & cd_loop)"]
+    Invariant --> Canon["CanonicalRepresentative.lean (cd as OperEq section)"]
     Invariant --> Category["KernelCategory.lean (Kernel & Terminality)"]
+    Canon --> Recurrence["AdmissibleRecurrence.lean (IOB/SARI & recurrence_to_Kernel)"]
     Category --> Dialect["DialectKernel.lean (Dialect interface)"]
-    Category --> Recurrence["AdmissibleRecurrence.lean (IOB/SARI & recurrence_to_Kernel)"]
+    Category --> Recurrence
     Dialect --> Unification["ViewUnification.lean (TRS, Bytecode & Factorization)"]
     Recurrence --> Unification
 ```
 
-* **[Kernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/Kernel.lean)**:
+* **[Kernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/Kernel.lean)**:
   - Formulates SKI and ITerm (ISAR symbolic core).
   - Proves confluence (`IRed_confluence`) and unique normal forms (`isar_fragment_unique_normal_forms`) via parallel reduction / complete development.
-* **[InvariantLayer.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/InvariantLayer.lean)**:
+* **[InvariantLayer.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/InvariantLayer.lean)**:
   - Constructs the quotient `InvariantLayer` modulo `OperEq`.
   - Defines the normalization loop `cd_loop_fuel`.
-* **[KernelCategory.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/KernelCategory.lean)**:
+* **[KernelCategory.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/KernelCategory.lean)**:
   - Defines the category of semantic kernels (`Kernel` objects, `KernelHom` morphisms).
   - Proves the **ISAR Kernel Terminality Theorem** (`ISAR_Kernel_terminal`) showing all admissible views factor uniquely through `ISAR_Kernel`.
-* **[DialectKernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/DialectKernel.lean)**:
+* **[DialectKernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/DialectKernel.lean)**:
   - Formalizes the abstract `Dialect` wrapper.
-* **[AdmissibleRecurrence.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/AdmissibleRecurrence.lean)**:
+* **[AdmissibleRecurrence.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/AdmissibleRecurrence.lean)**:
   - Formalizes the presuppositional `IOB` triad and operational `AdmissibleSARI` quartet (constrained by confluence, fixed-point invariants, and pairing closure).
   - Proves the **Recurrence Lemma** (`recurrence_lemma`) mapping closed carrier quotients to the next scale and verifying that the quotient layer satisfies the constraints.
   - Proves the **Universal Mapping Theorem** (`recurrence_to_Kernel`) which translates the recurrence quotient space into the category-theoretic `Kernel` class.
-* **[ViewUnification.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/ViewUnification.lean)**:
+* **[ViewUnification.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/ViewUnification.lean)**:
   - Unifies observational isomorphism and categorical kernel isomorphism (`isomorphism_unification`).
   - Proves the **Universal Factorization Theorem** (`universal_factorization_theorem`) across semantic views.
 
@@ -51,12 +89,15 @@ The following structures and theorems are derived constructively from first-prin
 3. **The Recurrence Step**:
    - Proven in `recurrence_lemma` showing that quotienting by operational equality preserves IOB and yields a constrained `AdmissibleSARI` operational layer.
 4. **Categorical Quotient Kernel (`recurrence_to_Kernel`)**:
-   - Constructs a category-theoretic `Kernel` directly from the recurrence quotient space by using the `Quotient.out` representative selection mapping.
+   - Constructs a category-theoretic `Kernel` from the recurrence quotient by lifting
+     `decode` into `InvariantLayer` (AC-free) and selecting an ISK representative via
+     `canonical_rep` / complete development (`CanonicalRepresentative.lean`).
+   - No longer uses `Quotient.out` on the carrier quotient.
 
 ### Architectural Decision: Modular Bridge vs. Monolithic Rebase
 To unify the stack, we chose to maintain **independence** between the `KernelCategory` framework and `AdmCarrier`, utilizing `recurrence_to_Kernel` as a **bridge lemma**:
 - *Why*: Forcing all category-theoretic semantic views (`Kernel`) to be derived from `AdmCarrier` quotients would impose severe proof obligations on simple views (e.g. HF sets, Stack VMs) that do not naturally use IOB structures.
-- *Noncomputability*: The bridge maps quotient classes to concrete representatives using `Quotient.out`, rendering the mapping `noncomputable` due to reliance on the Axiom of Choice.
+- *Representatives*: Carrier decode lifts to `InvariantLayer` without choice; the OperEq section uses `cd` / `cd_loop_fuel` on the linear fragment (`canonical_nf`) and `canonical_rep` (NF choice) in general. Explicit `cd`-based theorems live in `CanonicalRepresentative.lean`.
 
 ---
 

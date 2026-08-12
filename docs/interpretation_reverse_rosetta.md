@@ -38,7 +38,7 @@ The name **Reverse Rosetta** refers to the challenge of decoding a message when 
  └───────────────────────────┘          └───────────────────────────┘
 ```
 
-In **[ReverseRosetta.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/ReverseRosetta.lean)**, we formally verify this boundary:
+In **[ReverseRosetta.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/ReverseRosetta.lean)**, we formally verify this boundary:
 
 * **Forward Invariance** (`closure_preserved_under_reachability`): If a system is operationally closed and begins in a state within a closed subsystem, all reachable states remain within that subsystem. The semantic decoder can decode the state at any point in the transition path without loss of meaning.
 * **Referential Openness** (`referentially_open_requires_anchor`): In an anchor-dependent system (open system), the trace semantics are non-deterministic. Without knowing the external environmental anchor, the state alone does not determine the decoded outcome.
@@ -56,14 +56,14 @@ It is easy to dismiss terms like "view-independent semantics" and "decoders" as 
 
 ### A. The Category-Theoretic Proof: Terminality
 In formal logic and category theory, "representation-independence" has a strict definition: it is the **universal property of terminality**. 
-In **[KernelCategory.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/KernelCategory.lean)**, we prove the uniqueness of morphisms into the ISAR kernel (`morphism_uniqueness`):
+In **[KernelCategory.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/KernelCategory.lean)**, we prove the uniqueness of morphisms into the ISAR kernel (`morphism_uniqueness`):
 * We define a category of **Semantic Kernels** $\mathcal{K}$, where objects are carrier representations (dialects like Lambda calculus or ZFC sets) and morphisms are structure-preserving maps.
 * We prove that the operational quotient `InvariantLayer` is the **terminal object** in this category.
 * This means that for *any* other admissible representation $K$, there exists a *unique* morphism $h : K \to \text{ISAR\_Kernel}$ factoring through the quotient.
 * This is not a naming convention: it is an algebraic theorem stating that the Invariant Layer is the unique (up to isomorphism) cofinal quotient that retains only the information visible to observational equivalence. Any other view is mathematically guaranteed to factor uniquely through it.
 
 ### B. Geometrical Proof: Gauge Invariance
-In **[ISARMatrices.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/ISARMatrices.lean)**, we formalize the tensor representation of carriers as matrix transformations. Here, the distinction corresponds directly to the difference between coordinate systems and coordinate-free operators in linear algebra:
+In **[ISARMatrices.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/ISARMatrices.lean)**, we formalize the tensor representation of carriers as matrix transformations. Here, the distinction corresponds directly to the difference between coordinate systems and coordinate-free operators in linear algebra:
 * **The Decoder is a Coordinate System (Basis)**: Syntactic domains and matrix entries are coordinate-dependent (gauge-dependent).
 * **The Invariant Layer is the Coordinate-Free Operator**: The quotient represents the gauge-invariant operational semantics.
 * We formally prove that any two matrix models $K_1$ and $K_2$ of the substrate are isomorphic under basis conjugation:

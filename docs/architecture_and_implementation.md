@@ -59,10 +59,10 @@ CREATE TABLE NAMES (
 
 The mathematical core of the stack is implemented and mechanically verified in **Lean 4**:
 
-* **[ISAR.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR.lean)**: Defines the symbolic term algebra `ITerm` and the one-step reduction relation `IStep`. It proves the confluence of parallel reductions and the uniqueness of normal forms for the combinator fragment.
-* **[InvariantLayer.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/InvariantLayer.lean)**: Establishes operational equivalence `OperEq` (joinability) on terms. It proves that `OperEq` is an equivalence relation and constructs the quotient type `InvariantLayer`. It also proves that term application (`InvariantLayer.app`) is well-defined on equivalence classes (`app_congruence`).
-* **[TensorSemantics.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/TensorSemantics.lean)**: Defines the semantic mapping `denot` from terms to `TensorSpace` and verifies the extensional soundness (`denot_sound`) of the rewrite rules.
-* **[IotaView.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/IotaView.lean)**: Implements the Barker Iota universal combinator dialect, encoding/decoding maps, and verifies the round-trip correctness.
+* **[ISAR.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR.lean)**: Defines the symbolic term algebra `ITerm` and the one-step reduction relation `IStep`. It proves the confluence of parallel reductions and the uniqueness of normal forms for the combinator fragment.
+* **[InvariantLayer.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/InvariantLayer.lean)**: Establishes operational equivalence `OperEq` (joinability) on terms. It proves that `OperEq` is an equivalence relation and constructs the quotient type `InvariantLayer`. It also proves that term application (`InvariantLayer.app`) is well-defined on equivalence classes (`app_congruence`).
+* **[TensorSemantics.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/TensorSemantics.lean)**: Defines the semantic mapping `denot` from terms to `TensorSpace` and verifies the extensional soundness (`denot_sound`) of the rewrite rules.
+* **[IotaView.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/IotaView.lean)**: Implements the Barker Iota universal combinator dialect, encoding/decoding maps, and verifies the round-trip correctness.
 * **SQLite & egglog Runtime**: The Python prototype (`isar.py` and `isar_ski_kernel.py`) implements this relational schema, evaluating terms by performing SQL queries that execute tensor contraction steps.
 
 ---

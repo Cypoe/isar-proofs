@@ -1,10 +1,14 @@
 # ISAR: Invariant Kernel for Closed Computational Dialects
 
-ISAR is a Lean 4 formalization of a minimal combinatory substrate whose operational quotient — the **Invariant Layer** — is the terminal object in the category of closed computational dialects. Lambda calculus, term rewriting systems, stack VM bytecode, hereditarily finite sets, and linear interaction nets all factor uniquely through this quotient via structure-preserving morphisms. All 22 modules are machine-checked and **sorry-free**.
+[![Lean](https://github.com/Cypoe/ISAR-proofs/actions/workflows/lean.yml/badge.svg)](https://github.com/Cypoe/ISAR-proofs/actions/workflows/lean.yml)
+
+ISAR is a Lean 4 formalization of a minimal combinatory calculus whose operational quotient — the **Invariant Layer** — is the terminal object in a stated category of closed computational dialects (`Kernel`). Lambda calculus, term rewriting systems, stack VM bytecode, hereditarily finite sets, and linear interaction nets are modelled as views that factor through this quotient via structure-preserving morphisms. Modules are machine-checked; see STATUS for axiom / vacuity notes (sorry-free ≠ non-vacuous).
+
+Related literature for the intended claims: Rutten–Aczel (coalgebras), Abramsky–Ong (applicative bisimilarity), Jones/Gomard/Sestoft (partial evaluation). Terminality is relative to the formal `Kernel` interface, not a claim that other calculi lack models or encodings.
 
 The core factorization pattern is:
 $$\text{Encoder} \to \text{Kernel} \to \text{Quotient (InvariantLayer)} \to \text{Decoder}$$
-Different formalisms are precisely the decoders; the quotient is the invariant substrate shared by all.
+Different formalisms are the views/decoders; the quotient is the shared observational presentation.
 
 ---
 
@@ -14,7 +18,9 @@ Different formalisms are precisely the decoders; the quotient is the invariant s
 
 1. **[ISAR.lean](ISAR.lean)** — Syntax, rewrite rules, confluence, unique normal forms for `ISKTerm`, and basis completeness (derives $S$ from $I, K, W, C, B$).
 
-2. **[InvariantLayer.lean](InvariantLayer.lean)** — `OperEq` joinability quotient, `app_congruence`, `canonical_rep` (computable via `cd_loop` with `@[implemented_by]`), `cd_size_lt_IK` termination proof, fuel-based normalization loop `cd_loop_fuel`, and `cd_loop_fuel_quotient_eq`.
+2. **[InvariantLayer.lean](src/ISAR/InvariantLayer.lean)** — `OperEq` joinability quotient, `app_congruence`, `cd_loop_fuel`, linear fuel certificates.
+
+2a. **[CanonicalRepresentative.lean](src/ISAR/CanonicalRepresentative.lean)** — `cd` / `cd_loop_fuel` as explicit OperEq representatives; unique NF on the linear fragment; `canonical_rep_eq` proved under `HasNF`.
 
 3. **[LambdaFragment.lean](LambdaFragment.lean)** — de Bruijn `LTerm`, bracket abstraction `abstract0`, compiler `compile`, simulation: `compile_simulates_step` and `compile_simulates_red`.
 
@@ -52,7 +58,7 @@ Different formalisms are precisely the decoders; the quotient is the invariant s
 
 16. **[ViewUnification.lean](ViewUnification.lean)** — `AdmissibleDialect`, `KernelIsomorphism`, **Universal Factorization Theorem** (`universal_factorization_theorem`).
 
-17. **[Futamura.lean](Futamura.lean)** — Substitution, partial evaluation, **First/Second/Third Futamura Projections** constructively proved.
+17. **[Futamura.lean](src/ISAR/Futamura.lean)** — Subst-layer mix (`futamura_first`); `PESetup` with mix-based 2nd/3rd projections; `Nontrivial` cost obligation; identity residualizer vacuity.
 
 ---
 
@@ -118,6 +124,14 @@ lake exe checkdecls blueprint/lean_decls
 
 ## Narratives
 
-- Phase 1: [story.md](story.md)
-- Phase 2: [hf_story.md](hf_story.md)
-- Phase 3: [reverse_rosetta_story.md](reverse_rosetta_story.md)
+- Phase 1: [story.md](docs/story/story.md)
+- Phase 2: [hf_story.md](docs/story/hf_story.md)
+- Phase 3: [reverse_rosetta_story.md](docs/story/reverse_rosetta_story.md)
+
+## Exploratory: Holonomic Closure Algebra
+
+Session record and Python/Lean kernels for D-finite certificates under integral / sum / product closure, with theorem-backed refusal of general composition.
+
+- Session: [docs/holonomic_closure_and_isar_session.md](docs/holonomic_closure_and_isar_session.md) (§12 Lean status)
+- Python: [scratch/isar_holonomic_closure_algebra.py](scratch/isar_holonomic_closure_algebra.py) — `python scratch/isar_holonomic_closure_algebra.py`
+- Lean: `ISAR.Holonomic`, `ISAR.HolonomicClosure`, `ISAR.HolonomicInstances`, `ISAR.HolonomicCompose`

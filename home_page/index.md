@@ -13,7 +13,6 @@ usemathjax: true
 
 ## Project
 
-* **[Whitepaper]({{ site.baseurl }}/visualizations/quine-substrate-whitepaper.html)** &mdash; The whitepaper.
 * **[Interactive Blueprint]({{ site.baseurl }}/blueprint/)** &mdash; Theorem dependency graph with per-node Lean verification status.
 * **[Monograph PDF]({{ site.baseurl }}/pdf/blueprint_monograph.pdf)** &mdash; Full monograph: all modules and phases.
 * **[Paper A PDF]({{ site.baseurl }}/pdf/blueprint_paper_a.pdf)** &mdash; Calculus, confluence, Invariant Layer, category-theoretic terminality, dialect views.
@@ -34,8 +33,8 @@ The `ITerm` calculus with operators `norm`, `konst`, `comp`, `dup` is proven con
 ### 2. Terminality of the Invariant Layer
 `InvariantLayer := ISKSubtype / OperEq` is proven to be the terminal object in the category of admissible semantic kernels (`morphism_uniqueness`). Lambda, TRS, bytecode, HF-set, and quantity-kernel interpretations each yield a unique factorization morphism. The layer is not postulated as a universal structure; it is derived as the quotient of a concrete calculus and proven terminal within a formally stated category.
 
-### 3. Futamura Projections
-Substitution and partial evaluation are formalized over `ITerm`. The three Futamura projections are constructively proven: (1) specialization soundness, (2) compiler derivation from a specializer applied to an interpreter, (3) compiler-generator (`cogen`) derivation from self-application of the specializer.
+### 3. Futamura projections (mix formulation)
+Substitution soundness (`futamura_first`) is proved at the meta specializer. Object-level 2nd/3rd projections are stated as mix instantiations over `PESetup` (`specTerm` + `selfApp`); `Nontrivial` is a separate obligation (identity residualization does not shrink). A self-applicable optimizing ISAR specializer remains future work (Jones/Gomard/Sestoft).
 
 ### 4. Linear Reduction, Matrix Geometry, Metric Completion
 `LinearIKTerm` admits a bounded-fuel normalization certificate (`sufficient_fuel_correct`), structurally isomorphic to HVM2 interaction net reduction. The $4 \times 4$ ISAR operator matrices satisfy $I^2 = I$ (idempotency) and $(I \cdot R \cdot A \cdot S)^2 = 0$ (nilpotency). Gauge equivalence $P K_1 P^{-1} = K_2$ is proven, unifying two matrix representations of the same kernel. Metric completion and a formalized Universal Approximation result are given in `ISARApproximation.lean`; these are currently the least-constrained results in the project.

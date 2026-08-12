@@ -1,5 +1,6 @@
 import ISAR.Kernel
 import ISAR.InvariantLayer
+import ISAR.CanonicalRepresentative
 import ISAR.LambdaFragment
 import ISAR.TensorSemantics
 import ISAR.KernelCategory
@@ -21,5 +22,9 @@ import ISAR.ViewUnification
 import ISAR.ISARBridge
 import ISAR.ISARApproximation
 import ISAR.AdmissibleRecurrence
+import ISAR.Holonomic
+import ISAR.HolonomicClosure
+import ISAR.HolonomicInstances
+import ISAR.HolonomicCompose
 
 

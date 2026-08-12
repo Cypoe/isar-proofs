@@ -1,5 +1,5 @@
 import ISAR.HFSet
-import ISAR.InvariantLayer
+import ISAR.CanonicalRepresentative
 
 namespace ISAR
 
@@ -16,8 +16,6 @@ axiom layerToNat : InvariantLayer → Nat
 axiom natToLayer : Nat → InvariantLayer
 axiom layerToNat_inverse (q : InvariantLayer) : natToLayer (layerToNat q) = q
 axiom natToLayer_inverse (n : Nat) : layerToNat (natToLayer n) = n
-
-axiom canonical_rep_eq (t : ISKSubtype) : OperEq (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid t)) t
 
 noncomputable def HF_encode (c : HF) : InvariantLayer :=
   natToLayer (toNat c)
@@ -38,12 +36,6 @@ theorem decode_layer_HF_encode (c : HF) : decode_layer (HF_encode c) = c := by
 theorem HF_encode_decode_layer (q : InvariantLayer) : HF_encode (decode_layer q) = q := by
   unfold HF_encode decode_layer
   rw [toNat_fromNat_inverse, layerToNat_inverse]
-
-theorem canonical_rep_sound (q : InvariantLayer) :
-    Quotient.mk operEqSetoid (InvariantLayer.canonical_rep q) = q := by
-  induction q using Quotient.ind with | _ t =>
-    dsimp [InvariantLayer.canonical_rep]
-    exact Quotient.sound (canonical_rep_eq t)
 
 theorem decode_term_encode_raw (c : HF) : decode_term (encode_raw c) = c := by
   unfold decode_term encode_raw

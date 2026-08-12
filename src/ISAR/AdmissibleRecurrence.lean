@@ -1,5 +1,6 @@
 import ISAR.KernelCategory
 import ISAR.DialectKernel
+import ISAR.CanonicalRepresentative
 
 namespace ISAR
 
@@ -178,13 +179,26 @@ structure AdmissibleKernel extends Kernel where
   sari : AdmissibleSARI Carrier O
 
 /--
+Lift a carrier decode into the OperEq quotient. AC-free: uses `decode_eq` only.
+-/
+def decode_to_InvariantLayer {C : Type} (decode : C → ISKSubtype)
+    (step : C → C → Prop)
+    (confluent : ∀ (s s1 s2 : C), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
+      ∃ s3, Relation.ReflTransGen step s1 s3 ∧ Relation.ReflTransGen step s2 s3)
+    (decode_eq : ∀ (c1 c2 : C), OperationalEq step c1 c2 → OperEq (decode c1) (decode c2))
+    (q : Quotient (operSetoid step confluent)) : InvariantLayer :=
+  Quotient.lift (fun c => toInvariantLayer (decode c))
+    (fun c1 c2 h => Quotient.sound (decode_eq c1 c2 h)) q
+
+/--
 Universal Mapping Theorem:
 Constructs a category-theoretic AdmissibleKernel from the recurrence quotient space Q of an AdmCarrier C,
 given a sound and coherent projection/embedding mapping to ISKSubtype.
 
-NOTE: This definition uses `Quotient.out` to construct the decode representative,
-making it noncomputable and dependent on the Axiom of Choice. Downstream Kernels
-constructed via this mapping are suitable for logical verification rather than decidable computation.
+Decode no longer uses `Quotient.out` on the carrier quotient. It lifts `decode` into
+`InvariantLayer` (AC-free), then selects an ISK representative via `canonical_rep`
+(NF choice; still noncomputable in general, but given by `cd`/`Classical.choose` on
+the OperEq side — see `CanonicalRepresentative.lean` for the explicit `cd_loop_fuel` path).
 -/
 noncomputable def recurrence_to_Kernel (C : AdmCarrier) (step : C.Carrier → C.Carrier → Prop)
     (confluent : ∀ (s s1 s2 : C.Carrier), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
@@ -204,6 +218,8 @@ noncomputable def recurrence_to_Kernel (C : AdmCarrier) (step : C.Carrier → C.
     (fun c1 c2 d1 d2 h1 h2 => by
       apply Quotient.sound (s := operSetoid step confluent)
       exact O_compat c1 c2 d1 d2 h1 h2)
+  let layer (q : Q) : InvariantLayer :=
+    decode_to_InvariantLayer decode step confluent decode_eq q
   {
     toKernel := {
       Carrier := Q
@@ -215,21 +231,28 @@ noncomputable def recurrence_to_Kernel (C : AdmCarrier) (step : C.Carrier → C.
         trans := fun h1 h2 => h1.trans h2
       }
       sound t u h := Quotient.sound (s := operSetoid step confluent) (sound t u h)
-      decode q := decode (Quotient.out q)
+      decode q := InvariantLayer.canonical_rep (layer q)
       decode_view t := by
-        have h_out := Quotient.exact (s := operSetoid step confluent) (Quotient.out_eq (s := operSetoid step confluent) (Quotient.mk (operSetoid step confluent) (view_of t)))
-        have h_dec := decode_eq (Quotient.out (Quotient.mk (operSetoid step confluent) (view_of t))) (view_of t) h_out
-        exact OperEq.trans h_dec (decode_view t)
+        change OperEq (InvariantLayer.canonical_rep (toInvariantLayer (decode (view_of t)))) t
+        have h_rep := canonical_rep_eq (decode (view_of t))
+        exact OperEq.trans h_rep (decode_view t)
       view_eq_decode q := by
-        have h1 := Quotient.sound (s := operSetoid step confluent) (view_eq_decode (Quotient.out q))
-        have h2 := Quotient.out_eq (s := operSetoid step confluent) q
-        exact h1.trans h2
+        refine Quotient.inductionOn q (fun c => ?_)
+        change Quotient.mk (operSetoid step confluent) (view_of
+            (InvariantLayer.canonical_rep (toInvariantLayer (decode c)))) =
+          Quotient.mk (operSetoid step confluent) c
+        have h_rep := canonical_rep_eq (decode c)
+        have h_view := view_eq_decode c
+        have h_snd : OperationalEq step (view_of (InvariantLayer.canonical_rep (toInvariantLayer (decode c))))
+            (view_of (decode c)) :=
+          sound _ _ h_rep
+        have h_join : OperationalEq step
+            (view_of (InvariantLayer.canonical_rep (toInvariantLayer (decode c)))) c :=
+          oper_eq_trans step confluent h_snd h_view
+        exact Quotient.sound (s := operSetoid step confluent) h_join
       decode_eq q1 q2 h := by
-        have h_eq : OperationalEq step (Quotient.out q1) (Quotient.out q2) := by
-          have heq : Quotient.mk (operSetoid step confluent) (Quotient.out q1) = Quotient.mk (operSetoid step confluent) (Quotient.out q2) := by
-            rw [Quotient.out_eq (s := operSetoid step confluent) q1, Quotient.out_eq (s := operSetoid step confluent) q2, h]
-          exact Quotient.exact (s := operSetoid step confluent) heq
-        exact decode_eq (Quotient.out q1) (Quotient.out q2) h_eq
+        subst h
+        exact OperEq.refl _
     }
     O := lift_O
     sari := {

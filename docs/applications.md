@@ -6,7 +6,7 @@ This document details the practical engineering applications of the ISAR vertica
 
 ## 1. Compiler Design & The Futamura Chain
 
-In **[Futamura.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/Futamura.lean)**, we formally verify substitution (`subst`) and partial evaluation (`specialize`) over variables and terms, proving the correctness of the three Futamura projections:
+In **[Futamura.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/Futamura.lean)**, we formally verify substitution (`subst`) and partial evaluation (`specialize`) over variables and terms, proving the correctness of the three Futamura projections:
 
 ```
                   1st Futamura: Sound Specialization
@@ -29,7 +29,7 @@ In the ISAR stack, this formalization yields a **universal dialect compiler**:
 
 ## 2. Quantity Kernel & Structural Arithmetic
 
-Physical properties and measurements should not be treated as ontological primitives. In **[QuantityKernel.lean](file:///C:/Users/fabi0/Documents/antigravity/joyful-lavoisier/src/ISAR/QuantityKernel.lean)**, we formalize **structural arithmetic** as a 4-layered algebraic quantity model:
+Physical properties and measurements should not be treated as ontological primitives. In **[QuantityKernel.lean](https://github.com/Cypoe/ISAR-proofs/blob/master/src/ISAR/QuantityKernel.lean)**, we formalize **structural arithmetic** as a 4-layered algebraic quantity model:
 
 * **DimExpr**: Represents the dimensional units (e.g., length, time, mass) as prime exponents.
 * **MetricExpr**: Represents the measured scalar value (Rational).

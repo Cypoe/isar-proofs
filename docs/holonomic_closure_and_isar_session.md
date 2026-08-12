@@ -4,6 +4,8 @@
 
 This document records the complete technical thread from the modular-forms benchmark through the holonomic closure work, including verified results, corrected claims, explicit boundaries, and artifact-delivery failures. It is a session record, not a claim that every proposed idea has already been formalized in Lean.
 
+The durable Python kernel for sections 3–8 lives at [`scratch/isar_holonomic_closure_algebra.py`](../scratch/isar_holonomic_closure_algebra.py). See §10 for lineage, self-test, and continuity rules. Lean-checked counterparts live in `src/ISAR/Holonomic*.lean`; see §12.
+
 ## 1. Modular-forms benchmark
 
 The initial goal was to evaluate modular forms in an ISAR/Plex algebra and benchmark the updated kernel against larger levels. The kernel was tested against an independent genus/dimension oracle for levels through large composite and prime levels. The oracle matched known values and remained fast; the sparse exact backend extended the practical range substantially compared with dense rational linear algebra.
@@ -131,6 +133,31 @@ The session exposed a process failure. The execution sandbox reset and removed t
 
 The lesson is architectural as well as operational: generated artifacts must be treated as durable repository inputs, not as ephemeral notebook state. Every artifact should have a stable path, a content hash, a self-test command, and a repository commit. A claim of continuity must distinguish identical content, reconstructed equivalent content, and the same physical file.
 
+### Canonical repository artifact
+
+| Field | Value |
+| :--- | :--- |
+| Stable path | [`scratch/isar_holonomic_closure_algebra.py`](../scratch/isar_holonomic_closure_algebra.py) |
+| SHA-256 (2026-08-12 install) | `2ABC84E406B705C46A59FB1429EC7DF6E580D1E4B6C243F80A64210CD7C712DA` |
+| Self-test | `python scratch/isar_holonomic_closure_algebra.py` (requires `sympy`) |
+| Role | Exploratory Python kernel matching this session record; **not** a Lean formalization |
+| Status | Durable input under ADR 0003 scratch segregation; self-test exit 0 with all residual checks PASS |
+
+**Lineage consolidated into the path above** (Downloads forks superseded):
+
+1. `isar_holonomic_closure_algebra.py` (v5) — integral closure and decision tower; `product_closure` raised `NotImplementedError`.
+2. `isar_holonomic_closure_algebra_v7.py` — product/sum closures and theorem-backed composition refusal; initially missing restored demos 4b/4c.
+3. `isar_plex_holonomic_closure_algebra.py` — v7 plus restored mixed-order product (minimality check) and double-integral level-up chain.
+
+The repository file is the plex content with a repository header. After any edit, recompute `Get-FileHash scratch/isar_holonomic_closure_algebra.py -Algorithm SHA256` (or `sha256sum`) and record the hash in the commit message or below when claiming bit-identical continuity.
+
+Self-test checklist expected to report residual zero / PASS:
+
+- product \(e^x e^{-x^2}\) and sum \(e^x+e^{-x^2}\)
+- mixed-order product \(\sin(x^2)e^{-x^2}\) with order matching the tensor bound
+- double-integral chain vs \(x\,\operatorname{erf}(x)+e^{-x^2}/\sqrt{\pi}\)
+- composition refusal with strictly increasing Bell-root samples
+
 ## 11. Current conclusions
 
 1. Sparse exact computation is the correct scaling direction for the modular-form and ISAR tensor workloads.
@@ -142,3 +169,42 @@ The lesson is architectural as well as operational: generated artifacts must be 
 7. Repository artifacts, not transient execution state, are the source of truth.
 
 This document records the boundary honestly: the construction layer is strong where closure theorems exist, sparse where scale demands it, and explicit about operations that leave the represented class.
+
+## 12. Lean formalization status
+
+Lean modules (imported from [`src/ISAR.lean`](../src/ISAR.lean)):
+
+| Module | Role |
+| :--- | :--- |
+| [`ISAR.Holonomic`](../src/ISAR/Holonomic.lean) | `HolonomicCertificate`, `satisfiesODE`, `IsHolonomic`, `integralShift` |
+| [`ISAR.HolonomicClosure`](../src/ISAR/HolonomicClosure.lean) | `integral_closure_shift`; order-1 product; constant-rate sum |
+| [`ISAR.HolonomicInstances`](../src/ISAR/HolonomicInstances.lean) | Concrete certificates: `exp`, `gaussian`, product, sum, `sin(x²)`, mixed product, double-integral shift, tensor bound |
+| [`ISAR.HolonomicCompose`](../src/ISAR/HolonomicCompose.lean) | `ComposeOutcome` refusal; `holonomic_not_closed_under_compose` |
+
+### Proved (Lean-checked, no `sorry`)
+
+| Python claim | Lean name |
+| :--- | :--- |
+| Integral closure shift | `integral_closure_shift` |
+| Order-1 multiplicative product | `product_holonomic_orderOne` |
+| Constant-rate sum | `sum_holonomic_const_rates`, `exp_add_exp_holonomic` |
+| `exp` certificate | `exp_holonomic` |
+| `exp(-x²)` certificate | `gaussian_holonomic` |
+| `exp·exp(-x²)` product | `exp_mul_gaussian_holonomic` |
+| `exp+exp(-x²)` sum (TEST 4) | `exp_add_gaussian_holonomic` |
+| `sin(x²)` certificate | `fresnelSin_holonomic` |
+| `sin(x²)·exp(-x²)` mixed (TEST 4b) | `fresnelSin_mul_gaussian_holonomic` |
+| Double-integral level-up | `gaussian_double_integral_closure` |
+| Mixed tensor bound order = 2 | `fresnel_gaussian_tensor_bound` |
+| Compose refuses | `compose_refuses_in_general` |
+| General compose impossible given `exp∘exp` | `holonomic_not_closed_under_compose` |
+
+### Sole named axiom (honest boundary in `HolonomicCompose.lean`)
+
+| Axiom | Purpose |
+| :--- | :--- |
+| `exp_exp_not_holonomic` | `exp∘exp` is not D-finite / holonomic (Stanley + Bell root growth; not yet in Mathlib) |
+
+Unused supporting axioms (`bell_root_diverges`, `exp_exp_taylor_bell`) and residual axioms for the two order-2 certificates were removed once those residuals were proved in `HolonomicInstances`.
+
+Build: `lake build ISAR` (or `lake build ISAR.HolonomicCompose`).
