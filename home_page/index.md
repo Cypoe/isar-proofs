@@ -13,6 +13,7 @@ usemathjax: true
 
 ## Project
 
+* **[Whitepaper]({{ site.baseurl }}/visualizations/quine-substrate-whitepaper.html)** &mdash; The whitepaper.
 * **[Interactive Blueprint]({{ site.baseurl }}/blueprint/)** &mdash; Theorem dependency graph with per-node Lean verification status.
 * **[Monograph PDF]({{ site.baseurl }}/pdf/blueprint_monograph.pdf)** &mdash; Full monograph: all modules and phases.
 * **[Paper A PDF]({{ site.baseurl }}/pdf/blueprint_paper_a.pdf)** &mdash; Calculus, confluence, Invariant Layer, category-theoretic terminality, dialect views.
