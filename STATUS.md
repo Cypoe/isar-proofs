@@ -14,8 +14,8 @@ Sorry-free compilation does **not** imply non-vacuous content. Checklist for mai
 | `morphism_uniqueness` / `ISAR_Kernel_terminal` | Conditional | Unique morphisms into `ISAR_Kernel` **relative to the `Kernel` interface**. If that interface is too weak, the category collapses and everything looks terminal — schedule a false-variant (degenerate Kernel) as a regression test. Expected axioms today may include `propext` / `Classical.choice` via quotient infrastructure. |
 | `futamura_first` (subst layer) | Substantive but narrow | Mix equation at the meta-level specializer; does not by itself give optimizing PE. |
 | `futamura_second` / `futamura_third` (pre-PESetup) | Formulation-sensitive | Honest form needs object-level `specTerm` + `selfApp` + **nontriviality**; trivial specializers satisfy mix alone. |
-| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations; `identity_spec_not_shrinking` shows cost vacuity without a full `PESetup` toy instance. Real self-applicable ISAR `specTerm` is future work. |
-| `recurrence_to_Kernel` | Bridge | Formerly used `Quotient.out` (AC). Rewired through lift-to-`InvariantLayer` + cd-based representative where available. |
+| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations. Principled toy instance `TrivialPE` (`dup`-tagged residual, `swap` reflection, recursive unpack): mix/selfApp by `rfl`, `¬ Nontrivial`. Real self-applicable optimizing `specTerm` / BTA remains future work. |
+| `recurrence_to_Kernel` | Bridge | No `Quotient.out` on the carrier quotient: lift decode → `InvariantLayer`, then `canonical_rep` / `cd_loop_fuel`. `canonical_rep_eq_of_HasNF` / linear `canonical_nf` are theorems; unrestricted `canonical_rep_eq` remains an axiom until full NF. |
 | `fixed_point` in SARI (`I ↔ no R-step`) | Often definitional | See §4; treat as modeling choice, not deep content. |
 | HF encoding axioms in `HFSetEncoding` | Axiomatic bridges | Not derived; do not market as proved. |
 

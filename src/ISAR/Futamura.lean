@@ -107,8 +107,10 @@ Setup for object-level Futamura projections.
 `spec` is the meta specializer; `specTerm` is its reflection as an `ITerm`;
 `mix` is the characterizing equation; `selfApp` says evaluating `specTerm` implements `spec`.
 
-Constructing a real self-applicable ISAR `specTerm` (binding-time analysis / Jones–Gomard–Sestoft)
-is left as future work; the projections below are the mix instantiations.
+`TrivialPE` below is a sorry-free instance (tagged residual + recursive unpack) proving that
+mix+selfApp do not imply optimization (`¬ Nontrivial`). A real self-applicable optimizing
+ISAR `specTerm` (binding-time analysis / Jones–Gomard–Sestoft) remains future work; the
+projections below are the mix instantiations.
 -/
 structure PESetup where
   eval : ITerm → ITerm → Option ITerm
@@ -140,7 +142,9 @@ Without this, mix+selfApp alone are satisfied by residualizers that do no optimi
 def Nontrivial (S : PESetup) : Prop :=
   ∃ p s, pe_cost (S.spec p s) < pe_cost p
 
-/-- Identity residualizer (ignores static data). Satisfies mix for `eval prog _ := some prog`. -/
+/-- Identity residualizer (ignores static data). Cost-vacuous, but cannot be packaged as
+`PESetup` with `eval prog _ := some prog`: `selfApp` forces `specTerm` to behave like a
+realizer, colliding when programs can equal `specTerm`. -/
 def identity_spec (p _s : ITerm) : ITerm := p
 
 theorem identity_spec_mix (p s d : ITerm) :
@@ -154,12 +158,71 @@ theorem identity_spec_not_shrinking :
   rcases h with ⟨p, s, hlt⟩
   simp [identity_spec, pe_cost] at hlt
 
-/--
-A `PESetup` with identity `spec` would need an `eval`/`specTerm` pair satisfying `selfApp`
-without collapsing the carrier. Packaging that instance is deferred with the real
-self-applicable specializer; the cost vacuity above already shows why `Nontrivial`
-is an independent obligation from mix alone.
+/-! ### Principled trivial `PESetup` (tagged residual, recursive unpack)
+
+Identity `spec` cannot satisfy `selfApp` for a universal `eval prog _ := some prog`.
+Instead residualize under a `dup` tag and reflect the specializer as bare `swap`.
+Evaluation recursively unpacks residuals so mix holds for **all** `p` (including when
+`p` is itself tagged); `selfApp` is the `swap` clause. Cost never shrinks, so
+`¬ Nontrivial`. A real self-applicable optimizing `specTerm` / BTA remains future work.
 -/
+
+/-- Tagged residual: `dup · (pair p s)`. Strictly larger than `p` under `pe_cost`. -/
+def trivial_spec (p s : ITerm) : ITerm :=
+  ITerm.app ITerm.dup (pair p s)
+
+/--
+Object-level evaluator for the toy specializer.
+* `swap` on `pair p s` returns the tagged residual (`selfApp`).
+* A tagged residual applied to dynamic `d` continues as `run p (pair s d)` (mix),
+  recursively, so residual-shaped programs do not break the mix equation.
+* Otherwise return the syntactic application.
+-/
+def trivial_run : ITerm → ITerm → ITerm
+  | ITerm.swap, data =>
+      match data with
+      | ITerm.app (ITerm.app ITerm.konst p) s => trivial_spec p s
+      | _ => ITerm.app ITerm.swap data
+  | ITerm.app ITerm.dup (ITerm.app (ITerm.app ITerm.konst p) s), d =>
+      trivial_run p (pair s d)
+  | p, d => ITerm.app p d
+
+def trivial_eval (prog data : ITerm) : Option ITerm :=
+  some (trivial_run prog data)
+
+theorem trivial_mix (p s d : ITerm) :
+    trivial_eval (trivial_spec p s) d = trivial_eval p (pair s d) := by
+  rfl
+
+theorem trivial_selfApp (p s : ITerm) :
+    trivial_eval ITerm.swap (pair p s) = some (trivial_spec p s) := by
+  rfl
+
+/-- Toy `PESetup`: mix and selfApp by `rfl`; residualizer is cost-non-shrinking. -/
+def TrivialPE : PESetup where
+  eval := trivial_eval
+  spec := trivial_spec
+  specTerm := ITerm.swap
+  mix := trivial_mix
+  selfApp := trivial_selfApp
+
+theorem pe_cost_trivial_spec (p s : ITerm) :
+    pe_cost (trivial_spec p s) = pe_cost p + pe_cost s + 5 := by
+  dsimp [trivial_spec, pair, pe_cost, term_size]
+  omega
+
+theorem trivial_spec_not_shrinking :
+    ¬ ∃ p s : ITerm, pe_cost (trivial_spec p s) < pe_cost p := by
+  rintro ⟨p, s, hlt⟩
+  have hge : pe_cost p ≤ pe_cost (trivial_spec p s) := by
+    dsimp [trivial_spec, pair, pe_cost, term_size]
+    omega
+  exact Nat.not_lt_of_ge hge hlt
+
+/-- Mix+selfApp alone do not imply optimization: `TrivialPE` is not `Nontrivial`. -/
+theorem TrivialPE_not_nontrivial : ¬ Nontrivial TrivialPE := by
+  rintro ⟨p, s, hlt⟩
+  exact trivial_spec_not_shrinking ⟨p, s, hlt⟩
 
 theorem specialize_ISKTerm (t : ITerm) (ht : ISKTerm t) (s_env : Nat → Option ITerm) :
     specialize t s_env = t := by
