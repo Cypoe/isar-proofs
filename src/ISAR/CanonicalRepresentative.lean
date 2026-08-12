@@ -6,8 +6,9 @@ namespace ISAR
 # Canonical representatives via complete development
 
 Representative selection for `OperEq`-classes should be given by the complete-development
-function `cd` (iterated as `cd_loop_fuel`), not by `Quotient.out` / unconstrained
-`Classical.choose`. Unique normal forms on the fragment make the choice well-defined.
+function `cd` (iterated as `cd_loop_fuel`) on the linear / `HasNF` fragment, not by
+unconstrained choice of a dummy. Unique normal forms make that choice well-defined.
+For non-SN terms, `nf_of_term` falls back to `Quotient.exists_rep` choice (still OperEq-related).
 -/
 
 /-- One complete-development step, packed as an `ISKSubtype`. -/
@@ -81,14 +82,10 @@ theorem cd_is_OperEq_representative (fuel : Nat) (t : ISKSubtype) :
 
 /--
 Under `HasNF`, the AC `nf_of_term` representative is `OperEq`-related to `t`.
-This replaces the unchecked `canonical_rep_eq` axiom for the normalizing case.
 -/
 theorem nf_of_term_OperEq_of_HasNF (t : ISKSubtype) (ht : HasNF t) :
-    OperEq (nf_of_term t) t := by
-  unfold nf_of_term
-  rw [dif_pos ht]
-  have hspec := Classical.choose_spec ht
-  exact ⟨(Classical.choose ht).val, Relation.ReflTransGen.refl, hspec.1⟩
+    OperEq (nf_of_term t) t :=
+  nf_of_term_OperEq t
 
 theorem canonical_rep_eq_of_HasNF (t : ISKSubtype) (ht : HasNF t) :
     OperEq (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid t)) t := by
@@ -112,11 +109,15 @@ theorem section_fuel_OperEq (fuel : Nat) (t : ISKSubtype) :
   OperEq_cd_loop_fuel fuel t
 
 /--
-General `canonical_rep` coherence. Special cases `HasNF` / `LinearIKTerm` are theorems above;
-the unrestricted statement remains an axiom used by HF/views until full normalization is settled.
+Unrestricted coherence of `canonical_rep`: always OperEq-related to the class.
+Proved once `nf_of_term` uses NF when available and a class representative via
+`Quotient.exists_rep` otherwise (never the old false `⟨norm,_⟩` fallback). Preferred
+explicit section on the linear fragment remains `canonical_nf` / `cd_loop_fuel`.
 -/
-axiom canonical_rep_eq (t : ISKSubtype) :
-    OperEq (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid t)) t
+theorem canonical_rep_eq (t : ISKSubtype) :
+    OperEq (InvariantLayer.canonical_rep (Quotient.mk operEqSetoid t)) t := by
+  change OperEq (nf_of_term t) t
+  exact nf_of_term_OperEq t
 
 theorem canonical_rep_sound (q : InvariantLayer) :
     Quotient.mk operEqSetoid (InvariantLayer.canonical_rep q) = q := by

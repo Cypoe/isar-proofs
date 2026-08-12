@@ -14,8 +14,8 @@ Sorry-free compilation does **not** imply non-vacuous content. Checklist for mai
 | `morphism_uniqueness` / `ISAR_Kernel_terminal` | Conditional | Unique morphisms into `ISAR_Kernel` **relative to the `Kernel` interface**. If that interface is too weak, the category collapses and everything looks terminal — schedule a false-variant (degenerate Kernel) as a regression test. Expected axioms today may include `propext` / `Classical.choice` via quotient infrastructure. |
 | `futamura_first` (subst layer) | Substantive but narrow | Mix equation at the meta-level specializer; does not by itself give optimizing PE. |
 | `futamura_second` / `futamura_third` (pre-PESetup) | Formulation-sensitive | Honest form needs object-level `specTerm` + `selfApp` + **nontriviality**; trivial specializers satisfy mix alone. |
-| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations. Principled toy instance `TrivialPE` (`dup`-tagged residual, `swap` reflection, recursive unpack): mix/selfApp by `rfl`, `¬ Nontrivial`. Real self-applicable optimizing `specTerm` / BTA remains future work. |
-| `recurrence_to_Kernel` | Bridge | No `Quotient.out` on the carrier quotient: lift decode → `InvariantLayer`, then `canonical_rep` / `cd_loop_fuel`. `canonical_rep_eq_of_HasNF` / linear `canonical_nf` are theorems; unrestricted `canonical_rep_eq` remains an axiom until full NF. |
+| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations. `TrivialPE`: mix/selfApp by `rfl`, `¬ Nontrivial`. `OptimizingPE`: identity/konstβ fragment folds + tagged residual; mix by size induction, `selfApp` by `rfl`, **`Nontrivial` proved** (`norm·konst`). Full JGS BTA for all ISAR remains open. |
+| `recurrence_to_Kernel` | Bridge | No `Quotient.out` on the carrier quotient: lift decode → `InvariantLayer`, then `canonical_rep` / `cd_loop_fuel`. Unrestricted `canonical_rep_eq` is now a **theorem** (`nf_of_term` uses NF or `exists_rep`; never the false `norm` fallback). |
 | `fixed_point` in SARI (`I ↔ no R-step`) | Often definitional | See §4; treat as modeling choice, not deep content. |
 | HF encoding axioms in `HFSetEncoding` | Axiomatic bridges | Not derived; do not market as proved. |
 
@@ -97,7 +97,7 @@ The following structures and theorems are derived constructively from first-prin
 ### Architectural Decision: Modular Bridge vs. Monolithic Rebase
 To unify the stack, we chose to maintain **independence** between the `KernelCategory` framework and `AdmCarrier`, utilizing `recurrence_to_Kernel` as a **bridge lemma**:
 - *Why*: Forcing all category-theoretic semantic views (`Kernel`) to be derived from `AdmCarrier` quotients would impose severe proof obligations on simple views (e.g. HF sets, Stack VMs) that do not naturally use IOB structures.
-- *Representatives*: Carrier decode lifts to `InvariantLayer` without choice; the OperEq section uses `cd` / `cd_loop_fuel` on the linear fragment (`canonical_nf`) and `canonical_rep` (NF choice) in general. Explicit `cd`-based theorems live in `CanonicalRepresentative.lean`.
+- *Representatives*: Carrier decode lifts to `InvariantLayer` without choice; the OperEq section uses `cd` / `cd_loop_fuel` on the linear fragment (`canonical_nf`) and `canonical_rep` in general (`HasNF` choose, else class `exists_rep`). Unrestricted `canonical_rep_eq` is a theorem. Explicit `cd`-based theorems live in `CanonicalRepresentative.lean`.
 
 ---
 

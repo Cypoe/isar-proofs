@@ -303,12 +303,23 @@ partial def cd_loop (t : ISKSubtype) : ISKSubtype :=
   else
     cd_loop ⟨t', ISKTerm_cd t.property⟩
 
+/--
+Representative of an `OperEq`-class on concrete terms.
+* If `HasNF`, pick the unique normal form (AC on the nonempty NF fiber).
+* Otherwise pick any class representative via `Quotient.exists_rep` (SKI is not SN,
+  so finite `cd` may not reach a unique NF; the old `⟨norm, _⟩` fallback was not
+  OperEq-related in general and made unrestricted `canonical_rep_eq` false).
+
+Computational path: `@[implemented_by cd_loop]` (iterated complete development).
+Preferred *proved* section on the linear fragment: `canonical_nf` / `cd_loop_fuel`
+in `CanonicalRepresentative.lean`.
+-/
 @[implemented_by cd_loop]
 noncomputable def nf_of_term (t : ISKSubtype) : ISKSubtype :=
   if h : ISAR.HasNF t then
     Classical.choose h
   else
-    ⟨ITerm.norm, ISKTerm.norm⟩
+    Classical.choose (Quotient.exists_rep (Quotient.mk operEqSetoid t))
 
 theorem unique_nf_of_OperEq {t u : ISKSubtype} (h : OperEq t u) :
     nf_of_term t = nf_of_term u := by
@@ -342,7 +353,26 @@ theorem unique_nf_of_OperEq {t u : ISKSubtype} (h : OperEq t u) :
                     exact Subtype.ext h_val_eq }
   { have hu : ¬ ISAR.HasNF u := fun h_u => ht (HasNF_of_OperEq (OperEq.symm h) h_u)
     unfold nf_of_term
-    rw [dif_neg ht, dif_neg hu] }
+    rw [dif_neg ht, dif_neg hu]
+    have hq : Quotient.mk operEqSetoid t = Quotient.mk operEqSetoid u := Quotient.sound h
+    simp only [hq] }
+
+/-- `nf_of_term` is always an OperEq-representative (fixes the old false `norm` fallback). -/
+theorem nf_of_term_OperEq (t : ISKSubtype) : OperEq (nf_of_term t) t := by
+  by_cases ht : ISAR.HasNF t
+  { unfold nf_of_term
+    rw [dif_pos ht]
+    have hspec : IRed t.val (Classical.choose ht).val ∧ NormalI (Classical.choose ht).val :=
+      Classical.choose_spec ht
+    exact ⟨(Classical.choose ht).val, Relation.ReflTransGen.refl, hspec.1⟩ }
+  { unfold nf_of_term
+    rw [dif_neg ht]
+    have hmk :
+        Quotient.mk operEqSetoid
+          (Classical.choose (Quotient.exists_rep (Quotient.mk operEqSetoid t))) =
+        Quotient.mk operEqSetoid t :=
+      Classical.choose_spec (Quotient.exists_rep (Quotient.mk operEqSetoid t))
+    exact Quotient.exact (s := operEqSetoid) hmk }
 
 noncomputable def InvariantLayer.canonical_rep (q : InvariantLayer) : ISKSubtype :=
   Quotient.lift nf_of_term (by

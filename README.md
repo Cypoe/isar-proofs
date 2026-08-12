@@ -20,7 +20,7 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 2. **[InvariantLayer.lean](src/ISAR/InvariantLayer.lean)** — `OperEq` joinability quotient, `app_congruence`, `cd_loop_fuel`, linear fuel certificates.
 
-2a. **[CanonicalRepresentative.lean](src/ISAR/CanonicalRepresentative.lean)** — `cd` / `cd_loop_fuel` as explicit OperEq representatives; unique NF on the linear fragment; `canonical_rep_eq` proved under `HasNF`.
+2a. **[CanonicalRepresentative.lean](src/ISAR/CanonicalRepresentative.lean)** — `cd` / `cd_loop_fuel` as explicit OperEq representatives; unique NF on the linear fragment; unrestricted `canonical_rep_eq` proved (`nf_of_term` = NF or class `exists_rep`).
 
 3. **[LambdaFragment.lean](LambdaFragment.lean)** — de Bruijn `LTerm`, bracket abstraction `abstract0`, compiler `compile`, simulation: `compile_simulates_step` and `compile_simulates_red`.
 
@@ -58,7 +58,7 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 16. **[ViewUnification.lean](ViewUnification.lean)** — `AdmissibleDialect`, `KernelIsomorphism`, **Universal Factorization Theorem** (`universal_factorization_theorem`).
 
-17. **[Futamura.lean](src/ISAR/Futamura.lean)** — Subst-layer mix (`futamura_first`); `PESetup` with mix-based 2nd/3rd projections; `Nontrivial` cost obligation; identity residualizer vacuity.
+17. **[Futamura.lean](src/ISAR/Futamura.lean)** — Subst-layer mix; `PESetup` 2nd/3rd projections; `TrivialPE` (`¬Nontrivial`) and fragment `OptimizingPE` (proved `Nontrivial`).
 
 ---
 
