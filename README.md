@@ -2,7 +2,7 @@
 
 [![Lean](https://github.com/Cypoe/ISAR-proofs/actions/workflows/lean.yml/badge.svg)](https://github.com/Cypoe/ISAR-proofs/actions/workflows/lean.yml)
 
-ISAR is a Lean 4 formalization of a minimal combinatory calculus whose operational quotient — the **Invariant Layer** — is the terminal object in a stated category of closed computational dialects (`Kernel`). Lambda calculus, term rewriting systems, stack VM bytecode, hereditarily finite sets, and linear interaction nets are modelled as views that factor through this quotient via structure-preserving morphisms. Modules are machine-checked; see STATUS for axiom / vacuity notes (sorry-free ≠ non-vacuous).
+ISAR is a Lean 4 formalization of a minimal combinatory calculus whose operational quotient — the **Invariant Layer** — is the terminal object in a stated category of closed computational dialects (`Kernel`). Lambda calculus, term rewriting systems, stack VM bytecode, hereditarily finite sets, and linear interaction nets are modelled as views that factor through this quotient via structure-preserving morphisms. Modules are machine-checked; see [STATUS](STATUS.md) for axiom / vacuity notes and a dated **program status / next** list (sorry-free ≠ non-vacuous).
 
 Related literature for the intended claims: Rutten–Aczel (coalgebras), Abramsky–Ong (applicative bisimilarity), Jones/Gomard/Sestoft (partial evaluation). Terminality is relative to the formal `Kernel` interface, not a claim that other calculi lack models or encodings.
 
@@ -20,11 +20,11 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 2. **[InvariantLayer.lean](src/ISAR/InvariantLayer.lean)** — `OperEq` joinability quotient, `app_congruence`, `cd_loop_fuel`, linear fuel certificates.
 
-2a. **[CanonicalRepresentative.lean](src/ISAR/CanonicalRepresentative.lean)** — `cd` / `cd_loop_fuel` as explicit OperEq representatives; unique NF on the linear fragment; unrestricted `canonical_rep_eq` proved (`nf_of_term` = NF or class `exists_rep`).
+2a. **[CanonicalRepresentative.lean](src/ISAR/CanonicalRepresentative.lean)** — `cd` / `cd_loop_fuel` as explicit OperEq representatives; Gross–Knuth: finite `cd` reaches the unique NF iff `HasNF`; unrestricted `canonical_rep_eq` proved (`nf_of_term` = NF or class `exists_rep`).
 
 3. **[LambdaFragment.lean](LambdaFragment.lean)** — de Bruijn `LTerm`, bracket abstraction `abstract0`, compiler `compile`, simulation: `compile_simulates_step` and `compile_simulates_red`.
 
-4. **[TensorSemantics.lean](TensorSemantics.lean)** — `denot_sound`, `lambda_denot_sound`, `toExtTensor_app` homomorphism, adequacy: `adequacy_family` separating $I$, $K$, $K_2$.
+4. **[TensorSemantics.lean](TensorSemantics.lean)** — Term model (`TensorSpace := ITerm`, `ExtEq` = `IRed` joinability, B/C/W); `denot_sound`, adequacy separating $I$, $K$, $K_2$.
 
 5. **[KernelCategory.lean](KernelCategory.lean)** — `Kernel` structure, `ISAR_Kernel` terminal object, `ComputableISAR_Kernel`, `morphism_uniqueness` (terminality).
 
@@ -34,7 +34,7 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 6. **[HFSet.lean](HFSet.lean)** — Inductive `HF` type, Ackermann `toNat` bijection, membership, extensional equality, set axioms.
 
-7. **[HFSetEncoding.lean](HFSetEncoding.lean)** — `HF_encode` / `decode_term` bijection between `InvariantLayer` and `HF`, coherence equations.
+7. **[HFSetEncoding.lean](HFSetEncoding.lean)** — Constructed Ackermann `fromNat` / ISK Gödel numbering; named `layerToNat` bijection on the OperEq quotient; `HF_encode` / `decode_layer`.
 
 8. **[HFSetSemantics.lean](HFSetSemantics.lean)** — Lifts set constructors to `InvariantLayer`; proves `HF_encode` is a homomorphism.
 
@@ -54,11 +54,11 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 14. **[BytecodeView.lean](BytecodeView.lean)** — Stack VM (`push_I`, `push_K`, `push_S`, `app`), `run`, `compile_decompile` identity, `Bytecode_Dialect`.
 
-15. **[QuantityKernel.lean](QuantityKernel.lean)** — 4-layer quantity algebra, `QuantityKernel : Kernel`, `InvariantLayer.add` preserves arithmetic addition.
+15. **[QuantityKernel.lean](QuantityKernel.lean)** — 4-layer quantity algebra, `QuantityKernel : Kernel`; named `Quantity ≃ Nat` bridge (`String`/`Float` block `Encodable`).
 
 16. **[ViewUnification.lean](ViewUnification.lean)** — `AdmissibleDialect`, `KernelIsomorphism`, **Universal Factorization Theorem** (`universal_factorization_theorem`).
 
-17. **[Futamura.lean](src/ISAR/Futamura.lean)** — Subst-layer mix; `PESetup` 2nd/3rd projections; `TrivialPE` (`¬Nontrivial`) and fragment `OptimizingPE` (proved `Nontrivial`).
+17. **[Futamura.lean](src/ISAR/Futamura.lean)** — Subst-layer mix; `PESetup` 2nd/3rd projections; `TrivialPE` (`¬Nontrivial`), fragment `OptimizingPE`, and online `JGS_PE` for the full `IStep` signature (proved `Nontrivial`). Not 1993 polyvariant mix.
 
 ---
 

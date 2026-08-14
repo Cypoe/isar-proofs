@@ -138,7 +138,10 @@ def mulQ (q1 q2 : Quantity) : Quantity where
    3. Substrate Mapping & QuantityKernel
    ========================================================= -/
 
-/-- Countable bijection axioms between Quantity and Nat. -/
+/--
+Named modeling axioms: `Quantity` carries `String` and `Float`, which block a
+kernel `Encodable` instance. The countable bijection is not derived.
+-/
 axiom quantityToNat : Quantity → Nat
 axiom natQuantity : Nat → Quantity
 axiom quantityToNat_inverse (q : Quantity) : natQuantity (quantityToNat q) = q

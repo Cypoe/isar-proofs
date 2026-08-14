@@ -345,6 +345,150 @@ theorem pe_cost_opt_witness (s : ITerm) :
 theorem OptimizingPE_nontrivial : Nontrivial OptimizingPE :=
   ⟨opt_witness_p, ITerm.konst, pe_cost_opt_witness ITerm.konst⟩
 
+/-! ### Jones–Gomard–Sestoft online PE for the whole `IStep` signature
+
+Offline BTA classifies subterms; online PE *is* the 1985 mix technique once every
+object-language redex can fire at specialization time. ISAR's object reductions
+are exactly `normβ`, `konstβ`, `compβ`, `sβ`. This specializer folds all four.
+
+* Size-decreasing folds (`norm`, `konst`, `comp`) recurse.
+* `sβ` can grow `term_size`; we unfold once into a tagged residual (no recursion).
+* `swap` remains `specTerm`. Polyvariant *offline* mix that generates a
+  compiler-generator of Jones–Gomard–Sestoft 1993 quality is still open;
+  the object-language signature is covered.
+-/
+
+/-- Offline binding-time sketch: `swap` is the dynamic hole; other atoms are static;
+    application is static iff both sides are. -/
+inductive BindingTime where
+  | static
+  | dynamic
+  deriving DecidableEq, Repr
+
+def bta : ITerm → BindingTime
+  | ITerm.swap => BindingTime.dynamic
+  | ITerm.app f x =>
+      match bta f, bta x with
+      | BindingTime.static, BindingTime.static => BindingTime.static
+      | _, _ => BindingTime.dynamic
+  | _ => BindingTime.static
+
+/-- Online specializer covering every `IStep` constructor. -/
+def jgs_spec : ITerm → ITerm → ITerm
+  | ITerm.app ITerm.norm body, s => jgs_spec body s
+  | ITerm.app (ITerm.app ITerm.konst x) _y, s => jgs_spec x s
+  | ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x, s =>
+      jgs_spec (ITerm.app f (ITerm.app g x)) s
+  | ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z, s =>
+      ITerm.app (ITerm.var 0) (pair (ITerm.app (ITerm.app x z) (ITerm.app y z)) s)
+  | ITerm.norm, _ => ITerm.norm
+  | ITerm.konst, _ => ITerm.konst
+  | ITerm.sₛ, _ => ITerm.sₛ
+  | ITerm.dup, _ => ITerm.dup
+  | ITerm.comp, _ => ITerm.comp
+  | ITerm.var n, _ => ITerm.var n
+  | p, s => ITerm.app ITerm.dup (pair p s)
+termination_by p => term_size p
+decreasing_by
+  all_goals (simp [term_size]; omega)
+
+def jgs_run : ITerm → ITerm → ITerm
+  | ITerm.swap, data =>
+      match data with
+      | ITerm.app (ITerm.app ITerm.konst p) s => jgs_spec p s
+      | _ => ITerm.app ITerm.swap data
+  | ITerm.app ITerm.dup (ITerm.app (ITerm.app ITerm.konst p) s), d =>
+      jgs_run p (pair s d)
+  | ITerm.app ITerm.norm body, d =>
+      jgs_run body d
+  | ITerm.app (ITerm.app ITerm.konst x) _y, d =>
+      jgs_run x d
+  | ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x, d =>
+      jgs_run (ITerm.app f (ITerm.app g x)) d
+  | ITerm.app (ITerm.var 0) (ITerm.app (ITerm.app ITerm.konst c) s), d =>
+      ITerm.app c (pair s d)
+  | ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z, d =>
+      ITerm.app (ITerm.app (ITerm.app x z) (ITerm.app y z)) d
+  | ITerm.norm, _ => ITerm.norm
+  | ITerm.konst, _ => ITerm.konst
+  | ITerm.sₛ, _ => ITerm.sₛ
+  | ITerm.dup, _ => ITerm.dup
+  | ITerm.comp, _ => ITerm.comp
+  | ITerm.var n, _ => ITerm.var n
+  | p, d => ITerm.app p d
+termination_by p => term_size p
+decreasing_by
+  all_goals (simp [term_size]; omega)
+
+def jgs_eval (prog data : ITerm) : Option ITerm :=
+  some (jgs_run prog data)
+
+theorem jgs_mix (p s d : ITerm) :
+    jgs_eval (jgs_spec p s) d = jgs_eval p (pair s d) := by
+  cases p with
+  | var _ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+  | norm => simp [jgs_spec, jgs_eval, jgs_run, pair]
+  | konst => simp [jgs_spec, jgs_eval, jgs_run, pair]
+  | dup => simp [jgs_spec, jgs_eval, jgs_run, pair]
+  | swap => simp [jgs_spec, jgs_eval, jgs_run, pair]
+  | comp => simp [jgs_spec, jgs_eval, jgs_run, pair]
+  | sₛ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+  | app f x =>
+      cases f with
+      | norm =>
+          have h := jgs_mix x s d
+          simpa [jgs_spec, jgs_eval, jgs_run] using h
+      | app f1 x1 =>
+          cases f1 with
+          | konst =>
+              have h := jgs_mix x1 s d
+              simpa [jgs_spec, jgs_eval, jgs_run] using h
+          | app f2 x2 =>
+              cases f2 with
+              | comp =>
+                  have h := jgs_mix (ITerm.app x2 (ITerm.app x1 x)) s d
+                  simpa [jgs_spec, jgs_eval, jgs_run] using h
+              | sₛ =>
+                  simp [jgs_spec, jgs_eval, jgs_run, pair]
+              | var _ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+              | norm => simp [jgs_spec, jgs_eval, jgs_run, pair]
+              | konst => simp [jgs_spec, jgs_eval, jgs_run, pair]
+              | dup => simp [jgs_spec, jgs_eval, jgs_run, pair]
+              | swap => simp [jgs_spec, jgs_eval, jgs_run, pair]
+              | app _ _ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+          | var _ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+          | norm => simp [jgs_spec, jgs_eval, jgs_run, pair]
+          | dup => simp [jgs_spec, jgs_eval, jgs_run, pair]
+          | swap => simp [jgs_spec, jgs_eval, jgs_run, pair]
+          | comp => simp [jgs_spec, jgs_eval, jgs_run, pair]
+          | sₛ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+      | var _ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+      | konst => simp [jgs_spec, jgs_eval, jgs_run, pair]
+      | dup => simp [jgs_spec, jgs_eval, jgs_run, pair]
+      | swap => simp [jgs_spec, jgs_eval, jgs_run, pair]
+      | comp => simp [jgs_spec, jgs_eval, jgs_run, pair]
+      | sₛ => simp [jgs_spec, jgs_eval, jgs_run, pair]
+termination_by term_size p
+decreasing_by
+  all_goals (simp [term_size]; omega)
+
+theorem jgs_selfApp (p s : ITerm) :
+    jgs_eval ITerm.swap (pair p s) = some (jgs_spec p s) := by
+  simp [jgs_eval, jgs_run, pair]
+
+/-- Full-signature online PE: every `IStep` rule has a specialization clause. -/
+def JGS_PE : PESetup where
+  eval := jgs_eval
+  spec := jgs_spec
+  specTerm := ITerm.swap
+  mix := jgs_mix
+  selfApp := jgs_selfApp
+
+theorem JGS_PE_nontrivial : Nontrivial JGS_PE :=
+  ⟨opt_witness_p, ITerm.konst, by
+    simp only [JGS_PE, jgs_spec, opt_witness_p, pe_cost, term_size]
+    omega⟩
+
 theorem specialize_ISKTerm (t : ITerm) (ht : ISKTerm t) (s_env : Nat → Option ITerm) :
     specialize t s_env = t := by
   induction ht with

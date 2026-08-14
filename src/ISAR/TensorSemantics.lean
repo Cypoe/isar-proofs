@@ -3,51 +3,171 @@ import ISAR.LambdaFragment
 
 namespace ISAR
 
--- Abstract rank-4 tensor space for ISAR semantics
-axiom TensorSpace : Type
+/-!
+Term model: tensors *are* `ITerm`s; extensional equality is `IRed`-joinability
+(confluence is `IRed_confluence`). Combinators `B`/`C`/`W` are SKI encodings so
+`dup`/`swap`/`comp` β-laws are theorems, not axioms.
+-/
 
--- Extensional equality on tensors
-axiom ExtEq : TensorSpace → TensorSpace → Prop
+abbrev TensorSpace := ITerm
 
--- Extensional equality properties (equivalence relation)
-axiom ExtEq.refl (t : TensorSpace) : ExtEq t t
-axiom ExtEq.symm {t u : TensorSpace} : ExtEq t u → ExtEq u t
-axiom ExtEq.trans {t u w : TensorSpace} : ExtEq t u → ExtEq u w → ExtEq t w
+def ExtEq (t u : TensorSpace) : Prop := ∃ v, IRed t v ∧ IRed u v
 
--- Carrier base operators / primitives
-axiom t_norm  : TensorSpace
-axiom t_konst : TensorSpace
-axiom t_dup   : TensorSpace
-axiom t_swap  : TensorSpace
-axiom t_comp  : TensorSpace
-axiom t_var   : Nat → TensorSpace
+theorem ExtEq.refl (t : TensorSpace) : ExtEq t t :=
+  ⟨t, Relation.ReflTransGen.refl, Relation.ReflTransGen.refl⟩
 
--- Application / composition operator in tensor space
-axiom t_app   : TensorSpace → TensorSpace → TensorSpace
+theorem ExtEq.symm {t u : TensorSpace} : ExtEq t u → ExtEq u t
+  | ⟨v, ht, hu⟩ => ⟨v, hu, ht⟩
 
--- Congruence of t_app with respect to ExtEq
-axiom t_app_congr {t1 t2 u1 u2 : TensorSpace} :
-  ExtEq t1 t2 → ExtEq u1 u2 → ExtEq (t_app t1 u1) (t_app t2 u2)
+theorem ExtEq.trans {t u w : TensorSpace} (h1 : ExtEq t u) (h2 : ExtEq u w) : ExtEq t w := by
+  rcases h1 with ⟨v, ht, hu⟩
+  rcases h2 with ⟨v', hu', hw⟩
+  rcases IRed_confluence hu hu' with ⟨z, hvz, hv'z⟩
+  exact ⟨z, Relation.ReflTransGen.trans ht hvz, Relation.ReflTransGen.trans hw hv'z⟩
 
--- Helper lemma for left congruence
+def t_norm : TensorSpace := ITerm.norm
+def t_konst : TensorSpace := ITerm.konst
+def t_var : Nat → TensorSpace := ITerm.var
+def t_app : TensorSpace → TensorSpace → TensorSpace := ITerm.app
+
+/-- `B = S (K S) K`. -/
+def t_comp : TensorSpace :=
+  t_app (t_app ITerm.sₛ (t_app ITerm.konst ITerm.sₛ)) ITerm.konst
+
+/-- `W = S S (K I)`. -/
+def t_dup : TensorSpace :=
+  t_app (t_app ITerm.sₛ ITerm.sₛ) (t_app ITerm.konst ITerm.norm)
+
+/-- `C = S (S (K B) S) (K K)`. -/
+def t_swap : TensorSpace :=
+  t_app (t_app ITerm.sₛ (t_app (t_app ITerm.sₛ (t_app ITerm.konst t_comp)) ITerm.sₛ))
+    (t_app ITerm.konst ITerm.konst)
+
+theorem t_app_congr {t1 t2 u1 u2 : TensorSpace}
+    (ht : ExtEq t1 t2) (hu : ExtEq u1 u2) :
+    ExtEq (t_app t1 u1) (t_app t2 u2) := by
+  rcases ht with ⟨v, ht1, ht2⟩
+  rcases hu with ⟨w, hu1, hu2⟩
+  exact ⟨t_app v w, IRed_app ht1 hu1, IRed_app ht2 hu2⟩
+
 theorem t_app_congr_left {t1 t2 u : TensorSpace} (h : ExtEq t1 t2) :
     ExtEq (t_app t1 u) (t_app t2 u) :=
   t_app_congr h (ExtEq.refl u)
 
--- Helper lemma for right congruence
 theorem t_app_congr_right {t u1 u2 : TensorSpace} (h : ExtEq u1 u2) :
     ExtEq (t_app t u1) (t_app t u2) :=
   t_app_congr (ExtEq.refl t) h
 
--- Operational soundness axioms for reduction rules
-axiom t_norm_beta (x : TensorSpace) : ExtEq (t_app t_norm x) x
-axiom t_konst_beta (x y : TensorSpace) : ExtEq (t_app (t_app t_konst x) y) x
-axiom t_comp_beta (f g x : TensorSpace) : ExtEq (t_app (t_app (t_app t_comp f) g) x) (t_app f (t_app g x))
-axiom t_dup_beta (f x : TensorSpace) : ExtEq (t_app (t_app t_dup f) x) (t_app (t_app f x) x)
-axiom t_swap_beta (f x y : TensorSpace) : ExtEq (t_app (t_app (t_app t_swap f) x) y) (t_app (t_app f y) x)
+theorem t_norm_beta (x : TensorSpace) : ExtEq (t_app t_norm x) x :=
+  ⟨x, Relation.ReflTransGen.single (IStep.normβ x), Relation.ReflTransGen.refl⟩
+
+theorem t_konst_beta (x y : TensorSpace) : ExtEq (t_app (t_app t_konst x) y) x :=
+  ⟨x, Relation.ReflTransGen.single (IStep.konstβ x y), Relation.ReflTransGen.refl⟩
+
+theorem t_comp_app_f (f : TensorSpace) :
+    IRed (t_app t_comp f) (t_app ITerm.sₛ (t_app ITerm.konst f)) := by
+  have hstep : IStep (t_app t_comp f)
+      (t_app (t_app (t_app ITerm.konst ITerm.sₛ) f) (t_app ITerm.konst f)) := by
+    dsimp [t_comp, t_app]
+    exact IStep.sβ (ITerm.app ITerm.konst ITerm.sₛ) ITerm.konst f
+  have hcong : IStep
+      (t_app (t_app (t_app ITerm.konst ITerm.sₛ) f) (t_app ITerm.konst f))
+      (t_app ITerm.sₛ (t_app ITerm.konst f)) :=
+    IStep.appL (IStep.konstβ ITerm.sₛ f)
+  exact Relation.ReflTransGen.tail (Relation.ReflTransGen.single hstep) hcong
+
+theorem t_comp_red (f g x : TensorSpace) :
+    IRed (t_app (t_app (t_app t_comp f) g) x) (t_app f (t_app g x)) := by
+  have hfgx : IRed (t_app (t_app (t_app t_comp f) g) x)
+      (t_app (t_app (t_app ITerm.sₛ (t_app ITerm.konst f)) g) x) :=
+    IRed_app_left (IRed_app_left (t_comp_app_f f))
+  have hs : IStep (t_app (t_app (t_app ITerm.sₛ (t_app ITerm.konst f)) g) x)
+      (t_app (t_app (t_app ITerm.konst f) x) (t_app g x)) :=
+    IStep.sβ (t_app ITerm.konst f) g x
+  have hk : IStep (t_app (t_app (t_app ITerm.konst f) x) (t_app g x))
+      (t_app f (t_app g x)) :=
+    IStep.appL (IStep.konstβ f x)
+  exact Relation.ReflTransGen.trans hfgx
+    (Relation.ReflTransGen.tail (Relation.ReflTransGen.single hs) hk)
+
+theorem t_comp_beta (f g x : TensorSpace) :
+    ExtEq (t_app (t_app (t_app t_comp f) g) x) (t_app f (t_app g x)) :=
+  ⟨t_app f (t_app g x), t_comp_red f g x, Relation.ReflTransGen.refl⟩
+
+theorem t_dup_red (f x : TensorSpace) :
+    IRed (t_app (t_app t_dup f) x) (t_app (t_app f x) x) := by
+  have h1 : IStep (t_app t_dup f)
+      (t_app (t_app ITerm.sₛ f) (t_app (t_app ITerm.konst ITerm.norm) f)) := by
+    dsimp [t_dup, t_app]
+    exact IStep.sβ ITerm.sₛ (ITerm.app ITerm.konst ITerm.norm) f
+  have h2 : IStep (t_app (t_app ITerm.sₛ f) (t_app (t_app ITerm.konst ITerm.norm) f))
+      (t_app (t_app ITerm.sₛ f) ITerm.norm) :=
+    IStep.appR (IStep.konstβ ITerm.norm f)
+  have hf : IRed (t_app t_dup f) (t_app (t_app ITerm.sₛ f) ITerm.norm) :=
+    Relation.ReflTransGen.tail (Relation.ReflTransGen.single h1) h2
+  have hfx : IRed (t_app (t_app t_dup f) x)
+      (t_app (t_app (t_app ITerm.sₛ f) ITerm.norm) x) :=
+    IRed_app_left hf
+  have hs : IStep (t_app (t_app (t_app ITerm.sₛ f) ITerm.norm) x)
+      (t_app (t_app f x) (t_app ITerm.norm x)) :=
+    IStep.sβ f ITerm.norm x
+  have hi : IStep (t_app (t_app f x) (t_app ITerm.norm x)) (t_app (t_app f x) x) :=
+    IStep.appR (IStep.normβ x)
+  exact Relation.ReflTransGen.trans hfx
+    (Relation.ReflTransGen.tail (Relation.ReflTransGen.single hs) hi)
+
+theorem t_dup_beta (f x : TensorSpace) :
+    ExtEq (t_app (t_app t_dup f) x) (t_app (t_app f x) x) :=
+  ⟨t_app (t_app f x) x, t_dup_red f x, Relation.ReflTransGen.refl⟩
+
+theorem t_swap_red (f x y : TensorSpace) :
+    IRed (t_app (t_app (t_app t_swap f) x) y) (t_app (t_app f y) x) := by
+  let P := t_app (t_app ITerm.sₛ (t_app ITerm.konst t_comp)) ITerm.sₛ
+  have h1 : IStep (t_app t_swap f)
+      (t_app (t_app P f) (t_app (t_app ITerm.konst ITerm.konst) f)) := by
+    dsimp [t_swap, t_app, P]
+    exact IStep.sβ P (ITerm.app ITerm.konst ITerm.konst) f
+  have h2 : IStep (t_app (t_app P f) (t_app (t_app ITerm.konst ITerm.konst) f))
+      (t_app (t_app P f) ITerm.konst) :=
+    IStep.appR (IStep.konstβ ITerm.konst f)
+  have hCf : IRed (t_app t_swap f) (t_app (t_app P f) ITerm.konst) :=
+    Relation.ReflTransGen.tail (Relation.ReflTransGen.single h1) h2
+  have hP : IStep (t_app P f)
+      (t_app (t_app (t_app ITerm.konst t_comp) f) (t_app ITerm.sₛ f)) := by
+    dsimp [P, t_app]
+    exact IStep.sβ (t_app ITerm.konst t_comp) ITerm.sₛ f
+  have hP2 : IStep (t_app (t_app (t_app ITerm.konst t_comp) f) (t_app ITerm.sₛ f))
+      (t_app t_comp (t_app ITerm.sₛ f)) :=
+    IStep.appL (IStep.konstβ t_comp f)
+  have hPf : IRed (t_app P f) (t_app t_comp (t_app ITerm.sₛ f)) :=
+    Relation.ReflTransGen.tail (Relation.ReflTransGen.single hP) hP2
+  have hCf' : IRed (t_app t_swap f) (t_app (t_app t_comp (t_app ITerm.sₛ f)) ITerm.konst) :=
+    Relation.ReflTransGen.trans hCf (IRed_app_left hPf)
+  have hCfx : IRed (t_app (t_app t_swap f) x)
+      (t_app (t_app (t_app t_comp (t_app ITerm.sₛ f)) ITerm.konst) x) :=
+    IRed_app_left hCf'
+  have hB := t_comp_red (t_app ITerm.sₛ f) ITerm.konst x
+  have hCfx' : IRed (t_app (t_app t_swap f) x)
+      (t_app (t_app ITerm.sₛ f) (t_app ITerm.konst x)) :=
+    Relation.ReflTransGen.trans hCfx hB
+  have hCfxy : IRed (t_app (t_app (t_app t_swap f) x) y)
+      (t_app (t_app (t_app ITerm.sₛ f) (t_app ITerm.konst x)) y) :=
+    IRed_app_left hCfx'
+  have hs : IStep (t_app (t_app (t_app ITerm.sₛ f) (t_app ITerm.konst x)) y)
+      (t_app (t_app f y) (t_app (t_app ITerm.konst x) y)) :=
+    IStep.sβ f (t_app ITerm.konst x) y
+  have hk : IStep (t_app (t_app f y) (t_app (t_app ITerm.konst x) y))
+      (t_app (t_app f y) x) :=
+    IStep.appR (IStep.konstβ x y)
+  exact Relation.ReflTransGen.trans hCfxy
+    (Relation.ReflTransGen.tail (Relation.ReflTransGen.single hs) hk)
+
+theorem t_swap_beta (f x y : TensorSpace) :
+    ExtEq (t_app (t_app (t_app t_swap f) x) y) (t_app (t_app f y) x) :=
+  ⟨t_app (t_app f y) x, t_swap_red f x y, Relation.ReflTransGen.refl⟩
 
 -- Define the derived S combinator term
-noncomputable def t_sₛ : TensorSpace :=
+def t_sₛ : TensorSpace :=
   t_app (t_app t_comp (t_app t_comp t_dup))
     (t_app (t_app t_swap (t_app (t_app t_comp t_comp) (t_app (t_app t_comp t_comp) t_swap))) t_norm)
 
@@ -106,7 +226,7 @@ theorem t_s_beta (x y z : TensorSpace) :
   exact ExtEq.trans h_step1 h_step2
 
 -- Denotation function from symbolic ISAR into TensorSpace
-noncomputable def denot : ITerm → TensorSpace
+def denot : ITerm → TensorSpace
   | .var n => t_var n
   | .norm => t_norm
   | .konst => t_konst
@@ -262,11 +382,43 @@ theorem toExtTensor_app (t u : LambdaQuotient) :
       unfold LambdaQuotient.app LambdaQuotient.toExtTensor t_app_ext Quotient.lift₂ Quotient.lift lambda_denot_ext lapp_raw
       rfl
 
--- Axiom: There exist two tensors in TensorSpace on which application is not trivial
-axiom obs_a : TensorSpace
-axiom obs_b : TensorSpace
-axiom non_trivial_observable : ¬ ExtEq (t_app obs_a obs_b) obs_a
-axiom non_trivial_observable2 : ¬ ExtEq (t_app (t_app obs_a obs_b) obs_b) obs_a
+def obs_a : TensorSpace := t_norm
+def obs_b : TensorSpace := t_konst
+
+theorem NormalI.norm : NormalI ITerm.norm := fun _ h => by cases h
+theorem NormalI.konst : NormalI ITerm.konst := fun _ h => by cases h
+
+theorem NormalI.konst_konst : NormalI (ITerm.app ITerm.konst ITerm.konst) := by
+  intro u h
+  cases h with
+  | appL hf => cases hf
+  | appR hx => cases hx
+
+theorem non_trivial_observable : ¬ ExtEq (t_app obs_a obs_b) obs_a := by
+  intro ⟨v, h1, h2⟩
+  dsimp [obs_a, obs_b, t_app, t_norm, t_konst] at h1 h2
+  have hv : ITerm.norm = v := IRed_normal_eq NormalI.norm h2
+  subst hv
+  have hkonst : IRed (ITerm.app ITerm.norm ITerm.konst) ITerm.konst :=
+    Relation.ReflTransGen.single (IStep.normβ _)
+  rcases IRed_confluence h1 hkonst with ⟨w, hw1, hw2⟩
+  have hw_norm : ITerm.norm = w := IRed_normal_eq NormalI.norm hw1
+  have hw_konst : ITerm.konst = w := IRed_normal_eq NormalI.konst hw2
+  cases hw_norm.trans hw_konst.symm
+
+theorem non_trivial_observable2 : ¬ ExtEq (t_app (t_app obs_a obs_b) obs_b) obs_a := by
+  intro ⟨v, h1, h2⟩
+  dsimp [obs_a, obs_b, t_app, t_norm, t_konst] at h1 h2
+  have hv : ITerm.norm = v := IRed_normal_eq NormalI.norm h2
+  subst hv
+  have hred : IRed (ITerm.app (ITerm.app ITerm.norm ITerm.konst) ITerm.konst)
+      (ITerm.app ITerm.konst ITerm.konst) :=
+    IRed_app_left (Relation.ReflTransGen.single (IStep.normβ _))
+  rcases IRed_confluence h1 hred with ⟨w, hw1, hw2⟩
+  have hw_norm : ITerm.norm = w := IRed_normal_eq NormalI.norm hw1
+  have hw_kk : ITerm.app ITerm.konst ITerm.konst = w :=
+    IRed_normal_eq NormalI.konst_konst hw2
+  cases hw_norm.trans hw_kk.symm
 
 -- Separation lemma: if two tensors behave differently when applied to some arguments, they are not extensionally equal
 theorem separation_lemma {A B : TensorSpace} (x y : TensorSpace) (h_neq : ¬ ExtEq (t_app (t_app A x) y) (t_app (t_app B x) y)) :

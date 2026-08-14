@@ -16,11 +16,15 @@ theorem HF_encode_empty : HF_encode HF.empty = InvariantLayer.empty := rfl
 theorem HF_encode_pair (x y : HF) :
     HF_encode (HF.pair x y) = InvariantLayer.pair (HF_encode x) (HF_encode y) := by
   unfold InvariantLayer.pair
-  rw [decode_layer_HF_encode, decode_layer_HF_encode]
+  apply HF_encode_eq_of_ExtEq
+  exact ExtEq_pair (ExtEq.symm (decode_layer_HF_encode x))
+    (ExtEq.symm (decode_layer_HF_encode y))
 
 theorem HF_encode_union (x y : HF) :
     HF_encode (HF.union x y) = InvariantLayer.union (HF_encode x) (HF_encode y) := by
   unfold InvariantLayer.union
-  rw [decode_layer_HF_encode, decode_layer_HF_encode]
+  apply HF_encode_eq_of_ExtEq
+  exact ExtEq_union (ExtEq.symm (decode_layer_HF_encode x))
+    (ExtEq.symm (decode_layer_HF_encode y))
 
 end ISAR

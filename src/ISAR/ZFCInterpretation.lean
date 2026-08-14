@@ -33,9 +33,7 @@ noncomputable abbrev HF_Kernel : Kernel where
   sound := HF_sound
   decode := encode_raw
   decode_view := encode_raw_decode_term
-  view_eq_decode := fun c => by
-    rw [decode_term_encode_raw]
-    exact ExtEq.refl _
+  view_eq_decode := decode_term_encode_raw
   decode_eq := HF_decode_eq
 
 /--

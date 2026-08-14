@@ -83,3 +83,14 @@ theorem toNat_union (x y : HF) : toNat (HF.union x y) = toNat x ||| toNat y := b
 theorem mem_union (x y z : HF) : Mem z (HF.union x y) ↔ Mem z x ∨ Mem z y := by
   unfold Mem
   rw [toNat_union, Nat.testBit_or, bool_or_iff]
+
+theorem ExtEq_pair {x₁ x₂ y₁ y₂ : HF} (hx : ExtEq x₁ x₂) (hy : ExtEq y₁ y₂) :
+    ExtEq (HF.pair x₁ y₁) (HF.pair x₂ y₂) := by
+  unfold ExtEq HF.pair
+  simp [toNat]
+  rw [hx, hy]
+
+theorem ExtEq_union {x₁ x₂ y₁ y₂ : HF} (hx : ExtEq x₁ x₂) (hy : ExtEq y₁ y₂) :
+    ExtEq (HF.union x₁ y₁) (HF.union x₂ y₂) := by
+  unfold ExtEq
+  rw [toNat_union, toNat_union, hx, hy]

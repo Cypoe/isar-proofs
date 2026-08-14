@@ -4,9 +4,49 @@ This document provides a comprehensive inventory of proof dependencies, first-pr
 
 ---
 
-## Inventory: `sorry` / `axiom` / `noncomputable` (after fixes)
+## Program status (2026-08-14)
 
-Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`. Full JGS BTA for all ISAR remains **open** (not claimed).
+Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`.
+
+The formal core now has: confluence and unique NFs; `cd` as a **normalizing strategy** on `HasNF` (`finite_cd_reaches_NF_iff`); online Jones–Gomard–Sestoft PE for the whole `IStep` signature (`JGS_PE`); a tensor **term model**; constructed HF Ackermann / ISK Gödel numbering; holonomic closure theorems with one named analytic axiom.
+
+### Done (this cycle)
+
+| Item | Where | Honest claim |
+| :--- | :--- | :--- |
+| Online PE covering every `IStep` rule | `Futamura.lean` (`JGS_PE`) | Object-language signature is covered. **Not** 1993 polyvariant offline mix / compiler-generator. |
+| Finite `cd` unique section | `CanonicalRepresentative.lean` | `HasNF ↔ ∃ k, NormalI (cd_loop_fuel k t)`. Fuel is parallel-chain length. `¬HasNF` ⇒ no fuel yields `NormalI` (contrapositive; expected). Linear fragment still has explicit `term_size` fuel. |
+| HF Ackermann + ISK Gödel | `HFSetEncoding.lean` | `toNat_fromNat` theorem; `fromNat_toNat_ext` as `ExtEq`. |
+| Tensor combinators | `TensorSemantics.lean` | `TensorSpace := ITerm`; `ExtEq` = `IRed` joinability; B/C/W; β-laws are theorems. |
+| Holonomic closure | `Holonomic*.lean` | Residual certificates proved. Sole named axiom: `exp_exp_not_holonomic`. |
+
+### Named axioms that stay named
+
+| Item | Why it is not a theorem |
+| :--- | :--- |
+| `layerToNat` / `natToLayer` | Countable bijection on the OperEq **quotient**. `canonical_rep` cannot give both inverses. |
+| `quantityToNat` / `natQuantity` | `Quantity` carries `String` / `Float`, which block `Encodable`. |
+| `exp_exp_not_holonomic` | Stanley/Bell analytic fact; not in Mathlib. |
+| `ISAR_UAT` and completion/embedding axioms | Analytic UAT + metric completion interface (`ISARApproximation.lean`). |
+
+### Where to go next (priority order)
+
+1. **JGS 1993 mix** — polyvariant *offline* BTA and a compiler-generator (`mix` as `spec spec`) of Jones–Gomard–Sestoft quality. `JGS_PE` is online PE only.
+2. **Constructive `HasNF` section** — `nf_of_term` still uses `Classical.choose` even though fuel exists. Thread a concrete `IRed`/`ParN` witness instead of choosing an NF, or keep choice and document it as the remaining AC on the WN side.
+3. **Kernel terminality stress test** — a degenerate `Kernel` false-variant so `ISAR_Kernel_terminal` cannot hold of a vacuous interface.
+4. **SARI non-vacuity** — replace `S := True` and `I` by fiat with a derived state split; adjacency via pairing `O` rather than unary `B` (`STATUS` §4).
+5. **Approximation stack** — replace `ISAR_UAT` / `KernelAddressLimit` axioms by Mathlib completion + a cited UAT theorem, or keep them named and stop expanding that file.
+6. **Quotient countability** — `layerToNat` stays named unless a different encoding of `InvariantLayer` (not `canonical_rep`) supplies both inverses.
+
+Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; repair the withdrawn quine whitepaper.
+
+---
+
+## Inventory: `sorry` / `axiom` / `noncomputable`
+
+Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`.
+
+Honest JGS claim: `JGS_PE` is **online** PE covering every `IStep` constructor (`normβ`/`konstβ`/`compβ`/`sβ`) plus a binding-time sketch. Jones–Gomard–Sestoft 1993 **polyvariant offline mix / compiler-generator** remains **open** (not claimed).
 
 ### Sorry
 
@@ -21,10 +61,11 @@ Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`. Full 
 | `HFSet.lean` | `testBit_zero_number`, `testBit_shiftl` | **fixed → theorems** | Now `Nat.zero_testBit` / `testBit_two_pow` proofs. |
 | `IotaView.lean` | `iota_encode_decode_canonical` | **fixed → removed** | Was a false-risk “NF stays in ι-image” claim. Dialect now observes `InvariantLayer` (computable `id` decode). |
 | `HolonomicCompose.lean` | `exp_exp_not_holonomic` | **OK** | Named Stanley/Bell analytic fact; not in Mathlib. |
-| `HFSetEncoding.lean` | `subToNat`/`natToSub`/`fromNat`/`layerToNat` (+ inverses) | **OK** | Modeling countable bijection bridges; not derived. |
-| `QuantityKernel.lean` | `quantityToNat` / `natQuantity` (+ inverses) | **OK** | Same style bridge (Quantity has `String`/`Float`). |
-| `TensorSemantics.lean` | `TensorSpace`, `ExtEq`, combinators, β-laws, `obs_*` | **OK** | Abstract denotational model. |
-| `ISARApproximation.lean` | `ISAR_UAT`, limit/embedding/bijection axioms | **OK** | Analytic UAT / topological completion interface. |
+| `HFSetEncoding.lean` | `fromNat` / `toNat` / `subToNat` / `natToSub` | **constructed** | Ackermann coding + ISK Gödel numbering (`Nat.pair`). `toNat_fromNat` is a theorem; `fromNat_toNat_ext` is `ExtEq`. |
+| `HFSetEncoding.lean` | `layerToNat` / `natToLayer` (+ inverses) | **named** | Countable bijection on the OperEq quotient. Cannot be both inverses via `canonical_rep`. |
+| `QuantityKernel.lean` | `quantityToNat` / `natQuantity` (+ inverses) | **named** | `Quantity` carries `String`/`Float`, which block `Encodable`. |
+| `TensorSemantics.lean` | *(none)* | **constructed** | Term model: `TensorSpace := ITerm`, `ExtEq` = `IRed` joinability, B/C/W combinators; β-laws are theorems. |
+| `ISARApproximation.lean` | `ISAR_UAT`, limit/embedding/bijection axioms | **named** | Analytic UAT / topological completion interface. |
 
 ### Noncomputable (classified)
 
@@ -35,11 +76,11 @@ Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`. Full 
 | `BasisCompleteness` | `term_signature`, `term_matrix` | **fixed → computable** | Were unnecessarily marked. |
 | `InvariantLayer` | `nf_of_term`, `canonical_rep` | **OK (necessary)** | `Classical.choose` on `HasNF` / `Quotient.exists_rep`. Explicit `cd` path: `canonical_nf` / `cd_loop_fuel`. |
 | `AdmissibleRecurrence` | `recurrence_to_Kernel` | **OK (necessary)** | Uses `canonical_rep` section. |
-| `HFSetEncoding` / `HFSetSemantics` / `ZFCInterpretation` / `QuantityKernel` | encode/decode/kernels | **OK** | Via encoding axioms + `canonical_rep`. |
+| `HFSetEncoding` / `HFSetSemantics` / `ZFCInterpretation` / `QuantityKernel` | encode/decode/kernels | **OK** | Gödel/Ackermann constructed; quotient/Quantity bijections remain named; `canonical_rep` for sections. |
 | `ViewUnification` | `encode_from_sig`, `eval_to_nf`, SN dialect bridge | **OK** | `Classical.choose` / WF recursion choice. |
 | `Holonomic*.lean` | `noncomputable section` | **OK (necessary)** | Mathlib analysis / `ℝ` / C∞. |
 | `ISARApproximation` | continuous maps / realizations | **OK (necessary)** | Topology on `ℝ`. |
-| `TensorSemantics` | `denot`, quotients | **OK** | Built on axiomatic tensor carrier. |
+| `TensorSemantics` | `denot_ext`, quotients | **OK** | Term-model `denot` is computable; quotient lifts still use choice. |
 
 **Necessity summary:** remaining `noncomputable` is Classical.choice / `exists_rep` for OperEq sections, Mathlib analysis, or axiom-backed bridges — not silent gaps.
 
@@ -55,10 +96,11 @@ Sorry-free compilation does **not** imply non-vacuous content. Checklist for mai
 | `morphism_uniqueness` / `ISAR_Kernel_terminal` | Conditional | Unique morphisms into `ISAR_Kernel` **relative to the `Kernel` interface**. If that interface is too weak, the category collapses and everything looks terminal — schedule a false-variant (degenerate Kernel) as a regression test. Expected axioms today may include `propext` / `Classical.choice` via quotient infrastructure. |
 | `futamura_first` (subst layer) | Substantive but narrow | Mix equation at the meta-level specializer; does not by itself give optimizing PE. |
 | `futamura_second` / `futamura_third` (pre-PESetup) | Formulation-sensitive | Honest form needs object-level `specTerm` + `selfApp` + **nontriviality**; trivial specializers satisfy mix alone. |
-| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations. `TrivialPE`: mix/selfApp by `rfl`, `¬ Nontrivial`. `OptimizingPE`: identity/konstβ fragment folds + tagged residual; mix by size induction, `selfApp` by `rfl`, **`Nontrivial` proved** (`norm·konst`). Full JGS BTA for all ISAR remains open. |
+| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations. `TrivialPE`: mix/selfApp by `rfl`, `¬ Nontrivial`. `OptimizingPE`: identity/konstβ fragment folds + tagged residual; mix by size induction, `selfApp` by `rfl`, **`Nontrivial` proved** (`norm·konst`). `JGS_PE`: online PE for the full `IStep` signature (`sβ` unfolds once into a tagged residual); `Nontrivial` proved. 1993 polyvariant offline mix remains open. |
+| Finite `cd` unique section | Substantive | Unique NF iff `HasNF`. Finite `cd` reaches that NF iff `HasNF` (`finite_cd_reaches_NF_iff`); fuel is parallel-chain length, not `term_size`. `¬HasNF` ⇒ no fuel yields `NormalI`. Linear fragment still supplies explicit `term_size` fuel. |
+| HF encoding axioms in `HFSetEncoding` | Split | Gödel/Ackermann constructed; `layerToNat` remains a named quotient bijection. |
 | `recurrence_to_Kernel` | Bridge | No `Quotient.out` on the carrier quotient: lift decode → `InvariantLayer`, then `canonical_rep` / `cd_loop_fuel`. Unrestricted `canonical_rep_eq` is now a **theorem** (`nf_of_term` uses NF or `exists_rep`; never the false `norm` fallback). |
 | `fixed_point` in SARI (`I ↔ no R-step`) | Often definitional | See §4; treat as modeling choice, not deep content. |
-| HF encoding axioms in `HFSetEncoding` | Axiomatic bridges | Not derived; do not market as proved. |
 
 Procedure for re-check after edits: `#print axioms morphism_uniqueness` (and peers) in a Lean session — reject `sorryAx`; expect `Classical.choice` / `propext` until fully constructive sections land.
 
@@ -134,11 +176,12 @@ The following structures and theorems are derived constructively from first-prin
      `decode` into `InvariantLayer` (AC-free) and selecting an ISK representative via
      `canonical_rep` / complete development (`CanonicalRepresentative.lean`).
    - No longer uses `Quotient.out` on the carrier quotient.
+   - Finite `cd` is a unique NF section on `HasNF`; `¬HasNF` terms have no fuel that yields `NormalI`.
 
 ### Architectural Decision: Modular Bridge vs. Monolithic Rebase
 To unify the stack, we chose to maintain **independence** between the `KernelCategory` framework and `AdmCarrier`, utilizing `recurrence_to_Kernel` as a **bridge lemma**:
 - *Why*: Forcing all category-theoretic semantic views (`Kernel`) to be derived from `AdmCarrier` quotients would impose severe proof obligations on simple views (e.g. HF sets, Stack VMs) that do not naturally use IOB structures.
-- *Representatives*: Carrier decode lifts to `InvariantLayer` without choice; the OperEq section uses `cd` / `cd_loop_fuel` on the linear fragment (`canonical_nf`) and `canonical_rep` in general (`HasNF` choose, else class `exists_rep`). Unrestricted `canonical_rep_eq` is a theorem. Explicit `cd`-based theorems live in `CanonicalRepresentative.lean`.
+- *Representatives*: Carrier decode lifts to `InvariantLayer` without choice; the OperEq section uses `cd` / `cd_loop_fuel` on `HasNF` (`finite_cd_reaches_NF_iff`) and `canonical_rep` in general (`HasNF` choose, else class `exists_rep`). Unrestricted `canonical_rep_eq` is a theorem. Explicit `cd`-based theorems live in `CanonicalRepresentative.lean`.
 
 ---
 
@@ -169,4 +212,6 @@ During the current implementation cycle of `AdmissibleRecurrence.lean`, several 
    - Defining $I(q)$ explicitly as the absence of outgoing transitions makes the `fixed_point` equivalence proof a definitional tautology. It does not yet derive the invariants from the outer carrier self-composition functor $F(c) = c$.
 4. **Roadmap to Monolithic Rebase**:
    - To make a full rebase of `KernelCategory` on `QuotientCarrier` mathematically meaningful, a future lemma must show that if a carrier $C$ satisfies the self-composition closure condition $F(C) \cong C$, the induced `AdmissibleSARI` on the quotient space inherits a non-trivial, derived state-space split ($S \subset C$) rather than the constant-True placeholder. Until then, `recurrence_to_Kernel` remains a valuable and modular bridge lemma.
+
+Current ordered next steps for the whole stack (JGS mix, constructive `HasNF` section, Kernel false-variant, SARI, approximation axioms, `layerToNat`) are listed in **Program status** at the top of this file.
 
