@@ -305,14 +305,13 @@ partial def cd_loop (t : ISKSubtype) : ISKSubtype :=
 
 /--
 Representative of an `OperEq`-class on concrete terms.
-* If `HasNF`, pick the unique normal form (AC on the nonempty NF fiber).
-* Otherwise pick any class representative via `Quotient.exists_rep` (SKI is not SN,
-  so finite `cd` may not reach a unique NF; the old `⟨norm, _⟩` fallback was not
-  OperEq-related in general and made unrestricted `canonical_rep_eq` false).
+* If `HasNF`, pick some NF (AC on the nonempty NF fiber). The *fuelled* Gross–Knuth
+  section is `nf_of_HasNF_fuel` / `nf_of_HasNF` in `CanonicalRepresentative.lean`.
+* Otherwise pick any class representative via `Quotient.exists_rep` (SKI is not SN;
+  no finite `cd` yields `NormalI`). The old `⟨norm, _⟩` fallback was not
+  OperEq-related in general.
 
 Computational path: `@[implemented_by cd_loop]` (iterated complete development).
-Preferred *proved* section on the linear fragment: `canonical_nf` / `cd_loop_fuel`
-in `CanonicalRepresentative.lean`.
 -/
 @[implemented_by cd_loop]
 noncomputable def nf_of_term (t : ISKSubtype) : ISKSubtype :=

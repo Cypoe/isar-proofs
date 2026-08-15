@@ -359,7 +359,9 @@ are exactly `normβ`, `konstβ`, `compβ`, `sβ`. This specializer folds all fou
 -/
 
 /-- Offline binding-time sketch: `swap` is the dynamic hole; other atoms are static;
-    application is static iff both sides are. -/
+    application is static iff both sides are. Monovariant: no call strings, no
+    program-point splitting. Unused by `jgs_spec` (online PE). Lemmas below
+    relate `bta` to specialization; they do **not** give 1993 polyvariant mix. -/
 inductive BindingTime where
   | static
   | dynamic
@@ -372,6 +374,56 @@ def bta : ITerm → BindingTime
       | BindingTime.static, BindingTime.static => BindingTime.static
       | _, _ => BindingTime.dynamic
   | _ => BindingTime.static
+
+def containsSwap : ITerm → Bool
+  | ITerm.swap => true
+  | ITerm.app f x => containsSwap f || containsSwap x
+  | _ => false
+
+theorem bta_swap : bta ITerm.swap = BindingTime.dynamic := rfl
+
+theorem bta_norm : bta ITerm.norm = BindingTime.static := rfl
+
+theorem bta_konst : bta ITerm.konst = BindingTime.static := rfl
+
+theorem bta_dup : bta ITerm.dup = BindingTime.static := rfl
+
+theorem bta_comp : bta ITerm.comp = BindingTime.static := rfl
+
+theorem bta_s : bta ITerm.sₛ = BindingTime.static := rfl
+
+theorem bta_var (n : Nat) : bta (ITerm.var n) = BindingTime.static := rfl
+
+theorem bta_app_static (f x : ITerm) :
+    bta (ITerm.app f x) = BindingTime.static ↔
+      bta f = BindingTime.static ∧ bta x = BindingTime.static := by
+  cases hf : bta f <;> cases hx : bta x <;> simp [bta, hf, hx]
+
+theorem bta_eq_dynamic_iff_containsSwap (t : ITerm) :
+    bta t = BindingTime.dynamic ↔ containsSwap t = true := by
+  induction t with
+  | var n => simp [bta, containsSwap]
+  | norm => simp [bta, containsSwap]
+  | konst => simp [bta, containsSwap]
+  | dup => simp [bta, containsSwap]
+  | swap => simp [bta, containsSwap]
+  | comp => simp [bta, containsSwap]
+  | sₛ => simp [bta, containsSwap]
+  | app f x ihf ihx =>
+      cases hf : bta f <;> cases hx : bta x
+      { have hf' : containsSwap f = false := by
+          have : ¬ bta f = BindingTime.dynamic := by simp [hf]
+          simpa [ihf] using this
+        have hx' : containsSwap x = false := by
+          have : ¬ bta x = BindingTime.dynamic := by simp [hx]
+          simpa [ihx] using this
+        simp [bta, containsSwap, hf, hx, hf', hx'] }
+      { have hx' : containsSwap x = true := (ihx.mp hx)
+        simp [bta, containsSwap, hf, hx, hx'] }
+      { have hf' : containsSwap f = true := (ihf.mp hf)
+        simp [bta, containsSwap, hf, hx, hf'] }
+      { have hf' : containsSwap f = true := (ihf.mp hf)
+        simp [bta, containsSwap, hf, hx, hf'] }
 
 /-- Online specializer covering every `IStep` constructor. -/
 def jgs_spec : ITerm → ITerm → ITerm
@@ -391,6 +443,102 @@ def jgs_spec : ITerm → ITerm → ITerm
 termination_by p => term_size p
 decreasing_by
   all_goals (simp [term_size]; omega)
+
+theorem jgs_spec_norm (s : ITerm) : jgs_spec ITerm.norm s = ITerm.norm := by
+  simp [jgs_spec]
+
+theorem jgs_spec_konst (s : ITerm) : jgs_spec ITerm.konst s = ITerm.konst := by
+  simp [jgs_spec]
+
+theorem jgs_spec_comp_atom (s : ITerm) : jgs_spec ITerm.comp s = ITerm.comp := by
+  simp [jgs_spec]
+
+theorem jgs_spec_s_atom (s : ITerm) : jgs_spec ITerm.sₛ s = ITerm.sₛ := by
+  simp [jgs_spec]
+
+theorem jgs_spec_static_atom_independent (s₁ s₂ : ITerm) :
+    jgs_spec ITerm.norm s₁ = jgs_spec ITerm.norm s₂ ∧
+    jgs_spec ITerm.konst s₁ = jgs_spec ITerm.konst s₂ ∧
+    jgs_spec ITerm.comp s₁ = jgs_spec ITerm.comp s₂ ∧
+    jgs_spec ITerm.sₛ s₁ = jgs_spec ITerm.sₛ s₂ ∧
+    jgs_spec ITerm.dup s₁ = jgs_spec ITerm.dup s₂ := by
+  simp [jgs_spec]
+
+/--
+Monovariant *offline* specializer: fold a redex only when `bta` classifies the
+whole redex as static. Static S unfolds once into a residual with no `s` tag
+(no recursion — size may grow). Dynamic terms are tagged residuals.
+This is still monovariant (one division). It is **not** 1993 polyvariant mix.
+-/
+def offline_spec : ITerm → ITerm → ITerm
+  | ITerm.app ITerm.norm body, s =>
+      if bta (ITerm.app ITerm.norm body) = BindingTime.static then
+        offline_spec body s
+      else
+        ITerm.app ITerm.dup (pair (ITerm.app ITerm.norm body) s)
+  | ITerm.app (ITerm.app ITerm.konst x) y, s =>
+      if bta (ITerm.app (ITerm.app ITerm.konst x) y) = BindingTime.static then
+        offline_spec x s
+      else
+        ITerm.app ITerm.dup (pair (ITerm.app (ITerm.app ITerm.konst x) y) s)
+  | ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x, s =>
+      if bta (ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x) = BindingTime.static then
+        offline_spec (ITerm.app f (ITerm.app g x)) s
+      else
+        ITerm.app ITerm.dup
+          (pair (ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x) s)
+  | ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z, s =>
+      if bta (ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z) = BindingTime.static then
+        ITerm.app (ITerm.app x z) (ITerm.app y z)
+      else
+        ITerm.app ITerm.dup
+          (pair (ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z) s)
+  | ITerm.norm, _ => ITerm.norm
+  | ITerm.konst, _ => ITerm.konst
+  | ITerm.sₛ, _ => ITerm.sₛ
+  | ITerm.dup, _ => ITerm.dup
+  | ITerm.comp, _ => ITerm.comp
+  | ITerm.var n, _ => ITerm.var n
+  | p, s =>
+      if bta p = BindingTime.static then p
+      else ITerm.app ITerm.dup (pair p s)
+termination_by p => term_size p
+decreasing_by
+  all_goals (simp [term_size]; omega)
+
+theorem offline_spec_static_atom_independent (s₁ s₂ : ITerm) :
+    offline_spec ITerm.norm s₁ = offline_spec ITerm.norm s₂ ∧
+    offline_spec ITerm.konst s₁ = offline_spec ITerm.konst s₂ ∧
+    offline_spec ITerm.comp s₁ = offline_spec ITerm.comp s₂ ∧
+    offline_spec ITerm.sₛ s₁ = offline_spec ITerm.sₛ s₂ ∧
+    offline_spec ITerm.dup s₁ = offline_spec ITerm.dup s₂ := by
+  simp [offline_spec]
+
+theorem offline_spec_I_static (body s₁ s₂ : ITerm)
+    (ht : bta (ITerm.app ITerm.norm body) = BindingTime.static) :
+    offline_spec (ITerm.app ITerm.norm body) s₁ =
+      offline_spec body s₁ := by
+  simp [offline_spec, ht]
+
+theorem offline_spec_K_static (x y s₁ : ITerm)
+    (ht : bta (ITerm.app (ITerm.app ITerm.konst x) y) = BindingTime.static) :
+    offline_spec (ITerm.app (ITerm.app ITerm.konst x) y) s₁ =
+      offline_spec x s₁ := by
+  simp [offline_spec, ht]
+
+theorem offline_spec_B_static (f g x s₁ : ITerm)
+    (ht : bta (ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x) =
+      BindingTime.static) :
+    offline_spec (ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x) s₁ =
+      offline_spec (ITerm.app f (ITerm.app g x)) s₁ := by
+  simp [offline_spec, ht]
+
+theorem offline_spec_S_static (x y z s₁ s₂ : ITerm)
+    (ht : bta (ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z) =
+      BindingTime.static) :
+    offline_spec (ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z) s₁ =
+      offline_spec (ITerm.app (ITerm.app (ITerm.app ITerm.sₛ x) y) z) s₂ := by
+  simp [offline_spec, ht]
 
 def jgs_run : ITerm → ITerm → ITerm
   | ITerm.swap, data =>
@@ -487,6 +635,19 @@ def JGS_PE : PESetup where
 theorem JGS_PE_nontrivial : Nontrivial JGS_PE :=
   ⟨opt_witness_p, ITerm.konst, by
     simp only [JGS_PE, jgs_spec, opt_witness_p, pe_cost, term_size]
+    omega⟩
+
+/-- Extra `Nontrivial` witness: a static `compβ` redex folds to `norm`. -/
+def jgs_comp_witness : ITerm :=
+  ITerm.app (ITerm.app (ITerm.app ITerm.comp ITerm.norm) ITerm.norm) ITerm.norm
+
+theorem jgs_spec_comp_witness (s : ITerm) :
+    jgs_spec jgs_comp_witness s = ITerm.norm := by
+  simp [jgs_spec, jgs_comp_witness]
+
+theorem JGS_PE_nontrivial_comp : Nontrivial JGS_PE :=
+  ⟨jgs_comp_witness, ITerm.konst, by
+    simp only [JGS_PE, jgs_spec, jgs_comp_witness, pe_cost, term_size]
     omega⟩
 
 theorem specialize_ISKTerm (t : ITerm) (ht : ISKTerm t) (s_env : Nat → Option ITerm) :

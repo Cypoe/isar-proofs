@@ -2,13 +2,22 @@ ISAR.SK
 ISAR.ITerm
 ISAR.SKStep
 ISAR.IStep
+ISAR.ParStep
+ISAR.ParStep_cd
 ISAR.IRed_confluence
 ISAR.isar_fragment_unique_normal_forms
+ISAR.derived_s_beta
+ISAR.translate_preserves_step
 ISAR.ISKSubtype
 ISAR.OperEq
 ISAR.InvariantLayer
 ISAR.InvariantLayer.app
 ISAR.InvariantLayer.canonical_rep
+ISAR.dupCount
+ISAR.cd_size_le_LinearIK
+ISAR.cd_size_lt_LinearIK
+ISAR.cd_loop_fuel
+ISAR.sufficient_fuel_correct
 ISAR.Kernel
 ISAR.ISAR_Kernel
 ISAR.ComputableISAR_Kernel
@@ -27,6 +36,7 @@ HF
 ExtEq
 ISAR.HF_encode
 ISAR.decode_layer_HF_encode
+ISAR.HF_encode_decode_layer
 ISAR.HF_Kernel
 ISAR.HF_Kernel_factorization
 ISAR.TRS_Dialect
@@ -63,7 +73,7 @@ ISAR.topological_extension_bijection
 ISAR.ISAR_representation
 ISAR.physical_system_has_address
 ISAR.specialize
-ISAR.SpecializerCorrect
+ISAR.PESetup
 ISAR.futamura_first
 ISAR.futamura_second
 ISAR.futamura_third
@@ -71,6 +81,7 @@ ISAR.ObservationalIsomorphism
 ISAR.AdmissibleDialect
 ISAR.isomorphism_unification
 ISAR.TransitionSystem
+ISAR.IsClosed
 ISAR.closure_preserved_under_reachability
 ISAR.AnchorDependentSystem
 ISAR.referentially_open_requires_anchor

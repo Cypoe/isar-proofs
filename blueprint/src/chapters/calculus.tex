@@ -149,7 +149,7 @@ A noncomputable function mapping each equivalence class to its canonical represe
 Local duplication counts, size-decrease properties of complete development, and fuel correctness are verified in \href{https://github.com/cypoe/isar-proofs/blob/master/src/ISAR/Kernel.lean}{\texttt{src/ISAR/Kernel.lean}} and \href{https://github.com/cypoe/isar-proofs/blob/master/src/ISAR/InvariantLayer.lean}{\texttt{src/ISAR/InvariantLayer.lean}}. We define the linear duplication fragment \texttt{LinearIKTerm} and its termination metrics, which share a direct isomorphism with linear interaction nets.
 
 \begin{definition}[Linear Duplication]
-\lean{ISAR.InvariantLayer.dupCount}
+\lean{ISAR.dupCount}
 The function \texttt{dupCount} tracks the duplication multiplicity of a term. For the linear fragment \texttt{LinearIKTerm}, we verify that duplication is strictly localized:
 $$\text{dupCount } t = 0$$
 \end{definition}
@@ -158,7 +158,7 @@ We prove that complete development (\texttt{cd}) strictly decreases term size fo
 
 \begin{theorem}[Complete Development Size Decrease]
 \lean{ISAR.cd_size_le_LinearIK, ISAR.cd_size_lt_LinearIK}
-\uses{ISAR.InvariantLayer.dupCount}
+\uses{ISAR.dupCount}
 For any term $t$ in the \texttt{LinearIKTerm} fragment:
 $$\text{term\_size}(\text{cd } t) \leq \text{term\_size}(t)$$
 And if $t \neq \text{cd } t$, the inequality is strict.

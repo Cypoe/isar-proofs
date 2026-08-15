@@ -282,4 +282,44 @@ theorem cd_loop_fuel_unique_section_of_HasNF (t : ISKSubtype) (ht : HasNF t)
       (isar_fragment_unique_normal_forms t.property
         (IRed_of_OperEq_normal (OperEq_cd_loop_fuel k t) hk) hk hn.left hn.right)
 
+/-- Explicit Gross–Knuth section: the fuel is a parameter, not a chosen NF. -/
+def nf_of_HasNF_fuel (t : ISKSubtype) (k : Nat)
+    (_hk : NormalI (cd_loop_fuel k t).val) : ISKSubtype :=
+  cd_loop_fuel k t
+
+theorem nf_of_HasNF_fuel_normal (t : ISKSubtype) (k : Nat)
+    (hk : NormalI (cd_loop_fuel k t).val) :
+    NormalI (nf_of_HasNF_fuel t k hk).val :=
+  hk
+
+theorem nf_of_HasNF_fuel_OperEq (t : ISKSubtype) (k : Nat)
+    (hk : NormalI (cd_loop_fuel k t).val) :
+    OperEq (nf_of_HasNF_fuel t k hk) t :=
+  OperEq_cd_loop_fuel k t
+
+/-- `HasNF` still uses choice to pick *fuel*, then the representative is `cd_loop_fuel`.
+    Not computable; `¬HasNF` remains `exists_rep` in `nf_of_term`. -/
+noncomputable def nf_of_HasNF (t : ISKSubtype) (ht : HasNF t) : ISKSubtype :=
+  cd_loop_fuel (Classical.choose (HasNF_cd_loop_fuel t ht)) t
+
+theorem nf_of_HasNF_normal (t : ISKSubtype) (ht : HasNF t) :
+    NormalI (nf_of_HasNF t ht).val :=
+  Classical.choose_spec (HasNF_cd_loop_fuel t ht)
+
+theorem nf_of_HasNF_OperEq (t : ISKSubtype) (ht : HasNF t) :
+    OperEq (nf_of_HasNF t ht) t :=
+  OperEq_cd_loop_fuel (Classical.choose (HasNF_cd_loop_fuel t ht)) t
+
+theorem nf_of_HasNF_eq_nf_of_term (t : ISKSubtype) (ht : HasNF t) :
+    (nf_of_HasNF t ht).val = (nf_of_term t).val := by
+  have hn := nf_of_HasNF_normal t ht
+  have hred := IRed_of_OperEq_normal (nf_of_HasNF_OperEq t ht) hn
+  have hterm : nf_of_term t = Classical.choose ht := by
+    unfold nf_of_term
+    rw [dif_pos ht]
+  have hspec : IRed t.val (Classical.choose ht).val ∧ NormalI (Classical.choose ht).val :=
+    Classical.choose_spec ht
+  simpa [hterm] using
+    (isar_fragment_unique_normal_forms t.property hred hn hspec.1 hspec.2)
+
 end ISAR

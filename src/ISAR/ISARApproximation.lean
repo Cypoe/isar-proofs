@@ -33,8 +33,8 @@ The ISAR kernel has two kinds of universality:
   parametrised by (αI, αR, αA, αS) ∈ ℝ⁴. No ℚ→ℝ gap.
 - Proves constructively that the continuous-limit update map `activatedUpdate` is
   well-defined and continuous, reducing the axiom space.
-- States the **ISAR Universal Approximation Theorem** and **ISAR Representation Theorem**
-  to unify the metric and topological properties of the continuous limit.
+- States named axioms `ISAR_UAT` (analytic, not proved) and a named completion
+  interface (`KernelAddressLimit`, …). `KernelAddress` has no metric.
 
 ## Why K² = 0 is the key structural property
 
@@ -64,6 +64,11 @@ the earlier `QMat`/`Rat` version, `ISARUpdateR` lives in ℝ⁴ from the start �
 All other structures (Activation, nonPolynomial, RawAddress, KernelAddress, activatedUpdate,
 ISAR_representation, kernelAddressEmbedding_injective, kernelAddressEmbedding_dense)
 are defined or proved concretely.
+
+**Freeze (2026-08-14):** `KernelAddress` has no `MetricSpace`/`UniformSpace` instance,
+so `KernelAddressLimit` is not Mathlib `Metric.Completion`. Axioms stay named.
+`ISAR_UAT` remains a named analytic axiom (not a theorem). Next wiring is
+`Metric.Completion` only, after a metric exists. Do not add physical-system axioms.
 -/
 
 namespace ISAR
@@ -188,6 +193,12 @@ observational (functional) equivalence, mirroring the discrete `InvariantLayer`.
 **Axiom inventory** (all intentional — see ADR-003):
   ISAR_UAT, KernelAddressLimit, continuousRealizationLimit, kernelAddressEmbedding,
   continuousRealizationLimit_coe, topological_extension_bijection.
+
+**Freeze (2026-08-14):** `KernelAddress` has no `MetricSpace`/`UniformSpace` instance
+(functional quotient; `C(ℝᵈ, ℝᵏ)` on unbounded Euclidean domains is compact-open,
+not a global supremum metric). Completion axioms stay named. Next wiring is
+Mathlib `Metric.Completion` / `UniformSpace.Completion` only, after a metric exists.
+`ISAR_UAT` stays a named analytic axiom (not a theorem).
 -/
 
 /-- A nonlinear activation function: continuous real functions ℝ → ℝ. -/
@@ -405,18 +416,15 @@ def InvariantLayerContinuousBridge : InvariantLayer ≃ Quotient ISAR.operEqSeto
   Equiv.refl _
 
 /--
-**ISAR Universal Approximation Theorem.**
+**Named axiom `ISAR_UAT` (not a theorem).**
 
 For any continuous function f : ℝᵈ → ℝᵏ, a non-polynomial activation σ,
 and a compact domain K ⊆ ℝᵈ, the finite-grid iterated ISAR update can
 approximate f uniformly on K to arbitrary precision ε > 0.
 
-**Mathematical Motivation**: The function space $C(\mathbb{R}^d, \mathbb{R}^k)$ carries the compact-open
-topology (the topology of uniform convergence on compact sets). This theorem states that the realization
-space is dense in $C(\mathbb{R}^d, \mathbb{R}^k)$ under the compact-open topology.
-**Citation**: Cites the Leshno, Lin, Pinkus, and Schocken (1993) universal approximation theorem, which
-establishes that a continuous activation function $\sigma$ is universal on compact subsets if and only if
-it is non-polynomial (generalizing Cybenko 1989 / Hornik 1991, which require boundedness).
+**Why named**: Leshno, Lin, Pinkus, and Schocken (1993) is the cited analytic fact
+(non-polynomial continuous σ iff universal on compact sets; generalizing Cybenko 1989 /
+Hornik 1991, which require boundedness). Not proved in this repository.
 -/
 axiom ISAR_UAT
     (d k : Nat)
@@ -431,51 +439,44 @@ axiom ISAR_UAT
         ‖realizeRaw d k σ θ x - f x‖ < ε
 
 /--
-The continuous limit/completion of the quotiented address space.
+Named placeholder for a completion of `KernelAddress`.
 
-**Mathematical Motivation**: Represents the metric completion of `KernelAddress d k σ` (with the metric pulled back
-from the supremum metric on $C(\mathbb{R}^d, \mathbb{R}^k)$).
-**Why Axiomatic**: Avoids formalizing the metric space completion construction (`Metric.Completion` / `UniformSpace.Completion`)
-directly on `KernelAddress` in Lean, instead axiomatizing the resulting completion type.
+**Not constructed:** `KernelAddress` has no `MetricSpace`/`UniformSpace` instance
+(`C(ℝᵈ, ℝᵏ)` on unbounded Euclidean domains is compact-open, not a global supremum
+metric). This is **not** Mathlib `Metric.Completion`. Next wiring is
+`Metric.Completion` only, after a metric exists.
 -/
 axiom KernelAddressLimit (d k : Nat) (σ : Activation) : Type
 
 /--
-The continuous realization map from the completion.
+Named realization map on `KernelAddressLimit`.
 
-**Mathematical Motivation**: The unique continuous extension of `continuousRealization` to the completion.
-**Why Axiomatic**: Represents the extension of a uniformly continuous map to the completion (`DenseInducing.extend` in Mathlib).
-Declared axiomatically here to specify its existence and signature directly.
+**Not constructed:** would be the unique continuous extension of
+`continuousRealization` after a metric/uniform structure exists.
 -/
 axiom continuousRealizationLimit (d k : Nat) (σ : Activation) :
   KernelAddressLimit d k σ → C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))
 
 /--
-The canonical embedding from the quotient address space `KernelAddress` to its metric completion `KernelAddressLimit`.
+Named embedding `KernelAddress → KernelAddressLimit`.
 
-**Mathematical Motivation**: Represents the inclusion map $i : X \to \hat{X}$ of a metric space into its completion.
-**Why Axiomatic**: Represents the canonical inclusion of a space into its completion.
+**Not constructed:** would be the inclusion into a metric completion.
 -/
 axiom kernelAddressEmbedding (d k : Nat) (σ : Activation) :
   KernelAddress d k σ → KernelAddressLimit d k σ
 
 /--
-The continuous realization map on the completion is the unique continuous extension of `continuousRealization`.
-This means it commutes with the embedding: $\hat{f}(i(q)) = f(q)$.
-
-**Mathematical Motivation**: This is the definitional property of the extension of a map to the completion.
-**Why Axiomatic**: Relies on the properties of completion extension.
+Named commuting law: realization on the limit agrees with `continuousRealization`
+after embedding. Relies on the named completion axioms, not on a Mathlib extension.
 -/
 axiom continuousRealizationLimit_coe (d k : Nat) (σ : Activation) (q : KernelAddress d k σ) :
   continuousRealizationLimit d k σ (kernelAddressEmbedding d k σ q) = continuousRealization d k σ q
 
 /--
-**Injectivity of the Completion Embedding.**
+**Injectivity of the named embedding.**
 
-The canonical embedding from the quotient address space into its completion is injective.
-
-**Proof**: Follows directly from the injectivity of `continuousRealization` and the commuting property
-of the realization map on the completion.
+Follows from injectivity of `continuousRealization` plus the named commuting axiom
+`continuousRealizationLimit_coe`. Not a metric-completion theorem.
 -/
 theorem kernelAddressEmbedding_injective (d k : Nat) (σ : Activation) :
     Function.Injective (kernelAddressEmbedding d k σ) := by
@@ -486,12 +487,11 @@ theorem kernelAddressEmbedding_injective (d k : Nat) (σ : Activation) :
   exact continuousRealization_injective d k σ q₁ q₂ h_eq
 
 /--
-**Density of the Quotient Address Space in the Completion.**
+**Compact-open density relative to `ISAR_UAT`.**
 
-The quotient address space is dense in its completion, meaning any limit address can be approximated
-uniformly on compact domains to arbitrary precision by a quotient address.
-
-**Proof**: Follows by applying the density of the UAT (`ISAR_UAT`) to the realization of the limit address.
+Any `KernelAddressLimit` realization can be approximated uniformly on a compact set
+by a `KernelAddress`, *using the named axiom* `ISAR_UAT`. This is not a metric-space
+density theorem (there is no metric on `KernelAddress`).
 -/
 theorem kernelAddressEmbedding_dense (d k : Nat) (σ : Activation) (h_np : Activation.nonPolynomial σ)
     (K : Set (EuclideanSpace ℝ (Fin d))) (hK : IsCompact K)
@@ -504,18 +504,12 @@ theorem kernelAddressEmbedding_dense (d k : Nat) (σ : Activation) (h_np : Activ
   exact h_approx
 
 /--
-**Topological Extension to Completion (Functional Analysis Axiom).**
+**Named extension/bijection axiom** (not Mathlib `UniformSpace.Completion.extension`).
 
-An injective map with a dense range into a complete metric space extends uniquely
-to a bijection on the completion of its domain.
-
-**Mathematical Motivation**: This is the standard functional analysis completion theorem (`UniformSpace.Completion.extension`
-paired with injectivity/density facts).
-1. `KernelAddress` is equipped with a metric space structure by pulling back the metric on $C(\mathbb{R}^d, \mathbb{R}^k)$ via `continuousRealization`.
-2. Under this metric, `continuousRealization` is an isometric embedding (hence injective and uniformly continuous).
-3. The image of `continuousRealization` is dense in $C(\mathbb{R}^d, \mathbb{R}^k)$ (by the UAT density axiom on compact domains).
-4. By the properties of metric completions, the unique continuous extension `continuousRealizationLimit` to the completion
-   `KernelAddressLimit` is a bijection, i.e., every continuous function $f$ has a unique limit representative.
+Would follow from a metric on `KernelAddress` (pullback of a metric on `C(ℝᵈ, ℝᵏ)`
+via `continuousRealization`) plus isometric embedding and density. That metric
+**does not exist** in this file. The axiom stays named until `Metric.Completion`
+can be wired.
 -/
 axiom topological_extension_bijection
     (d k : Nat) (σ : Activation)
@@ -527,13 +521,11 @@ axiom topological_extension_bijection
     ∃! θ_limit : KernelAddressLimit d k σ, continuousRealizationLimit d k σ θ_limit = f
 
 /--
-**ISAR Universal Representation Theorem (Borges' Library Representation).**
+**Representation relative to named completion axioms.**
 
-Every continuous function f : ℝᵈ → ℝᵏ has a unique address θ_limit in the continuous
-limit morphism space (`KernelAddressLimit`) such that its realization is exactly f.
-
-**Proof**: Follows by applying the functional analysis extension theorem to the constructive
-injectivity of continuousRealization and the metric density of the UAT.
+Every continuous `f` has a unique `KernelAddressLimit` address *if* one assumes
+`topological_extension_bijection` and `ISAR_UAT`. Not a constructed completion
+theorem; `ISAR_UAT` remains a named analytic axiom.
 -/
 theorem ISAR_representation
     (d k : Nat)
@@ -549,18 +541,15 @@ theorem ISAR_representation
     exact h_approx }
 
 /--
-**Corollary: Logical, Statistical, and Topological Universality.**
+**Corollary: logical universality plus named analytic/completion axioms.**
 
-The ISAR kernel simultaneously achieves:
-1. **Logical universality** (proved, zero extra axioms):
-   `morphism_uniqueness` — every admissible formal rewriting system embeds uniquely
-   into ISAR_Kernel.
-2. **Statistical universality** (analytic UAT axiom `ISAR_UAT`):
-   every continuous function ℝᵈ → ℝᵏ is approximable by the iterated ISAR update
-   on any compact subset K to arbitrary precision ε > 0.
-3. **Topological universality** (proved theorem `ISAR_representation`):
-   every continuous function ℝᵈ → ℝᵏ is uniquely represented by its coordinate address θ_limit
-   in the continuous limit morphism space.
+1. **Logical universality** (`morphism_uniqueness`, `propext`): unique morphisms
+   into `ISAR_Kernel` relative to the `Kernel` interface.
+2. **Statistical approximation** (named axiom `ISAR_UAT`, not proved):
+   every continuous `f` is approximable on compact `K` by a `RawAddress`.
+3. **Representation** (`ISAR_representation`): unique `KernelAddressLimit` address,
+   **relative to** `ISAR_UAT` and the named completion axioms — not a theorem that
+   UAT or metric completion has been constructed.
 -/
 theorem ISAR_logical_and_statistical_universality :
     (∀ (K : Kernel) (f : KernelHom K ISAR_Kernel) (c : K.Carrier),
@@ -579,15 +568,9 @@ theorem ISAR_logical_and_statistical_universality :
    fun d k σ σ_np f => ISAR_representation d k σ σ_np f⟩
 
 /--
-**Physical System Representation Theorem.**
-
-Every physical system represented as an admissible continuous kernel has a unique address
-in the continuous completion limit space.
-
-**Mathematical Motivation**: The observable behaviors of physical systems (e.g. S-matrices,
-partition functions, chaotic Lorenz trajectories) map to continuous functions `f_sys` over
-the state space. By applying the representation theorem `ISAR_representation`, every such system
-has a unique fractal address `θ` in the completion of the quotient address space.
+Wrapper: `ISAR_representation` applied to an arbitrary continuous map.
+Adds no physical content and no extra axiom. Relies on the same named
+`ISAR_UAT` / completion axioms as `ISAR_representation`.
 -/
 theorem physical_system_has_address
     (d k : Nat)

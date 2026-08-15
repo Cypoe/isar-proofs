@@ -34,7 +34,7 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 6. **[HFSet.lean](HFSet.lean)** — Inductive `HF` type, Ackermann `toNat` bijection, membership, extensional equality, set axioms.
 
-7. **[HFSetEncoding.lean](HFSetEncoding.lean)** — Constructed Ackermann `fromNat` / ISK Gödel numbering; named `layerToNat` bijection on the OperEq quotient; `HF_encode` / `decode_layer`.
+7. **[HFSetEncoding.lean](src/ISAR/HFSetEncoding.lean)** — Constructed Ackermann `fromNat` / ISK Gödel numbering; constructed `noncomputable` `layerToNat` / `natToLayer` (min-Gödel enumeration); `HF_encode` / `decode_layer`.
 
 8. **[HFSetSemantics.lean](HFSetSemantics.lean)** — Lifts set constructors to `InvariantLayer`; proves `HF_encode` is a homomorphism.
 
@@ -72,9 +72,9 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 ---
 
-### Phase 5: Metric Completion & Continuous Semantics
+### Phase 5: Continuous semantics (named UAT / completion axioms)
 
-21. **[ISARApproximation.lean](ISARApproximation.lean)** — Pseudo-metric on `KernelAddress d k σ` (supremum norm), metric completion `KernelAddressLimit`, dense embedding extension, Universal Approximation Theorem (Leshno 1993), and physical system attractor embeddings (Lorenz, Gray-Scott, Ising).
+21. **[ISARApproximation.lean](src/ISAR/ISARApproximation.lean)** — Named analytic axiom `ISAR_UAT` (Leshno-style, not proved) plus named completion/embedding axioms. `KernelAddress` has no metric; `KernelAddressLimit` is **not** Mathlib `Metric.Completion`. Frozen pending a metric.
 
 ---
 
@@ -114,7 +114,7 @@ Or via Docker (no local LaTeX install):
 docker run --rm -v "${PWD}:/doc" -w /doc/blueprint/src texlive/texlive xelatex print.tex
 ```
 
-Validate all 71 blueprint declarations against the Lean source:
+Validate all 87 blueprint declarations against the Lean source:
 
 ```bash
 lake exe checkdecls blueprint/lean_decls

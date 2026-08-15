@@ -127,4 +127,70 @@ theorem ISAR_Kernel_terminal (K : Kernel) :
   intro c
   exact morphism_uniqueness K g c
 
+/-! ### False-variant: junk on the carrier, not a disproof of terminality
+
+`view_eq := True` cannot inhabit `Kernel`: `decode_eq` + `decode_view` would
+force all terms `OperEq`-related, contradicting distinct atom NFs.
+
+`DegenerateKernel` still inhabits `Kernel` by ignoring a `Bool` tag in
+`view_eq`. Terminality holds; observations do not see the tag. This is a
+regression that the interface does **not** force `view_eq` to be equality
+on `Carrier`. It is **not** a disproof of `ISAR_Kernel_terminal`.
+-/
+
+theorem NormalI_norm_atom : NormalI ITerm.norm := fun _ h => by cases h
+
+theorem NormalI_konst_atom : NormalI ITerm.konst := fun _ h => by cases h
+
+theorem not_OperEq_norm_konst :
+    ¬ OperEq ⟨ITerm.norm, ISKTerm.norm⟩ ⟨ITerm.konst, ISKTerm.konst⟩ := by
+  intro h
+  rcases h with ⟨v, hn, hk⟩
+  have e1 := IRed_normal_eq NormalI_norm_atom hn
+  have e2 := IRed_normal_eq NormalI_konst_atom hk
+  cases e1
+  cases e2
+
+/-- An indiscrete `view_eq` would collapse `OperEq`; hence no such `Kernel`. -/
+theorem no_indiscrete_Kernel (K : Kernel)
+    (h : ∀ c1 c2 : K.Carrier, K.view_eq c1 c2) : False := by
+  have hn : OperEq (K.decode (K.view_of ⟨ITerm.norm, ISKTerm.norm⟩))
+      ⟨ITerm.norm, ISKTerm.norm⟩ := K.decode_view _
+  have hk : OperEq (K.decode (K.view_of ⟨ITerm.konst, ISKTerm.konst⟩))
+      ⟨ITerm.konst, ISKTerm.konst⟩ := K.decode_view _
+  have hvu : K.view_eq (K.view_of ⟨ITerm.norm, ISKTerm.norm⟩)
+      (K.view_of ⟨ITerm.konst, ISKTerm.konst⟩) := h _ _
+  have hdec := K.decode_eq _ _ hvu
+  exact not_OperEq_norm_konst (OperEq.trans (OperEq.symm hn) (OperEq.trans hdec hk))
+
+/-- Carrier is `ISKSubtype × Bool`; `view_eq` ignores the tag. -/
+def DegenerateKernel : Kernel where
+  Carrier := ISKSubtype × Bool
+  view_of := fun t => (t, false)
+  view_eq := fun c1 c2 => OperEq c1.1 c2.1
+  is_equiv := {
+    refl := fun c => OperEq.refl c.1
+    symm := fun h => OperEq.symm h
+    trans := fun h1 h2 => OperEq.trans h1 h2
+  }
+  sound := fun _ _ h => h
+  decode := fun c => c.1
+  decode_view := fun t => OperEq.refl t
+  view_eq_decode := fun c => OperEq.refl c.1
+  decode_eq := fun _ _ h => h
+
+theorem DegenerateKernel_view_eq_ignores_tag (t : ISKSubtype) :
+    DegenerateKernel.view_eq (t, false) (t, true) :=
+  OperEq.refl t
+
+theorem DegenerateKernel_carriers_not_eq (t : ISKSubtype) :
+    (t, false) ≠ (t, true) := by
+  intro h
+  injection h with _ hb
+  cases hb
+
+theorem DegenerateKernel_terminal :
+    ∃! _f_class : Quotient (homSetoid DegenerateKernel), True :=
+  ISAR_Kernel_terminal DegenerateKernel
+
 end ISAR

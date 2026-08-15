@@ -17,7 +17,7 @@ usemathjax: true
 * **[Monograph PDF]({{ site.baseurl }}/pdf/blueprint_monograph.pdf)** &mdash; Full monograph: all modules and phases.
 * **[Paper A PDF]({{ site.baseurl }}/pdf/blueprint_paper_a.pdf)** &mdash; Calculus, confluence, Invariant Layer, category-theoretic terminality, dialect views.
 * **[Paper B PDF]({{ site.baseurl }}/pdf/blueprint_paper_b.pdf)** &mdash; HF set interpretation, view pluralism, Futamura projections.
-* **[Paper C PDF]({{ site.baseurl }}/pdf/blueprint_paper_c.pdf)** &mdash; Linear duplication, optimal kernels, matrix geometry, metric completion.
+* **[Paper C PDF]({{ site.baseurl }}/pdf/blueprint_paper_c.pdf)** &mdash; Linear duplication, optimal kernels, matrix geometry; metric completion remains named axioms.
 * **[Lean API Docs]({{ site.baseurl }}/docs/)** &mdash; Generated documentation for the Lean 4 source.
 * **[Formal Systems Zoo]({{ site.baseurl }}/zoo/)** &mdash; Executable dialect explorer: SKI, Iota, lambda, TRS, bytecode.
 * **[Demos]({{ site.baseurl }}/visualizations/)** &mdash; Kernel geometry and invariant layer interactive diagrams.
@@ -36,8 +36,8 @@ The `ITerm` calculus with operators `norm`, `konst`, `comp`, `dup` is proven con
 ### 3. Futamura projections (mix formulation)
 Substitution soundness (`futamura_first`) is proved at the meta specializer. Object-level 2nd/3rd projections are mix instantiations over `PESetup` (`specTerm` + `selfApp`). `TrivialPE` shows mix+selfApp alone need not optimize; fragment `OptimizingPE` (identity/konstβ folds) proves `Nontrivial`. Full Jones–Gomard–Sestoft BTA for all of ISAR remains open.
 
-### 4. Linear Reduction, Matrix Geometry, Metric Completion
-`LinearIKTerm` admits a bounded-fuel normalization certificate (`sufficient_fuel_correct`), structurally isomorphic to HVM2 interaction net reduction. The $4 \times 4$ ISAR operator matrices satisfy $I^2 = I$ (idempotency) and $(I \cdot R \cdot A \cdot S)^2 = 0$ (nilpotency). Gauge equivalence $P K_1 P^{-1} = K_2$ is proven, unifying two matrix representations of the same kernel. Metric completion and a formalized Universal Approximation result are given in `ISARApproximation.lean`; these are currently the least-constrained results in the project.
+### 4. Linear Reduction, Matrix Geometry, Named Completion Axioms
+`LinearIKTerm` admits a bounded-fuel normalization certificate (`sufficient_fuel_correct`), structurally isomorphic to HVM2 interaction net reduction. The $4 \times 4$ ISAR operator matrices satisfy $I^2 = I$ (idempotency) and $(I \cdot R \cdot A \cdot S)^2 = 0$ (nilpotency). Gauge equivalence $P K_1 P^{-1} = K_2$ is proven, unifying two matrix representations of the same kernel. `ISARApproximation.lean` keeps `ISAR_UAT` and completion/embedding as **named axioms**; there is no metric on `KernelAddress` and UAT is not proved.
 
 ---
 
@@ -56,7 +56,7 @@ Substitution soundness (`futamura_first`) is proved at the meta specializer. Obj
 | `ReverseRosetta.lean` | Forward invariance, referential openness | **Verified** |
 | `Futamura.lean` | Three Futamura projections | **Verified** |
 | `ISARMatrices.lean` | Idempotency, nilpotency, gauge equivalence | **Verified** |
-| `ISARApproximation.lean` | Metric completion, UAT, attractor structure | **Verified** |
+| `ISARApproximation.lean` | Named `ISAR_UAT` + completion axioms (frozen; no metric) | **Named axioms** |
 
 ---
 

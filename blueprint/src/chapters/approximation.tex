@@ -1,6 +1,6 @@
 \chapter{Continuous Approximation and Representation Space}
 
-In this chapter, we bridge the discrete combinatory logic of the ISAR substrate with continuous analysis and matrix spaces. We formalize dimensional physical quantities, matrix representations, expressive completeness, the tensor semantics, and the continuous universal approximation theorem showing that every continuous function can be uniquely represented as a limit address.
+In this chapter, we bridge the discrete combinatory logic of the ISAR substrate with continuous analysis and matrix spaces. We formalize dimensional physical quantities, matrix representations, expressive completeness, the tensor semantics, and named analytic axioms for universal approximation. Unique addresses in a completion of \texttt{KernelAddress} remain axiomatic: there is no metric on \texttt{KernelAddress}.
 
 \section{Physical Quantities and Matrix Representations}
 
@@ -197,7 +197,7 @@ The quotient parameter space of raw addresses modulo observational equivalence:
 $$\text{KernelAddress } d\ k\ \sigma := \text{Quotient } (\text{addressSetoid } d\ k\ \sigma)$$
 \end{definition}
 
-We state the Universal Approximation Theorem (UAT).
+We state the Universal Approximation Theorem as a \textbf{named axiom} (Leshno-style; not a theorem in this repository).
 
 \begin{axiom}[ISAR Universal Approximation]
 \lean{ISAR.ISAR_UAT}
@@ -208,51 +208,51 @@ $$\forall x \in K, \quad \| \text{realizeRaw } d\ k\ \sigma\ \theta\ x - f(x) \|
 
 \section{Quotient Completion and Unique Representation}
 
-We complete the parameter space and show unique representation.
+We complete the parameter space only as a named interface.
 
 \begin{axiom}[Quotient Completion Space]
 \lean{ISAR.KernelAddressLimit}
-The metric completion of \texttt{KernelAddress} is \texttt{KernelAddressLimit}.
+The named placeholder type for a completion of \texttt{KernelAddress}. \texttt{KernelAddress} has no metric or uniform structure in Lean; this is \textbf{not} Mathlib \texttt{Metric.Completion}.
 \end{axiom}
 
 \begin{axiom}[Continuous Realization Limit]
 \lean{ISAR.continuousRealizationLimit}
 \uses{ISAR.KernelAddressLimit}
-The extended continuous realization map on the completed space.
+The named realization map on \texttt{KernelAddressLimit} (not a constructed Mathlib extension).
 \end{axiom}
 
 \begin{axiom}[Completion Embedding]
 \lean{ISAR.kernelAddressEmbedding}
-The canonical inclusion map $i : \text{KernelAddress} \to \text{KernelAddressLimit}$.
+Named embedding $i : \text{KernelAddress} \to \text{KernelAddressLimit}$ (not a metric-completion inclusion).
 \end{axiom}
 
 \begin{theorem}[Embedding Injectivity]
 \lean{ISAR.kernelAddressEmbedding_injective}
 \uses{ISAR.kernelAddressEmbedding}
-The completion embedding is injective:
-$$\forall q_1, q_2, \quad i(q_1) = i(q_2) \implies q_1 = q_2$$
+The named embedding is injective (from \texttt{continuousRealization} injectivity and the commuting axiom).
 \end{theorem}
 
 \begin{theorem}[Embedding Density]
 \lean{ISAR.kernelAddressEmbedding_dense}
 \uses{ISAR.kernelAddressEmbedding}
-The completion embedding has dense range (with respect to uniform convergence on compact domains).
+Compact-open density relative to the named axiom \texttt{ISAR\_UAT}, not a metric-space density theorem.
 \end{theorem}
 
 \begin{axiom}[Topological Extension Bijection]
 \lean{ISAR.topological_extension_bijection}
-An injective map with a dense range into a complete metric space extends uniquely to a bijection on the completion of its domain.
+Named extension axiom. Would follow from a metric on \texttt{KernelAddress} plus density; that metric does not exist in the formalization.
 \end{axiom}
 
 \begin{theorem}[ISAR Representation Theorem]
 \lean{ISAR.ISAR_representation}
 \uses{ISAR.topological_extension_bijection, ISAR.kernelAddressEmbedding_injective, ISAR.kernelAddressEmbedding_dense}
-Every continuous function $f \in C(\mathbb{R}^d, \mathbb{R}^k)$ has a unique address $\theta_{\text{limit}} \in \text{KernelAddressLimit}$ such that:
+Relative to the named axioms \texttt{ISAR\_UAT} and \texttt{topological\_extension\_bijection}: every continuous $f \in C(\mathbb{R}^d, \mathbb{R}^k)$ has a unique address $\theta_{\text{limit}} \in \text{KernelAddressLimit}$ such that:
 $$\text{continuousRealizationLimit } d\ k\ \sigma\ \theta_{\text{limit}} = f$$
+This does not prove UAT or construct a metric completion.
 \end{theorem}
 
 \begin{theorem}[Physical System Address]
 \lean{ISAR.physical_system_has_address}
 \uses{ISAR.ISAR_representation}
-Every physical system represented as an admissible continuous kernel has a unique address in the continuous completion limit space.
+Wrapper: \texttt{ISAR\_representation} applied to an arbitrary continuous map. Adds no physical content and no extra axiom.
 \end{theorem}

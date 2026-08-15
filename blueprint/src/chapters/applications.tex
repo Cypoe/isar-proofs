@@ -8,37 +8,34 @@ We formalize partial evaluation and compile-time optimization via Futamura proje
 
 \begin{definition}[Specializer]
 \lean{ISAR.specialize}
-The partial evaluator that specializes a term with respect to a static environment:
+The meta-level specializer (partial evaluator) substituting static variables:
 $$\text{specialize} : \text{ITerm} \to (\mathbb{N} \to \text{Option } \text{ITerm}) \to \text{ITerm}$$
 \end{definition}
 
-\begin{definition}[Specializer Correctness]
-\lean{ISAR.SpecializerCorrect}
+\begin{definition}[PE Setup]
+\lean{ISAR.PESetup}
 \uses{ISAR.specialize}
-The correctness predicate asserting that specialization preserves evaluation under coherent dynamic environments.
+Object-level mix setup: an evaluator, a meta specializer, its reflection as an object-language term \texttt{specTerm}, the mix equation, and \texttt{selfApp} (evaluating \texttt{specTerm} implements \texttt{spec}). Mix+selfApp alone admit a trivial residualizer; \texttt{Nontrivial} is a separate obligation. Jones--Gomard--Sestoft 1993 polyvariant offline mix remains open.
 \end{definition}
 
-We prove the three Futamura projections.
+We prove the three Futamura projections in this mix formulation.
 
 \begin{theorem}[First Futamura Projection]
 \lean{ISAR.futamura_first}
-\uses{ISAR.SpecializerCorrect}
-Specializing an interpreter term $I$ with respect to a static source program $P$ produces an executable target program:
-$$\text{specialize } I\ [P, \cdot] \sim_{op} \text{target\_program}$$
+\uses{ISAR.specialize}
+Mix equation at the substitution layer: specializing then substituting dynamic data equals substituting the full environment, under a coherence hypothesis on static/dynamic environments.
 \end{theorem}
 
 \begin{theorem}[Second Futamura Projection]
 \lean{ISAR.futamura_second}
-\uses{ISAR.SpecializerCorrect}
-Specializing the specializer with respect to an interpreter $I$ produces a compiler for that language:
-$$\text{specialize } \text{spec}\ [I, \cdot] \sim_{op} \text{compiler}$$
+\uses{ISAR.PESetup}
+Mix instantiation: evaluating the specialized specializer on source data yields the specialized interpreter. Holds for any \texttt{PESetup}; does not by itself give a compiler-generator of Jones--Gomard--Sestoft quality.
 \end{theorem}
 
 \begin{theorem}[Third Futamura Projection]
 \lean{ISAR.futamura_third}
-\uses{ISAR.SpecializerCorrect}
-Specializing the specializer with respect to itself produces a compiler-compiler (generating compilers from interpreters):
-$$\text{specialize } \text{spec}\ [\text{spec}, \cdot] \sim_{op} \text{compiler-compiler}$$
+\uses{ISAR.PESetup}
+Self-application mix instantiation: evaluating \texttt{specTerm} specialized to itself yields a compiler generator \emph{at the mix-equation level}. Online \texttt{JGS\_PE} covers the \texttt{IStep} signature; 1993 polyvariant cogen remains open.
 \end{theorem}
 
 \subsection{System Generation vs. Compilation}

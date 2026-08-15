@@ -8,12 +8,12 @@
 
 ## Context
 
-`ISARApproximation.lean` must prove two things:
+`ISARApproximation.lean` splits two kinds of claim:
 
 1. **Algebraic**: The ISAR update matrix family inherits nilpotency from `ISARMatrices.lean`.
-2. **Topological / Statistical**: The continuous limit of the state space has universal representation (every continuous function is represented by a unique address in the continuous morphism space).
+2. **Topological / Statistical**: Approximation and unique addresses in a completion of `KernelAddress` are **named axioms** (`ISAR_UAT`, `KernelAddressLimit`, …), not theorems. `KernelAddress` has no metric.
 
-The algebraic claim is constructive and finite. The topological representation claim requires continuous analysis and category-theoretic limits (ℝ, infinite parameter sequences, topological terminality) declared as `axiom` to cite the mathematical correspondence.
+The algebraic claim is constructive and finite. The analytic/completion claims stay `axiom`.
 
 ---
 
@@ -37,7 +37,7 @@ vacuous. The UAT requires characteristic 0. Rejected on mathematical-content gro
 
 ### Representation content: `axiom`
 
-The universal representation theorem is the topological counterpart to the discrete `morphism_uniqueness` terminality theorem. Rather than approximating a target function $f$ up to $\varepsilon$ using external grid scaffolding, $f$ is represented exactly as a trajectory (address) in the continuous morphism space. These components are declared as `axiom`.
+`ISAR_UAT` is a named Leshno-style approximation axiom (compact `K`, ε-close, **not proved**). Unique exact addresses live on the named type `KernelAddressLimit` via `topological_extension_bijection` — also not constructed. These do **not** replace approximation by an exact theorem; both layers stay axiomatic. `ISAR_representation` is a theorem only relative to those axioms.
 
 ---
 
@@ -49,7 +49,7 @@ By transitioning fully to `ℝ`, the parameters of `ISARUpdateR` are real number
 
 ## Axiom Inventory
 
-By formalizing the quotient structure, continuous activations, and recursive block-diagonal updates, the axiom inventory has been minimized to three analytical axioms/mappings:
+Six named analytic/completion axioms remain (not three). Definitions in the table are constructed; the last rows are axioms:
 
 | Axiom / Definition | Role | Why axiomatic / defined |
 |---|---|---|
@@ -59,9 +59,12 @@ By formalizing the quotient structure, continuous activations, and recursive blo
 | `KernelAddress` | Address space | **Definitional**: Concrete quotient of `RawAddress` modulo functional equivalence. |
 | `continuousRealization` | Address realization map | **Definitional**: Lifted composition map on the quotient. |
 | `activatedUpdate` | T-step update map | **Definitional**: Concrete recursive composition map. |
-| `ISAR_UAT` | Universal approximation | **Axiomatic**: Standard Cybenko/Hornik approximation theorem on compact domains. |
-| `KernelAddressLimit` / `continuousRealizationLimit` | Limit address space & realization | **Axiomatic**: Map representing the completion of the quotient address space. |
-| `topological_extension_bijection` | Completion extension | **Axiomatic**: Functional analysis theorem extending dense + injective map to a unique bijection on the completion. |
+| `ISAR_UAT` | Universal approximation | **Axiomatic**: Named Leshno-style (non-polynomial σ) density on compact domains. **Not a theorem.** Cybenko/Hornik boundedness is not the statement. |
+| `KernelAddressLimit` | Named completion type | **Axiomatic**: `KernelAddress` has no metric; this is **not** `Metric.Completion`. |
+| `continuousRealizationLimit` | Named realization on the limit | **Axiomatic**: not a Mathlib extension. |
+| `kernelAddressEmbedding` | Named embedding into the limit | **Axiomatic**: not a completion inclusion. |
+| `continuousRealizationLimit_coe` | Named commuting law | **Axiomatic**. |
+| `topological_extension_bijection` | Named extension axiom | **Axiomatic**: would follow from a metric + density; neither is constructed. |
 
 **No algebraic theorems use `sorry` or `axiom`.**
 
@@ -70,8 +73,8 @@ By formalizing the quotient structure, continuous activations, and recursive blo
 ## Consequences
 
 - The algebraic representation is fully unified with the topological representation space over `ℝ`.
-- The UAT is replaced by an exact representation theorem (`ISAR_representation`), mirroring the category-theoretic terminality (`morphism_uniqueness`) in the continuous limit.
+- `ISAR_representation` is a theorem **relative to** named axioms `ISAR_UAT` and `topological_extension_bijection`. It does not prove UAT or construct a metric completion.
 - The axiom inventory is significantly simplified, removing all grid-scaffolding axioms (`GridState`, `ISARGridUpdate`, `gridEncode`, `gridReadout`, etc.).
-- **Topological Completion Roadmap**: By proving `kernelAddressEmbedding_injective` and `kernelAddressEmbedding_dense`, we have formal proof terms for the two key requirements of the completion theorem. When Mathlib's `UniformSpace.Completion` API stabilizes, the limit axioms (`KernelAddressLimit`, `continuousRealizationLimit`, and `topological_extension_bijection`) can be mechanically substituted and fully collapsed into Mathlib theorems, leaving only `ISAR_UAT` as a freestanding axiom.
+- **Topological Completion Roadmap (frozen 2026-08-14):** the blocker is the missing metric/uniform structure on `KernelAddress` (`C(ℝᵈ, ℝᵏ)` is compact-open, not a global supremum metric), not Mathlib API stability. Next wiring is `Metric.Completion` / `UniformSpace.Completion` only, after a metric exists. `ISAR_UAT` stays named.
 - `Mathlib.Tactic` is imported for `fin_cases`, `push_cast`, `ring`. It does NOT
   introduce `sorry` or other non-constructive axioms into the algebraic proofs.
