@@ -147,6 +147,46 @@ axiom natQuantity : Nat → Quantity
 axiom quantityToNat_inverse (q : Quantity) : natQuantity (quantityToNat q) = q
 axiom natQuantity_inverse (n : Nat) : quantityToNat (natQuantity n) = n
 
+/- =========================================================
+   3a. Encodable QuantityCore (no String / Float)
+   ========================================================= -/
+
+/-- Exact core without `SymbolBase.Symbolic` (`String`) or `MetricExpr.MetricApprox`
+(`Float`). The four `quantityToNat` axioms on the full `Quantity` stay named. -/
+structure QuantityCore where
+  dimCode : Nat
+  num : Int
+  den : Nat
+deriving DecidableEq, Repr
+
+def intToNat : Int → Nat
+  | Int.ofNat k => Nat.pair k 0
+  | Int.negSucc k => Nat.pair k 1
+
+def natToInt (n : Nat) : Int :=
+  if (Nat.unpair n).2 = 0 then Int.ofNat (Nat.unpair n).1
+  else Int.negSucc (Nat.unpair n).1
+
+theorem natToInt_toNat (i : Int) : natToInt (intToNat i) = i := by
+  cases i <;> simp [natToInt, intToNat, Nat.unpair_pair]
+
+def quantityCoreToNat (q : QuantityCore) : Nat :=
+  Nat.pair q.dimCode (Nat.pair (intToNat q.num) q.den)
+
+def natToQuantityCore (n : Nat) : QuantityCore :=
+  let d := (Nat.unpair n).1
+  let r := (Nat.unpair n).2
+  { dimCode := d
+    num := natToInt (Nat.unpair r).1
+    den := (Nat.unpair r).2 }
+
+/-- Constructed left inverse: `QuantityCore` is encodable. Not a bijection on
+the full `Quantity` (those four axioms stay named). -/
+theorem natToQuantityCore_toNat (q : QuantityCore) :
+    natToQuantityCore (quantityCoreToNat q) = q := by
+  cases q
+  simp [natToQuantityCore, quantityCoreToNat, Nat.unpair_pair, natToInt_toNat]
+
 /-- Mapping from substrate to Quantity. -/
 noncomputable def view_of (t : ISKSubtype) : Quantity :=
   natQuantity (layerToNat (Quotient.mk operEqSetoid t))

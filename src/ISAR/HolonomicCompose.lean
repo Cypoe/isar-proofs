@@ -53,7 +53,8 @@ Direct non-holonomicity of `exp ∘ exp`.
 **Content (classical analysis):** the Taylor coefficients of `exp(exp x)` at `0`
 involve Bell numbers whose root growth diverges, so by Stanley’s criterion the
 function is not D-finite / holonomic. Mathlib does not yet contain this chain;
-we import the conclusion as one named axiom.
+we import the conclusion as one named axiom. No Mathlib Bell-number / D-finiteness
+criterion is available to sketch a proof from; the axiom stays named.
 -/
 axiom exp_exp_not_holonomic :
     ¬ IsHolonomic (fun x : ℝ => Real.exp (Real.exp x))
