@@ -120,7 +120,7 @@ def recurrence_step (C : AdmCarrier) (step : C.Carrier → C.Carrier → Prop)
   let A_pred (q1 q2 : Q) : Prop := ∃ q3, q2 = lift_O q1 q3 ∨ q2 = lift_O q3 q1
   let R_pred (q1 q2 : Q) : Prop := ∃ c1 c2, q1 = Quotient.mk (operSetoid step confluent) c1 ∧ q2 = Quotient.mk (operSetoid step confluent) c2 ∧ step c1 c2 ∧ q1 ≠ q2
   -- `I` is "no outgoing R". A `step` always joins, so R is empty on the quotient
-  -- and I is True; `fixed_point` is definitional, not derived from `F`.
+  -- and I is True (`I_true`); `fixed_point` is definitional, not derived from `F`.
   let I_pred (q : Q) : Prop := ∀ q', ¬ R_pred q q'
   {
     Carrier := Q
@@ -169,6 +169,38 @@ theorem step_same_quotient {C : Type} (step : C → C → Prop)
     {c1 c2 : C} (h : step c1 c2) :
     Quotient.mk (operSetoid step confluent) c1 = Quotient.mk (operSetoid step confluent) c2 :=
   Quotient.sound ⟨c2, Relation.ReflTransGen.single h, Relation.ReflTransGen.refl⟩
+
+/-- Recurrence `R`: a `step` between **distinct** OperEq classes. -/
+def recurrence_R {C : Type} (step : C → C → Prop)
+    (confluent : ∀ (s s1 s2 : C), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
+      ∃ s3, Relation.ReflTransGen step s1 s3 ∧ Relation.ReflTransGen step s2 s3)
+    (q1 q2 : Quotient (operSetoid step confluent)) : Prop :=
+  ∃ c1 c2, q1 = Quotient.mk (operSetoid step confluent) c1 ∧
+    q2 = Quotient.mk (operSetoid step confluent) c2 ∧ step c1 c2 ∧ q1 ≠ q2
+
+/-- `I` is “no outgoing `R`”. -/
+def recurrence_I {C : Type} (step : C → C → Prop)
+    (confluent : ∀ (s s1 s2 : C), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
+      ∃ s3, Relation.ReflTransGen step s1 s3 ∧ Relation.ReflTransGen step s2 s3)
+    (q : Quotient (operSetoid step confluent)) : Prop :=
+  ∀ q', ¬ recurrence_R step confluent q q'
+
+/-- Machine-checked: `step_same_quotient` plus `q1 ≠ q2` makes `R` uninhabited.
+Do not change `OperationalEq` to inhabit `R` — that would break the quotient. -/
+theorem R_empty {C : Type} (step : C → C → Prop)
+    (confluent : ∀ (s s1 s2 : C), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
+      ∃ s3, Relation.ReflTransGen step s1 s3 ∧ Relation.ReflTransGen step s2 s3)
+    (q1 q2 : Quotient (operSetoid step confluent)) :
+    ¬ recurrence_R step confluent q1 q2 := by
+  rintro ⟨c1, c2, h1, h2, hstep, hne⟩
+  exact hne (h1.trans ((step_same_quotient step confluent hstep).trans h2.symm))
+
+theorem I_true {C : Type} (step : C → C → Prop)
+    (confluent : ∀ (s s1 s2 : C), Relation.ReflTransGen step s s1 → Relation.ReflTransGen step s s2 →
+      ∃ s3, Relation.ReflTransGen step s1 s3 ∧ Relation.ReflTransGen step s2 s3)
+    (q : Quotient (operSetoid step confluent)) :
+    recurrence_I step confluent q :=
+  fun q' => R_empty step confluent q q'
 
 /--
 An Admissible Kernel extends the base Kernel with the Operational SARI Quartet.
@@ -219,8 +251,7 @@ noncomputable def recurrence_to_Kernel (C : AdmCarrier) (step : C.Carrier → C.
       exact O_compat c1 c2 d1 d2 h1 h2)
   let layer (q : Q) : InvariantLayer :=
     decode_to_InvariantLayer decode step confluent decode_eq q
-  let R_pred (q1 q2 : Q) : Prop :=
-    ∃ c1 c2, q1 = Quotient.mk (operSetoid step confluent) c1 ∧ q2 = Quotient.mk (operSetoid step confluent) c2 ∧ step c1 c2 ∧ q1 ≠ q2
+  let R_pred (q1 q2 : Q) : Prop := recurrence_R step confluent q1 q2
   {
     toKernel := {
       Carrier := Q
@@ -261,7 +292,7 @@ noncomputable def recurrence_to_Kernel (C : AdmCarrier) (step : C.Carrier → C.
       A := fun q1 q2 => ∃ q3, q2 = lift_O q1 q3 ∨ q2 = lift_O q3 q1
       R := R_pred
       -- Same as `recurrence_step`: `I` is no outgoing `R` (definitional `fixed_point`).
-      I := fun q => ∀ q', ¬ R_pred q q'
+      I := fun q => recurrence_I step confluent q
       confluent := fun q q1 q2 h1 h2 => by
         rcases h1 with ⟨c1, c2, hq1, hq1_eq, hstep1, hne1⟩
         rcases h2 with ⟨d1, d2, hq2, hq2_eq, hstep2, hne2⟩
