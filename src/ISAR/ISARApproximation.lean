@@ -65,8 +65,10 @@ All other structures (Activation, nonPolynomial, RawAddress, KernelAddress, acti
 ISAR_representation, kernelAddressEmbedding_injective, kernelAddressEmbedding_dense)
 are defined or proved concretely.
 
-**Freeze (2026-08-14):** `KernelAddress` has no `MetricSpace`/`UniformSpace` instance,
-so `KernelAddressLimit` is not Mathlib `Metric.Completion`. Axioms stay named.
+**Freeze (2026-08-16):** the freeze **is** the decision, not a placeholder.
+`KernelAddress` has no `MetricSpace`/`UniformSpace` instance, so
+`KernelAddressLimit` is not Mathlib `Metric.Completion`. Do not invent a compact-K
+or `BoundedContinuousFunction` metric this cycle (that would be a different theorem).
 `ISAR_UAT` remains a named analytic axiom (not a theorem). Next wiring is
 `Metric.Completion` only, after a metric exists. Do not add physical-system axioms.
 -/
@@ -194,11 +196,13 @@ observational (functional) equivalence, mirroring the discrete `InvariantLayer`.
   ISAR_UAT, KernelAddressLimit, continuousRealizationLimit, kernelAddressEmbedding,
   continuousRealizationLimit_coe, topological_extension_bijection.
 
-**Freeze (2026-08-14):** `KernelAddress` has no `MetricSpace`/`UniformSpace` instance
-(functional quotient; `C(ℝᵈ, ℝᵏ)` on unbounded Euclidean domains is compact-open,
-not a global supremum metric). Completion axioms stay named. Next wiring is
-Mathlib `Metric.Completion` / `UniformSpace.Completion` only, after a metric exists.
-`ISAR_UAT` stays a named analytic axiom (not a theorem).
+**Freeze (2026-08-16):** the freeze **is** the decision, not a placeholder.
+`KernelAddress` has no `MetricSpace`/`UniformSpace` instance (functional quotient;
+`C(ℝᵈ, ℝᵏ)` on unbounded Euclidean domains is compact-open, not a global supremum
+metric). Completion axioms stay named. Next wiring is Mathlib `Metric.Completion` /
+`UniformSpace.Completion` only, after a metric exists. `ISAR_UAT` stays a named
+analytic axiom (not a theorem). Do not restate `KernelAddressLimit` as
+`Metric.Completion`.
 -/
 
 /-- A nonlinear activation function: continuous real functions ℝ → ℝ. -/
