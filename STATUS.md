@@ -4,41 +4,39 @@ This document provides a comprehensive inventory of proof dependencies, first-pr
 
 ---
 
-## Program status (2026-08-14)
+## Program status (2026-08-16)
 
 Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`.
 
-The formal core now has: confluence and unique NFs; `cd` as a **normalizing strategy** on `HasNF` (`finite_cd_reaches_NF_iff`); online Jones–Gomard–Sestoft PE for the whole `IStep` signature (`JGS_PE`); a tensor **term model**; constructed HF Ackermann / ISK Gödel numbering; constructed `layerToNat` (min-Gödel enumeration); holonomic closure theorems with one named analytic axiom.
+The formal core now has: confluence and unique NFs; `cd` as a **normalizing strategy** on `HasNF` (`finite_cd_reaches_NF_iff`); online Jones–Gomard–Sestoft PE for the whole `IStep` signature (`JGS_PE`) plus the **Jones-optimality** cost criterion (`JonesOptimal`; toy `JonesIdPE` positive, `JGS_PE` / `TrivialPE` negative); a tensor **term model**; constructed HF Ackermann / ISK Gödel numbering; constructed `layerToNat` (min-Gödel enumeration); `R_empty` / `I_true` on the OperEq quotient; holonomic closure theorems with one named analytic axiom.
 
-### Done (this cycle)
+### Done (residue cycle)
 
 | Item | Where | Honest claim |
 | :--- | :--- | :--- |
-| Online PE covering every `IStep` rule | `Futamura.lean` (`JGS_PE`) | Object-language signature is covered. **Not** 1993 polyvariant offline mix / compiler-generator. |
-| Finite `cd` unique section | `CanonicalRepresentative.lean` | `HasNF ↔ ∃ k, NormalI (cd_loop_fuel k t)`. Fuel is parallel-chain length. `¬HasNF` ⇒ no fuel yields `NormalI` (contrapositive; expected). Linear fragment still has explicit `term_size` fuel. |
-| HF Ackermann + ISK Gödel | `HFSetEncoding.lean` | `toNat_fromNat` theorem; `fromNat_toNat_ext` as `ExtEq`. |
-| `layerToNat` / `natToLayer` | `HFSetEncoding.lean` | Constructed `Nat ≃ InvariantLayer` via min-Gödel enumeration. `noncomputable`. Not `canonical_rep`. |
-| Tensor combinators | `TensorSemantics.lean` | `TensorSpace := ITerm`; `ExtEq` = `IRed` joinability; B/C/W; β-laws are theorems. |
-| Holonomic closure | `Holonomic*.lean` | Residual certificates proved. Sole named axiom: `exp_exp_not_holonomic`. |
+| 1 Ship | `1d538c5` on `origin/master` | Previous six-step cycle already shipped. No Lean in this item. |
+| 2 Jones-optimality | `Futamura.lean` | `JonesOptimal` on `PESetup` (`SelfInterpreter` + `pe_cost` bound). `¬ JonesOptimal TrivialPE`; `¬ JonesOptimal JGS_PE` (no self-interpreter). Toy `JonesIdPE` is Jones-optimal. **Not** 1993 polyvariant mix / cogen; `specTerm` is still `swap`. |
+| 3 UAT / metric freeze | `ISARApproximation.lean` | Freeze **is** the decision, not a placeholder. No metric invented. `ISAR_UAT` stays named. Next wiring is `Metric.Completion` **only after** a metric exists. |
+| 4 SARI `R` empty | `AdmissibleRecurrence.lean` | Theorems `R_empty` / `I_true` from `step_same_quotient` + `q1 ≠ q2`. Kernel half of `recurrence_to_Kernel` unchanged. Remaining softness is empty `R`; nonempty dynamics need a relation not already collapsed by joinability. |
+| 5 `HasNF` AC | `InvariantLayer.lean` / `CanonicalRepresentative.lean` | Computational HasNF section is `nf_of_HasNF_fuel`. `nf_of_term` remains the AC section used by `canonical_rep`. `¬HasNF` is expected (SKI is not SN), not a gap. Not claimed computable. |
+| 6 Named leftovers | `QuantityKernel.lean` / `HolonomicCompose.lean` | Four `quantityToNat` axioms stay named. Optional constructed `QuantityCore` (no `String`/`Float`) is encodable. `exp_exp_not_holonomic` stays named (no fake Stanley/Bell proof). |
 
 ### Named axioms that stay named
 
 | Item | Why it is not a theorem |
 | :--- | :--- |
-| `quantityToNat` / `natQuantity` | `Quantity` carries `String` / `Float`, which block `Encodable`. |
+| `quantityToNat` / `natQuantity` | Full `Quantity` carries `String` / `Float`, which block `Encodable`. `QuantityCore` is a separate encodable fragment. |
 | `exp_exp_not_holonomic` | Stanley/Bell analytic fact; not in Mathlib. |
-| `ISAR_UAT` and completion/embedding axioms | Frozen named: no metric on `KernelAddress` (compact-open `C(ℝᵈ,ℝᵏ)`, not a global sup metric). Next wiring is `Metric.Completion` only. `ISAR_UAT` stays named. |
+| `ISAR_UAT` and completion/embedding axioms | Frozen named: freeze is the decision. No metric on `KernelAddress` (compact-open `C(ℝᵈ,ℝᵏ)`, not a global sup metric). Next wiring is `Metric.Completion` only after a metric exists. `ISAR_UAT` stays named. |
 
 ### Where to go next (priority order)
 
-1. **JGS 1993 mix** — polyvariant *offline* BTA and a compiler-generator (`mix` as `spec spec`) of Jones–Gomard–Sestoft quality. `JGS_PE` is online PE only.
-2. **Constructive `HasNF` section** — `nf_of_term` still uses `Classical.choose` even though fuel exists. Thread a concrete `IRed`/`ParN` witness instead of choosing an NF, or keep choice and document it as the remaining AC on the WN side.
-3. **Kernel terminality stress test** — a degenerate `Kernel` false-variant so `ISAR_Kernel_terminal` cannot hold of a vacuous interface.
-4. **SARI remaining softness** — `S`/`A` are already derived (`Statehood` / `lift_O`). Remaining: `R` is empty on the OperEq quotient (`step_same_quotient`), so `I` (no outgoing `R`) is True. See §4.
-5. **Approximation stack** — frozen named axioms (`ISAR_UAT` still named). No metric on `KernelAddress`; next wiring is Mathlib `Metric.Completion` only.
-6. **Quotient countability** — `layerToNat` / `natToLayer` constructed via min-Gödel enumeration. Remaining named countability: `quantityToNat` (`String`/`Float`).
+1. **1993 polyvariant mix / cogen** — still open. Jones-optimality (modern PE cost criterion) has landed; do not stretch `JGS_PE` / `specTerm := swap` into a compiler-generator.
+2. **Nonempty SARI dynamics** — `R_empty` is a theorem. A nonempty `R` needs a relation that is *not* already collapsed by `OperationalEq` / joinability. Do not change `OperationalEq` to fake a step.
+3. **Metric, then completion** — UAT freeze is the decision. Do not claim `ISAR_UAT` proved or restate `KernelAddressLimit` as `Metric.Completion` before a metric exists.
+4. **Keep named** — `quantityToNat` (full `Quantity`) and `exp_exp_not_holonomic`. `QuantityCore` does not replace the four axioms.
 
-Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; repair the withdrawn quine whitepaper.
+Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; claim `nf_of_term` computable; repair the withdrawn quine whitepaper; invent a metric this cycle.
 
 ### Step log
 
@@ -51,7 +49,18 @@ Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; repair the withdra
 | 5 Approximation stack | PASS | Frozen named axioms; no metric on `KernelAddress`. `ISAR_UAT` stays named. Next wiring is `Metric.Completion` only. |
 | 6 layerToNat | PASS | Min-Gödel enumeration bijection; four axioms deleted. `layerToNat_godelClass_three_ne` blocks raw-code `rfl`. Still `noncomputable`. |
 
-Six-step cycle closed 2026-08-14: all PASS. Remaining named: `quantityToNat`, `exp_exp_not_holonomic`, `ISAR_UAT` + completion axioms. Blueprint follow-up (2026-08-15): `ISAR.SpecializerCorrect` replaced by `ISAR.PESetup`; Paper C no longer claims a constructed metric.
+Six-step cycle closed 2026-08-14: all PASS. Shipped as `1d538c5`. Blueprint follow-up (2026-08-15): `ISAR.SpecializerCorrect` replaced by `ISAR.PESetup`; Paper C no longer claims a constructed metric.
+
+| Residue | Status | Notes |
+| :--- | :--- | :--- |
+| 1 Ship | PASS | `1d538c5` on `origin/master`. |
+| 2 Jones-optimality | PASS | Criterion landed; `JonesIdPE` positive; `TrivialPE` / `JGS_PE` negative. **1993 cogen still open.** |
+| 3 UAT freeze | PASS | Freeze is the decision. `ISAR_UAT` not proved. |
+| 4 `R_empty` / `I_true` | PASS | From `step_same_quotient` + `q1 ≠ q2`. Kernel morphisms unchanged. |
+| 5 `HasNF` AC docs | PASS | `nf_of_HasNF_fuel` computational; `nf_of_term` AC; `¬HasNF` expected. |
+| 6 Named leftovers | PASS | `quantityToNat` + `exp_exp_not_holonomic` stay named; `QuantityCore` constructed. |
+
+Residue cycle closed 2026-08-16: all PASS. Remaining named: `quantityToNat`, `exp_exp_not_holonomic`, `ISAR_UAT` + completion axioms.
 
 ---
 
@@ -59,7 +68,7 @@ Six-step cycle closed 2026-08-14: all PASS. Remaining named: `quantityToNat`, `e
 
 Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`.
 
-Honest JGS claim: `JGS_PE` is **online** PE covering every `IStep` constructor (`normβ`/`konstβ`/`compβ`/`sβ`). Monovariant `bta` now has lemmas (`bta_eq_dynamic_iff_containsSwap`, static atom independence, `offline_spec` fold equations). Jones–Gomard–Sestoft 1993 **polyvariant offline mix / compiler-generator** remains **open** (not claimed). `specTerm` is still `swap`, not an encoding of `jgs_spec`.
+Honest JGS claim: `JGS_PE` is **online** PE covering every `IStep` constructor (`normβ`/`konstβ`/`compβ`/`sβ`). Monovariant `bta` now has lemmas (`bta_eq_dynamic_iff_containsSwap`, static atom independence, `offline_spec` fold equations). Jones-optimality criterion landed (`JonesOptimal`; `JonesIdPE` positive; `¬ JonesOptimal JGS_PE` / `TrivialPE`). Jones–Gomard–Sestoft 1993 **polyvariant offline mix / compiler-generator** remains **open** (not claimed). `specTerm` is still `swap`, not an encoding of `jgs_spec`.
 
 ### Sorry
 
@@ -76,9 +85,9 @@ Honest JGS claim: `JGS_PE` is **online** PE covering every `IStep` constructor (
 | `HolonomicCompose.lean` | `exp_exp_not_holonomic` | **OK** | Named Stanley/Bell analytic fact; not in Mathlib. |
 | `HFSetEncoding.lean` | `fromNat` / `toNat` / `subToNat` / `natToSub` | **constructed** | Ackermann coding + ISK Gödel numbering (`Nat.pair`). `toNat_fromNat` is a theorem; `fromNat_toNat_ext` is `ExtEq`. |
 | `HFSetEncoding.lean` | `layerToNat` / `natToLayer` (+ inverses) | **constructed** | Min-Gödel enumeration of OperEq classes. `noncomputable`. `layerToNat_godelClass_three_ne`: not `rfl` on raw code 3. |
-| `QuantityKernel.lean` | `quantityToNat` / `natQuantity` (+ inverses) | **named** | `Quantity` carries `String`/`Float`, which block `Encodable`. |
+| `QuantityKernel.lean` | `quantityToNat` / `natQuantity` (+ inverses) | **named** | `Quantity` carries `String`/`Float`, which block `Encodable`. Optional `QuantityCore` is a constructed encodable fragment; it does not replace these axioms. |
 | `TensorSemantics.lean` | *(none)* | **constructed** | Term model: `TensorSpace := ITerm`, `ExtEq` = `IRed` joinability, B/C/W combinators; β-laws are theorems. |
-| `ISARApproximation.lean` | `ISAR_UAT`, limit/embedding/bijection axioms | **named, frozen** | No `MetricSpace` on `KernelAddress`. `ISAR_UAT` is not a theorem. Next wiring: `Metric.Completion` only. |
+| `ISARApproximation.lean` | `ISAR_UAT`, limit/embedding/bijection axioms | **named, frozen** | Freeze is the decision. No `MetricSpace` on `KernelAddress`. `ISAR_UAT` is not a theorem. Next wiring: `Metric.Completion` only after a metric exists. |
 
 ### Noncomputable (classified)
 
@@ -87,9 +96,9 @@ Honest JGS claim: `JGS_PE` is **online** PE covering every `IStep` constructor (
 | `TRSView` / `BytecodeView` / `IotaView` dialects | Dialect defs | **fixed → computable** | OperEq-quotient observations (`Quotient.lift`); no `canonical_rep`. |
 | `ViewUnification` | `TRS_`/`Bytecode_AdmissibleDialect`, `isomorphism_unification` | **fixed → computable** | Follow dialects. |
 | `BasisCompleteness` | `term_signature`, `term_matrix` | **fixed → computable** | Were unnecessarily marked. |
-| `InvariantLayer` | `nf_of_term`, `canonical_rep` | **OK (necessary)** | `Classical.choose` on `HasNF` / `Quotient.exists_rep`. Explicit `cd` path: `canonical_nf` / `cd_loop_fuel`. |
+| `InvariantLayer` | `nf_of_term`, `canonical_rep` | **OK (necessary)** | AC section used by `canonical_rep`: `Classical.choose` on `HasNF` / `Quotient.exists_rep`. Computational HasNF path: `nf_of_HasNF_fuel`. Not claimed computable. `¬HasNF` expected. |
 | `AdmissibleRecurrence` | `recurrence_to_Kernel` | **OK (necessary)** | Uses `canonical_rep` section. |
-| `HFSetEncoding` / `HFSetSemantics` / `ZFCInterpretation` / `QuantityKernel` | encode/decode/kernels | **OK** | Gödel/Ackermann constructed; `layerToNat` constructed (min-Gödel, `Classical`/`Nat.find`); `quantityToNat` remains named; `canonical_rep` for sections. |
+| `HFSetEncoding` / `HFSetSemantics` / `ZFCInterpretation` / `QuantityKernel` | encode/decode/kernels | **OK** | Gödel/Ackermann constructed; `layerToNat` constructed (min-Gödel, `Classical`/`Nat.find`); `quantityToNat` remains named; `QuantityCore` constructed encodable fragment; `canonical_rep` for sections. |
 | `ViewUnification` | `encode_from_sig`, `eval_to_nf`, SN dialect bridge | **OK** | `Classical.choose` / WF recursion choice. |
 | `Holonomic*.lean` | `noncomputable section` | **OK (necessary)** | Mathlib analysis / `ℝ` / C∞. |
 | `ISARApproximation` | continuous maps / realizations | **OK (necessary)** | Topology on `ℝ`. |
@@ -109,11 +118,11 @@ Sorry-free compilation does **not** imply non-vacuous content. Checklist for mai
 | `morphism_uniqueness` / `ISAR_Kernel_terminal` | Conditional | Unique morphisms into `ISAR_Kernel` **relative to the `Kernel` interface**. False-variant landed: `DegenerateKernel` (junk `Bool` tag ignored by `view_eq`) is still terminal; `no_indiscrete_Kernel` shows `view_eq := True` cannot inhabit `Kernel`. Not a disproof of terminality. |
 | `futamura_first` (subst layer) | Substantive but narrow | Mix equation at the meta-level specializer; does not by itself give optimizing PE. |
 | `futamura_second` / `futamura_third` (pre-PESetup) | Formulation-sensitive | Honest form needs object-level `specTerm` + `selfApp` + **nontriviality**; trivial specializers satisfy mix alone. |
-| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations. `TrivialPE`: mix/selfApp by `rfl`, `¬ Nontrivial`. `OptimizingPE`: identity/konstβ fragment folds + tagged residual; mix by size induction, `selfApp` by `rfl`, **`Nontrivial` proved** (`norm·konst`). `JGS_PE`: online PE for the full `IStep` signature (`sβ` unfolds once into a tagged residual); `Nontrivial` proved. 1993 polyvariant offline mix remains open. |
+| `futamura_second` / `futamura_third` (`PESetup`) | Substantive (conditional) | Mix instantiations. `TrivialPE`: mix/selfApp by `rfl`, `¬ Nontrivial`, `¬ JonesOptimal`. `OptimizingPE`: identity/konstβ fragment folds + tagged residual; mix by size induction, `selfApp` by `rfl`, **`Nontrivial` proved** (`norm·konst`). `JGS_PE`: online PE for the full `IStep` signature (`sβ` unfolds once into a tagged residual); `Nontrivial` proved; `¬ JonesOptimal` (no self-interpreter). Toy `JonesIdPE` is Jones-optimal (`norm` copies the source). 1993 polyvariant offline mix remains open. |
 | Finite `cd` unique section | Substantive | Unique NF iff `HasNF`. Finite `cd` reaches that NF iff `HasNF` (`finite_cd_reaches_NF_iff`); fuel is parallel-chain length, not `term_size`. `¬HasNF` ⇒ no fuel yields `NormalI`. Linear fragment still supplies explicit `term_size` fuel. |
 | HF encoding in `HFSetEncoding` | Constructed | Gödel/Ackermann constructed; `layerToNat` is min-Gödel enumeration (not `canonical_rep`). |
 | `recurrence_to_Kernel` | Bridge | No `Quotient.out` on the carrier quotient: lift decode → `InvariantLayer`, then `canonical_rep` / `cd_loop_fuel`. Unrestricted `canonical_rep_eq` is now a **theorem** (`nf_of_term` uses NF or `exists_rep`; never the false `norm` fallback). |
-| `fixed_point` in SARI (`I ↔ no R-step`) | Definitional | `I` is defined as no outgoing `R`, so `fixed_point` is `Iff.rfl`. Not derived from `F`. `R` is empty (`step_same_quotient`). See §4. |
+| `fixed_point` in SARI (`I ↔ no R-step`) | Definitional | `I` is defined as no outgoing `R`, so `fixed_point` is `Iff.rfl`. Not derived from `F`. `R_empty` / `I_true` are theorems (`step_same_quotient` + `q1 ≠ q2`). See §4. |
 
 Procedure for re-check after edits: `#print axioms morphism_uniqueness` (and peers) in a Lean session — reject `sorryAx`; expect `Classical.choice` / `propext` until fully constructive sections land.
 
@@ -220,8 +229,8 @@ Live `AdmissibleRecurrence.lean` (not the older placeholder story):
 1. **Statehood (`S`)**: `S q` is `∃ c, q = mk c ∧ Statehood C c`. `Statehood` is inductive from `iob.I` under `iob.O`. Pairing closure is `Statehood.application`, not vacuous `S := True`.
 2. **Adjacency (`A`)**: `A q1 q2` is `∃ q3, q2 = lift_O q1 q3 ∨ q2 = lift_O q3 q1` — binary pairing via `O`, not unary `B`.
 3. **`I` / `fixed_point`**: `I q` is defined as `∀ q', ¬ R q q'`, so `fixed_point` is `Iff.rfl`. It is **not** derived from `AdmCarrier.F`. Previously `I` was `F c = c` (always True by `is_fixed_point`) while `fixed_point` still used `is_fixed_point` on the backward direction, ignoring `¬ R`.
-4. **Remaining softness (`R` empty)**: `R` requires a `step` between **distinct** quotient classes. A one-step reduction always joins (`step_same_quotient`), so `R` is uninhabited and `I` is True on every class. Confluence of `R` is therefore vacuous. This is a modeling consequence of identifying reducts in the OperEq quotient, not a derived dynamics.
-5. **Kernel half of `recurrence_to_Kernel`**: decode / `canonical_rep` is independent of SARI fields and was not changed in this cycle.
+4. **Remaining softness (`R` empty)**: `R` requires a `step` between **distinct** quotient classes. A one-step reduction always joins (`step_same_quotient`), so `R_empty` / `I_true` are theorems and `I` is True on every class. Confluence of `R` is therefore vacuous. This is a modeling consequence of identifying reducts in the OperEq quotient, not a derived dynamics. A nonempty dynamics needs a relation not already collapsed by joinability.
+5. **Kernel half of `recurrence_to_Kernel`**: decode / `canonical_rep` is independent of SARI fields and was not changed.
 
 **Roadmap:** a non-empty `R` would need a reduction that is *not* already collapsed by `OperationalEq` (or a different carrier). Until then, `recurrence_to_Kernel` remains a modular bridge; do not rebase `KernelCategory` on `QuotientCarrier` for a dynamics that is empty.
 
