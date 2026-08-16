@@ -107,11 +107,14 @@ Setup for object-level Futamura projections.
 `spec` is the meta specializer; `specTerm` is its reflection as an `ITerm`;
 `mix` is the characterizing equation; `selfApp` says evaluating `specTerm` implements `spec`.
 
-`TrivialPE` is a sorry-free non-optimizing instance (`¬ Nontrivial`).
+`TrivialPE` is a sorry-free non-optimizing instance (`¬ Nontrivial`, `¬ JonesOptimal`).
 `OptimizingPE` is a sorry-free fragment specializer with proved `Nontrivial`
-(identity / konstβ folds + tagged residual fallback). Full Jones–Gomard–Sestoft BTA
-for all of ISAR remains dissertation-scale future work; the projections below are
-the mix instantiations.
+(identity / konstβ folds + tagged residual fallback). `JGS_PE` is online PE for
+the whole `IStep` signature (`Nontrivial`, `¬ JonesOptimal`). Jones-optimality is
+the cost criterion (`JonesOptimal`); a toy self-interpreter pair `JonesIdPE`
+meets it. Full Jones–Gomard–Sestoft 1993 polyvariant BTA / cogen remains open;
+`specTerm` is still `swap`, not an encoding of `jgs_spec` / `offline_spec`.
+The projections below are the mix instantiations.
 -/
 structure PESetup where
   eval : ITerm → ITerm → Option ITerm
@@ -135,6 +138,9 @@ theorem futamura_third (S : PESetup) (int : ITerm) :
 /-- Cost measure for nontriviality (term size). -/
 def pe_cost : ITerm → Nat := term_size
 
+theorem term_size_pos (t : ITerm) : 1 ≤ term_size t := by
+  induction t <;> simp [term_size]
+
 /--
 Nontriviality: specialization strictly reduces cost on some nonempty class of programs.
 Without this, mix+selfApp alone are satisfied by residualizers that do no optimization
@@ -142,6 +148,19 @@ Without this, mix+selfApp alone are satisfied by residualizers that do no optimi
 -/
 def Nontrivial (S : PESetup) : Prop :=
   ∃ p s, pe_cost (S.spec p s) < pe_cost p
+
+/-- Self-interpreter: running `int` on `(src, d)` agrees with running `src` on `d`. -/
+def SelfInterpreter (S : PESetup) (int : ITerm) : Prop :=
+  ∀ src d, S.eval int (pair src d) = S.eval src d
+
+/--
+Jones-optimality (Neil Jones): some self-interpreter specializes to a residual
+no more expensive than the source, for every source. Cost/`pe_cost` form matches
+`Nontrivial`. This is **not** 1993 polyvariant mix / compiler-generator quality;
+`specTerm` is not an encoding of `jgs_spec` or `offline_spec`.
+-/
+def JonesOptimal (S : PESetup) : Prop :=
+  ∃ int, SelfInterpreter S int ∧ ∀ src, pe_cost (S.spec int src) ≤ pe_cost src
 
 /-- Identity residualizer (ignores static data). Cost-vacuous, but cannot be packaged as
 `PESetup` with `eval prog _ := some prog`: `selfApp` forces `specTerm` to behave like a
@@ -224,6 +243,138 @@ theorem trivial_spec_not_shrinking :
 theorem TrivialPE_not_nontrivial : ¬ Nontrivial TrivialPE := by
   rintro ⟨p, s, hlt⟩
   exact trivial_spec_not_shrinking ⟨p, s, hlt⟩
+
+/-- `trivial_run` returns `konst · norm` only by the default clause on those atoms. -/
+theorem trivial_run_result_konst_norm :
+    ∀ (n : Nat) (p d : ITerm), term_size p ≤ n →
+      trivial_run p d = ITerm.app ITerm.konst ITerm.norm →
+        p = ITerm.konst ∧ d = ITerm.norm := by
+  intro n
+  induction n with
+  | zero =>
+      intro p d hsz h
+      have := term_size_pos p
+      omega
+  | succ n ih =>
+      intro p d hsz h
+      cases p with
+      | var _ | norm | dup | comp | sₛ =>
+          simp [trivial_run] at h
+      | konst =>
+          simp [trivial_run] at h
+          exact ⟨rfl, h⟩
+      | swap =>
+          cases d with
+          | app d1 d2 =>
+              cases d1 with
+              | app d11 d12 =>
+                  cases d11 with
+                  | konst => simp [trivial_run, trivial_spec, pair] at h
+                  | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                      simp [trivial_run] at h
+              | var _ | norm | konst | dup | swap | comp | sₛ =>
+                  simp [trivial_run] at h
+          | var _ | norm | konst | dup | swap | comp | sₛ =>
+              simp [trivial_run] at h
+      | app f x =>
+          cases f with
+          | dup =>
+              cases x with
+              | app x1 x2 =>
+                  cases x1 with
+                  | app x11 p' =>
+                      cases x11 with
+                      | konst =>
+                          have hrec : trivial_run p' (pair x2 d) =
+                              ITerm.app ITerm.konst ITerm.norm := by
+                            simpa [trivial_run, pair] using h
+                          have hszp : term_size p' ≤ n := by
+                            simp [term_size] at hsz ⊢
+                            omega
+                          have ⟨_, hpair⟩ := ih p' (pair x2 d) hszp hrec
+                          simp [pair] at hpair
+                      | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                          simp [trivial_run] at h
+                  | var _ | norm | konst | dup | swap | comp | sₛ =>
+                      simp [trivial_run] at h
+              | var _ | norm | konst | dup | swap | comp | sₛ =>
+                  simp [trivial_run] at h
+          | var _ | norm | konst | swap | comp | sₛ | app _ _ =>
+              simp [trivial_run] at h
+
+theorem TrivialPE_not_self_interpreter (int : ITerm) :
+    ¬ SelfInterpreter TrivialPE int := by
+  intro hSI
+  have hrun : trivial_run int (pair ITerm.konst ITerm.norm) =
+      ITerm.app ITerm.konst ITerm.norm := by
+    have := hSI ITerm.konst ITerm.norm
+    simpa [SelfInterpreter, TrivialPE, trivial_eval, trivial_run, pair] using this
+  have ⟨_, hpair⟩ :=
+    trivial_run_result_konst_norm (term_size int) int (pair ITerm.konst ITerm.norm)
+      (Nat.le_refl _) hrun
+  simp [pair] at hpair
+
+/-- Tagged residuals are strictly larger than the source, so no self-interpreter
+can meet the Jones cost bound either — `TrivialPE` is not Jones-optimal. -/
+theorem TrivialPE_not_jonesOptimal : ¬ JonesOptimal TrivialPE := by
+  rintro ⟨int, hSI, _⟩
+  exact TrivialPE_not_self_interpreter int hSI
+
+/-! ### Toy Jones-optimal pair (identity interpreter, not 1993 mix)
+
+`norm` as a degenerate self-interpreter: running it on `(src, d)` continues as
+`src` on `d`. Specializing that interpreter copies the source (`spec norm src = src`),
+so the Jones cost bound holds with equality. Mix/selfApp still use tagged residuals
+for every other program. This is a cost-criterion toy, **not** a 1993 compiler-generator.
+-/
+
+def jones_spec (p s : ITerm) : ITerm :=
+  if p = ITerm.norm then s else trivial_spec p s
+
+def jones_run : ITerm → ITerm → ITerm
+  | ITerm.swap, data =>
+      match data with
+      | ITerm.app (ITerm.app ITerm.konst p) s => jones_spec p s
+      | _ => ITerm.app ITerm.swap data
+  | ITerm.app ITerm.dup (ITerm.app (ITerm.app ITerm.konst p) s), d =>
+      jones_run p (pair s d)
+  | ITerm.norm, data =>
+      match data with
+      | ITerm.app (ITerm.app ITerm.konst p) d => jones_run p d
+      | _ => ITerm.app ITerm.norm data
+  | p, d => ITerm.app p d
+termination_by p d => term_size p + term_size d
+decreasing_by
+  all_goals (simp [pair, term_size]; omega)
+
+def jones_eval (prog data : ITerm) : Option ITerm :=
+  some (jones_run prog data)
+
+theorem jones_mix (p s d : ITerm) :
+    jones_eval (jones_spec p s) d = jones_eval p (pair s d) := by
+  by_cases hp : p = ITerm.norm
+  { subst hp
+    simp [jones_eval, jones_spec, jones_run, pair] }
+  { simp [jones_eval, jones_spec, hp, trivial_spec, jones_run, pair] }
+
+theorem jones_selfApp (p s : ITerm) :
+    jones_eval ITerm.swap (pair p s) = some (jones_spec p s) := by
+  simp [jones_eval, jones_run, pair, jones_spec]
+
+def JonesIdPE : PESetup where
+  eval := jones_eval
+  spec := jones_spec
+  specTerm := ITerm.swap
+  mix := jones_mix
+  selfApp := jones_selfApp
+
+theorem JonesIdPE_self_interpreter_norm : SelfInterpreter JonesIdPE ITerm.norm := by
+  intro src d
+  simp [JonesIdPE, jones_eval, jones_run, pair]
+
+theorem JonesIdPE_jonesOptimal : JonesOptimal JonesIdPE :=
+  ⟨ITerm.norm, JonesIdPE_self_interpreter_norm, fun src => by
+    simp [JonesIdPE, jones_spec, pe_cost]⟩
 
 /-! ### Optimizing fragment PE (identity / konstβ folding)
 
@@ -649,6 +800,302 @@ theorem JGS_PE_nontrivial_comp : Nontrivial JGS_PE :=
   ⟨jgs_comp_witness, ITerm.konst, by
     simp only [JGS_PE, jgs_spec, jgs_comp_witness, pe_cost, term_size]
     omega⟩
+
+/-- Residual `konst` does not depend on the static argument. Used to rule out
+`swap` as a self-interpreter (it specializes via `jgs_spec`). -/
+theorem jgs_spec_eq_konst_independent :
+    ∀ (n : Nat) (a s1 s2 : ITerm), term_size a ≤ n →
+      jgs_spec a s1 = ITerm.konst → jgs_spec a s2 = ITerm.konst := by
+  intro n
+  induction n with
+  | zero =>
+      intro a s1 s2 hsz h
+      have := term_size_pos a
+      omega
+  | succ n ih =>
+      intro a s1 s2 hsz h
+      cases a with
+      | var _ | norm | konst | dup | swap | comp | sₛ =>
+          simp [jgs_spec] at h ⊢
+      | app f x =>
+          cases f with
+          | norm =>
+              have hszx : term_size x ≤ n := by simp [term_size] at hsz ⊢; omega
+              have hx : jgs_spec x s1 = ITerm.konst := by simpa [jgs_spec] using h
+              have := ih x s1 s2 hszx hx
+              simpa [jgs_spec] using this
+          | app f1 x1 =>
+              cases f1 with
+              | konst =>
+                  have hszx : term_size x1 ≤ n := by simp [term_size] at hsz ⊢; omega
+                  have hx : jgs_spec x1 s1 = ITerm.konst := by simpa [jgs_spec] using h
+                  have := ih x1 s1 s2 hszx hx
+                  simpa [jgs_spec] using this
+              | app f2 x2 =>
+                  cases f2 with
+                  | comp =>
+                      have hsz' : term_size (ITerm.app x2 (ITerm.app x1 x)) ≤ n := by
+                        simp [term_size] at hsz ⊢; omega
+                      have hx : jgs_spec (ITerm.app x2 (ITerm.app x1 x)) s1 = ITerm.konst := by
+                        simpa [jgs_spec] using h
+                      have := ih (ITerm.app x2 (ITerm.app x1 x)) s1 s2 hsz' hx
+                      simpa [jgs_spec] using this
+                  | sₛ =>
+                      simp [jgs_spec] at h
+                  | var _ | norm | konst | dup | swap | app _ _ =>
+                      simp [jgs_spec] at h
+              | var _ | norm | dup | swap | comp | sₛ =>
+                  simp [jgs_spec] at h
+          | var _ | konst | dup | swap | comp | sₛ =>
+              simp [jgs_spec] at h
+
+/-- If the first argument of `pair` is shared, `jgs_run` cannot return both
+`konst` and `dup` (atoms ignore data; `swap` specializes independently of
+the remaining static payload). -/
+theorem jgs_run_not_konst_dup_same_static :
+    ∀ (n : Nat) (p s e1 e2 : ITerm), term_size p ≤ n →
+      ¬ (jgs_run p (pair s e1) = ITerm.konst ∧
+         jgs_run p (pair s e2) = ITerm.dup) := by
+  intro n
+  induction n with
+  | zero =>
+      intro p s e1 e2 hsz h
+      have := term_size_pos p
+      omega
+  | succ n ih =>
+      intro p s e1 e2 hsz ⟨h1, h2⟩
+      cases p with
+      | var _ | norm | konst | dup | comp | sₛ =>
+          simp [jgs_run, pair] at h1 h2
+      | swap =>
+          have h1' : jgs_spec s e1 = ITerm.konst := by simpa [jgs_run, pair] using h1
+          have h2' : jgs_spec s e2 = ITerm.dup := by simpa [jgs_run, pair] using h2
+          have hconst :=
+            jgs_spec_eq_konst_independent (term_size s) s e1 e2 (Nat.le_refl _) h1'
+          simp [hconst] at h2'
+      | app f x =>
+          cases f with
+          | norm =>
+              have hszx : term_size x ≤ n := by simp [term_size] at hsz ⊢; omega
+              exact ih x s e1 e2 hszx ⟨by simpa [jgs_run] using h1,
+                by simpa [jgs_run] using h2⟩
+          | app f1 x1 =>
+              cases f1 with
+              | konst =>
+                  have hszx : term_size x1 ≤ n := by simp [term_size] at hsz ⊢; omega
+                  exact ih x1 s e1 e2 hszx ⟨by simpa [jgs_run] using h1,
+                    by simpa [jgs_run] using h2⟩
+              | app f2 x2 =>
+                  cases f2 with
+                  | comp =>
+                      have hsz' : term_size (ITerm.app x2 (ITerm.app x1 x)) ≤ n := by
+                        simp [term_size] at hsz ⊢; omega
+                      exact ih (ITerm.app x2 (ITerm.app x1 x)) s e1 e2 hsz'
+                        ⟨by simpa [jgs_run] using h1, by simpa [jgs_run] using h2⟩
+                  | sₛ =>
+                      simp [jgs_run, pair] at h1
+                  | var _ | norm | konst | dup | swap | app _ _ =>
+                      simp [jgs_run, pair] at h1
+              | var n =>
+                  cases n with
+                  | zero =>
+                      cases x with
+                      | app x1 x2 =>
+                          cases x1 with
+                          | app x11 _ =>
+                              cases x11 with
+                              | konst => simp [jgs_run, pair] at h1
+                              | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                                  simp [jgs_run, pair] at h1
+                          | var _ | norm | konst | dup | swap | comp | sₛ =>
+                              simp [jgs_run, pair] at h1
+                      | var _ | norm | konst | dup | swap | comp | sₛ =>
+                          simp [jgs_run, pair] at h1
+                  | succ _ =>
+                      simp [jgs_run, pair] at h1
+              | norm | dup | swap | comp | sₛ =>
+                  simp [jgs_run, pair] at h1
+          | dup =>
+              cases x with
+              | app x1 x2 =>
+                  cases x1 with
+                  | app x11 p' =>
+                      cases x11 with
+                      | konst =>
+                          have hszp : term_size p' ≤ n := by
+                            simp [term_size] at hsz ⊢; omega
+                          exact ih p' x2 (pair s e1) (pair s e2) hszp
+                            ⟨by simpa [jgs_run, pair] using h1,
+                             by simpa [jgs_run, pair] using h2⟩
+                      | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                          simp [jgs_run, pair] at h1
+                  | var _ | norm | konst | dup | swap | comp | sₛ =>
+                      simp [jgs_run, pair] at h1
+              | var _ | norm | konst | dup | swap | comp | sₛ =>
+                  simp [jgs_run, pair] at h1
+          | var n =>
+              cases n with
+              | zero =>
+                  cases x with
+                  | app x1 x2 =>
+                      cases x1 with
+                      | app x11 _ =>
+                          cases x11 with
+                          | konst => simp [jgs_run, pair] at h1
+                          | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                              simp [jgs_run, pair] at h1
+                      | var _ | norm | konst | dup | swap | comp | sₛ =>
+                          simp [jgs_run, pair] at h1
+                  | var _ | norm | konst | dup | swap | comp | sₛ =>
+                      simp [jgs_run, pair] at h1
+              | succ _ =>
+                  simp [jgs_run, pair] at h1
+          | konst | swap | comp | sₛ =>
+              simp [jgs_run, pair] at h1
+
+/-- Online one-step `JGS_PE` has no self-interpreter: the three atom tests
+(`konst`, `dup`, `swap` as sources) cannot hold together. Not Jones-optimal.
+This is **not** a 1993 polyvariant mix / cogen claim. -/
+theorem jgs_run_not_three :
+    ∀ (n : Nat) (p : ITerm), term_size p ≤ n →
+      ¬ (jgs_run p (pair ITerm.konst ITerm.norm) = ITerm.konst ∧
+         jgs_run p (pair ITerm.dup ITerm.norm) = ITerm.dup ∧
+         jgs_run p (pair ITerm.swap ITerm.norm) =
+           ITerm.app ITerm.swap ITerm.norm) := by
+  intro n
+  induction n with
+  | zero =>
+      intro p hsz h
+      have := term_size_pos p
+      omega
+  | succ n ih =>
+      intro p hsz ⟨h1, h2, h3⟩
+      cases p with
+      | var _ =>
+          simp [jgs_run, pair] at h1
+      | norm =>
+          simp [jgs_run, pair] at h1
+      | konst =>
+          simp [jgs_run, pair] at h2
+      | dup =>
+          simp [jgs_run, pair] at h1
+      | swap =>
+          have h3' : jgs_spec ITerm.swap ITerm.norm =
+              ITerm.app ITerm.swap ITerm.norm := by
+            simpa [jgs_run, pair] using h3
+          simp [jgs_spec, pair] at h3'
+      | comp =>
+          simp [jgs_run, pair] at h1
+      | sₛ =>
+          simp [jgs_run, pair] at h1
+      | app f x =>
+          cases f with
+          | norm =>
+              have hszx : term_size x ≤ n := by simp [term_size] at hsz ⊢; omega
+              refine ih x hszx ⟨?_, ?_, ?_⟩
+              { simpa [jgs_run] using h1 }
+              { simpa [jgs_run] using h2 }
+              { simpa [jgs_run] using h3 }
+          | app f1 x1 =>
+              cases f1 with
+              | konst =>
+                  have hszx : term_size x1 ≤ n := by simp [term_size] at hsz ⊢; omega
+                  refine ih x1 hszx ⟨?_, ?_, ?_⟩
+                  { simpa [jgs_run] using h1 }
+                  { simpa [jgs_run] using h2 }
+                  { simpa [jgs_run] using h3 }
+              | app f2 x2 =>
+                  cases f2 with
+                  | comp =>
+                      have hsz' : term_size (ITerm.app x2 (ITerm.app x1 x)) ≤ n := by
+                        simp [term_size] at hsz ⊢; omega
+                      refine ih (ITerm.app x2 (ITerm.app x1 x)) hsz' ⟨?_, ?_, ?_⟩
+                      { simpa [jgs_run] using h1 }
+                      { simpa [jgs_run] using h2 }
+                      { simpa [jgs_run] using h3 }
+                  | sₛ =>
+                      simp [jgs_run, pair] at h1
+                  | var _ | norm | konst | dup | swap | app _ _ =>
+                      simp [jgs_run, pair] at h1
+              | var n =>
+                  cases n with
+                  | zero =>
+                      cases x with
+                      | app x1 x2 =>
+                          cases x1 with
+                          | app x11 c =>
+                              cases x11 with
+                              | konst =>
+                                  simp [jgs_run, pair] at h1
+                              | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                                  simp [jgs_run, pair] at h1
+                          | var _ | norm | konst | dup | swap | comp | sₛ =>
+                              simp [jgs_run, pair] at h1
+                      | var _ | norm | konst | dup | swap | comp | sₛ =>
+                          simp [jgs_run, pair] at h1
+                  | succ _ =>
+                      simp [jgs_run, pair] at h1
+              | norm | dup | swap | comp | sₛ =>
+                  simp [jgs_run, pair] at h1
+          | dup =>
+              cases x with
+              | app x1 x2 =>
+                  cases x1 with
+                  | app x11 p' =>
+                      cases x11 with
+                      | konst =>
+                          have hszp : term_size p' ≤ n := by
+                            simp [term_size] at hsz ⊢
+                            omega
+                          exact jgs_run_not_konst_dup_same_static n p' x2
+                            (pair ITerm.konst ITerm.norm)
+                            (pair ITerm.dup ITerm.norm) hszp
+                            ⟨by simpa [jgs_run, pair] using h1,
+                             by simpa [jgs_run, pair] using h2⟩
+                      | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                          simp [jgs_run, pair] at h1
+                  | var _ | norm | konst | dup | swap | comp | sₛ =>
+                      simp [jgs_run, pair] at h1
+              | var _ | norm | konst | dup | swap | comp | sₛ =>
+                  simp [jgs_run, pair] at h1
+          | var n =>
+              cases n with
+              | zero =>
+                  cases x with
+                  | app x1 x2 =>
+                      cases x1 with
+                      | app x11 c =>
+                          cases x11 with
+                          | konst =>
+                              simp [jgs_run, pair] at h1
+                          | var _ | norm | dup | swap | comp | sₛ | app _ _ =>
+                              simp [jgs_run, pair] at h1
+                      | var _ | norm | konst | dup | swap | comp | sₛ =>
+                          simp [jgs_run, pair] at h1
+                  | var _ | norm | konst | dup | swap | comp | sₛ =>
+                      simp [jgs_run, pair] at h1
+              | succ _ =>
+                  simp [jgs_run, pair] at h1
+          | konst | swap | comp | sₛ =>
+              simp [jgs_run, pair] at h1
+
+theorem JGS_PE_not_self_interpreter (int : ITerm) :
+    ¬ SelfInterpreter JGS_PE int := by
+  intro hSI
+  have h1 := hSI ITerm.konst ITerm.norm
+  have h2 := hSI ITerm.dup ITerm.norm
+  have h3 := hSI ITerm.swap ITerm.norm
+  apply jgs_run_not_three (term_size int) int (Nat.le_refl _)
+  refine ⟨?_, ?_, ?_⟩
+  { simpa [JGS_PE, jgs_eval, jgs_run, pair] using h1 }
+  { simpa [JGS_PE, jgs_eval, jgs_run, pair] using h2 }
+  { simpa [JGS_PE, jgs_eval, jgs_run, pair] using h3 }
+
+/-- One-step online `JGS_PE` is not Jones-optimal. 1993 polyvariant division / cogen
+remains open; `specTerm` is still `swap`. -/
+theorem JGS_PE_not_jonesOptimal : ¬ JonesOptimal JGS_PE := by
+  rintro ⟨int, hSI, _⟩
+  exact JGS_PE_not_self_interpreter int hSI
 
 theorem specialize_ISKTerm (t : ITerm) (ht : ISKTerm t) (s_env : Nat → Option ITerm) :
     specialize t s_env = t := by
