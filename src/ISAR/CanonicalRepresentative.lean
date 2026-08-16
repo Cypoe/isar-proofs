@@ -131,9 +131,10 @@ theorem canonical_rep_sound (q : InvariantLayer) :
 SKI is not SN, so `term_size` is not a fuel bound once `sβ` can grow. Iterated
 `cd` is still a *normalizing* strategy: a length-indexed strip against complete
 development shows that any parallel chain to an NF yields a fuel for
-`cd_loop_fuel`. For `¬HasNF`, no fuel yields `NormalI`; `nf_of_term` still uses
-`exists_rep` on that side. The linear fragment additionally gives an explicit
-bound `term_size`.
+`cd_loop_fuel`. For `¬HasNF`, no fuel yields `NormalI` (expected: SKI is not SN);
+that is not a gap. `nf_of_term` remains the AC section used by `canonical_rep`
+(`Classical.choose` on `HasNF`, `exists_rep` otherwise) and is not claimed
+computable. The linear fragment additionally gives an explicit bound `term_size`.
 -/
 
 /-- Length-indexed parallel reduction (head form, for induction on the first step). -/
@@ -297,8 +298,9 @@ theorem nf_of_HasNF_fuel_OperEq (t : ISKSubtype) (k : Nat)
     OperEq (nf_of_HasNF_fuel t k hk) t :=
   OperEq_cd_loop_fuel k t
 
-/-- `HasNF` still uses choice to pick *fuel*, then the representative is `cd_loop_fuel`.
-    Not computable; `¬HasNF` remains `exists_rep` in `nf_of_term`. -/
+/-- Computational HasNF section: choice picks *fuel*, then the representative is
+    `cd_loop_fuel`. Still not a computable `nf_of_term`; that AC section is what
+    `canonical_rep` uses. `¬HasNF` remains `exists_rep` there (expected, not a gap). -/
 noncomputable def nf_of_HasNF (t : ISKSubtype) (ht : HasNF t) : ISKSubtype :=
   cd_loop_fuel (Classical.choose (HasNF_cd_loop_fuel t ht)) t
 

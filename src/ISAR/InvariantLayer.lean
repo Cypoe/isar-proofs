@@ -304,12 +304,16 @@ partial def cd_loop (t : ISKSubtype) : ISKSubtype :=
     cd_loop ⟨t', ISKTerm_cd t.property⟩
 
 /--
-Representative of an `OperEq`-class on concrete terms.
-* If `HasNF`, pick some NF (AC on the nonempty NF fiber). The *fuelled* Gross–Knuth
-  section is `nf_of_HasNF_fuel` / `nf_of_HasNF` in `CanonicalRepresentative.lean`.
-* Otherwise pick any class representative via `Quotient.exists_rep` (SKI is not SN;
-  no finite `cd` yields `NormalI`). The old `⟨norm, _⟩` fallback was not
-  OperEq-related in general.
+Representative of an `OperEq`-class on concrete terms. **AC section** used by
+`canonical_rep`. Not claimed computable.
+
+* If `HasNF`, pick some NF (`Classical.choose` on the nonempty NF fiber). The
+  *computational* HasNF section is `nf_of_HasNF_fuel` / `nf_of_HasNF` in
+  `CanonicalRepresentative.lean` (choose fuel, then `cd_loop_fuel`). That file
+  imports this one, so this HasNF branch cannot call `cd_loop_fuel` via that
+  path without a cycle.
+* If `¬HasNF`, pick any class representative via `Quotient.exists_rep`. SKI is
+  not SN; no finite `cd` yields `NormalI`. This is expected, not a gap.
 
 Computational path: `@[implemented_by cd_loop]` (iterated complete development).
 -/
