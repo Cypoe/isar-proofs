@@ -87,7 +87,7 @@ def HolonomicCertificate.integralShift (c : HolonomicCertificate) : HolonomicCer
       omega⟩
   leading_ne := by
     have hne : ¬(c.order + 1 = 0) := Nat.succ_ne_zero _
-    simp only [Fin.val_mk, hne, ↓reduceDIte]
+    simp only [hne, ↓reduceDIte]
     convert c.leading_ne
     simp
 

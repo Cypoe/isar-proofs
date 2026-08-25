@@ -264,8 +264,8 @@ theorem deriv_deriv_fresnel_mul_gaussian (x : ℝ) :
     refine DifferentiableAt.mul ?_ (gaussian_differentiable x)
     exact (differentiableAt_id.const_mul 2).mul (hasDerivAt_sq x).cos.differentiableAt
   have hB : DifferentiableAt ℝ B x := by
-    have hs : DifferentiableAt ℝ (fun y => Real.sin (y ^ 2)) x := by
-      simpa [fresnelSin] using fresnelSin_differentiable x
+    have hs : DifferentiableAt ℝ (fun y => Real.sin (y ^ 2)) x :=
+      fresnelSin_differentiable x
     exact hs.mul
       (((differentiableAt_id.const_mul (2 : ℝ)).neg).mul (gaussian_differentiable x))
   change deriv (fun y => A y + B y) x = _
@@ -296,8 +296,8 @@ theorem deriv_deriv_fresnel_mul_gaussian (x : ℝ) :
       (2 * x) * Real.cos (x ^ 2) * (-(2 * x) * gaussian x) +
         Real.sin (x ^ 2) * deriv ((fun y : ℝ => -((2 : ℝ) * y)) * gaussian) x := by
     unfold B
-    have hs : DifferentiableAt ℝ (fun y => Real.sin (y ^ 2)) x := by
-      simpa [fresnelSin] using fresnelSin_differentiable x
+    have hs : DifferentiableAt ℝ (fun y => Real.sin (y ^ 2)) x :=
+      fresnelSin_differentiable x
     have hr : DifferentiableAt ℝ ((fun y : ℝ => -((2 : ℝ) * y)) * gaussian) x :=
       ((differentiableAt_id.const_mul 2).neg).mul (gaussian_differentiable x)
     have hmul :

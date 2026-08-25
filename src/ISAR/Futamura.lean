@@ -1127,4 +1127,60 @@ theorem specialize_respects_OperEq (t u : ITerm) (ht : ISKTerm t) (hu : ISKTerm 
     exact h
   exact ⟨ht_spec, hu_spec, h_eq_eq⟩
 
+/-!
+## Parameterized Futamura Square & Commutative Diagram
+
+Formal verification that all 4 execution pathways across the Futamura Projections
+commute to identical operational semantics:
+- Pathway 0 (Direct Evaluation): `eval int (pair src d)`
+- Pathway 1 (1st Projection Target): `eval (spec int src) d`
+- Pathway 2 (2nd Projection Compiler): `eval (eval (spec specTerm int) src) d`
+- Pathway 3 (3rd Projection Cogen): `eval (eval (eval (spec specTerm specTerm) int) src) d`
+-/
+
+/-- The four corner evaluations of the Futamura Square for a given `PESetup`. -/
+structure FutamuraSquare (S : PESetup) (int src d : ITerm) where
+  direct_eval : Option ITerm := S.eval int (pair src d)
+  proj1_target : Option ITerm := S.eval (S.spec int src) d
+  compiler : ITerm := S.spec S.specTerm int
+  cogen : ITerm := S.spec S.specTerm S.specTerm
+
+/-- 
+Commutative Futamura Square Theorem:
+Evaluating the source program via direct interpretation (Pathway 0) produces the exact
+same result as executing the 1st Projection compiled target (Pathway 1).
+-/
+theorem futamura_square_proj1_commutes (S : PESetup) (int src d : ITerm) :
+    S.eval (S.spec int src) d = S.eval int (pair src d) := by
+  exact S.mix int src d
+
+/-- 
+Compiler Synthesis Commutative Theorem (2nd Projection):
+Applying the synthesized compiler to the source program yields the 1st projection target.
+-/
+theorem futamura_square_proj2_compiler_yields_target (S : PESetup) (int src : ITerm) :
+    S.eval (S.spec S.specTerm int) src = some (S.spec int src) := by
+  exact futamura_second S int src
+
+/-- 
+Compiler-Generator Synthesis Commutative Theorem (3rd Projection):
+Applying the synthesized cogen to an interpreter yields the 2nd projection compiler.
+-/
+theorem futamura_square_proj3_cogen_yields_compiler (S : PESetup) (int : ITerm) :
+    S.eval (S.spec S.specTerm S.specTerm) int = some (S.spec S.specTerm int) := by
+  exact futamura_third S int
+
+/-- 
+Full Commutative Futamura Square:
+All four pathways of the Futamura hierarchy compute identical values on all dynamic inputs.
+-/
+theorem futamura_square_all_pathways_commute (S : PESetup) (int src d : ITerm) :
+    let target1 := S.spec int src
+    let compiler := S.spec S.specTerm int
+    let cogen := S.spec S.specTerm S.specTerm
+    (S.eval target1 d = S.eval int (pair src d)) ∧
+    (S.eval compiler src = some target1) ∧
+    (S.eval cogen int = some compiler) := by
+  refine ⟨S.mix int src d, futamura_second S int src, futamura_third S int⟩
+
 end ISAR
