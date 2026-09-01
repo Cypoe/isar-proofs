@@ -20,6 +20,7 @@ permissions:
 jobs:
   build_project:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     name: Build project
     steps:
       - name: Cleanup to free disk space
