@@ -115,14 +115,13 @@ lake env lean --run Main.lean --term "((S K) K) I"
 # Host congruence check (Python step must match Lean NF):
 python host/congruence.py
 
-# λ dialect column (Lean compile = host abstract0; then IStep reduce):
+# λ dialect: Turner → IStepBasis (dupβ/swapβ) → IStep (gold):
 python host/lambda_dialect.py
-python host/lambda_dialect.py --term "(\\x. x) K"
+python host/lambda_dialect.py --term "((\\x. \\y. (y x)) S) I"
 python host/lambda_congruence.py
-lake env lean src/ISAR/LambdaEval.lean
 ```
 
-Familiar surface (`\x. e` / `λx. e`, juxta app, atoms `I K S B C D`) compiles via Lean's `abstract0` (no Turner η/C), then reduces with the gold `IStep` host. Rust plex-core Turner is a sibling dialect, not authority here.
+Pipeline: familiar `\x.e` → Turner degenerate collapse → **IStepBasis-only** preprocess (dialect) → **IStep** reduce (kernel). `C`/`W` are compile alphabet; their β fires in the dialect pass, not as a second kernel. Lean `abstract0` is a weaker proved compiler (simulation theorems), not this dialect’s authority — congruence is observational on applied NFs.
 
 ### Alphabet layers
 

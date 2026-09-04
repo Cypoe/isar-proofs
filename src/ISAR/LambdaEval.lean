@@ -3,10 +3,11 @@ import ISAR.LambdaFragment
 import ISAR.Reduce
 
 /-!
-# LambdaEval — λ dialect column against the gold reduce
+# LambdaEval — weaker proved `compile` (not the host λ dialect)
 
-`compile` (Lean `LambdaFragment`) then `reduceFuel` (Lean `IStep`).
-Host twin: `host/lambda_dialect.py` (same `abstract0` / `compile`, familiar `\x. e` sugar).
+`LambdaFragment.abstract0` has no η/C; simulation theorems rest on it.
+Host dialect authority is Turner → IStepBasis → IStep (`host/lambda_dialect.py`).
+This file only regression-checks the proved conservative compiler.
 -/
 
 namespace ISAR
