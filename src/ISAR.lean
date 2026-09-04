@@ -27,3 +27,6 @@ import ISAR.HolonomicClosure
 import ISAR.HolonomicInstances
 import ISAR.HolonomicCompose
 import ISAR.QuineProof
+import ISAR.Eval
+import ISAR.Reduce
+import ISAR.LambdaEval

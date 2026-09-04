@@ -1,0 +1,14 @@
+{
+  "folders": [
+	{
+		"path": "."
+	},
+	{
+		"path": "../elegant-babbage/scratch"
+	},
+	{
+		"path": "../../../repos/isa-physics"
+	}
+],
+  "settings": {}
+}

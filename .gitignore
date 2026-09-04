@@ -3,6 +3,8 @@
 .pytest_cache/
 .__pycache__/
 .lake/
+.agents/
+.cursor/
 graphify-out/
 
 blueprint/print

@@ -92,6 +92,58 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 ---
 
+## Runnable Reduce
+
+Two computable reduction strategies, both sound w.r.t. the proved `IStep` relation:
+
+| Strategy | File | What it does |
+|:---------|:-----|:-------------|
+| `cd` (parallel) | `Eval.lean` | Complete development: contracts every redex in one pass. Iterated via `cd_loop_fuel`. |
+| `step?` (LO) | `Reduce.lean` | Leftmost-outermost single step. `reduceFuel` iterates it. Proved sound: `step? t = some u → IStep t u`. |
+
+```bash
+# In-Lean #eval / #guard (compile-time checked):
+lake env lean src/ISAR/Eval.lean      # cd strategy goldens
+lake env lean src/ISAR/Reduce.lean    # step? strategy goldens
+
+# CLI golden suite (both strategies, printed NF + step count):
+lake env lean --run Main.lean
+
+# Reduce a single term (S-expression, atoms: I K S B C D):
+lake env lean --run Main.lean --term "((S K) K) I"
+
+# Host congruence check (Python step must match Lean NF):
+python host/congruence.py
+
+# λ dialect column (Lean compile = host abstract0; then IStep reduce):
+python host/lambda_dialect.py
+python host/lambda_dialect.py --term "(\\x. x) K"
+python host/lambda_congruence.py
+lake env lean src/ISAR/LambdaEval.lean
+```
+
+Familiar surface (`\x. e` / `λx. e`, juxta app, atoms `I K S B C D`) compiles via Lean's `abstract0` (no Turner η/C), then reduces with the gold `IStep` host. Rust plex-core Turner is a sibling dialect, not authority here.
+
+### Alphabet layers
+
+| Layer | What | Source of truth |
+|:------|:-----|:----------------|
+| Carriers | `I,R,A,S` 4×4 matrices | `ISARMatrices.lean`, `kernel.py` |
+| Gauge | `K1_K2_gauge_equiv` | `ISARMatrices.lean`, `ISARBridge.lean` |
+| Ops → terms | `term_signature_val` (norm→I1, s→S1, konst→K1, dup→A1, swap→R1, comp→0) | `BasisCompleteness.lean` |
+| Quotient fragment | ISK only (norm, konst, sₛ, app) on `ISKSubtype` | `InvariantLayer.lean` |
+| Full surface syntax | + dup, swap, comp, var | `Kernel.lean` |
+| Main reduce `IStep` | I/K/B/S β + appL/appR — no dupβ/swapβ | `Kernel.lean` |
+| Operator basis | `IStepBasis` adds dupβ, swapβ; `derived_s` recovers S | `Kernel.lean`, `TensorSemantics.lean` |
+
+### What this is not
+
+- **Not Lafont interaction nets.** No δ/ε/γ annihilation. "Interaction-looking" is analogy for the BCKW-style agents; the formal alphabet is ISK (quotient) / ISKWBCS (syntax).
+- **plex-shell is parked.** No kernel work, no emit/cogen claims from that tree. The ISAR kernel lives here in `isar-proofs`.
+- **No cogen/emit product.** `cd` and `step?` are interpreters. Future cogen targets are projections of the Invariant Layer quotient; they are not in this slice.
+
+---
+
 ## Local Build
 
 ```bash
