@@ -86,11 +86,50 @@ def step(t: T) -> Optional[T]:
 
 
 def reduce(t: T, fuel: int = 1000) -> Tuple[T, int]:
-    """Iterate step until NF or fuel exhaustion."""
+    """Iterate LO step until NF or fuel exhaustion."""
     cur, n = t, 0
     while n < fuel:
         nxt = step(cur)
         if nxt is None:
+            break
+        cur = nxt
+        n += 1
+    return cur, n
+
+
+def cd(t: T) -> T:
+    """Complete development — matches Lean `ISAR.cd` / ParStep (I/K/B/S only)."""
+    if t.k != K.APP:
+        return t
+    f, x = t.l, t.r
+    assert f is not None and x is not None
+    # I x => cd x
+    if f.k == K.NORM:
+        return cd(x)
+    if f.k == K.APP:
+        fl, fr = f.l, f.r
+        assert fl is not None and fr is not None
+        # K a b => cd a
+        if fl.k == K.KONST:
+            return cd(fr)
+        if fl.k == K.APP:
+            fll, flr = fl.l, fl.r
+            assert fll is not None and flr is not None
+            # B f g x => (cd f) ((cd g) (cd x))
+            if fll.k == K.COMP:
+                return app(cd(flr), app(cd(fr), cd(x)))
+            # S f g x => ((cd f)(cd x)) ((cd g)(cd x))
+            if fll.k == K.S:
+                return app(app(cd(flr), cd(x)), app(cd(fr), cd(x)))
+    return app(cd(f), cd(x))
+
+
+def reduce_cd(t: T, fuel: int = 1000) -> Tuple[T, int]:
+    """Iterate cd until fixpoint. Round count << LO steps on I-spines."""
+    cur, n = t, 0
+    while n < fuel:
+        nxt = cd(cur)
+        if nxt == cur:
             break
         cur = nxt
         n += 1

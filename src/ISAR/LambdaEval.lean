@@ -3,11 +3,10 @@ import ISAR.LambdaFragment
 import ISAR.Reduce
 
 /-!
-# LambdaEval — weaker proved `compile` (not the host λ dialect)
+# LambdaEval — proved `compile` / `abstract0` (no η/C by design)
 
-`LambdaFragment.abstract0` has no η/C; simulation theorems rest on it.
-Host dialect authority is Turner → IStepBasis → IStep (`host/lambda_dialect.py`).
-This file only regression-checks the proved conservative compiler.
+Does less compile-time work on purpose; simulation theorems rest on it.
+Host dialect (Turner + basis/IStep) is separate — see `host/lambda_dialect.py`.
 -/
 
 namespace ISAR

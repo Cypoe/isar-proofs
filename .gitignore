@@ -1,7 +1,8 @@
 *.olean
 .bin/
 .pytest_cache/
-.__pycache__/
+__pycache__/
+.pyc
 .lake/
 .agents/
 .cursor/

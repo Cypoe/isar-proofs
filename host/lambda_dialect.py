@@ -1,13 +1,13 @@
 """
-Host λ dialect — Turner bracket → IStepBasis collapse → IStep reduce.
+Host λ dialect — Turner bracket → prefer IStepBasis → else IStep.
 
-Pipeline (dialect-specific, then kernel):
-  1. Turner degenerate elim (η / K-lift / B / C / S) → combinator tree
-  2. IStepBasis only (dupβ, swapβ) until stuck  — dialect preprocess
-  3. IStep reduce (normβ, konstβ, compβ, sβ)     — gold kernel
+Pipeline:
+  1. Turner degenerate elim (η / K-lift / B / C / S)
+  2. Until NF: if basis redex (dupβ/swapβ) fire it; else IStep (I/K/B/S)
+     Basis has priority whenever C/W appear (including after Sβ).
 
-Lean `LambdaFragment.abstract0` is a weaker proved compiler (no η/C). It is
-not this dialect; observational congruence is on applied NFs after the pipeline.
+Lean `LambdaFragment.abstract0` is the proved compiler (no η/C by design — less
+compile work, simulation theorems). Host dialect authority is Turner + basis/IStep.
 """
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 
-from reduce import I, KK, S, B, C, D, T, K, app, reduce as reduce_istep  # noqa: E402
+from reduce import I, KK, S, B, C, D, T, K, app, step as step_istep  # noqa: E402
+from graph_runtime import reduce_tree_pipeline  # noqa: E402
 
 
 def show(t: T) -> str:
@@ -175,19 +176,54 @@ def reduce_basis(t: T, fuel: int = 1000) -> Tuple[T, int]:
     return cur, n
 
 
+def reduce_pipeline(t: T, fuel: int = 100_000) -> Tuple[T, int, int]:
+    """Prefer IStepBasis, then IStep, until NF. Returns (nf, basis_steps, istep_steps)."""
+    cur = t
+    b_n = i_n = 0
+    while b_n + i_n < fuel:
+        nxt = step_basis(cur)
+        if nxt is not None:
+            cur = nxt
+            b_n += 1
+            continue
+        nxt = step_istep(cur)
+        if nxt is not None:
+            cur = nxt
+            i_n += 1
+            continue
+        break
+    return cur, b_n, i_n
+
+
 def compile_dialect(e: NExpr, fuel: int = 1000) -> T:
-    """Turner + basis collapse → tree ready for IStep."""
+    """Turner + exhaust basis on the closed term (no IStep yet)."""
     raw = bracket(e)
     cleaned, _ = reduce_basis(raw, fuel=fuel)
     return cleaned
 
 
-def compute(src: str, fuel: int = 1000) -> Tuple[T, T, T, int]:
-    """Returns (turner_raw, after_basis, nf_istep, istep_steps)."""
-    raw = bracket(parse(src))
-    mid, _ = reduce_basis(raw, fuel=fuel)
-    nf, steps = reduce_istep(mid, fuel=fuel)
-    return raw, mid, nf, steps
+def compute(src: str, fuel: int = 100_000) -> Tuple[T, T, T, int, int]:
+    """Returns (turner_raw, after_first_basis, nf, basis_steps, istep_steps)."""
+    return compute_expr(parse(src), fuel=fuel)
+
+
+def compute_expr(e: NExpr, fuel: int = 100_000) -> Tuple[T, T, T, int, int]:
+    raw = bracket(e)
+    mid, _ = reduce_basis(raw, fuel=min(fuel, 10_000))
+    nf, b_n, i_n = reduce_pipeline(raw, fuel=fuel)
+    return raw, mid, nf, b_n, i_n
+
+
+def compute_expr_graph(e: NExpr, fuel: int = 100_000) -> Tuple[T, T, T, int, int, int]:
+    """Turner on tree, then basis+IStep on shared graph. Returns + unique_nodes."""
+    raw = bracket(e)
+    mid, _ = reduce_basis(raw, fuel=min(fuel, 10_000))
+    nf, b_n, i_n, nodes = reduce_tree_pipeline(raw, fuel=fuel)
+    return raw, mid, nf, b_n, i_n, nodes
+
+
+def compute_graph(src: str, fuel: int = 100_000) -> Tuple[T, T, T, int, int, int]:
+    return compute_expr_graph(parse(src), fuel=fuel)
 
 
 # ---------------------------------------------------------------------------
@@ -275,28 +311,45 @@ GOLDENS = [
     ("(\\x. x) K", "K"),
     ("((\\x. \\y. x) S) I", "S"),
     ("(((\\x. \\y. \\z. (x z) (y z)) K) K) I", "I"),
-    # Turner emits C; basis fires swapβ → ((I I) S); IStep → S
     ("((\\x. \\y. (y x)) S) I", "S"),
 ]
 
 
 def main(argv: List[str]) -> int:
-    if len(argv) >= 2 and argv[0] == "--term":
-        raw, mid, nf, steps = compute(argv[1])
-        print(f"turner:  {show(raw)}")
-        print(f"basis:   {show(mid)}")
-        print(f"istep:   {show(nf)}  ({steps} steps)")
+    use_graph = False
+    args = list(argv)
+    if args and args[0] == "--graph":
+        use_graph = True
+        args = args[1:]
+
+    if len(args) >= 2 and args[0] == "--term":
+        if use_graph:
+            raw, mid, nf, b_n, i_n, nodes = compute_graph(args[1])
+            print(f"turner:  {show(raw)}")
+            print(f"basis1:  {show(mid)}")
+            print(f"nf:      {show(nf)}  (basis={b_n} istep={i_n} nodes={nodes}) [graph]")
+        else:
+            raw, mid, nf, b_n, i_n = compute(args[1])
+            print(f"turner:  {show(raw)}")
+            print(f"basis1:  {show(mid)}")
+            print(f"nf:      {show(nf)}  (basis={b_n} istep={i_n})")
         return 0
-    if len(argv) >= 2 and argv[0] == "--compile":
-        print(show(compile_dialect(parse(argv[1]))))
+    if len(args) >= 2 and args[0] == "--compile":
+        print(show(compile_dialect(parse(args[1]))))
         return 0
 
     ok = True
     for src, expected in GOLDENS:
-        raw, mid, nf, steps = compute(src)
-        got = show(nf)
-        tag = "OK" if got == expected else "FAIL"
-        print(f"{tag} {src}  =>  {got}  ({steps} IStep)  [turner {show(raw)} | basis {show(mid)}]")
+        if use_graph:
+            raw, mid, nf, b_n, i_n, nodes = compute_graph(src)
+            got = show(nf)
+            tag = "OK" if got == expected else "FAIL"
+            print(f"{tag} {src}  =>  {got}  (basis={b_n} istep={i_n} nodes={nodes}) [graph]")
+        else:
+            raw, mid, nf, b_n, i_n = compute(src)
+            got = show(nf)
+            tag = "OK" if got == expected else "FAIL"
+            print(f"{tag} {src}  =>  {got}  (basis={b_n} istep={i_n})  [turner {show(raw)}]")
         if got != expected:
             print(f"  EXPECTED: {expected}")
             ok = False

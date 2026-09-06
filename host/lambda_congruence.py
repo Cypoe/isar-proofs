@@ -1,8 +1,4 @@
-"""λ dialect congruence: observational NFs after Turner → basis → IStep.
-
-Lean LambdaEval (conservative abstract0) is not a peer dialect column —
-it only checks that the proved weaker compiler still builds.
-"""
+"""Observational NF congruence for λ dialect (prefer basis, then IStep)."""
 from __future__ import annotations
 
 import os
@@ -16,16 +12,20 @@ sys.path.insert(0, _HOST)
 from lambda_dialect import compute, show, compile_dialect, parse  # noqa: E402
 
 COMPILE = [
-    ("\\x. x", "I"),
-    ("\\x. \\y. x", "K"),
-    ("\\x. \\y. \\z. (x z) (y z)", "S"),
+    (r"\x. x", "I"),
+    (r"\x. \y. x", "K"),
+    (r"\x. \y. \z. (x z) (y z)", "S"),
+    (r"\f. \g. \x. f (g x)", "B"),
+    (r"\f. \x. \y. f y x", "C"),
 ]
 
 APPLIED = [
-    ("(\\x. x) K", "K"),
-    ("((\\x. \\y. x) S) I", "S"),
-    ("(((\\x. \\y. \\z. (x z) (y z)) K) K) I", "I"),
-    ("((\\x. \\y. (y x)) S) I", "S"),
+    (r"(\x. x) K", "K"),
+    (r"((\x. \y. x) S) I", "S"),
+    (r"(((\x. \y. \z. (x z) (y z)) K) K) I", "I"),
+    (r"((\x. \y. (y x)) S) I", "S"),
+    (r"((\p. \q. p q p) (\a. \b. a) (\a. \b. a)) K I", "K"),
+    (r"((\p. \q. p q p) (\a. \b. a) (\a. \b. b)) K I", "I"),
 ]
 
 
@@ -40,13 +40,13 @@ def main() -> int:
             print(f"OK  compile {src} => {c}")
 
     for src, exp in APPLIED:
-        raw, mid, nf, steps = compute(src)
+        raw, mid, nf, b_n, i_n = compute(src)
         got = show(nf)
         if got != exp:
-            print(f"FAIL nf {src}: got {got} want {exp} (turner={show(raw)} basis={show(mid)})")
+            print(f"FAIL nf {src}: got {got} want {exp} (b={b_n} i={i_n})")
             ok = False
         else:
-            print(f"OK  nf {src} => {got} ({steps} IStep)")
+            print(f"OK  nf {src} => {got} (basis={b_n} istep={i_n})")
 
     r = subprocess.run(
         ["lake", "env", "lean", "src/ISAR/LambdaEval.lean"],
@@ -54,12 +54,10 @@ def main() -> int:
     )
     errs = [ln for ln in (r.stdout + r.stderr).splitlines() if "error:" in ln.lower()]
     if r.returncode != 0 or errs:
-        print("FAIL Lean LambdaEval.lean (weaker proved compiler still must build)")
-        for ln in errs[:8]:
-            print(" ", ln)
+        print("FAIL Lean LambdaEval.lean")
         ok = False
     else:
-        print("OK  Lean LambdaEval.lean builds (weaker abstract0; not dialect authority)")
+        print("OK  Lean LambdaEval.lean (proved abstract0; less compile work by design)")
 
     return 0 if ok else 1
 

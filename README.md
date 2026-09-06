@@ -115,13 +115,24 @@ lake env lean --run Main.lean --term "((S K) K) I"
 # Host congruence check (Python step must match Lean NF):
 python host/congruence.py
 
+# Phase 2 proper-toy: shared composition-graph (LO / ParStep-cd / kürzen):
+python host/graph_runtime.py
+python host/graph_congruence.py
+python host/graph_congruence.py --lean   # also vs Main.lean
+python host/graph_bench.py --rounds 3    # tree vs graph wall + unique nodes
+
 # λ dialect: Turner → IStepBasis (dupβ/swapβ) → IStep (gold):
 python host/lambda_dialect.py
+python host/lambda_dialect.py --graph    # reduce via shared graph
 python host/lambda_dialect.py --term "((\\x. \\y. (y x)) S) I"
 python host/lambda_congruence.py
 ```
 
-Pipeline: familiar `\x.e` → Turner degenerate collapse → **IStepBasis-only** preprocess (dialect) → **IStep** reduce (kernel). `C`/`W` are compile alphabet; their β fires in the dialect pass, not as a second kernel. Lean `abstract0` is a weaker proved compiler (simulation theorems), not this dialect’s authority — congruence is observational on applied NFs.
+Pipeline: familiar `\x.e` → Turner degenerate collapse → **prefer IStepBasis** (swapβ/dupβ) else **IStep** until NF. Basis has priority whenever `C`/`W` redexes appear (including after `Sβ`); kernel gold remains `IStep`. Lean `abstract0` is the proved compiler that does less work on purpose (no η/C) — not the host dialect. Congruence is observational on applied NFs.
+
+**Runtime roadmap:** (1) Lean kernel gold — done. (2) Shared composition-graph host — `host/graph_runtime.py` (interned App cells + **forward/kürzen** so shared parents observe updates; not tree copy, not “dict as ontology”). (3) Slim dialects on that graph — next. (4) Parametrized Futamura / cogen on `ParStep`/`cd` + scheduler — later. Lineage: isa-physics/plex toys → Lean formalization → proper-toy host. Agents are a named rewrite surface (many derived via composition); not ontological atoms. Keep combinators-from-composition; do **not** re-import plex-core ports/lowerings as the kernel.
+
+Bench: `python host/lambda_bench.py --rounds 50` (tree) · `python host/graph_bench.py --rounds 5` (tree vs graph)
 
 ### Alphabet layers
 
@@ -134,12 +145,14 @@ Pipeline: familiar `\x.e` → Turner degenerate collapse → **IStepBasis-only**
 | Full surface syntax | + dup, swap, comp, var | `Kernel.lean` |
 | Main reduce `IStep` | I/K/B/S β + appL/appR — no dupβ/swapβ | `Kernel.lean` |
 | Operator basis | `IStepBasis` adds dupβ, swapβ; `derived_s` recovers S | `Kernel.lean`, `TensorSemantics.lean` |
+| Shared graph host | Full `ITerm` arena; LO / `ParStep`/`cd`; share + kürzen | `host/graph_runtime.py` |
 
 ### What this is not
 
-- **Not Lafont interaction nets.** No δ/ε/γ annihilation. "Interaction-looking" is analogy for the BCKW-style agents; the formal alphabet is ISK (quotient) / ISKWBCS (syntax).
+- **Not Lafont interaction nets.** No δ/ε/γ annihilation — superfluous for composition/tensor graphs; we don't have ports. Sharing is node identity + edges.
+- **Not plex-core product surface.** Ports / five lowerings / wire are not the kernel. The proper-toy keeps composition-shaped sharing only.
 - **plex-shell is parked.** No kernel work, no emit/cogen claims from that tree. The ISAR kernel lives here in `isar-proofs`.
-- **No cogen/emit product.** `cd` and `step?` are interpreters. Future cogen targets are projections of the Invariant Layer quotient; they are not in this slice.
+- **No cogen/emit product yet.** `cd` / `step?` / graph `ParStep` are interpreters. Phase 4 specializes the shared parallel runtime (Futamura), not LO tree copy.
 
 ---
 
