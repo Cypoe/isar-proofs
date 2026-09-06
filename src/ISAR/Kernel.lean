@@ -69,6 +69,11 @@ inductive SKStep : SK → SK → Prop where
    4. One-step ISAR reduction
    ========================================================= -/
 
+/--
+Main LO stepper. **`konstβ` / `sβ` here are convenience axioms** (usable ISK surface).
+Pure L0 rewrite is `IStepCore` (no konst/s); S is recovered by `derived_s_beta`.
+K remains a macro/debt until carrier recovery — see §15 and host `tower.py`.
+-/
 inductive IStep : ITerm → ITerm → Prop where
   | normβ (x : ITerm) :
       IStep (ITerm.app ITerm.norm x) x
@@ -608,12 +613,51 @@ open ITerm
 
 local infixl:70 " ◦ " => ITerm.app
 
+/--
+Pure L0 rewrite (host tower / carrier presentation): `norm`, `comp`, `dup`, `swap`, and
+congruence. **Not** `konstβ` / `sβ` — those are derived-macro laws.
+
+`IStep` / `IStepBasis` still axiomatize `konstβ` (and `IStep` axiomatizes `sβ`) for a
+usable stepper; that is the **wrong long-term shape** relative to the composition
+tower (see host `tower.py`, `derived_s` below). Target: recover those laws as theorems
+(or fused macro steps justified by carrier IRAS / `derived_s`), not as core axioms.
+`app` ↔ matrix mul is a dispatch concern, not an extra L0 β.
+-/
+inductive IStepCore : ITerm → ITerm → Prop where
+  | normβ (x : ITerm) :
+      IStepCore (norm ◦ x) x
+  | compβ (f g x : ITerm) :
+      IStepCore (comp ◦ f ◦ g ◦ x) (f ◦ (g ◦ x))
+  | dupβ (f x : ITerm) :
+      IStepCore (dup ◦ f ◦ x) (f ◦ x ◦ x)
+  | swapβ (f x y : ITerm) :
+      IStepCore (swap ◦ f ◦ x ◦ y) (f ◦ y ◦ x)
+  | appL {f f' x : ITerm} :
+      IStepCore f f' → IStepCore (f ◦ x) (f' ◦ x)
+  | appR {f x x' : ITerm} :
+      IStepCore x x' → IStepCore (f ◦ x) (f ◦ x')
+
+abbrev IRedCore := Relation.ReflTransGen IStepCore
+
 def derived_s : ITerm :=
   (comp ◦ (comp ◦ dup)) ◦ ((swap ◦ ((comp ◦ comp) ◦ ((comp ◦ comp) ◦ swap))) ◦ norm)
+
+/--
+Carrier-signature word for `konst`: `I₁·R₁·A₁·S₁` as
+`(((norm ◦ swap) ◦ dup) ◦ sₛ)` (cf. `term_signature_val`).
+
+**Not** a BCWI β-definition of `konstβ` (combinatory completeness needs cancellation:
+basis is BCKW, not BCWI). Open: prove recovery of `konstβ` from carrier/IRAS or
+ExtEq under a dispatch interpretation — then demote the convenience axiom.
+-/
+def derived_k_signature : ITerm :=
+  ((norm ◦ swap) ◦ dup) ◦ sₛ
 
 inductive IStepBasis : ITerm → ITerm → Prop where
   | normβ (x : ITerm) :
       IStepBasis (norm ◦ x) x
+  /-- Convenience axiom (wrong long-term shape for the pure tower). Prefer recovery
+  via carrier IRAS / macro; see `IStepCore` and `derived_k_signature`. -/
   | konstβ (x y : ITerm) :
       IStepBasis (konst ◦ x ◦ y) x
   | compβ (f g x : ITerm) :
@@ -626,6 +670,15 @@ inductive IStepBasis : ITerm → ITerm → Prop where
       IStepBasis f f' → IStepBasis (f ◦ x) (f' ◦ x)
   | appR {f x x' : ITerm} :
       IStepBasis x x' → IStepBasis (f ◦ x) (f ◦ x')
+
+theorem IStepCore_to_IStepBasis {t u : ITerm} (h : IStepCore t u) : IStepBasis t u := by
+  induction h with
+  | normβ x => exact IStepBasis.normβ x
+  | compβ f g x => exact IStepBasis.compβ f g x
+  | dupβ f x => exact IStepBasis.dupβ f x
+  | swapβ f x y => exact IStepBasis.swapβ f x y
+  | appL _ ih => exact IStepBasis.appL ih
+  | appR _ ih => exact IStepBasis.appR ih
 
 abbrev IRedBasis := Relation.ReflTransGen IStepBasis
 

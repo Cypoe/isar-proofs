@@ -67,18 +67,14 @@ def main() -> int:
             ok = False
             print(f"  EXPECTED {expected}")
 
-    print("\n== S-beta sharing (same x id) ==")
+    print("\n== S expands to derived_s; NF quotes back ==")
     g = Graph()
-    # S I I K → (I K)(I K); both K args share
-    root = g.import_tree(app(app(app(S, I), I), KK))
-    after = g.step_lo(root)
-    assert after is not None
-    r = g.repr(after)
-    la, ra = g.repr(g.left[r]), g.repr(g.right[r])
-    lx, rx = g.repr(g.right[la]), g.repr(g.right[ra])
-    share_ok = lx == rx
-    print(f"{'OK' if share_ok else 'FAIL'} shared arg id={lx} (alloc={g.alloc_count()})")
-    if not share_ok:
+    root = g.import_tree(app(app(KK, S), I))
+    nf, _ = g.reduce(root)
+    got = g.export_tree(nf)
+    ok_s = got == S
+    print(f"{'OK' if ok_s else 'FAIL'} K S I => {got} (alloc={g.alloc_count()})")
+    if not ok_s:
         ok = False
 
     print("\n== shared-parent kurzen ==")
@@ -86,11 +82,10 @@ def main() -> int:
     redex = g2.import_tree(app(I, KK))
     p1 = g2.mk_app(g2.atom(K.NORM), redex)
     p2 = g2.mk_app(g2.atom(K.KONST), redex)
-    g2.step_lo(redex)
-    from reduce import KK as KKonst
+    g2.step(redex)
     kurz_ok = (
-        g2.export_tree(g2.repr(g2.right[p1])) == KKonst
-        and g2.export_tree(g2.repr(g2.right[p2])) == KKonst
+        g2.export_tree(g2.repr(g2.right[p1])) == KK
+        and g2.export_tree(g2.repr(g2.right[p2])) == KK
     )
     print(f"{'OK' if kurz_ok else 'FAIL'} both parents observe forward")
     if not kurz_ok:

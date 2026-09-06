@@ -35,6 +35,7 @@ The formal core now has: confluence and unique NFs; `cd` as a **normalizing stra
 2. **Nonempty SARI dynamics** — `R_empty` is a theorem. A nonempty `R` needs a relation that is *not* already collapsed by `OperationalEq` / joinability. Do not change `OperationalEq` to fake a step.
 3. **Metric, then completion** — UAT freeze is the decision. Do not claim `ISAR_UAT` proved or restate `KernelAddressLimit` as `Metric.Completion` before a metric exists.
 4. **Keep named** — `quantityToNat` (full `Quantity`) and `exp_exp_not_holonomic`. `QuantityCore` does not replace the four axioms.
+5. **Pure tower / `IStepCore`** — L0 = norm/app/comp/dup/swap. **S:** recovered (`derived_s_beta`) — correct. **K:** `konstβ` as core axiom is still wrong shape, but K is **not** a BCWI β-definition (complete CL basis is BCKW; cancellation/weakening is independent of W). Open proof: recover `konstβ` from carrier IRAS / ExtEq / dispatch eval — Kuratowski pairing (isa-physics Δ) is related structure, not `K = BCWI-term`. Host fused K is placeholder until that theorem. Do not claim BCWI ⊢ K.
 
 Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; claim `nf_of_term` computable; repair the withdrawn quine whitepaper; invent a metric this cycle.
 
@@ -211,8 +212,11 @@ To unify the stack, we chose to maintain **independence** between the `KernelCat
 
 The verified stack relies on the following ground-truth definitions, which serve as the axiomatic baseline of the system:
 
-1. **Substrate Reductions (`IStep`)**:
-   - The transition rules for `normβ`, `konstβ`, `compβ`, and `sβ` in `Kernel.lean` are the axiomatic reductions of the substrate.
+1. **Rewrite (stratified):**
+   - **L0 core** (`IStepCore`): `normβ`, `compβ`, `dupβ`, `swapβ` (+ congruence) — pure tower.
+   - **Derived:** `derived_s` / `derived_s_beta`; `derived_k_signature` (IRAS word, not yet a β-theorem).
+   - **Convenience (debt):** `IStep`/`IStepBasis` still axiomatize `konstβ` and `IStep` axiomatizes `sβ` — wrong long-term shape vs host `tower.py`; recover as macros/theorems.
+   - `app` ↔ matrix mul is dispatch (Phase 4), not an extra L0 β.
 2. **Causal Compatibility (`O_compat` / `B_compat`)**:
    - The compatibility of the application (`O`) and pairing (`B`) operations with operational equivalence is assumed in the general `recurrence_lemma`.
 3. **Observation Faithfulness (`sig_faithful_opereq` / `sig_surjective`)**:

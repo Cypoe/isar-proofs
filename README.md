@@ -130,7 +130,7 @@ python host/lambda_congruence.py
 
 Pipeline: familiar `\x.e` → Turner degenerate collapse → **prefer IStepBasis** (swapβ/dupβ) else **IStep** until NF. Basis has priority whenever `C`/`W` redexes appear (including after `Sβ`); kernel gold remains `IStep`. Lean `abstract0` is the proved compiler that does less work on purpose (no η/C) — not the host dialect. Congruence is observational on applied NFs.
 
-**Runtime roadmap:** (1) Lean kernel gold — done. (2) Shared composition-graph host — `host/graph_runtime.py` (interned App cells + **forward/kürzen** so shared parents observe updates; not tree copy, not “dict as ontology”). (3) Slim dialects on that graph — next. (4) Parametrized Futamura / cogen on `ParStep`/`cd` + scheduler — later. Lineage: isa-physics/plex toys → Lean formalization → proper-toy host. Agents are a named rewrite surface (many derived via composition); not ontological atoms. Keep combinators-from-composition; do **not** re-import plex-core ports/lowerings as the kernel.
+**Runtime roadmap:** (1) Lean gold — done. (2) **Pure tower** on the rewrite dispatch — L0 `norm, app, comp, dup, swap`; L1 `s=derived_s` (expand), `k` macro fused β (sig IRAS); L2 dialects next. See `host/tower.py`. (3) Slim dialects onto that basis. (4) Dispatch backends (graph β vs CPU/GPU matmul for app/mul), Futamura/cogen, scheduler. No plex-core ports as kernel.
 
 Bench: `python host/lambda_bench.py --rounds 50` (tree) · `python host/graph_bench.py --rounds 5` (tree vs graph)
 
@@ -138,14 +138,10 @@ Bench: `python host/lambda_bench.py --rounds 50` (tree) · `python host/graph_be
 
 | Layer | What | Source of truth |
 |:------|:-----|:----------------|
-| Carriers | `I,R,A,S` 4×4 matrices | `ISARMatrices.lean`, `kernel.py` |
-| Gauge | `K1_K2_gauge_equiv` | `ISARMatrices.lean`, `ISARBridge.lean` |
-| Ops → terms | `term_signature_val` (norm→I1, s→S1, konst→K1, dup→A1, swap→R1, comp→0) | `BasisCompleteness.lean` |
-| Quotient fragment | ISK only (norm, konst, sₛ, app) on `ISKSubtype` | `InvariantLayer.lean` |
-| Full surface syntax | + dup, swap, comp, var | `Kernel.lean` |
-| Main reduce `IStep` | I/K/B/S β + appL/appR — no dupβ/swapβ | `Kernel.lean` |
-| Operator basis | `IStepBasis` adds dupβ, swapβ; `derived_s` recovers S | `Kernel.lean`, `TensorSemantics.lean` |
-| Shared graph host | Full `ITerm` arena; LO / `ParStep`/`cd`; share + kürzen | `host/graph_runtime.py` |
+| Pure tower L0 | `norm, app, comp, dup, swap` | `host/tower.py` |
+| Pure tower L1 | `s=derived_s` (expand); `k` macro (fused β; sig IRAS) | `host/tower.py`, `host/basis.py` |
+| Shared graph host | L0+L1 rewrite + kürzen; quote to L2 ISK display | `host/graph_runtime.py` |
+| Dispatch / lowering | Same NF; app/mul may be graph β or matmul (CPU/GPU) | Phase 4 |
 
 ### What this is not
 

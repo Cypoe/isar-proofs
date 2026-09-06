@@ -1,15 +1,11 @@
 """
-Phase 2 proper-toy: structural composition-graph.
+Phase 2.5 proper-toy: principled basis graph (pure tower, rewrite dispatch).
 
-Heap semantics (graph reduction, not tree copy):
-  - Interned App cells: equal (left,right) → one id (maximal structural share).
-  - Cells are not mutated in place. A rewrite `redirect(src, dst)` installs a
-    forward so every parent that already held `src` observes `dst` on `repr`
-    (kürzen). That is the tensor-graph update, not “dict as the ontology.”
-  - Sβ / Wβ build both uses with the same arg id before intern.
-  - `_step_memo` / `_cd_memo` avoid re-walking reduced cells.
+L0 atoms: norm, comp, dup, swap  (+ app edges, var)
+L1: S expands to derived_s; K is a macro tag with fused β (sig IRAS in tower.py)
+L2: dialects / ITerm — Phase 3
 
-Lean = NF gold. Atoms unique. Not plex-core ports/lowerings.
+Share + forward kürzen. App/mul backend (GPU, …) = Phase 4 dispatch.
 """
 from __future__ import annotations
 
@@ -22,13 +18,15 @@ if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 
 from reduce import K, T, I, KK, B, S, D, C, app as tree_app  # noqa: E402
+from tower import translate_to_basis, quote_surface  # noqa: E402
 
 
 class Graph:
     __slots__ = (
         "kind", "varn", "left", "right", "fwd",
         "_atom", "_var_intern", "_app_intern",
-        "_step_memo", "_basis_memo", "_cd_memo", "_nf",
+        "_step_memo", "_cd_memo", "_nf",
+        "_macro_k",
     )
 
     def __init__(self) -> None:
@@ -41,11 +39,14 @@ class Graph:
         self._var_intern: Dict[int, int] = {}
         self._app_intern: Dict[Tuple[int, int], int] = {}
         self._step_memo: Dict[int, Optional[int]] = {}
-        self._basis_memo: Dict[int, Optional[int]] = {}
         self._cd_memo: Dict[int, int] = {}
         self._nf: Dict[int, bool] = {}
-        for kind in (K.NORM, K.KONST, K.DUP, K.SWAP, K.COMP, K.S):
+        # L0 only
+        for kind in (K.NORM, K.COMP, K.DUP, K.SWAP):
             self._atom[kind] = self._alloc(kind)
+        # L1 macro K (fused β) — not an L0 substrate op
+        self._macro_k = self._alloc(K.KONST)
+        self._nf[self._macro_k] = True
 
     def _alloc(self, kind: K, n: int = 0, left: int = -1, right: int = -1) -> int:
         i = len(self.kind)
@@ -68,19 +69,21 @@ class Graph:
         return i
 
     def redirect(self, src: int, dst: int) -> int:
-        """Kürzen: all holders of src observe dst."""
         src = self.repr(src)
         dst = self.repr(dst)
         if src == dst:
             return src
         self.fwd[src] = dst
         self._step_memo[src] = dst
-        self._basis_memo.pop(src, None)
         self._cd_memo[src] = dst
         self._nf.pop(src, None)
         return dst
 
     def atom(self, kind: K) -> int:
+        if kind == K.S:
+            raise ValueError("S is L1 expand — use translate_to_basis / import_tree")
+        if kind == K.KONST:
+            return self._macro_k
         return self._atom[kind]
 
     def var(self, n: int) -> int:
@@ -89,6 +92,7 @@ class Graph:
             return got
         i = self._alloc(K.VAR, n=n)
         self._var_intern[n] = i
+        self._nf[i] = True
         return i
 
     def mk_app(self, left: int, right: int) -> int:
@@ -108,43 +112,48 @@ class Graph:
     def unique_count(self) -> int:
         return sum(1 for f in self.fwd if f < 0)
 
-    def import_tree(self, t: T) -> int:
+    def import_tree(self, t: T, *, expand_s: bool = True) -> int:
+        if expand_s:
+            t = translate_to_basis(t)
+        return self._import(t)
+
+    def _import(self, t: T) -> int:
+        if t.k == K.S:
+            raise ValueError("unexpected S after translate_to_basis")
         if t.k == K.APP:
             assert t.l is not None and t.r is not None
-            return self.mk_app(self.import_tree(t.l), self.import_tree(t.r))
+            return self.mk_app(self._import(t.l), self._import(t.r))
         if t.k == K.VAR:
             return self.var(t.n)
+        if t.k == K.KONST:
+            return self._macro_k
         return self.atom(t.k)
 
-    def export_tree(self, i: int) -> T:
+    def export_tree(self, i: int, *, quote: bool = True) -> T:
+        t = self._export_raw(i)
+        return quote_surface(t) if quote else t
+
+    def _export_raw(self, i: int) -> T:
         i = self.repr(i)
         k = self.kind[i]
         if k == K.APP:
-            return tree_app(self.export_tree(self.left[i]), self.export_tree(self.right[i]))
+            return tree_app(self._export_raw(self.left[i]), self._export_raw(self.right[i]))
         if k == K.VAR:
             return T(K.VAR, n=self.varn[i])
         return {
-            K.NORM: I, K.KONST: KK, K.DUP: D, K.SWAP: C, K.COMP: B, K.S: S,
+            K.NORM: I, K.KONST: KK, K.DUP: D, K.SWAP: C, K.COMP: B,
         }[k]
 
     def show(self, i: int) -> str:
-        i = self.repr(i)
-        k = self.kind[i]
-        if k == K.APP:
-            return f"({self.show(self.left[i])} {self.show(self.right[i])})"
-        if k == K.VAR:
-            return f"v{self.varn[i]}"
-        return {
-            K.NORM: "I", K.KONST: "K", K.DUP: "D", K.SWAP: "C",
-            K.COMP: "B", K.S: "S",
-        }[k]
+        return str(self.export_tree(i))
 
     def _fun_arg(self, i: int) -> Tuple[int, int]:
         i = self.repr(i)
         assert self.kind[i] == K.APP
         return self.repr(self.left[i]), self.repr(self.right[i])
 
-    def step_lo(self, i: int) -> Optional[int]:
+    def step(self, i: int) -> Optional[int]:
+        """LO step: L0 β (I/B/D/C) + L1 macro Kβ."""
         i = self.repr(i)
         if i in self._step_memo:
             return self._step_memo[i]
@@ -167,30 +176,33 @@ class Graph:
         if fk == K.APP:
             fl, fr = self._fun_arg(f)
             flk = self.kind[fl]
+            # L1 macro K: K x y → x
             if flk == K.KONST:
                 out = self.redirect(i, fr)
+                self._step_memo[i] = out
+                return out
+            if flk == K.DUP:
+                out = self.redirect(i, self.mk_app(self.mk_app(fr, x), x))
                 self._step_memo[i] = out
                 return out
             if flk == K.APP:
                 fll, flr = self._fun_arg(fl)
                 fllk = self.kind[fll]
                 if fllk == K.COMP:
-                    out = self.mk_app(flr, self.mk_app(fr, x))
-                    out = self.redirect(i, out)
+                    out = self.redirect(i, self.mk_app(flr, self.mk_app(fr, x)))
                     self._step_memo[i] = out
                     return out
-                if fllk == K.S:
-                    out = self.mk_app(self.mk_app(flr, x), self.mk_app(fr, x))
-                    out = self.redirect(i, out)
+                if fllk == K.SWAP:
+                    out = self.redirect(i, self.mk_app(self.mk_app(flr, x), fr))
                     self._step_memo[i] = out
                     return out
 
-        sf = self.step_lo(f)
+        sf = self.step(f)
         if sf is not None:
             out = self.redirect(i, self.mk_app(sf, x))
             self._step_memo[i] = out
             return out
-        sx = self.step_lo(x)
+        sx = self.step(x)
         if sx is not None:
             out = self.redirect(i, self.mk_app(f, sx))
             self._step_memo[i] = out
@@ -200,75 +212,35 @@ class Graph:
         self._step_memo[i] = None
         return None
 
-    def reduce_lo(self, i: int, fuel: int = 100_000) -> Tuple[int, int]:
+    def step_lo(self, i: int) -> Optional[int]:
+        return self.step(i)
+
+    def step_basis(self, i: int) -> Optional[int]:
+        return self.step(i)
+
+    def reduce(self, i: int, fuel: int = 100_000) -> Tuple[int, int]:
         cur, steps = self.repr(i), 0
         while steps < fuel:
-            nxt = self.step_lo(cur)
+            nxt = self.step(cur)
             if nxt is None:
                 break
             cur = self.repr(nxt)
             steps += 1
         return cur, steps
 
-    def step_basis(self, i: int) -> Optional[int]:
-        i = self.repr(i)
-        if i in self._basis_memo:
-            return self._basis_memo[i]
-        if self.kind[i] != K.APP:
-            self._basis_memo[i] = None
-            return None
-        f, x = self._fun_arg(i)
-        if self.kind[f] == K.APP:
-            fl, fr = self._fun_arg(f)
-            if self.kind[fl] == K.DUP:
-                out = self.redirect(i, self.mk_app(self.mk_app(fr, x), x))
-                self._basis_memo[i] = out
-                return out
-            if self.kind[fl] == K.APP:
-                fll, flr = self._fun_arg(fl)
-                if self.kind[fll] == K.SWAP:
-                    out = self.redirect(i, self.mk_app(self.mk_app(flr, x), fr))
-                    self._basis_memo[i] = out
-                    return out
-        sf = self.step_basis(f)
-        if sf is not None:
-            out = self.redirect(i, self.mk_app(sf, x))
-            self._basis_memo[i] = out
-            return out
-        sx = self.step_basis(x)
-        if sx is not None:
-            out = self.redirect(i, self.mk_app(f, sx))
-            self._basis_memo[i] = out
-            return out
-        self._basis_memo[i] = None
-        return None
+    def reduce_lo(self, i: int, fuel: int = 100_000) -> Tuple[int, int]:
+        return self.reduce(i, fuel=fuel)
 
     def reduce_pipeline(self, i: int, fuel: int = 100_000) -> Tuple[int, int, int]:
-        cur = self.repr(i)
-        b_n = i_n = 0
-        while b_n + i_n < fuel:
-            nxt = self.step_basis(cur)
-            if nxt is not None:
-                cur = self.repr(nxt)
-                b_n += 1
-                continue
-            nxt = self.step_lo(cur)
-            if nxt is not None:
-                cur = self.repr(nxt)
-                i_n += 1
-                continue
-            break
-        return cur, b_n, i_n
+        nf, n = self.reduce(i, fuel=fuel)
+        return nf, n, 0
 
     def cd(self, i: int) -> int:
         i = self.repr(i)
         hit = self._cd_memo.get(i)
         if hit is not None:
             return self.repr(hit)
-        if self._nf.get(i):
-            self._cd_memo[i] = i
-            return i
-        if self.kind[i] != K.APP:
+        if self._nf.get(i) or self.kind[i] != K.APP:
             self._cd_memo[i] = i
             return i
 
@@ -279,23 +251,22 @@ class Graph:
             out = self.redirect(i, self.cd(x))
         elif fk == K.APP:
             fl, fr = self._fun_arg(f)
-            if self.kind[fl] == K.KONST:
+            flk = self.kind[fl]
+            if flk == K.KONST:
                 out = self.redirect(i, self.cd(fr))
-            elif self.kind[fl] == K.APP:
+            elif flk == K.DUP:
+                zx = self.cd(x)
+                out = self.redirect(i, self.mk_app(self.mk_app(self.cd(fr), zx), zx))
+            elif flk == K.APP:
                 fll, flr = self._fun_arg(fl)
                 fllk = self.kind[fll]
                 if fllk == K.COMP:
                     out = self.redirect(
                         i, self.mk_app(self.cd(flr), self.mk_app(self.cd(fr), self.cd(x)))
                     )
-                elif fllk == K.S:
-                    zx = self.cd(x)
+                elif fllk == K.SWAP:
                     out = self.redirect(
-                        i,
-                        self.mk_app(
-                            self.mk_app(self.cd(flr), zx),
-                            self.mk_app(self.cd(fr), zx),
-                        ),
+                        i, self.mk_app(self.mk_app(self.cd(flr), self.cd(x)), self.cd(fr))
                     )
                 else:
                     out = self.redirect(i, self.mk_app(self.cd(f), self.cd(x)))
@@ -314,8 +285,7 @@ class Graph:
         cur, rounds = self.repr(i), 0
         while rounds < fuel:
             self._cd_memo.clear()
-            nxt = self.cd(cur)
-            nxt = self.repr(nxt)
+            nxt = self.repr(self.cd(cur))
             rounds += 1
             if nxt == cur:
                 break
@@ -326,7 +296,7 @@ class Graph:
 def reduce_tree_lo(t: T, fuel: int = 100_000) -> Tuple[T, int, int]:
     g = Graph()
     root = g.import_tree(t)
-    nf, steps = g.reduce_lo(root, fuel=fuel)
+    nf, steps = g.reduce(root, fuel=fuel)
     return g.export_tree(nf), steps, g.alloc_count()
 
 
@@ -365,19 +335,16 @@ def main() -> int:
             ok = False
 
     g = Graph()
-    root = g.import_tree(tree_app(tree_app(tree_app(S, KK), KK), I))
-    after = g.step_lo(root)
-    assert after is not None
-    r = g.repr(after)
-    la, ra = g.repr(g.left[r]), g.repr(g.right[r])
-    assert la == ra
-    print(f"OK S-beta shares spine  (alloc={g.alloc_count()})")
+    assert g.kind[g._macro_k] == K.KONST
+    assert K.S not in g._atom
+    assert K.NORM in g._atom and K.COMP in g._atom
+    print(f"OK L0 atoms={{norm,comp,dup,swap}} macro_k={g._macro_k}")
 
     g2 = Graph()
     redex = g2.import_tree(tree_app(I, KK))
     p1 = g2.mk_app(g2.atom(K.NORM), redex)
-    p2 = g2.mk_app(g2.atom(K.KONST), redex)
-    g2.step_lo(redex)
+    p2 = g2.mk_app(g2._macro_k, redex)
+    g2.step(redex)
     assert g2.export_tree(g2.repr(g2.right[p1])) == KK
     assert g2.export_tree(g2.repr(g2.right[p2])) == KK
     print("OK shared-parent kurzen via forward")
