@@ -7,19 +7,17 @@ Layer 0 — five ops (substrate presentation for this rewrite dispatch):
 
 Layer 1 — derived ops (macros over L0):
   s  = derived_s  (Lean `derived_s_beta` — theorem under BCWI; correct shape)
-  k  = macro K    (NOT a BCWI β-definition — BCKW needs K as cancellative primitive;
-                   literature: complete basis is B,C,K,W not B,C,W,I.
-                   Open theorem owed: recover `konstβ` from carrier IRAS / ExtEq /
-                   dispatch, not from inventing a BCWI term. Kuratowski pairing in
-                   isa-physics is Δ/asymmetry for pairs — adjacent toolkit, not K=…)
+  k  = macro K    (L1 fused β — Lean `IStep.konst_macro` / `IStepKMacro`.
+                   NOT a BCWI β-definition; complete basis is BCKW.
+                   `derived_k_signature` is IRAS word evidence, not BCWI ⊢ K.)
 
-Observational NFs must keep matching. Lean `konstβ` as core axiom remains wrong
-shape until that recovery theorem exists; fused host K is the twin placeholder.
+Observational NFs must keep matching. Lean exposes K as L1 `konst_macro`
+(`IStepKMacro`), not as an `IStepCore` peer — same host stratification.
 
-Layer 2 — surface / dialects:
-  full ITerm labels, λ, TRS, … compile onto L0+L1
+Layer 2 — surface / dialects (QuotientMap only):
+  encode/decode onto L0+L1; observe via Graph / OperEq. No private dialect β.
 
-Lean still axiomatizes konstβ/sβ in places; this host makes the tower explicit.
+Lean: `IStep.konst_macro` / `IStepKMacro` (L1); `IStepBasis = IStepCore ∪ macro`.
 """
 from __future__ import annotations
 
@@ -101,8 +99,9 @@ def layer_summary() -> str:
     return (
         "L0 ops:  norm, app, comp, dup, swap\n"
         "L1 der:  s = derived_s (expand); k = macro (fused beta; sig IRAS)\n"
-        "L2 sfc:  ITerm / dialects compile onto L0+L1\n"
-        "Dispatch (Phase 4): app/mul may be graph beta or GPU matmul"
+        "L2 sfc:  QuotientMap encode/decode; observe via Graph/OperEq\n"
+        "Params:  host pieces + strategy (compiler uses / CoGen emits later)\n"
+        "Dispatch (later): budgeted loaders CPU/SIMD/GPU - not dialect-owned"
     )
 
 

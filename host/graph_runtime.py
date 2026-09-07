@@ -3,7 +3,7 @@ Phase 2.5 proper-toy: principled basis graph (pure tower, rewrite dispatch).
 
 L0 atoms: norm, comp, dup, swap  (+ app edges, var)
 L1: S expands to derived_s; K is a macro tag with fused β (sig IRAS in tower.py)
-L2: dialects / ITerm — Phase 3
+L2: QuotientMap dialects (encode/decode) — observe via this Graph
 
 Share + forward kürzen. App/mul backend (GPU, …) = Phase 4 dispatch.
 """

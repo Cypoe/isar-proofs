@@ -121,18 +121,22 @@ python host/graph_congruence.py
 python host/graph_congruence.py --lean   # also vs Main.lean
 python host/graph_bench.py --rounds 3    # tree vs graph wall + unique nodes
 
-# λ dialect: Turner → IStepBasis (dupβ/swapβ) → IStep (gold):
+# λ QuotientMap (Turner encode → Graph observe); --tree for A/B:
 python host/lambda_dialect.py
-python host/lambda_dialect.py --graph    # reduce via shared graph
+python host/lambda_dialect.py --tree
+python host/lambda_dialect.py --abstract0   # encode variant (η/C gap)
 python host/lambda_dialect.py --term "((\\x. \\y. (y x)) S) I"
+python host/bytecode_dialect.py
+python host/observational_suite.py
+python host/quotient_map.py
+python host/host_pieces.py
+python host/strategy.py
 python host/lambda_congruence.py
 ```
 
-Pipeline: familiar `\x.e` → Turner degenerate collapse → **prefer IStepBasis** (swapβ/dupβ) else **IStep** until NF. Basis has priority whenever `C`/`W` redexes appear (including after `Sβ`); kernel gold remains `IStep`. Lean `abstract0` is the proved compiler that does less work on purpose (no η/C) — not the host dialect. Congruence is observational on applied NFs.
+Pipeline: `\x.e` → **QuotientMap.encode** (Turner or `abstract0`) → **Graph** reduce → decode observation. Tree `--tree` keeps Turner + IStepBasis/IStep A/B. Lean `abstract0` is the proved compiler (no η/C) — host Turner is the other encode variant of the same map slot. Congruence is observational on applied NFs under OperEq.
 
-**Runtime roadmap:** (1) Lean gold — done. (2) **Pure tower** on the rewrite dispatch — L0 `norm, app, comp, dup, swap`; L1 `s=derived_s` (expand), `k` macro fused β (sig IRAS); L2 dialects next. See `host/tower.py`. (3) Slim dialects onto that basis. (4) Dispatch backends (graph β vs CPU/GPU matmul for app/mul), Futamura/cogen, scheduler. No plex-core ports as kernel.
-
-Bench: `python host/lambda_bench.py --rounds 50` (tree) · `python host/graph_bench.py --rounds 5` (tree vs graph)
+**Runtime roadmap:** carriers → kernel (`IStepCore` / pure tower) → runtime (Graph) → **dialect ≤ QuotientMap** (or identity) → host pieces + strategy as parameters → compiler *uses* / CoGen *emits* later. See `host/tower.py`, `host/quotient_map.py`.
 
 ### Alphabet layers
 
@@ -141,14 +145,22 @@ Bench: `python host/lambda_bench.py --rounds 50` (tree) · `python host/graph_be
 | Pure tower L0 | `norm, app, comp, dup, swap` | `host/tower.py` |
 | Pure tower L1 | `s=derived_s` (expand); `k` macro (fused β; sig IRAS) | `host/tower.py`, `host/basis.py` |
 | Shared graph host | L0+L1 rewrite + kürzen; quote to L2 ISK display | `host/graph_runtime.py` |
-| Dispatch / lowering | Same NF; app/mul may be graph β or matmul (CPU/GPU) | Phase 4 |
+| QuotientMap | encode/decode only; λ + Bytecode authored maps | `host/quotient_map.py`, `host/lambda_dialect.py`, `host/bytecode_dialect.py` |
+| Host pieces + strategy | Graph piece; Identity/Mix stubs | `host/host_pieces.py`, `host/strategy.py` |
+| Later loaders / CoGen | budgeted CPU/SIMD/GPU choose; mine-adopt | noted below — not Phase 3 product |
+
+### Noted for later
+
+1. **Mine ≠ invent encode.** Candidates from bootstrapped pieces (FASM-shaped) may be **adopted** only if OperEq matches an already known map; otherwise define an explicit QuotientMap.
+2. **CoGen loader shape.** `choose(piece, host_pieces, budget)`: serial → CPU, partly parallel → SIMD, fully parallel + tile fit → GPU. Compiler uses; CoGen emits into the piece catalog. Dialects never own hardware.
+3. Lean `konst_macro` demotion — done on host-aligned spine (`IStepKMacro` / `IStep.konst_macro`; basis = core ∪ macro). Not BCWI ⊢ K.
 
 ### What this is not
 
 - **Not Lafont interaction nets.** No δ/ε/γ annihilation — superfluous for composition/tensor graphs; we don't have ports. Sharing is node identity + edges.
 - **Not plex-core product surface.** Ports / five lowerings / wire are not the kernel. The proper-toy keeps composition-shaped sharing only.
 - **plex-shell is parked.** No kernel work, no emit/cogen claims from that tree. The ISAR kernel lives here in `isar-proofs`.
-- **No cogen/emit product yet.** `cd` / `step?` / graph `ParStep` are interpreters. Phase 4 specializes the shared parallel runtime (Futamura), not LO tree copy.
+- **No cogen/emit product yet.** `cd` / `step?` / graph `ParStep` are interpreters. Host pieces + strategy slots are ready; budgeted loaders are later.
 
 ---
 

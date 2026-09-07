@@ -241,7 +241,7 @@ theorem denot_sound {t u : ITerm} (h : IStep t u) : ExtEq (denot t) (denot u) :=
   induction h with
   | normβ x =>
       exact t_norm_beta (denot x)
-  | konstβ x y =>
+  | konst_macro x y =>
       exact t_konst_beta (denot x) (denot y)
   | compβ f g x =>
       exact t_comp_beta (denot f) (denot g) (denot x)

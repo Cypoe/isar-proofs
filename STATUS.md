@@ -31,11 +31,14 @@ The formal core now has: confluence and unique NFs; `cd` as a **normalizing stra
 
 ### Where to go next (priority order)
 
-1. **1993 polyvariant mix / cogen** — still open. Jones-optimality (modern PE cost criterion) has landed; do not stretch `JGS_PE` / `specTerm := swap` into a compiler-generator.
-2. **Nonempty SARI dynamics** — `R_empty` is a theorem. A nonempty `R` needs a relation that is *not* already collapsed by `OperationalEq` / joinability. Do not change `OperationalEq` to fake a step.
-3. **Metric, then completion** — UAT freeze is the decision. Do not claim `ISAR_UAT` proved or restate `KernelAddressLimit` as `Metric.Completion` before a metric exists.
-4. **Keep named** — `quantityToNat` (full `Quantity`) and `exp_exp_not_holonomic`. `QuantityCore` does not replace the four axioms.
-5. **Pure tower / `IStepCore`** — L0 = norm/app/comp/dup/swap. **S:** recovered (`derived_s_beta`) — correct. **K:** `konstβ` as core axiom is still wrong shape, but K is **not** a BCWI β-definition (complete CL basis is BCKW; cancellation/weakening is independent of W). Open proof: recover `konstβ` from carrier IRAS / ExtEq / dispatch eval — Kuratowski pairing (isa-physics Δ) is related structure, not `K = BCWI-term`. Host fused K is placeholder until that theorem. Do not claim BCWI ⊢ K.
+1. **1993 polyvariant mix / cogen** — still open. Jones-optimality (modern PE cost criterion) has landed; do not stretch `JGS_PE` / `specTerm := swap` into a compiler-generator. Host Phase 3 left **strategy + host pieces** as parameters; CoGen later *emits* loaders (budgeted CPU/SIMD/GPU choose) — dialects stay ≤ QuotientMap.
+2. **Mine-adopt** — candidates from bootstrapped pieces may be adopted only if OperEq matches a known map; else define an explicit QuotientMap. Not invented encode.
+3. **Nonempty SARI dynamics** — `R_empty` is a theorem. A nonempty `R` needs a relation that is *not* already collapsed by `OperationalEq` / joinability. Do not change `OperationalEq` to fake a step.
+4. **Metric, then completion** — UAT freeze is the decision. Do not claim `ISAR_UAT` proved or restate `KernelAddressLimit` as `Metric.Completion` before a metric exists.
+5. **Keep named** — `quantityToNat` (full `Quantity`) and `exp_exp_not_holonomic`. `QuantityCore` does not replace the four axioms.
+6. **Pure tower / `IStepCore`** — L0 = norm/app/comp/dup/swap. **S:** recovered (`derived_s_beta`) — correct. **K:** demoted to L1 fused macro (`IStep.konst_macro` / `IStepKMacro`); `IStepBasis = IStepCore ∪ IStepKMacro`. Not BCWI-definable (complete CL basis is BCKW). `derived_k_signature` remains IRAS word evidence, not a β-from-BCWI theorem. Do not claim BCWI ⊢ K.
+
+**Host Phase 3 (done shape):** `host/quotient_map.py` (observe via `host_pieces`), `host/strategy.py`, λ + Bytecode QuotientMaps, `host/observational_suite.py`. OperEq/Graph authority; no private dialect β. **K-macro demotion (Lean):** `IStep.konst_macro` + `IStepKMacro`; basis = core ∪ macro.
 
 Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; claim `nf_of_term` computable; repair the withdrawn quine whitepaper; invent a metric this cycle.
 
@@ -214,9 +217,9 @@ The verified stack relies on the following ground-truth definitions, which serve
 
 1. **Rewrite (stratified):**
    - **L0 core** (`IStepCore`): `normβ`, `compβ`, `dupβ`, `swapβ` (+ congruence) — pure tower.
-   - **Derived:** `derived_s` / `derived_s_beta`; `derived_k_signature` (IRAS word, not yet a β-theorem).
-   - **Convenience (debt):** `IStep`/`IStepBasis` still axiomatize `konstβ` and `IStep` axiomatizes `sβ` — wrong long-term shape vs host `tower.py`; recover as macros/theorems.
-   - `app` ↔ matrix mul is dispatch (Phase 4), not an extra L0 β.
+   - **Derived:** `derived_s` / `derived_s_beta`; `derived_k_signature` (IRAS word).
+   - **L1 K-macro:** `IStepKMacro` / `IStep.konst_macro` (demoted off L0); `IStepBasis = IStepCore ∪ IStepKMacro`. Surface `IStep.sβ` remains for the `sₛ` atom.
+   - `app` ↔ matrix mul is dispatch (later loaders), not an extra L0 β.
 2. **Causal Compatibility (`O_compat` / `B_compat`)**:
    - The compatibility of the application (`O`) and pairing (`B`) operations with operational equivalence is assumed in the general `recurrence_lemma`.
 3. **Observation Faithfulness (`sig_faithful_opereq` / `sig_surjective`)**:

@@ -724,7 +724,7 @@ theorem normal_of_cd_eq (t : ITerm) (ht : LinearIKTerm t) (h : t = cd t) : Norma
           dsimp [term_size] at h_sz
           have h_le := cd_size_le_LinearIK x hx
           omega
-      | konstβ =>
+      | konst_macro =>
           dsimp [cd] at h
           have h_sz := congrArg term_size h
           dsimp [term_size] at h_sz

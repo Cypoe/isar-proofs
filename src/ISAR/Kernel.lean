@@ -70,14 +70,21 @@ inductive SKStep : SK → SK → Prop where
    ========================================================= -/
 
 /--
-Main LO stepper. **`konstβ` / `sβ` here are convenience axioms** (usable ISK surface).
-Pure L0 rewrite is `IStepCore` (no konst/s); S is recovered by `derived_s_beta`.
-K remains a macro/debt until carrier recovery — see §15 and host `tower.py`.
+Main LO stepper (usable ISK surface).
+
+* L0 agents in this relation: `normβ`, `compβ` (plus congruence).
+* **L1 fused K-macro:** `konst_macro` — cancellation; **not** an `IStepCore` rule
+  and **not** BCWI-definable (complete basis is BCKW). Host: fused K in `tower.py`.
+* `sβ` remains a surface convenience for the `sₛ` atom; basis recovery is
+  `derived_s_beta` under `IStepBasis`.
+
+Pure L0 rewrite is `IStepCore` (no konst / no s atom).
 -/
 inductive IStep : ITerm → ITerm → Prop where
   | normβ (x : ITerm) :
       IStep (ITerm.app ITerm.norm x) x
-  | konstβ (x y : ITerm) :
+  /-- L1 fused K-macro (cancellation). Demoted off the L0 / `IStepCore` alphabet. -/
+  | konst_macro (x y : ITerm) :
       IStep (ITerm.app (ITerm.app ITerm.konst x) y) x
   | compβ (f g x : ITerm) :
       IStep (ITerm.app (ITerm.app (ITerm.app ITerm.comp f) g) x)
@@ -89,6 +96,11 @@ inductive IStep : ITerm → ITerm → Prop where
       IStep f f' → IStep (ITerm.app f x) (ITerm.app f' x)
   | appR {f x x' : ITerm} :
       IStep x x' → IStep (ITerm.app f x) (ITerm.app f x')
+
+/-- Compatibility intro for the L1 K-macro (prefer `IStep.konst_macro` in new code). -/
+theorem IStep.konstβ (x y : ITerm) :
+    IStep (ITerm.app (ITerm.app ITerm.konst x) y) x :=
+  IStep.konst_macro x y
 
 abbrev SKRed := Relation.ReflTransGen SKStep
 abbrev IRed  := Relation.ReflTransGen IStep
@@ -469,7 +481,7 @@ theorem ParStep_diamond {t u₁ u₂ : ITerm} (h₁ : ParStep t u₁) (h₂ : Pa
 theorem IStep_to_ParStep {t u : ITerm} (h : IStep t u) : ParStep t u := by
   induction h with
   | normβ x => exact ParStep.norm_red (ParStep.refl x)
-  | konstβ x y => exact ParStep.konst_red (ParStep.refl x) (ParStep.refl y)
+  | konst_macro x y => exact ParStep.konst_red (ParStep.refl x) (ParStep.refl y)
   | compβ f g x => exact ParStep.comp_red (ParStep.refl f) (ParStep.refl g) (ParStep.refl x)
   | sβ x y z => exact ParStep.s_red (ParStep.refl x) (ParStep.refl y) (ParStep.refl z)
   | appL _ ih => exact ParStep.app ih (ParStep.refl _)
@@ -542,7 +554,7 @@ theorem ISKTerm_preserved {t u : ITerm} (ht : ISKTerm t) (h : IStep t u) : ISKTe
   induction h with
   | normβ x =>
       cases ht with | app _ hx => exact hx
-  | konstβ x y =>
+  | konst_macro x y =>
       cases ht with | app hf _ =>
         cases hf with | app _ hx => exact hx
   | compβ f g x =>
@@ -617,11 +629,9 @@ local infixl:70 " ◦ " => ITerm.app
 Pure L0 rewrite (host tower / carrier presentation): `norm`, `comp`, `dup`, `swap`, and
 congruence. **Not** `konstβ` / `sβ` — those are derived-macro laws.
 
-`IStep` / `IStepBasis` still axiomatize `konstβ` (and `IStep` axiomatizes `sβ`) for a
-usable stepper; that is the **wrong long-term shape** relative to the composition
-tower (see host `tower.py`, `derived_s` below). Target: recover those laws as theorems
-(or fused macro steps justified by carrier IRAS / `derived_s`), not as core axioms.
-`app` ↔ matrix mul is a dispatch concern, not an extra L0 β.
+`IStep` exposes `konst_macro` (L1 fused K) and surface `sβ`; `IStepBasis` is
+`IStepCore ∪ IStepKMacro` — K is **not** a peer of the L0 agents. Target: keep
+macros out of `IStepCore`; `app` ↔ matrix mul remains dispatch, not an extra L0 β.
 -/
 inductive IStepCore : ITerm → ITerm → Prop where
   | normβ (x : ITerm) :
@@ -646,39 +656,77 @@ def derived_s : ITerm :=
 Carrier-signature word for `konst`: `I₁·R₁·A₁·S₁` as
 `(((norm ◦ swap) ◦ dup) ◦ sₛ)` (cf. `term_signature_val`).
 
-**Not** a BCWI β-definition of `konstβ` (combinatory completeness needs cancellation:
-basis is BCKW, not BCWI). Open: prove recovery of `konstβ` from carrier/IRAS or
-ExtEq under a dispatch interpretation — then demote the convenience axiom.
+**Not** a BCWI β-definition of K-macro (combinatory completeness needs cancellation:
+basis is BCKW, not BCWI). Signature evidence for the macro; β-law is `IStepKMacro`.
 -/
 def derived_k_signature : ITerm :=
   ((norm ◦ swap) ◦ dup) ◦ sₛ
 
-inductive IStepBasis : ITerm → ITerm → Prop where
-  | normβ (x : ITerm) :
-      IStepBasis (norm ◦ x) x
-  /-- Convenience axiom (wrong long-term shape for the pure tower). Prefer recovery
-  via carrier IRAS / macro; see `IStepCore` and `derived_k_signature`. -/
+/--
+L1 fused K-macro (host tower). Cancellation primitive — independent of W/dup.
+Congruence included so the macro closes under app contexts.
+-/
+inductive IStepKMacro : ITerm → ITerm → Prop where
   | konstβ (x y : ITerm) :
-      IStepBasis (konst ◦ x ◦ y) x
-  | compβ (f g x : ITerm) :
-      IStepBasis (comp ◦ f ◦ g ◦ x) (f ◦ (g ◦ x))
-  | dupβ (f x : ITerm) :
-      IStepBasis (dup ◦ f ◦ x) (f ◦ x ◦ x)
-  | swapβ (f x y : ITerm) :
-      IStepBasis (swap ◦ f ◦ x ◦ y) (f ◦ y ◦ x)
+      IStepKMacro (konst ◦ x ◦ y) x
   | appL {f f' x : ITerm} :
-      IStepBasis f f' → IStepBasis (f ◦ x) (f' ◦ x)
+      IStepKMacro f f' → IStepKMacro (f ◦ x) (f' ◦ x)
   | appR {f x x' : ITerm} :
-      IStepBasis x x' → IStepBasis (f ◦ x) (f ◦ x')
+      IStepKMacro x x' → IStepKMacro (f ◦ x) (f ◦ x')
 
-theorem IStepCore_to_IStepBasis {t u : ITerm} (h : IStepCore t u) : IStepBasis t u := by
+/--
+Basis rewrite = **L0** `IStepCore` ∪ **L1** `IStepKMacro`.
+
+`konstβ` is no longer a peer constructor of `norm`/`comp`/`dup`/`swap`; it lives
+only in the macro layer. S remains recovered by `derived_s_beta` (theorem).
+-/
+inductive IStepBasis : ITerm → ITerm → Prop where
+  | ofCore {t u : ITerm} :
+      IStepCore t u → IStepBasis t u
+  | ofMacro {t u : ITerm} :
+      IStepKMacro t u → IStepBasis t u
+
+namespace IStepBasis
+
+theorem normβ (x : ITerm) : IStepBasis (norm ◦ x) x :=
+  .ofCore (.normβ x)
+
+theorem konstβ (x y : ITerm) : IStepBasis (konst ◦ x ◦ y) x :=
+  .ofMacro (.konstβ x y)
+
+theorem compβ (f g x : ITerm) : IStepBasis (comp ◦ f ◦ g ◦ x) (f ◦ (g ◦ x)) :=
+  .ofCore (.compβ f g x)
+
+theorem dupβ (f x : ITerm) : IStepBasis (dup ◦ f ◦ x) (f ◦ x ◦ x) :=
+  .ofCore (.dupβ f x)
+
+theorem swapβ (f x y : ITerm) : IStepBasis (swap ◦ f ◦ x ◦ y) (f ◦ y ◦ x) :=
+  .ofCore (.swapβ f x y)
+
+theorem appL {f f' x : ITerm} (h : IStepBasis f f') : IStepBasis (f ◦ x) (f' ◦ x) := by
+  cases h with
+  | ofCore hc => exact .ofCore (.appL hc)
+  | ofMacro hm => exact .ofMacro (.appL hm)
+
+theorem appR {f x x' : ITerm} (h : IStepBasis x x') : IStepBasis (f ◦ x) (f ◦ x') := by
+  cases h with
+  | ofCore hc => exact .ofCore (.appR hc)
+  | ofMacro hm => exact .ofMacro (.appR hm)
+
+end IStepBasis
+
+theorem IStepCore_to_IStepBasis {t u : ITerm} (h : IStepCore t u) : IStepBasis t u :=
+  .ofCore h
+
+theorem IStepKMacro_to_IStepBasis {t u : ITerm} (h : IStepKMacro t u) : IStepBasis t u :=
+  .ofMacro h
+
+/-- Embed the L1 K-macro into the usable `IStep` surface. -/
+theorem IStepKMacro_to_IStep {t u : ITerm} (h : IStepKMacro t u) : IStep t u := by
   induction h with
-  | normβ x => exact IStepBasis.normβ x
-  | compβ f g x => exact IStepBasis.compβ f g x
-  | dupβ f x => exact IStepBasis.dupβ f x
-  | swapβ f x y => exact IStepBasis.swapβ f x y
-  | appL _ ih => exact IStepBasis.appL ih
-  | appR _ ih => exact IStepBasis.appR ih
+  | konstβ x y => exact IStep.konst_macro x y
+  | appL _ ih => exact IStep.appL ih
+  | appR _ ih => exact IStep.appR ih
 
 abbrev IRedBasis := Relation.ReflTransGen IStepBasis
 
@@ -754,7 +802,7 @@ theorem translate_preserves_step {t u : ITerm} (h : IStep t u) :
   induction h with
   | normβ x =>
       exact Relation.ReflTransGen.single (IStepBasis.normβ (translate_to_basis x))
-  | konstβ x y =>
+  | konst_macro x y =>
       exact Relation.ReflTransGen.single (IStepBasis.konstβ (translate_to_basis x) (translate_to_basis y))
   | compβ f g x =>
       exact Relation.ReflTransGen.single (IStepBasis.compβ (translate_to_basis f) (translate_to_basis g) (translate_to_basis x))
@@ -789,32 +837,42 @@ theorem translate_NoS (t : ITerm) : NoS (translate_to_basis t) := by
   | app f x ihf ihx => exact NoS.app ihf ihx
 
 theorem IStepBasis_preserves_NoS {t u : ITerm} (h : IStepBasis t u) (ht : NoS t) : NoS u := by
-  induction h with
-  | normβ x =>
-      cases ht with | app _ hx => exact hx
-  | konstβ x y =>
-      cases ht with | app hf _ =>
-        cases hf with | app _ hx => exact hx
-  | compβ f g x =>
-      cases ht with | app hf hx =>
-        cases hf with | app hfg hg =>
-          cases hfg with | app hc hf =>
-            exact NoS.app hf (NoS.app hg hx)
-  | dupβ f x =>
-      cases ht with | app hf hx =>
-        cases hf with | app hd hf =>
-          exact NoS.app (NoS.app hf hx) hx
-  | swapβ f x y =>
-      cases ht with | app h_swap_f_x hy =>
-        cases h_swap_f_x with | app h_swap_f hx =>
-          cases h_swap_f with | app h_swap hf =>
-            exact NoS.app (NoS.app hf hy) hx
-  | appL _ ih =>
-      cases ht with | app hf hx =>
-        exact NoS.app (ih hf) hx
-  | appR _ ih =>
-      cases ht with | app hf hx =>
-        exact NoS.app hf (ih hx)
+  cases h with
+  | ofCore hc =>
+      induction hc with
+      | normβ x =>
+          cases ht with | app _ hx => exact hx
+      | compβ f g x =>
+          cases ht with | app hf hx =>
+            cases hf with | app hfg hg =>
+              cases hfg with | app hc hf =>
+                exact NoS.app hf (NoS.app hg hx)
+      | dupβ f x =>
+          cases ht with | app hf hx =>
+            cases hf with | app hd hf =>
+              exact NoS.app (NoS.app hf hx) hx
+      | swapβ f x y =>
+          cases ht with | app h_swap_f_x hy =>
+            cases h_swap_f_x with | app h_swap_f hx =>
+              cases h_swap_f with | app h_swap hf =>
+                exact NoS.app (NoS.app hf hy) hx
+      | appL _ ih =>
+          cases ht with | app hf hx =>
+            exact NoS.app (ih hf) hx
+      | appR _ ih =>
+          cases ht with | app hf hx =>
+            exact NoS.app hf (ih hx)
+  | ofMacro hm =>
+      induction hm with
+      | konstβ x y =>
+          cases ht with | app hf _ =>
+            cases hf with | app _ hx => exact hx
+      | appL _ ih =>
+          cases ht with | app hf hx =>
+            exact NoS.app (ih hf) hx
+      | appR _ ih =>
+          cases ht with | app hf hx =>
+            exact NoS.app hf (ih hx)
 
 theorem IRedBasis_preserves_NoS {t u : ITerm} (h : IRedBasis t u) (ht : NoS t) : NoS u := by
   induction h with

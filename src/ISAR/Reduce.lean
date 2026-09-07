@@ -3,7 +3,7 @@ import ISAR.Kernel
 /-!
 # Reduce — leftmost-outermost single-step interpreter
 
-`step?` matches **IStep** redexes only (normβ, konstβ, compβ, sβ, appL, appR).
+`step?` matches **IStep** redexes only (normβ, konst_macro, compβ, sβ, appL, appR).
 No dupβ/swapβ — those belong to `IStepBasis`, not the main reduction.
 
 `reduceFuel` iterates `step?` up to a fuel bound.

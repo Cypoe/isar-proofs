@@ -51,9 +51,9 @@ theorem subst_env_preserves_step {t u : ITerm} (env : Nat → ITerm) (h : IStep 
   | normβ x =>
       dsimp [subst_env]
       exact IStep.normβ (subst_env x env)
-  | konstβ x y =>
+  | konst_macro x y =>
       dsimp [subst_env]
-      exact IStep.konstβ (subst_env x env) (subst_env y env)
+      exact IStep.konst_macro (subst_env x env) (subst_env y env)
   | compβ f g x =>
       dsimp [subst_env]
       exact IStep.compβ (subst_env f env) (subst_env g env) (subst_env x env)

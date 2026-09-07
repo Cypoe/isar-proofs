@@ -1,13 +1,11 @@
 """
-Host λ dialect — Turner bracket → prefer IStepBasis → else IStep.
+Host λ dialect — explicit QuotientMap onto the OperEq / Graph spine.
 
-Pipeline:
-  1. Turner degenerate elim (η / K-lift / B / C / S)
-  2. Until NF: if basis redex (dupβ/swapβ) fire it; else IStep (I/K/B/S)
-     Basis has priority whenever C/W appear (including after Sβ).
+Encode variants (static division of the map, not two kernels):
+  - Turner: degenerate elim (η / K-lift / B / C / S)
+  - abstract0: Lean-shaped (I / K / S only — no η/C)
 
-Lean `LambdaFragment.abstract0` is the proved compiler (no η/C by design — less
-compile work, simulation theorems). Host dialect authority is Turner + basis/IStep.
+Observation: decode(Graph.reduce(encode(x))). Tree pipeline remains for --tree A/B.
 """
 from __future__ import annotations
 
@@ -21,7 +19,8 @@ if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 
 from reduce import I, KK, S, B, C, D, T, K, app, step as step_istep  # noqa: E402
-from graph_runtime import reduce_tree_pipeline  # noqa: E402
+from quotient_map import QuotientMap, observe, obs_eq  # noqa: E402
+from host_pieces import default_piece, run_piece  # noqa: E402
 
 
 def show(t: T) -> str:
@@ -138,7 +137,55 @@ def bracket(e: NExpr) -> T:
 
 
 # ---------------------------------------------------------------------------
-# Dialect preprocess: IStepBasis only (dupβ, swapβ), then gold IStep
+# abstract0 — Lean LambdaFragment shape (no η / no C/B special cases)
+# ---------------------------------------------------------------------------
+
+def abs0_(x: str, b: X) -> X:
+    if isinstance(b, V) and b.name == x:
+        return Atom(I)
+    if x not in fv(b):
+        return A(Atom(KK), b)
+    if isinstance(b, A):
+        return A(A(Atom(S), abs0_(x, b.left)), abs0_(x, b.right))
+    return A(Atom(KK), b)
+
+
+def bracket_x_abstract0(e: NExpr) -> X:
+    if isinstance(e, NComb):
+        return Atom(e.atom)
+    if isinstance(e, NVar):
+        return V(e.name)
+    if isinstance(e, NApp):
+        return A(bracket_x_abstract0(e.left), bracket_x_abstract0(e.right))
+    return abs0_(e.param, bracket_x_abstract0(e.body))
+
+
+def bracket_abstract0(e: NExpr) -> T:
+    return to_closed(bracket_x_abstract0(e))
+
+
+def encode_turner(surface) -> T:
+    if isinstance(surface, str):
+        surface = parse(surface)
+    return bracket(surface)
+
+
+def encode_abstract0(surface) -> T:
+    if isinstance(surface, str):
+        surface = parse(surface)
+    return bracket_abstract0(surface)
+
+
+def lambda_turner_map() -> QuotientMap:
+    return QuotientMap(name="lambda.turner", encode=encode_turner, decode=show)
+
+
+def lambda_abstract0_map() -> QuotientMap:
+    return QuotientMap(name="lambda.abstract0", encode=encode_abstract0, decode=show)
+
+
+# ---------------------------------------------------------------------------
+# Tree A/B only (--tree): IStepBasis then IStep. Not QuotientMap authority.
 # ---------------------------------------------------------------------------
 
 def step_basis(t: T) -> Optional[T]:
@@ -215,15 +262,21 @@ def compute_expr(e: NExpr, fuel: int = 100_000) -> Tuple[T, T, T, int, int]:
 
 
 def compute_expr_graph(e: NExpr, fuel: int = 100_000) -> Tuple[T, T, T, int, int, int]:
-    """Turner on tree, then basis+IStep on shared graph. Returns + unique_nodes."""
+    """Turner encode, then Graph reduce via host piece. Returns + unique_nodes."""
     raw = bracket(e)
     mid, _ = reduce_basis(raw, fuel=min(fuel, 10_000))
-    nf, b_n, i_n, nodes = reduce_tree_pipeline(raw, fuel=fuel)
-    return raw, mid, nf, b_n, i_n, nodes
+    nf, steps, nodes = run_piece(default_piece(), raw, fuel=fuel)
+    return raw, mid, nf, steps, 0, nodes
 
 
 def compute_graph(src: str, fuel: int = 100_000) -> Tuple[T, T, T, int, int, int]:
     return compute_expr_graph(parse(src), fuel=fuel)
+
+
+def observe_lambda(src: str, *, variant: str = "turner", fuel: int = 100_000):
+    """QuotientMap observe (Graph). variant: turner | abstract0."""
+    qm = lambda_abstract0_map() if variant == "abstract0" else lambda_turner_map()
+    return observe(qm, src, fuel=fuel)
 
 
 # ---------------------------------------------------------------------------
@@ -316,41 +369,58 @@ GOLDENS = [
 
 
 def main(argv: List[str]) -> int:
-    use_graph = False
+    use_tree = False
+    variant = "turner"
     args = list(argv)
-    if args and args[0] == "--graph":
-        use_graph = True
+    while args and args[0] in ("--tree", "--graph", "--abstract0"):
+        if args[0] == "--tree":
+            use_tree = True
+        elif args[0] == "--abstract0":
+            variant = "abstract0"
+        # --graph kept as no-op (graph is default)
         args = args[1:]
 
     if len(args) >= 2 and args[0] == "--term":
-        if use_graph:
-            raw, mid, nf, b_n, i_n, nodes = compute_graph(args[1])
-            print(f"turner:  {show(raw)}")
-            print(f"basis1:  {show(mid)}")
-            print(f"nf:      {show(nf)}  (basis={b_n} istep={i_n} nodes={nodes}) [graph]")
-        else:
+        if use_tree:
             raw, mid, nf, b_n, i_n = compute(args[1])
             print(f"turner:  {show(raw)}")
             print(f"basis1:  {show(mid)}")
-            print(f"nf:      {show(nf)}  (basis={b_n} istep={i_n})")
+            print(f"nf:      {show(nf)}  (basis={b_n} istep={i_n}) [tree]")
+        else:
+            obs, nf, steps, nodes = observe_lambda(args[1], variant=variant)
+            raw = encode_abstract0(args[1]) if variant == "abstract0" else encode_turner(args[1])
+            print(f"encode:  {show(raw)}  [{variant}]")
+            print(f"obs:     {obs}  (steps={steps} nodes={nodes}) [graph QuotientMap]")
         return 0
     if len(args) >= 2 and args[0] == "--compile":
-        print(show(compile_dialect(parse(args[1]))))
+        enc = encode_abstract0 if variant == "abstract0" else encode_turner
+        print(show(enc(parse(args[1]))))
         return 0
 
     ok = True
     for src, expected in GOLDENS:
-        if use_graph:
-            raw, mid, nf, b_n, i_n, nodes = compute_graph(src)
-            got = show(nf)
-            tag = "OK" if got == expected else "FAIL"
-            print(f"{tag} {src}  =>  {got}  (basis={b_n} istep={i_n} nodes={nodes}) [graph]")
-        else:
+        if use_tree:
             raw, mid, nf, b_n, i_n = compute(src)
             got = show(nf)
             tag = "OK" if got == expected else "FAIL"
-            print(f"{tag} {src}  =>  {got}  (basis={b_n} istep={i_n})  [turner {show(raw)}]")
-        if got != expected:
+            print(f"{tag} {src}  =>  {got}  (basis={b_n} istep={i_n}) [tree]")
+            if got != expected:
+                print(f"  EXPECTED: {expected}")
+                ok = False
+            continue
+
+        obs, nf, steps, nodes = observe_lambda(src, variant=variant)
+        got = obs if isinstance(obs, str) else show(nf)
+        match = obs_eq(got, expected)
+        if variant == "abstract0":
+            tag = "OK" if match else "DIFF"
+            print(f"{tag} {src}  =>  {got}  (steps={steps} nodes={nodes}) [abstract0]")
+            if not match:
+                print(f"  TURNER GOLD: {expected}  (eta/C static-division gap; not a FAIL)")
+            continue
+        tag = "OK" if match else "FAIL"
+        print(f"{tag} {src}  =>  {got}  (steps={steps} nodes={nodes}) [graph QuotientMap]")
+        if not match:
             print(f"  EXPECTED: {expected}")
             ok = False
     return 0 if ok else 1
