@@ -21,6 +21,7 @@ if _HOST not in sys.path:
 from reduce import I, KK, S, B, C, D, T, K, app, step as step_istep  # noqa: E402
 from quotient_map import QuotientMap, observe, obs_eq  # noqa: E402
 from host_pieces import default_piece, run_piece  # noqa: E402
+from observation_regime import encoding_regime  # noqa: E402
 
 
 def show(t: T) -> str:
@@ -177,11 +178,21 @@ def encode_abstract0(surface) -> T:
 
 
 def lambda_turner_map() -> QuotientMap:
-    return QuotientMap(name="lambda.turner", encode=encode_turner, decode=show)
+    return QuotientMap(
+        name="lambda.turner",
+        encode=encode_turner,
+        decode=show,
+        regime=encoding_regime(encode_turner, name="lambda.turner.operEq"),
+    )
 
 
 def lambda_abstract0_map() -> QuotientMap:
-    return QuotientMap(name="lambda.abstract0", encode=encode_abstract0, decode=show)
+    return QuotientMap(
+        name="lambda.abstract0",
+        encode=encode_abstract0,
+        decode=show,
+        regime=encoding_regime(encode_abstract0, name="lambda.abstract0.operEq"),
+    )
 
 
 # ---------------------------------------------------------------------------

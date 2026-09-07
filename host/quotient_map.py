@@ -1,16 +1,15 @@
 """
-Phase 3: QuotientMap — dialect obligation is encode/decode only.
+Phase 3: QuotientMap — dialect obligation is encode/decode under a regime O.
 
-OperEq / host-piece NF is observational authority. No private dialect β.
+OperEq / host-piece NF is the primary ObservationRegime. No private dialect β.
 Identity when the surface is already substrate (ITerm).
-Reduce goes through host_pieces (Graph now; later loaders).
 """
 from __future__ import annotations
 
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple, TypeVar
+from typing import Any, Callable, Optional, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -18,18 +17,21 @@ if _HOST not in sys.path:
 
 from reduce import T  # noqa: E402
 from host_pieces import HostPiece, default_piece, run_piece  # noqa: E402
-
-S = TypeVar("S")
-O = TypeVar("O")
+from observation_regime import (  # noqa: E402
+    ObservationRegime,
+    oper_eq_regime,
+    encoding_regime,
+)
 
 
 @dataclass(frozen=True)
 class QuotientMap:
-    """encode surface → substrate ITerm; decode NF → observation."""
+    """encode surface → substrate ITerm; decode NF → observation; preserves regime."""
 
     name: str
     encode: Callable[[Any], T]
     decode: Callable[[T], Any]
+    regime: ObservationRegime
 
     def encode_term(self, surface: Any) -> T:
         return self.encode(surface)
@@ -37,10 +39,26 @@ class QuotientMap:
     def decode_obs(self, nf: T) -> Any:
         return self.decode(nf)
 
+    def preserves(self, surface: Any, *, fuel: int = 100_000,
+                  piece: Optional[HostPiece] = None) -> bool:
+        """decode(nf(encode(p))) agrees with decode(observe_O(p))."""
+        term = self.encode(surface)
+        p = piece if piece is not None else default_piece()
+        nf, _, _ = run_piece(p, term, fuel=fuel)
+        got = self.decode(nf)
+        # Regime observe may already be an NF / Obs; decode for comparison.
+        expected = self.decode(self.regime.observe(surface))
+        return self.regime.obs_eq(got, expected)
 
-def identity_map(name: str = "identity") -> QuotientMap:
-    """Surface already on substrate — OperEq observes directly."""
-    return QuotientMap(name=name, encode=lambda t: t, decode=lambda t: t)
+
+def identity_map(
+    name: str = "identity",
+    *,
+    regime: Optional[ObservationRegime] = None,
+) -> QuotientMap:
+    """Surface already on substrate — observe under operEqRegime by default."""
+    R = regime if regime is not None else oper_eq_regime()
+    return QuotientMap(name=name, encode=lambda t: t, decode=lambda t: t, regime=R)
 
 
 def observe(
@@ -60,8 +78,10 @@ def observe(
     return qm.decode(nf), nf, steps, alloc
 
 
-def obs_eq(a: Any, b: Any) -> bool:
-    """Host observational equality (string form for display trees)."""
+def obs_eq(a: Any, b: Any, *, regime: Optional[ObservationRegime] = None) -> bool:
+    """Equality of observations under a regime (default: string / OperEq stand-in)."""
+    if regime is not None:
+        return regime.obs_eq(a, b)
     return str(a) == str(b)
 
 
@@ -70,9 +90,9 @@ def main() -> int:
 
     qm = identity_map()
     obs, nf, steps, n = observe(qm, app(I, KK))
-    ok = obs_eq(obs, KK) and obs_eq(nf, KK)
-    print(f"{'OK' if ok else 'FAIL'} identity observe via host_pieces I K => {obs} "
-          f"(steps={steps} alloc={n})")
+    ok = obs_eq(obs, KK, regime=qm.regime) and qm.preserves(app(I, KK))
+    print(f"{'OK' if ok else 'FAIL'} identity under operEqRegime I K => {obs} "
+          f"(steps={steps} alloc={n}) preserves={qm.preserves(app(I, KK))}")
     return 0 if ok else 1
 
 

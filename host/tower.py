@@ -8,8 +8,9 @@ Layer 0 — five ops (substrate presentation for this rewrite dispatch):
 Layer 1 — derived ops (macros over L0):
   s  = derived_s  (Lean `derived_s_beta` — theorem under BCWI; correct shape)
   k  = macro K    (L1 fused β — Lean `IStep.konst_macro` / `IStepKMacro`.
-                   NOT a BCWI β-definition; complete basis is BCKW.
-                   `derived_k_signature` is IRAS word evidence, not BCWI ⊢ K.)
+                   BCWI ⊬ K forever; never derive. BCWIK was construction
+                   scaffolding to prove ISAR, not definability of K.
+                   `derived_k_signature` = IRAS word for the macro tag only.)
 
 Observational NFs must keep matching. Lean exposes K as L1 `konst_macro`
 (`IStepKMacro`), not as an `IStepCore` peer — same host stratification.

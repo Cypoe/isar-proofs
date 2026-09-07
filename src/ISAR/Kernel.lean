@@ -74,7 +74,8 @@ Main LO stepper (usable ISK surface).
 
 * L0 agents in this relation: `normβ`, `compβ` (plus congruence).
 * **L1 fused K-macro:** `konst_macro` — cancellation; **not** an `IStepCore` rule
-  and **not** BCWI-definable (complete basis is BCKW). Host: fused K in `tower.py`.
+  and **not** BCWI-definable — **BCWI ⊬ K forever**. BCWIK was constructive
+  scaffolding to prove ISAR, not a derivation target. Host: fused K in `tower.py`.
 * `sβ` remains a surface convenience for the `sₛ` atom; basis recovery is
   `derived_s_beta` under `IStepBasis`.
 
@@ -656,8 +657,10 @@ def derived_s : ITerm :=
 Carrier-signature word for `konst`: `I₁·R₁·A₁·S₁` as
 `(((norm ◦ swap) ◦ dup) ◦ sₛ)` (cf. `term_signature_val`).
 
-**Not** a BCWI β-definition of K-macro (combinatory completeness needs cancellation:
-basis is BCKW, not BCWI). Signature evidence for the macro; β-law is `IStepKMacro`.
+**Not** a BCWI β-definition of the K-macro — **never derive K from BCWI**.
+Complete CL basis is BCKW (cancellation independent of W). BCWIK existed so the
+stack could be constructed/proved; it is not “K from I,B,C,W”. Signature word
+only; β-law is `IStepKMacro`.
 -/
 def derived_k_signature : ITerm :=
   ((norm ◦ swap) ◦ dup) ◦ sₛ

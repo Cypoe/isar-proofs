@@ -31,14 +31,14 @@ The formal core now has: confluence and unique NFs; `cd` as a **normalizing stra
 
 ### Where to go next (priority order)
 
-1. **1993 polyvariant mix / cogen** — still open. Jones-optimality (modern PE cost criterion) has landed; do not stretch `JGS_PE` / `specTerm := swap` into a compiler-generator. Host Phase 3 left **strategy + host pieces** as parameters; CoGen later *emits* loaders (budgeted CPU/SIMD/GPU choose) — dialects stay ≤ QuotientMap.
+1. **1993 polyvariant mix / cogen** — still open. Jones-optimality landed; do not stretch `JGS_PE` into a compiler-generator. Host pieces + strategy are parameters; CoGen later emits loaders. Dialects preserve a declared **ObservationRegime** \(\mathcal O\).
 2. **Mine-adopt** — candidates from bootstrapped pieces may be adopted only if OperEq matches a known map; else define an explicit QuotientMap. Not invented encode.
 3. **Nonempty SARI dynamics** — `R_empty` is a theorem. A nonempty `R` needs a relation that is *not* already collapsed by `OperationalEq` / joinability. Do not change `OperationalEq` to fake a step.
 4. **Metric, then completion** — UAT freeze is the decision. Do not claim `ISAR_UAT` proved or restate `KernelAddressLimit` as `Metric.Completion` before a metric exists.
 5. **Keep named** — `quantityToNat` (full `Quantity`) and `exp_exp_not_holonomic`. `QuantityCore` does not replace the four axioms.
-6. **Pure tower / `IStepCore`** — L0 = norm/app/comp/dup/swap. **S:** recovered (`derived_s_beta`) — correct. **K:** demoted to L1 fused macro (`IStep.konst_macro` / `IStepKMacro`); `IStepBasis = IStepCore ∪ IStepKMacro`. Not BCWI-definable (complete CL basis is BCKW). `derived_k_signature` remains IRAS word evidence, not a β-from-BCWI theorem. Do not claim BCWI ⊢ K.
+6. **Pure tower / `IStepCore`** — L0 = norm/app/comp/dup/swap. **S:** recovered (`derived_s_beta`) under BCWI — correct. **K:** L1 fused macro only (`IStep.konst_macro` / `IStepKMacro`); `IStepBasis = IStepCore ∪ IStepKMacro`. **BCWI ⊬ K in all respects** — do not derive, demote-into-BCWI, or “recover” K from that basis. **BCWIK was construction scaffolding** (so ISAR could be proved at all), not a claim that K is BCWI-definable. Complete CL basis remains BCKW. `derived_k_signature` is IRAS word evidence for the macro tag, not a β-from-BCWI theorem.
 
-**Host Phase 3 (done shape):** `host/quotient_map.py` (observe via `host_pieces`), `host/strategy.py`, λ + Bytecode QuotientMaps, `host/observational_suite.py`. OperEq/Graph authority; no private dialect β. **K-macro demotion (Lean):** `IStep.konst_macro` + `IStepKMacro`; basis = core ∪ macro.
+**Phase 3 (observation category) landed:** Lean `ObservationRegime` / `QuotientMapO` / `operEqRegime`; host `observation_regime.py` + QuotientMaps that **preserve** \(\mathcal O\). OperEq is the primary regime instance. EAL / Interaction Combinators are realization backends only — not \(S\). Automorphisms + Realize/synth = later.
 
 Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; claim `nf_of_term` computable; repair the withdrawn quine whitepaper; invent a metric this cycle.
 
@@ -218,7 +218,7 @@ The verified stack relies on the following ground-truth definitions, which serve
 1. **Rewrite (stratified):**
    - **L0 core** (`IStepCore`): `normβ`, `compβ`, `dupβ`, `swapβ` (+ congruence) — pure tower.
    - **Derived:** `derived_s` / `derived_s_beta`; `derived_k_signature` (IRAS word).
-   - **L1 K-macro:** `IStepKMacro` / `IStep.konst_macro` (demoted off L0); `IStepBasis = IStepCore ∪ IStepKMacro`. Surface `IStep.sβ` remains for the `sₛ` atom.
+   - **L1 K-macro:** `IStepKMacro` / `IStep.konst_macro` (not L0). **BCWI ⊬ K** — never derive; BCWIK was construction scaffolding only. Surface `IStep.sβ` remains for the `sₛ` atom (S recovered on basis via `derived_s_beta`).
    - `app` ↔ matrix mul is dispatch (later loaders), not an extra L0 β.
 2. **Causal Compatibility (`O_compat` / `B_compat`)**:
    - The compatibility of the application (`O`) and pairing (`B`) operations with operational equivalence is assumed in the general `recurrence_lemma`.

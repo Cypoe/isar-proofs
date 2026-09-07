@@ -19,6 +19,7 @@ if _HOST not in sys.path:
 from reduce import I, KK, S, T, K, app  # noqa: E402
 from quotient_map import QuotientMap, observe, obs_eq  # noqa: E402
 from lambda_dialect import show  # noqa: E402
+from observation_regime import encoding_regime  # noqa: E402
 
 
 class Instr(Enum):
@@ -103,7 +104,12 @@ def decode_bytecode(nf: T) -> Prog:
 
 
 def bytecode_map() -> QuotientMap:
-    return QuotientMap(name="bytecode", encode=encode_bytecode, decode=decode_bytecode)
+    return QuotientMap(
+        name="bytecode",
+        encode=encode_bytecode,
+        decode=decode_bytecode,
+        regime=encoding_regime(encode_bytecode, name="bytecode.operEq"),
+    )
 
 
 def obs_show(nf: T) -> str:

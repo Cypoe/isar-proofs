@@ -42,9 +42,11 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 ---
 
-### Phase 3: Dialect Views & View Pluralism
+### Phase 3: Admissible Observation Category \(\mathcal O\)
 
 10. **[DialectKernel.lean](DialectKernel.lean)** — `Dialect` structure: encode, decode, eval, preservation law.
+
+10a. **[ObservationRegime.lean](src/ISAR/ObservationRegime.lean)** — admissible \(\mathcal O\): `ObservationRegime`, `sim` (\(\sim_{\mathcal O}\)), `operEqRegime`, `QuotientMapO`; dialects as regime-preserving maps. **Phase 3 formal core** (OperEq is the primary instance).
 
 11. **[ViewIndependence.lean](ViewIndependence.lean)** — `ObservationalIsomorphism`, **No Preferred Syntax Theorem** (`no_preferred_syntax`), reflexivity/symmetry/transitivity.
 
@@ -121,39 +123,41 @@ python host/graph_congruence.py
 python host/graph_congruence.py --lean   # also vs Main.lean
 python host/graph_bench.py --rounds 3    # tree vs graph wall + unique nodes
 
-# λ QuotientMap (Turner encode → Graph observe); --tree for A/B:
+# ObservationRegime + QuotientMaps (preserve ∼_O; OperEq primary):
+python host/observation_regime.py
+python host/quotient_map.py
 python host/lambda_dialect.py
 python host/lambda_dialect.py --tree
-python host/lambda_dialect.py --abstract0   # encode variant (η/C gap)
-python host/lambda_dialect.py --term "((\\x. \\y. (y x)) S) I"
+python host/lambda_dialect.py --abstract0
 python host/bytecode_dialect.py
 python host/observational_suite.py
-python host/quotient_map.py
 python host/host_pieces.py
 python host/strategy.py
 python host/lambda_congruence.py
 ```
 
-Pipeline: `\x.e` → **QuotientMap.encode** (Turner or `abstract0`) → **Graph** reduce → decode observation. Tree `--tree` keeps Turner + IStepBasis/IStep A/B. Lean `abstract0` is the proved compiler (no η/C) — host Turner is the other encode variant of the same map slot. Congruence is observational on applied NFs under OperEq.
+Pipeline: presentations → **ObservationRegime** \(\mathcal O\) induces \(\sim_{\mathcal O}\) → **QuotientMap.encode** → Graph/host piece → decode. Maps **preserve** \(\mathcal O\) (not invent \(\sim\)). Lean: `ISAR.ObservationRegime`, `operEqRegime`, `QuotientMapO`. Tree `--tree` is A/B only.
 
-**Runtime roadmap:** carriers → kernel (`IStepCore` / pure tower) → runtime (Graph) → **dialect ≤ QuotientMap** (or identity) → host pieces + strategy as parameters → compiler *uses* / CoGen *emits* later. See `host/tower.py`, `host/quotient_map.py`.
+**Runtime roadmap:** carriers → kernel → runtime → **\(\mathcal O\)** → QuotientMaps (λ, Bytecode, …) → host pieces + strategy → compiler *uses* / CoGen *emits* later.
 
 ### Alphabet layers
 
 | Layer | What | Source of truth |
 |:------|:-----|:----------------|
 | Pure tower L0 | `norm, app, comp, dup, swap` | `host/tower.py` |
-| Pure tower L1 | `s=derived_s` (expand); `k` macro (fused β; sig IRAS) | `host/tower.py`, `host/basis.py` |
-| Shared graph host | L0+L1 rewrite + kürzen; quote to L2 ISK display | `host/graph_runtime.py` |
-| QuotientMap | encode/decode only; λ + Bytecode authored maps | `host/quotient_map.py`, `host/lambda_dialect.py`, `host/bytecode_dialect.py` |
+| Pure tower L1 | `s=derived_s`; `k` macro (`konst_macro`) | `host/tower.py`, Lean `IStepKMacro` |
+| Shared graph host | L0+L1 rewrite + kürzen | `host/graph_runtime.py` |
+| **ObservationRegime** | \(\sim_{\mathcal O}\); OperEq primary | `ObservationRegime.lean`, `host/observation_regime.py` |
+| QuotientMap | encode/decode **preserving** \(\mathcal O\) | `host/quotient_map.py`, λ + Bytecode |
 | Host pieces + strategy | Graph piece; Identity/Mix stubs | `host/host_pieces.py`, `host/strategy.py` |
-| Later loaders / CoGen | budgeted CPU/SIMD/GPU choose; mine-adopt | noted below — not Phase 3 product |
+| Later loaders / CoGen | budgeted CPU/SIMD/GPU; automorphisms | not Phase 3 product |
 
 ### Noted for later
 
-1. **Mine ≠ invent encode.** Candidates from bootstrapped pieces (FASM-shaped) may be **adopted** only if OperEq matches an already known map; otherwise define an explicit QuotientMap.
-2. **CoGen loader shape.** `choose(piece, host_pieces, budget)`: serial → CPU, partly parallel → SIMD, fully parallel + tile fit → GPU. Compiler uses; CoGen emits into the piece catalog. Dialects never own hardware.
-3. Lean `konst_macro` demotion — done on host-aligned spine (`IStepKMacro` / `IStep.konst_macro`; basis = core ∪ macro). Not BCWI ⊢ K.
+1. **Mine ≠ invent encode.** Adopt only if OperEq matches a known map; else explicit QuotientMap.
+2. **CoGen loader shape.** `choose(piece, host_pieces, budget)`: serial → CPU, partial → SIMD, full+fit → GPU.
+3. Lean `konst_macro` — L1 macro layer; **BCWI ⊬ K** (never derive). BCWIK was construction scaffolding only.
+4. **Not** EAL / Interaction Combinators as semantic source — possible realization backends \(R_{c,\mathcal O}\) only. Automorphisms + Realize/synth attach on top of \(\mathcal O\).
 
 ### What this is not
 
