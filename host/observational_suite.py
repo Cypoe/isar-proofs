@@ -29,9 +29,22 @@ from bytecode_dialect import (  # noqa: E402
     show_prog,
     compile_bytecode,
 )
+from fasm_dialect import (  # noqa: E402
+    GOLDENS as FASM_GOLDENS,
+    fasm_map,
+    show_fasm,
+)
 from lambda_dialect import show as show_term  # noqa: E402
 from strategy import IdentityStrategy, MixStrategy  # noqa: E402
 from host_pieces import catalog  # noqa: E402
+from cogen import (  # noqa: E402
+    identity_realize,
+    fasm_realize,
+    preserves_spec,
+    Budget,
+    MachineContext,
+)
+from mine_adopt import try_adopt, default_probes  # noqa: E402
 
 
 def main() -> int:
@@ -109,11 +122,66 @@ def main() -> int:
         if not match:
             ok = False
 
+    print("\n== FASM QuotientMap ==")
+    qm_f = fasm_map()
+    for label, prog, expected in FASM_GOLDENS:
+        text = show_fasm(prog)
+        obs_prog, nf, steps, n = observe(qm_f, text)
+        got = show_term(nf)
+        match = (
+            obs_eq(got, expected)
+            and compile_bytecode(obs_prog) == nf
+            and qm_f.preserves(text)
+        )
+        tag = "OK" if match else "FAIL"
+        print(f"{tag} {label}  => {got}  preserves={qm_f.preserves(text)}  "
+              f"(steps={steps} alloc={n})")
+        if not match:
+            ok = False
+
+    print("\n== shared SKI: fasm vs bytecode under operEqRegime ==")
+    for label, prog, expected in FASM_GOLDENS:
+        _, nf_f, _, _ = observe(qm_f, prog)
+        _, nf_b, _, _ = observe(qm_b, prog)
+        match = R.sim(nf_f, nf_b) and obs_eq(show_term(nf_f), expected)
+        tag = "OK" if match else "FAIL"
+        print(f"{tag} {label}  fasm={show_term(nf_f)} bytecode={show_term(nf_b)}")
+        if not match:
+            ok = False
+
     print("\n== params (strategy + host pieces); O is primary ==")
     print(f"pieces: {[p.name for p in catalog()]}")
     print(f"strategies: {[IdentityStrategy().name, MixStrategy().name]}")
     print(f"primary regime: {R.name}")
-    print("Phase 3: ObservationRegime formalizes ~_O; maps preserve it")
+
+    print("\n== Phase 4 IdentityRealize (CoGen) ==")
+    spec, plan, piece = identity_realize(budget=Budget.SERIAL)
+    if not preserves_spec(spec, piece) or plan.family != "graph":
+        print("FAIL IdentityRealize preserves O")
+        ok = False
+    else:
+        print(f"OK IdentityRealize piece={piece.name} plan={plan.name} "
+              f"c={MachineContext.detect().machine}")
+
+    print("\n== Phase 4b FasmRealize (CoGen) ==")
+    fspec, fplan, fpiece = fasm_realize(budget=Budget.SERIAL)
+    if fpiece.kind != "fasm" or not preserves_spec(fspec, fpiece):
+        print(f"FAIL FasmRealize kind={fpiece.kind} preserves")
+        ok = False
+    else:
+        print(f"OK FasmRealize piece={fpiece.name} kind={fpiece.kind} "
+              f"plan={fplan.name}")
+
+    print("\n== mine-adopt gate ==")
+    r_ok = try_adopt(lambda t: t, surfaces=default_probes())
+    r_bad = try_adopt(lambda _t: KK, surfaces=default_probes())
+    if not r_ok.accepted or r_bad.accepted:
+        print(f"FAIL mine-adopt accept={r_ok} refuse={r_bad}")
+        ok = False
+    else:
+        print(f"OK adopt identity; refuse always_K")
+
+    print("Phase 4b: FASM QuotientMap + FasmRealize under O; no external fasmg")
 
     return 0 if ok else 1
 

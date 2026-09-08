@@ -141,6 +141,8 @@ def bytecodeObsRegime : ObservationRegime (List Instruction) :=
 def Bytecode_QuotientMapO : QuotientMapO (List Instruction) bytecodeObsRegime :=
   Bytecode_Dialect.toQuotientMapO
 
+-- FASM QuotientMapO lives in FASMView (same Instruction carrier; host owns text).
+
 /--
 Encoding into the substrate respects the primary `operEqRegime`:
 observe is `toInvariantLayer` on the encoded term.

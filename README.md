@@ -48,6 +48,10 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 10a. **[ObservationRegime.lean](src/ISAR/ObservationRegime.lean)** — admissible \(\mathcal O\): `ObservationRegime`, `sim` (\(\sim_{\mathcal O}\)), `operEqRegime`, `QuotientMapO`; dialects as regime-preserving maps. **Phase 3 formal core** (OperEq is the primary instance).
 
+10b. **[CoGen.lean](src/ISAR/CoGen.lean)** — Realize / `LoaderPlan` / `Budget` / `LoaderFamily.fasm`; host `cogen.py` (IdentityRealize + FasmRealize).
+
+10c. **[FASMView.lean](src/ISAR/FASMView.lean)** — FASM presentation = bytecode `Instruction` carrier; host owns fasmg-ish text. Phase 4b.
+
 11. **[ViewIndependence.lean](ViewIndependence.lean)** — `ObservationalIsomorphism`, **No Preferred Syntax Theorem** (`no_preferred_syntax`), reflexivity/symmetry/transitivity.
 
 12. **[ReverseRosetta.lean](ReverseRosetta.lean)** — `closure_preserved_under_reachability` (forward invariance), `referentially_open_requires_anchor` (referential openness).
@@ -123,22 +127,25 @@ python host/graph_congruence.py
 python host/graph_congruence.py --lean   # also vs Main.lean
 python host/graph_bench.py --rounds 3    # tree vs graph wall + unique nodes
 
-# ObservationRegime + QuotientMaps (preserve ∼_O; OperEq primary):
+# ObservationRegime + QuotientMaps (preserve ~_O; OperEq primary):
 python host/observation_regime.py
 python host/quotient_map.py
 python host/lambda_dialect.py
 python host/lambda_dialect.py --tree
 python host/lambda_dialect.py --abstract0
 python host/bytecode_dialect.py
+python host/fasm_dialect.py
 python host/observational_suite.py
 python host/host_pieces.py
 python host/strategy.py
+python host/cogen.py
+python host/mine_adopt.py
 python host/lambda_congruence.py
 ```
 
 Pipeline: presentations → **ObservationRegime** \(\mathcal O\) induces \(\sim_{\mathcal O}\) → **QuotientMap.encode** → Graph/host piece → decode. Maps **preserve** \(\mathcal O\) (not invent \(\sim\)). Lean: `ISAR.ObservationRegime`, `operEqRegime`, `QuotientMapO`. Tree `--tree` is A/B only.
 
-**Runtime roadmap:** carriers → kernel → runtime → **\(\mathcal O\)** → QuotientMaps (λ, Bytecode, …) → host pieces + strategy → compiler *uses* / CoGen *emits* later.
+**Runtime roadmap:** carriers → kernel → runtime → **\(\mathcal O\)** → QuotientMaps → host pieces + strategy → **CoGen choose/emit/adopt** → **FasmRealize** (first non-identity emit) → later native fasmg/CPU loaders.
 
 ### Alphabet layers
 
@@ -148,23 +155,26 @@ Pipeline: presentations → **ObservationRegime** \(\mathcal O\) induces \(\sim_
 | Pure tower L1 | `s=derived_s`; `k` macro (`konst_macro`) | `host/tower.py`, Lean `IStepKMacro` |
 | Shared graph host | L0+L1 rewrite + kürzen | `host/graph_runtime.py` |
 | **ObservationRegime** | \(\sim_{\mathcal O}\); OperEq primary | `ObservationRegime.lean`, `host/observation_regime.py` |
-| QuotientMap | encode/decode **preserving** \(\mathcal O\) | `host/quotient_map.py`, λ + Bytecode |
+| QuotientMap | encode/decode **preserving** \(\mathcal O\) | `host/quotient_map.py`, λ + Bytecode + **FASM** |
 | Host pieces + strategy | Graph piece; Identity/Mix stubs | `host/host_pieces.py`, `host/strategy.py` |
-| Later loaders / CoGen | budgeted CPU/SIMD/GPU; automorphisms | not Phase 3 product |
+| **CoGen / Realize** | choose/emit/adopt; IdentityRealize + **FasmRealize** | `host/cogen.py`, `host/mine_adopt.py`, `CoGen.lean` |
+| FASM(g) dialect | fasmg-ish text QuotientMap; reduce still graph | `host/fasm_dialect.py`, `FASMView.lean` |
+| Later: native loaders | external fasmg / CPU-SIMD-GPU HostPieces | not this wave |
 
 ### Noted for later
 
-1. **Mine ≠ invent encode.** Adopt only if OperEq matches a known map; else explicit QuotientMap.
-2. **CoGen loader shape.** `choose(piece, host_pieces, budget)`: serial → CPU, partial → SIMD, full+fit → GPU.
+1. **Mine ≠ invent encode.** `mine_adopt.try_adopt`: OperEq match a known map, else explicit QuotientMap.
+2. **CoGen loader shape.** `choose(..., budget, c)` → `LoaderPlan` → `emit` into host_pieces. SERIAL+x86_64 → `fasm`; SIMD/GPU families stub to graph until loaders exist.
 3. Lean `konst_macro` — L1 macro layer; **BCWI ⊬ K** (never derive). BCWIK was construction scaffolding only.
-4. **Not** EAL / Interaction Combinators as semantic source — possible realization backends \(R_{c,\mathcal O}\) only. Automorphisms + Realize/synth attach on top of \(\mathcal O\).
+4. **Not** EAL / Interaction Combinators as semantic source — possible realization backends \(R_{c,\mathcal O}\) only.
+5. **Native fasmg / PE** — assemble/link and real CPU HostPiece; FASM presentation ≠ native exec. Never "InvariantLayer IT".
 
 ### What this is not
 
 - **Not Lafont interaction nets.** No δ/ε/γ annihilation — superfluous for composition/tensor graphs; we don't have ports. Sharing is node identity + edges.
 - **Not plex-core product surface.** Ports / five lowerings / wire are not the kernel. The proper-toy keeps composition-shaped sharing only.
 - **plex-shell is parked.** No kernel work, no emit/cogen claims from that tree. The ISAR kernel lives here in `isar-proofs`.
-- **No cogen/emit product yet.** `cd` / `step?` / graph `ParStep` are interpreters. Host pieces + strategy slots are ready; budgeted loaders are later.
+- **No external fasmg yet.** FASM QuotientMap + FasmRealize ship; reduce remains `graph.lo`.
 
 ---
 

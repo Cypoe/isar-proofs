@@ -1,8 +1,8 @@
 """
-Phase 3: Strategy — parametric specialize/residual policy.
+Phase 3–4: Strategy — parametric specialize/residual policy.
 
 Mix / Futamura / identity are instances of this slot, not the ontology.
-Nontrivial BTA and CoGen stay later.
+Nontrivial BTA stays later; CoGen uses this slot via RealizeSpec.
 """
 from __future__ import annotations
 

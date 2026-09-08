@@ -1,8 +1,8 @@
 """
-Phase 3: Host pieces catalog — parametric runnable fragments.
+Phase 3–4: Host pieces catalog — parametric runnable fragments.
 
-Phase 3 ships Graph reduce only. Later CoGen may emit loaders
-(CPU / SIMD / GPU) into this catalog; dialects never own hardware.
+Graph reduce ships by default. CoGen emit registers loaders into this catalog;
+dialects never own hardware.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class HostPiece:
     """A runnable fragment available on this host."""
 
     name: str
-    kind: str  # "graph" now; later "simd" | "gpu" | …
+    kind: str  # "graph" | "cpu" | "simd" | "gpu" | …
     reduce: Callable[[T, int], Tuple[T, int, int]]
     # Returns (nf, steps_or_rounds, alloc_or_nodes)
 
@@ -38,10 +38,23 @@ def _graph_reduce(t: T, fuel: int = 100_000) -> Tuple[T, int, int]:
 
 GRAPH_PIECE = HostPiece(name="graph.lo", kind="graph", reduce=_graph_reduce)
 
+_REGISTERED: Dict[str, HostPiece] = {}
+
+
+def register_piece(piece: HostPiece) -> None:
+    """CoGen emit / tests register loaders here."""
+    _REGISTERED[piece.name] = piece
+
+
+def clear_registered() -> None:
+    _REGISTERED.clear()
+
 
 def catalog() -> List[HostPiece]:
-    """Pieces available on this host (Graph only in Phase 3)."""
-    return [GRAPH_PIECE]
+    """Base graph piece plus any CoGen-registered loaders."""
+    out: Dict[str, HostPiece] = {"graph.lo": GRAPH_PIECE}
+    out.update(_REGISTERED)
+    return list(out.values())
 
 
 def by_name(name: str) -> Optional[HostPiece]:
@@ -63,11 +76,11 @@ def main() -> int:
     from reduce import I, KK, app  # noqa: E402
 
     pieces = catalog()
-    assert len(pieces) == 1 and pieces[0].kind == "graph"
+    assert any(p.name == "graph.lo" for p in pieces)
     nf, steps, n = run_piece(default_piece(), app(I, KK))
     ok = str(nf) == "K"
     print(f"{'OK' if ok else 'FAIL'} host_pieces graph I K => {nf} (steps={steps} alloc={n})")
-    print(f"catalog: {[p.name for p in pieces]} (later: simd/gpu loaders)")
+    print(f"catalog: {[p.name for p in pieces]} (CoGen may register more)")
     return 0 if ok else 1
 
 

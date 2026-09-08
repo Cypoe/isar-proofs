@@ -101,7 +101,7 @@ def layer_summary() -> str:
         "L0 ops:  norm, app, comp, dup, swap\n"
         "L1 der:  s = derived_s (expand); k = macro (fused beta; sig IRAS)\n"
         "L2 sfc:  QuotientMap encode/decode; observe via Graph/OperEq\n"
-        "Params:  host pieces + strategy (compiler uses / CoGen emits later)\n"
+        "Params:  host pieces + strategy; CoGen IdentityRealize + FasmRealize; native fasmg later\n"
         "Dispatch (later): budgeted loaders CPU/SIMD/GPU - not dialect-owned"
     )
 

@@ -31,14 +31,18 @@ The formal core now has: confluence and unique NFs; `cd` as a **normalizing stra
 
 ### Where to go next (priority order)
 
-1. **1993 polyvariant mix / cogen** — still open. Jones-optimality landed; do not stretch `JGS_PE` into a compiler-generator. Host pieces + strategy are parameters; CoGen later emits loaders. Dialects preserve a declared **ObservationRegime** \(\mathcal O\).
-2. **Mine-adopt** — candidates from bootstrapped pieces may be adopted only if OperEq matches a known map; else define an explicit QuotientMap. Not invented encode.
+1. **1993 polyvariant mix / cogen product** — still open as *full* mix. **CoGen + FasmRealize landed:** `host/cogen.py` choose/emit; IdentityRealize + FasmRealize; `host/fasm_dialect.py`; Lean `CoGen` / `FASMView`. Do not stretch `JGS_PE` into a compiler-generator. Native fasmg/CPU loaders are **next** (decision 011) — not required for Phase 4b.
+2. **Mine-adopt** — `try_adopt`: OperEq match a known QuotientMap (identity / bytecode / fasm) or refuse (explicit map required).
 3. **Nonempty SARI dynamics** — `R_empty` is a theorem. A nonempty `R` needs a relation that is *not* already collapsed by `OperationalEq` / joinability. Do not change `OperationalEq` to fake a step.
 4. **Metric, then completion** — UAT freeze is the decision. Do not claim `ISAR_UAT` proved or restate `KernelAddressLimit` as `Metric.Completion` before a metric exists.
 5. **Keep named** — `quantityToNat` (full `Quantity`) and `exp_exp_not_holonomic`. `QuantityCore` does not replace the four axioms.
 6. **Pure tower / `IStepCore`** — L0 = norm/app/comp/dup/swap. **S:** recovered (`derived_s_beta`) under BCWI — correct. **K:** L1 fused macro only (`IStep.konst_macro` / `IStepKMacro`); `IStepBasis = IStepCore ∪ IStepKMacro`. **BCWI ⊬ K in all respects** — do not derive, demote-into-BCWI, or “recover” K from that basis. **BCWIK was construction scaffolding** (so ISAR could be proved at all), not a claim that K is BCWI-definable. Complete CL basis remains BCKW. `derived_k_signature` is IRAS word evidence for the macro tag, not a β-from-BCWI theorem.
 
-**Phase 3 (observation category) landed:** Lean `ObservationRegime` / `QuotientMapO` / `operEqRegime`; host `observation_regime.py` + QuotientMaps that **preserve** \(\mathcal O\). OperEq is the primary regime instance. EAL / Interaction Combinators are realization backends only — not \(S\). Automorphisms + Realize/synth = later.
+**Phase 3 (observation category) landed:** Lean `ObservationRegime` / `QuotientMapO` / `operEqRegime`; host mirrors; maps preserve \(\mathcal O\).
+
+**Phase 4a (CoGen machinery) landed:** choose/emit/adopt + IdentityRealize under \(\mathcal O\) + `MachineContext`.
+
+**Phase 4b (FASM QuotientMap + FasmRealize) landed:** fasmg-ish presentation QuotientMap sharing Bytecode VM; CoGen family=`fasm` piece (`kind=fasm`, reduce=`graph.lo`). No external fasmg. Bootstrap = truthful *representation* — never InvariantLayer “IT”. EAL / IC = \(R_{c,\mathcal O}\) only.
 
 Do **not**: claim 1993 mix; treat `¬HasNF`/no-fuel as a gap; claim `nf_of_term` computable; repair the withdrawn quine whitepaper; invent a metric this cycle.
 
