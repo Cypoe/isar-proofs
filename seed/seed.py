@@ -1,35 +1,48 @@
 """
-SEED — native x86-64 realization of the Lean `step?` kernel as a real PE.
+SEED — native x86-64 realization of Lean `IStepBasis` as a real PE.
 
-Invariant : IStep = Lean `step?` (normβ, konstβ, compβ, sβ + appL/appR,
-            leftmost-outermost).  The Python mirror in §1 is a reference
-            transcription of `src/ISAR/Reduce.lean` / `host/reduce.py`.
+Invariant : IStepBasis = IStepCore ∪ IStepKMacro (Kernel.lean §15):
+            L0 agents normβ, compβ, dupβ, swapβ (+ appL/appR, leftmost-
+            outermost); L1 fused K-macro konstβ.  The Python mirror in §1
+            is a reference transcription of `src/ISAR/Kernel.lean` and the
+            host basis reducer (host/graph_runtime.py, the `graph.lo`
+            piece).  S is a *view-level derived word* by default: the input
+            alphabet admits `S`, but the parser instantiates `derived_s`
+            (an L0-only tree) per token — no sβ rule is emitted.
+            `Realization.fuse_s=True` instead keeps S primitive with sβ.
+Basis     : §0 carries the ISARMatrices signature algebra.  The matrix
+            signature fixes the tag set — it is NOT the β-semantics
+            (β-reduction does not preserve signatures).  `comp` and `var`
+            share the zero matrix by Lean convention; tags are keyed on
+            the atom name, never on the matrix value.
 Strategy  : `Realization` (§2) — a frozen data record: evaluation order,
             node layout, allocation discipline, fuel policy, stack reserve,
-            ABI.  `order="cd"` is a declared parameter value but is
-            *refused* (NotRealized) — mine_adopt semantics, never a fallback.
+            read granule, fuse_s, ABI.  `order="cd"` is a declared
+            parameter value but is *refused* (NotRealized) — mine_adopt
+            semantics, never a fallback.
 Data      : the ISA table (§3), the reducer program as asm-data (§5),
             the PE layout table (§6), the import table (§6).
 Mechanism : encode() (ISA-intrinsic), assemble() (two-pass fixups),
             build_pe() (header construction).
-Oracles   : fasmg.exe (byte equality, env ISAR_FASMG), host reduce.py and
-            graph.lo piece (NF equality) — imported lazily in §7/§8 only.
+Oracles   : fasmg.exe (byte equality, env ISAR_FASMG), host graph.lo
+            piece / graph_runtime (basis NF equality), host reduce.py
+            (surface NF for the fuse_s build) — imported lazily in §7/§8
+            only.
 
-Gates: G1 encoder vs fasmg | G2 kernel vs host reduce | G3 native exe
-end-to-end | G4 strategy variations + cd refusal + fuel | G5 host
-registration (cogen.choose -> cpu, native_realize, piece adoption).
+Gates: G0 signature algebra + homomorphism | G0b signature-free emission
+| G1 encoder vs fasmg | G2 basis mirror vs host graph.lo | G3 native exe
+end-to-end (both builds) | G4 strategy variations + cd refusal + fuel |
+G5 host registration (cogen.choose -> cpu, native_realize, piece
+adoption through both builds).
 
 Hard rules: no fixed heap (chunked VirtualAlloc growth), fuel optional
 (default off — run to NF), cd refused, no cross-repo *code* (oracle
-binaries and host oracle modules only), §1–§6 import nothing from host.
-
-Note: B has a step rule (compβ) for step? fidelity but no input token —
-unreachable from BytecodeView by construction; a B-containing NF cannot
-arise from the {I,K,S,@} input alphabet.
+binaries and host oracle modules only), §0–§6 import nothing from host.
 """
 from __future__ import annotations
 
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -52,15 +65,75 @@ class NotRealized(Exception):
 
 
 # ======================================================================
+# §0  BASIS (ISARMatrices signature algebra — data, not semantics)
+#
+# The 4x4 signature fixes the tag SET (§1 generates Tag from SIGNATURE's
+# keys); it is NOT the β-semantics — β does not preserve signatures.
+# `comp` and `var` share the zero matrix by Lean convention; SIGNATURE is
+# keyed on the atom name, never on the matrix value.
+# ======================================================================
+
+Matrix = Tuple[int, ...]          # 16 ints, row-major
+
+
+def mul(A: Matrix, B: Matrix) -> Matrix:
+    out = []
+    for i in range(4):
+        for j in range(4):
+            out.append(sum(A[i * 4 + k] * B[k * 4 + j] for k in range(4)))
+    return tuple(out)
+
+
+zero: Matrix = (0,) * 16
+I_id: Matrix = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+# Version-1 carrier basis (Kernel isar_categorical_proof)
+I1: Matrix = (1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)
+R1: Matrix = (1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0)
+A1: Matrix = (0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0)
+S1: Matrix = (1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+K1: Matrix = mul(mul(mul(I1, R1), A1), S1)
+# Version-2 carrier basis (verify_isar_ZFC)
+I2: Matrix = (1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)
+R2: Matrix = (1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0)
+A2: Matrix = (0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0)
+S2: Matrix = (1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+K2: Matrix = mul(mul(mul(I2, R2), A2), S2)
+# Gauge equivalence
+P: Matrix = (1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+P_inv: Matrix = (1, 0, 0, 0, -1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+
+BASIS: Dict[str, Matrix] = {"I": I1, "R": R1, "A": A1, "S": S1}
+
+# term_signature_val (BasisCompleteness.lean): atom name -> Matrix4.
+SIGNATURE: Dict[str, Matrix] = {
+    "norm": I1, "konst": K1, "s": S1, "comp": zero,
+    "dup": A1, "swap": R1, "var": zero,
+}
+
+# Derived words as term data: a pair (f, x) means app(f, x), a string is an
+# atom name from SIGNATURE.  (Kernel.lean `derived_s`, `derived_k_signature`.)
+DERIVED_S = (
+    ("comp", ("comp", "dup")),
+    (("swap", (("comp", "comp"), (("comp", "comp"), "swap"))), "norm"),
+)
+DERIVED_K_SIG = ((("norm", "swap"), "dup"), "s")
+
+
+# ======================================================================
 # §1  KERNEL MIRROR (reference, Python) — self-contained
 # ======================================================================
 
-class Tag(IntEnum):
-    APP = 0
-    I = 1
-    K = 2
-    S = 3
-    B = 4   # no input token; compβ unreachable from BytecodeView
+# Tag is GENERATED from SIGNATURE's keys (+ APP).  Numbering preserves the
+# previous {APP,I,K,S,B} assignment: norm=1 konst=2 s=3 comp=4 dup=5 swap=6.
+_ATOMS = [k for k in SIGNATURE if k != "var"]
+Tag = IntEnum("Tag", {"APP": 0, **{a: i + 1 for i, a in enumerate(_ATOMS)}})
+
+# Input/output alphabet generated from Tag: single uppercase letters.
+TOKEN: Dict[str, "Tag"] = {
+    "I": Tag.norm, "K": Tag.konst, "S": Tag.s,
+    "B": Tag.comp, "W": Tag.dup, "C": Tag.swap,
+}
+CHAR_OF: Dict["Tag", str] = {v: k for k, v in TOKEN.items()}
 
 
 class T:
@@ -78,61 +151,93 @@ class T:
     def __repr__(self) -> str:
         if self.tag == Tag.APP:
             return f"({self.l} {self.r})"
-        return {Tag.I: "I", Tag.K: "K", Tag.S: "S", Tag.B: "B"}[Tag(self.tag)]
+        return CHAR_OF[Tag(self.tag)]
 
     def __hash__(self):
         return hash((self.tag, id(self.l), id(self.r)))
 
 
-TI = T(Tag.I)
-TK = T(Tag.K)
-TS = T(Tag.S)
+TI = T(Tag.norm)
+TK = T(Tag.konst)
+TS = T(Tag.s)
+TB = T(Tag.comp)
+TW = T(Tag.dup)
+TC = T(Tag.swap)
 
 
 def app(f: T, x: T) -> T:
     return T(Tag.APP, f, x)
 
 
-# Pattern table as documentation-as-data (Lean IStep rule order).
+def _mk(word) -> T:
+    """Instantiate a §0 derived word (tuple-of-tuples) as a term."""
+    if isinstance(word, str):
+        return T(Tag[word])
+    return app(_mk(word[0]), _mk(word[1]))
+
+
+DERIVED_S_T = _mk(DERIVED_S)
+DERIVED_K_SIG_T = _mk(DERIVED_K_SIG)
+
+
+def signature(t: T) -> Matrix:
+    """term_signature_val: atom -> SIGNATURE, app -> mul (homomorphism)."""
+    if t.tag == Tag.APP:
+        return mul(signature(t.l), signature(t.r))
+    return SIGNATURE[Tag(t.tag).name]
+
+
+# Pattern table as documentation-as-data (Lean IStepBasis rule order).
 RULES = (
-    ("normβ",  "I x        -> x"),
-    ("konstβ", "K a b      -> a"),
-    ("compβ",  "B f g x    -> f (g x)"),
-    ("sβ",     "S f g x    -> (f x)(g x)"),
+    ("normβ",  "I x        -> x           (L0)"),
+    ("konstβ", "K a b      -> a           (L1 fused macro)"),
+    ("dupβ",   "W f x      -> f x x       (L0)"),
+    ("compβ",  "B f g x    -> f (g x)     (L0)"),
+    ("swapβ",  "C f x y    -> f y x       (L0)"),
+    ("sβ",     "S f g x    -> (f x)(g x)  (surface, fuse_s only)"),
 )
 
 
-def step(t: T) -> Optional[T]:
-    """LO single step = Lean `step?` (normβ, konstβ, compβ, sβ, appL, appR)."""
+def step(t: T, fuse_s: bool = False) -> Optional[T]:
+    """LO single step = Lean `IStepBasis` (L0 β + L1 konst macro + appL/R).
+
+    `fuse_s=True` adds the surface sβ rule (strategy); by default S never
+    reaches the reducer — the parser instantiates `derived_s` instead.
+    """
     if t.tag != Tag.APP:
         return None
     f, x = t.l, t.r
-    if f.tag == Tag.I:                      # normβ: I x -> x
+    if f.tag == Tag.norm:                       # normβ: I x -> x
         return x
     if f.tag == Tag.APP:
         fl, fr = f.l, f.r
-        if fl.tag == Tag.K:                 # konstβ: K a b -> a
+        if fl.tag == Tag.konst:                 # konstβ: K a b -> a
             return fr
+        if fl.tag == Tag.dup:                   # dupβ: W f x -> f x x
+            return app(app(fr, x), x)
         if fl.tag == Tag.APP:
             fll, flr = fl.l, fl.r
-            if fll.tag == Tag.B:            # compβ: B f g x -> f (g x)
+            if fll.tag == Tag.comp:             # compβ: B f g x -> f (g x)
                 return app(flr, app(fr, x))
-            if fll.tag == Tag.S:            # sβ: S f g x -> (f x)(g x)
+            if fll.tag == Tag.swap:             # swapβ: C f x y -> f y x
+                return app(app(flr, x), fr)
+            if fuse_s and fll.tag == Tag.s:     # sβ: S f g x -> (f x)(g x)
                 return app(app(flr, x), app(fr, x))
-    sf = step(f)                            # appL
+    sf = step(f, fuse_s)                        # appL
     if sf is not None:
         return app(sf, x)
-    sx = step(x)                            # appR
+    sx = step(x, fuse_s)                        # appR
     if sx is not None:
         return app(f, sx)
     return None
 
 
-def reduce(t: T, fuel: Optional[int] = None) -> Tuple[T, int]:
+def reduce(t: T, fuel: Optional[int] = None,
+           fuse_s: bool = False) -> Tuple[T, int]:
     """Iterate LO step until NF (fuel=None) or exhaustion."""
     cur, n = t, 0
     while fuel is None or n < fuel:
-        nxt = step(cur)
+        nxt = step(cur, fuse_s)
         if nxt is None:
             break
         cur = nxt
@@ -140,16 +245,16 @@ def reduce(t: T, fuel: Optional[int] = None) -> Tuple[T, int]:
     return cur, n
 
 
-def bc_compile(tokens: str) -> T:
-    """Lean BytecodeView.run incl. underflow rules, then head of stack."""
+def bc_compile(tokens: str, fuse_s: bool = False) -> T:
+    """Lean BytecodeView.run incl. underflow rules, then head of stack.
+
+    With fuse_s=False the `S` token pushes the derived_s tree (view
+    expansion); with fuse_s=True it pushes the primitive s atom.
+    """
     st: List[T] = []
     for ch in tokens:
-        if ch == "I":
-            st.insert(0, TI)
-        elif ch == "K":
-            st.insert(0, TK)
-        elif ch == "S":
-            st.insert(0, TS)
+        if ch in TOKEN:
+            st.insert(0, DERIVED_S_T if (ch == "S" and not fuse_s) else T(TOKEN[ch]))
         elif ch == "@":
             if len(st) >= 2:
                 x, y = st[0], st[1]
@@ -166,35 +271,27 @@ def bc_compile(tokens: str) -> T:
 
 
 def bc_decompile(t: T) -> str:
-    """Postfix single-char tokens 'I','K','S','@' + '\\n'; raises on B."""
-    if t.tag == Tag.I:
-        return "I"
-    if t.tag == Tag.K:
-        return "K"
-    if t.tag == Tag.S:
-        return "S"
+    """Postfix single-char tokens over the full alphabet + '@'."""
     if t.tag == Tag.APP:
         return bc_decompile(t.l) + bc_decompile(t.r) + "@"
-    raise ValueError(f"decompile: unexpected tag {t.tag}")
+    return CHAR_OF[Tag(t.tag)]
 
 
 def t_to_host(t: T, H):
     """Convert seed T -> host reduce.T (H = host reduce module)."""
-    if t.tag == Tag.I:
-        return H.I
-    if t.tag == Tag.K:
-        return H.KK
-    if t.tag == Tag.S:
-        return H.S
     if t.tag == Tag.APP:
         return H.app(t_to_host(t.l, H), t_to_host(t.r, H))
-    raise ValueError("B has no host surface token")
+    return {
+        Tag.norm: H.I, Tag.konst: H.KK, Tag.s: H.S,
+        Tag.comp: H.B, Tag.dup: H.D, Tag.swap: H.C,
+    }[Tag(t.tag)]
 
 
 def t_from_host(h) -> T:
     """Convert host reduce.T -> seed T."""
     from_host = {
-        "NORM": Tag.I, "KONST": Tag.K, "S": Tag.S, "COMP": Tag.B,
+        "NORM": Tag.norm, "KONST": Tag.konst, "S": Tag.s,
+        "COMP": Tag.comp, "DUP": Tag.dup, "SWAP": Tag.swap,
     }
     if h.k.name == "APP":
         return app(t_from_host(h.l), t_from_host(h.r))
@@ -218,6 +315,8 @@ class Realization:
                                     # chunk-by-chunk; total input is unbounded
     io: tuple = ("stdin", "stdout")
     abi: str = "win64"
+    fuse_s: bool = False              # False: `S` token instantiates derived_s
+                                      # (IStepBasis only); True: primitive sβ
     reclaim: str = "none"             # GC slot — explicitly none this wave
 
 
@@ -556,13 +655,14 @@ IMPORTS: Tuple[str, ...] = (
 # .data slots (labels; 8 bytes each unless noted)
 DATA_SLOTS: Tuple[Tuple[str, int], ...] = (
     ("hin", 8), ("hout", 8), ("herr", 8), ("nread", 8), ("nw", 8),
-    ("nalloc", 8), ("scratch", 64),
+    ("nalloc", 8), ("ds", 8), ("scratch", 64),
 )
 
 VA_COMMIT_RESERVE = 0x3000
 PAGE_RW = 4
-STK_TAG = 5   # native-internal parse-stack cons cell tag (never a term node);
-              # excluded from nalloc so `alloc=` counts term nodes only
+STK_TAG = 7   # native-internal parse-stack cons cell tag (never a term node;
+              # tags 1..6 are atoms generated from SIGNATURE); excluded from
+              # nalloc so `alloc=` counts term nodes only
 
 
 def reducer_program(R: Realization) -> Program:
@@ -597,6 +697,11 @@ def reducer_program(R: Realization) -> Program:
         I("xor_r32_r32", "r14d", "r14d"),        # r14 = parse stack top (0)
         # first heap chunk (sets rbx=bump, rbp=end)
         I("call_rel32", ("l", "grow_heap")),
+    ]
+    if not R.fuse_s:
+        # build the shared derived_s template (L0-only tree); `S` tokens push it
+        p += [I("call_rel32", ("l", "build_ds"))]
+    p += [
         # ---- streaming parse: ReadFile granule -> parse bytes -> repeat ----
         # bytecode stack = heap cons cells {tag=STK_TAG, l=value, r=next}
         LBL("read_loop"),
@@ -619,18 +724,38 @@ def reducer_program(R: Realization) -> Program:
         I("cmp_r64_imm", "rax", 0x49), I("je_rel32", ("l", "p_i")),
         I("cmp_r64_imm", "rax", 0x4B), I("je_rel32", ("l", "p_k")),
         I("cmp_r64_imm", "rax", 0x53), I("je_rel32", ("l", "p_s")),
+        I("cmp_r64_imm", "rax", 0x42), I("je_rel32", ("l", "p_b")),
+        I("cmp_r64_imm", "rax", 0x57), I("je_rel32", ("l", "p_w")),
+        I("cmp_r64_imm", "rax", 0x43), I("je_rel32", ("l", "p_c")),
         I("cmp_r64_imm", "rax", 0x40), I("je_rel32", ("l", "p_app")),
         I("cmp_r64_imm", "rax", 0x20), I("je_rel32", ("l", "p_next")),
         I("cmp_r64_imm", "rax", 0x09), I("je_rel32", ("l", "p_next")),
         I("cmp_r64_imm", "rax", 0x0A), I("je_rel32", ("l", "p_next")),
         I("cmp_r64_imm", "rax", 0x0D), I("je_rel32", ("l", "p_next")),
         I("jmp_rel32", ("l", "exit3")),
-        LBL("p_i"), I("mov_r32_imm32", "edx", Tag.I),
+        LBL("p_i"), I("mov_r32_imm32", "edx", Tag.norm),
         I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-        LBL("p_k"), I("mov_r32_imm32", "edx", Tag.K),
+        LBL("p_k"), I("mov_r32_imm32", "edx", Tag.konst),
         I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-        LBL("p_s"), I("mov_r32_imm32", "edx", Tag.S),
+        LBL("p_b"), I("mov_r32_imm32", "edx", Tag.comp),
         I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
+        LBL("p_w"), I("mov_r32_imm32", "edx", Tag.dup),
+        I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
+        LBL("p_c"), I("mov_r32_imm32", "edx", Tag.swap),
+        I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
+    ]
+    if R.fuse_s:
+        p += [
+            LBL("p_s"), I("mov_r32_imm32", "edx", Tag.s),
+            I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
+        ]
+    else:
+        # view expansion: `S` pushes the shared derived_s root (no sβ emitted)
+        p += [
+            LBL("p_s"), I("mov_r64_rip", "rax", ("p", "ds")),
+            I("jmp_rel32", ("l", "p_push")),
+        ]
+    p += [
         LBL("p_push"),
         I("push_r64", "rdi"), I("sub_r64_imm", "rsp", 8),
         I("mov_r64_r64", "rdi", "rax"), I("call_rel32", ("l", "mkstk")),
@@ -654,7 +779,7 @@ def reducer_program(R: Realization) -> Program:
         I("jmp_rel32", ("l", "p_next")),
         LBL("p_under"),
         # depth 0 or 1 -> push I (Lean underflow: []->[I], [t]->[I,t])
-        I("mov_r32_imm32", "edx", Tag.I),
+        I("mov_r32_imm32", "edx", Tag.norm),
         I("call_rel32", ("l", "mkleaf")),
         I("push_r64", "rdi"), I("sub_r64_imm", "rsp", 8),
         I("mov_r64_r64", "rdi", "rax"), I("call_rel32", ("l", "mkstk")),
@@ -664,7 +789,7 @@ def reducer_program(R: Realization) -> Program:
         I("test_r64_r64", "r14", "r14"), I("je_rel32", ("l", "empty")),
         I("mov_r64_m64", "r12", ("m", "r14", 8)),
         I("jmp_rel32", ("l", "do_reduce")),
-        LBL("empty"), I("mov_r32_imm32", "edx", Tag.I),
+        LBL("empty"), I("mov_r32_imm32", "edx", Tag.norm),
         I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r12", "rax"),
         # ---- reduce loop (r15 = steps) ----
         LBL("do_reduce"), I("xor_r32_r32", "r15d", "r15d"),
@@ -783,26 +908,49 @@ def reducer_program(R: Realization) -> Program:
         I("jne_rel32", ("l", "st_none")),
         I("mov_r64_m64", "r13", ("m", "r12", 8)),    # f
         I("mov_r64_m64", "r14", ("m", "r12", 16)),   # x
-        I("cmp_m64_imm", ("m", "r13", 0), Tag.I),
+        I("cmp_m64_imm", ("m", "r13", 0), Tag.norm),
         I("je_rel32", ("l", "st_norm")),
         I("cmp_m64_imm", ("m", "r13", 0), Tag.APP),
         I("jne_rel32", ("l", "st_left")),
         I("mov_r64_m64", "rax", ("m", "r13", 8)),    # fl
         I("mov_r64_m64", "rcx", ("m", "r13", 16)),   # fr
-        I("cmp_m64_imm", ("m", "rax", 0), Tag.K),
+        I("cmp_m64_imm", ("m", "rax", 0), Tag.konst),
         I("je_rel32", ("l", "st_konst")),
+        I("cmp_m64_imm", ("m", "rax", 0), Tag.dup),
+        I("je_rel32", ("l", "st_dup")),
         I("cmp_m64_imm", ("m", "rax", 0), Tag.APP),
         I("jne_rel32", ("l", "st_left")),
         I("mov_r64_m64", "rdx", ("m", "rax", 8)),    # fll
         I("mov_r64_m64", "rsi", ("m", "rax", 16)),   # flr
-        I("cmp_m64_imm", ("m", "rdx", 0), Tag.B),
+        I("cmp_m64_imm", ("m", "rdx", 0), Tag.comp),
         I("je_rel32", ("l", "st_comp")),
-        I("cmp_m64_imm", ("m", "rdx", 0), Tag.S),
-        I("je_rel32", ("l", "st_s")),
+        I("cmp_m64_imm", ("m", "rdx", 0), Tag.swap),
+        I("je_rel32", ("l", "st_swap")),
+    ]
+    if R.fuse_s:
+        p += [
+            I("cmp_m64_imm", ("m", "rdx", 0), Tag.s),
+            I("je_rel32", ("l", "st_s")),
+        ]
+    p += [
         I("jmp_rel32", ("l", "st_left")),
         LBL("st_norm"), I("mov_r64_r64", "rax", "r14"),
         I("jmp_rel32", ("l", "st_out")),
         LBL("st_konst"), I("mov_r64_r64", "rax", "rcx"),
+        I("jmp_rel32", ("l", "st_out")),
+        LBL("st_dup"),                                 # W f x -> f x x
+        I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+        I("call_rel32", ("l", "mkapp")),               # rax = (f x)
+        I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
+        I("call_rel32", ("l", "mkapp")),               # rax = (f x) x
+        I("jmp_rel32", ("l", "st_out")),
+        LBL("st_swap"),                                # C f x y -> f y x
+        I("push_r64", "rcx"), I("sub_r64_imm", "rsp", 8),  # save fr (=y-side)
+        I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
+        I("call_rel32", ("l", "mkapp")),               # rax = (f y)
+        I("add_r64_imm", "rsp", 8), I("pop_r64", "rsi"),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("call_rel32", ("l", "mkapp")),               # rax = (f y) x
         I("jmp_rel32", ("l", "st_out")),
         LBL("st_comp"),                                # B f g x -> f (g x)
         I("push_r64", "rcx"), I("push_r64", "rsi"),
@@ -812,19 +960,24 @@ def reducer_program(R: Realization) -> Program:
         I("mov_r64_r64", "rsi", "rax"),
         I("call_rel32", ("l", "mkapp")),               # rax = f (g x)
         I("jmp_rel32", ("l", "st_out")),
-        LBL("st_s"),                                   # S f g x -> (f x)(g x)
-        I("push_r64", "rcx"), I("push_r64", "rsi"),    # [rsp]=flr,[rsp+8]=fr
-        I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")),               # rax = (f x)
-        I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
-        I("mov_r64_m64", "rdi", ("m", "rsp", 24)),     # fr
-        I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")),               # rax = (g x)
-        I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
-        I("mov_r64_r64", "rsi", "rax"),
-        I("call_rel32", ("l", "mkapp")),
-        I("add_r64_imm", "rsp", 16),
-        I("jmp_rel32", ("l", "st_out")),
+    ]
+    if R.fuse_s:
+        p += [
+            LBL("st_s"),                               # S f g x -> (f x)(g x)
+            I("push_r64", "rcx"), I("push_r64", "rsi"),  # [rsp]=flr,[rsp+8]=fr
+            I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),             # rax = (f x)
+            I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
+            I("mov_r64_m64", "rdi", ("m", "rsp", 24)),   # fr
+            I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),             # rax = (g x)
+            I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
+            I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")),
+            I("add_r64_imm", "rsp", 16),
+            I("jmp_rel32", ("l", "st_out")),
+        ]
+    p += [
         LBL("st_left"),
         I("mov_r64_r64", "rdi", "r13"), I("call_rel32", ("l", "step")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "st_right")),
@@ -869,13 +1022,19 @@ def reducer_program(R: Realization) -> Program:
         I("mov_m8_imm8", ("m", "rsi", 0), 0x40), I("inc_r64", "rsi"),
         I("mov_m8_imm8", ("m", "rsi", 0), 0x20), I("inc_r64", "rsi"), I("ret"),
         LBL("en_leaf"),
-        I("cmp_r64_imm", "rax", Tag.I), I("je_rel32", ("l", "en_i")),
-        I("cmp_r64_imm", "rax", Tag.K), I("je_rel32", ("l", "en_k")),
-        I("cmp_r64_imm", "rax", Tag.S), I("je_rel32", ("l", "en_s")),
+        I("cmp_r64_imm", "rax", Tag.norm), I("je_rel32", ("l", "en_i")),
+        I("cmp_r64_imm", "rax", Tag.konst), I("je_rel32", ("l", "en_k")),
+        I("cmp_r64_imm", "rax", Tag.s), I("je_rel32", ("l", "en_s")),
+        I("cmp_r64_imm", "rax", Tag.comp), I("je_rel32", ("l", "en_b")),
+        I("cmp_r64_imm", "rax", Tag.dup), I("je_rel32", ("l", "en_d")),
+        I("cmp_r64_imm", "rax", Tag.swap), I("je_rel32", ("l", "en_c")),
         I("mov_r32_imm32", "ecx", 0x3F), I("jmp_rel32", ("l", "en_w")),
         LBL("en_i"), I("mov_r32_imm32", "ecx", 0x49), I("jmp_rel32", ("l", "en_w")),
         LBL("en_k"), I("mov_r32_imm32", "ecx", 0x4B), I("jmp_rel32", ("l", "en_w")),
-        LBL("en_s"), I("mov_r32_imm32", "ecx", 0x53),
+        LBL("en_s"), I("mov_r32_imm32", "ecx", 0x53), I("jmp_rel32", ("l", "en_w")),
+        LBL("en_b"), I("mov_r32_imm32", "ecx", 0x42), I("jmp_rel32", ("l", "en_w")),
+        LBL("en_d"), I("mov_r32_imm32", "ecx", 0x57), I("jmp_rel32", ("l", "en_w")),
+        LBL("en_c"), I("mov_r32_imm32", "ecx", 0x43),
         LBL("en_w"),
         I("mov_m8_r8", ("m", "rsi", 0), "cl"), I("inc_r64", "rsi"),
         I("mov_m8_imm8", ("m", "rsi", 0), 0x20), I("inc_r64", "rsi"), I("ret"),
@@ -899,6 +1058,54 @@ def reducer_program(R: Realization) -> Program:
         I("jmp_rel32", ("l", "it_cp")),
         LBL("it_done"), I("add_r64_imm", "rsp", 0x28), I("ret"),
     ]
+    if not R.fuse_s:
+        # build_ds: construct DERIVED_S once into [rip+ds]; r13/r14/r15 scratch
+        # (pre-parse; r14 re-zeroed after — it is the parse-stack top).
+        p += [
+            LBL("build_ds"),
+            I("sub_r64_imm", "rsp", 8),
+            I("mov_r32_imm32", "edx", Tag.comp),
+            I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r13", "rax"),
+            I("mov_r32_imm32", "edx", Tag.dup),
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r13", "rax"),
+            I("mov_r32_imm32", "edx", Tag.comp),
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r13"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r13", "rax"),
+            I("mov_r32_imm32", "edx", Tag.comp),        # r13 = (B (B D))
+            I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r15", "rax"),
+            I("mov_r32_imm32", "edx", Tag.comp),
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_r64_r64", "rdi", "r15"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
+            I("mov_r32_imm32", "edx", Tag.comp),        # r15 = (B B)
+            I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r14", "rax"),
+            I("mov_r32_imm32", "edx", Tag.comp),
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_r64_r64", "rdi", "r14"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r14", "rax"),
+            I("mov_r32_imm32", "edx", Tag.swap),        # r14 = (B B)
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_r64_r64", "rdi", "r14"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r14", "rax"),
+            I("mov_r64_r64", "rdi", "r15"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
+            I("mov_r32_imm32", "edx", Tag.swap),        # r15 = ((B B)(B C))
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r15"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
+            I("mov_r32_imm32", "edx", Tag.norm),        # r15 = (C ((B B)(B C)))
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_r64_r64", "rdi", "r15"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
+            I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "r15"),
+            I("call_rel32", ("l", "mkapp")),            # rax = derived_s
+            I("mov_rip_r64", ("p", "ds"), "rax"),
+            I("xor_r32_r32", "r14d", "r14d"),
+            I("add_r64_imm", "rsp", 8), I("ret"),
+        ]
     return p
 
 
@@ -1069,26 +1276,68 @@ _EXE_CACHE: Dict[str, str] = {}
 def _exe_for(R: Realization = DEFAULT) -> str:
     key = repr(R)
     if key not in _EXE_CACHE:
-        _EXE_CACHE[key] = write_exe(os.path.join(BUILD_DIR, "reducer.exe"), R)
+        tag = "default" if R == DEFAULT else \
+            f"v{abs(hash(key)) & 0xFFFF:x}"
+        _EXE_CACHE[key] = write_exe(
+            os.path.join(BUILD_DIR, f"reducer_{tag}.exe"), R)
     return _EXE_CACHE[key]
 
 
-def reduce_native(t, fuel: Optional[int] = None):
+def _parse_native_out(text: str):
+    """Parse native NF tokens 'I K S B W C @' -> host T."""
+    hreduce, bcd, hp = _host()
+    leaf = {"I": hreduce.I, "K": hreduce.KK, "S": hreduce.S,
+            "B": hreduce.B, "W": hreduce.D, "C": hreduce.C}
+    st: list = []
+    for tok in text.split():
+        if tok in leaf:
+            st.insert(0, leaf[tok])
+        elif tok == "@":
+            if len(st) >= 2:
+                x, y = st[0], st[1]
+                st = [hreduce.app(y, x)] + st[2:]
+            elif len(st) == 1:
+                st = [hreduce.I, st[0]]
+            else:
+                st = [hreduce.I]
+        else:
+            raise ValueError(f"bad NF token {tok!r}")
+    return st[0] if st else hreduce.I
+
+
+def _tokens_of_term(t) -> str:
+    """Host T -> native input token text (postfix, full alphabet)."""
+    hreduce, bcd, hp = _host()
+    if t.k.name == "APP":
+        return _tokens_of_term(t.l) + " " + _tokens_of_term(t.r) + " @"
+    return {
+        "NORM": "I", "KONST": "K", "S": "S",
+        "COMP": "B", "DUP": "W", "SWAP": "C",
+    }[t.k.name]
+
+
+def _reduce_via(t, R: Realization):
     """HostPiece.reduce signature: (T_host, fuel) -> (nf, steps, alloc).
 
     The `fuel` argument is intentionally ignored: it is a graph-piece
     parameter, while native fuel is governed by Realization.fuel baked
     into the generated executable.
+
+    Observation discipline mirrors host graph.lo: for the default build
+    the input term is `translate_to_basis` (S expands to derived_s), the
+    native NF tokens are parsed back, and `quote_surface` folds any exact
+    derived_s subtree back to S — the same view the graph piece applies.
     """
     hreduce, bcd, hp = _host()
-    prog = bcd.decompile(t)
-    text = " ".join(
-        {bcd.Instr.PUSH_I: "I", bcd.Instr.PUSH_K: "K",
-         bcd.Instr.PUSH_S: "S", bcd.Instr.APP: "@"}[i] for i in prog)
-    out, err, rc = run_native(_exe_for(DEFAULT), text)
+    import tower
+    if not R.fuse_s:
+        t = tower.translate_to_basis(t)
+    out, err, rc = run_native(_exe_for(R), _tokens_of_term(t))
     if rc != 0:
         raise RuntimeError(f"native reducer rc={rc} stderr={err!r}")
-    nf = bcd.compile_bytecode(bcd.parse_prog(out))
+    nf = _parse_native_out(out)
+    if not R.fuse_s:
+        nf = tower.quote_surface(nf)
     steps = alloc = 0
     import re
     m = re.search(r"steps=(\d+)\s+alloc=(\d+)", err)
@@ -1097,10 +1346,17 @@ def reduce_native(t, fuel: Optional[int] = None):
     return nf, steps, alloc
 
 
-def piece():
+def reduce_native(t, fuel: Optional[int] = None):
+    return _reduce_via(t, DEFAULT)
+
+
+def piece(R: Realization = DEFAULT):
     _, _, hp = _host()
-    return hp.HostPiece(name="native.x86_64.pe", kind="cpu",
-                        reduce=reduce_native)
+    name = "native.x86_64.pe" if R == DEFAULT else \
+        f"native.x86_64.pe.fuse_s"
+    return hp.HostPiece(
+        name=name, kind="cpu",
+        reduce=lambda t, fuel=100_000: _reduce_via(t, R))
 
 
 # ======================================================================
@@ -1128,6 +1384,145 @@ _FASM_HDR = (
     f"include '{FASMG_INC}/x64.inc'\n"
     "use64\nformat binary\n"
 )
+
+
+def _lean_matrices(path: str) -> Dict[str, Matrix]:
+    """Parse `def NAME : Matrix4 where` blocks from ISARMatrices.lean into
+    row-major 16-tuples (read-only file oracle, like fasmg.exe)."""
+    out: Dict[str, Matrix] = {}
+    name = None
+    vals: Dict[str, int] = {}
+    for line in open(path, encoding="utf-8"):
+        m = re.match(r"def\s+(\w+)\s*:\s*Matrix4\s+where", line)
+        if m:
+            name = m.group(1)
+            vals = {}
+            continue
+        if name is None:
+            continue
+        for mm in re.finditer(r"m([0-3])([0-3])\s*:=\s*(-?\d+)", line):
+            vals[mm.group(1) + mm.group(2)] = int(mm.group(3))
+        if len(vals) == 16:
+            if name != "zero":
+                out[name] = tuple(
+                    vals[f"{i}{j}"] for i in range(4) for j in range(4))
+            name = None
+    return out
+
+
+def _lean_signature(path: str, mats: Dict[str, Matrix]) -> Dict[str, Matrix]:
+    """Parse `term_signature_val` `| .atom => expr` lines from
+    BasisCompleteness.lean; products are evaluated with `mul`."""
+    atoms = {"var": "var", "norm": "norm", "sₛ": "s", "konst": "konst",
+             "dup": "dup", "swap": "swap", "comp": "comp"}
+    sig: Dict[str, Matrix] = {}
+    in_fn = False
+    for line in open(path, encoding="utf-8"):
+        if "term_signature_val" in line and "=>" not in line:
+            in_fn = True
+            continue
+        if not in_fn:
+            continue
+        m = re.match(r"\s*\|\s*\.(\S+).*?=>\s*(.+)", line)
+        if not m:
+            if in_fn and sig:
+                break
+            continue
+        atom, expr = m.group(1), m.group(2).strip()
+        if atom not in atoms or atom == "app":
+            continue
+        factors = [f.strip() for f in expr.split("*")]
+        acc = I_id
+        for f in factors:
+            acc = mul(acc, zero if f == "zero" else mats[f])
+        sig[atoms[atom]] = acc
+    return sig
+
+
+def _g0() -> bool:
+    """Signature algebra: reproduce the rfl theorems + the app↔mul hom."""
+    ok = True
+    checks = [
+        ("I1*I1==I1", mul(I1, I1) == I1),
+        ("K1*K1==zero", mul(K1, K1) == zero),
+        ("I2*I2==I2", mul(I2, I2) == I2),
+        ("K2*K2==zero", mul(K2, K2) == zero),
+        ("P_inv*P==I_id", mul(P_inv, P) == I_id),
+        ("P*P_inv==I_id", mul(P, P_inv) == I_id),
+        ("P*K1*P_inv==K2", mul(mul(P, K1), P_inv) == K2),
+        ("sig(derived_k_signature)==K1", signature(DERIVED_K_SIG_T) == K1),
+    ]
+    for name, good in checks:
+        if not good:
+            print(f"  FAIL {name}")
+            ok = False
+    # Literal cross-check against the Lean source (read-only file oracle).
+    lean_dir = os.path.normpath(os.path.join(SEED_DIR, "..", "src", "ISAR"))
+    mats_path = os.path.join(lean_dir, "ISARMatrices.lean")
+    comp_path = os.path.join(lean_dir, "BasisCompleteness.lean")
+    try:
+        lm = _lean_matrices(mats_path)
+        names = ["I1", "R1", "A1", "S1", "I2", "R2", "A2", "S2",
+                 "I_id", "P", "P_inv"]
+        bad = [n for n in names if lm.get(n) != globals()[n]]
+        if bad:
+            print(f"  FAIL literals != ISARMatrices.lean: {bad}")
+            ok = False
+        else:
+            print(f"  ok {len(names)} literals == ISARMatrices.lean")
+    except (OSError, KeyError) as e:
+        print(f"  FAIL ISARMatrices.lean oracle: {e}")
+        ok = False
+        lm = {}
+    try:
+        lsig = _lean_signature(comp_path, {**lm, "zero": zero})
+        bad = [k for k in SIGNATURE if lsig.get(k) != SIGNATURE[k]]
+        if bad or len(lsig) != len(SIGNATURE):
+            print(f"  FAIL SIGNATURE != term_signature_val: {bad}")
+            ok = False
+        else:
+            print(f"  ok {len(lsig)} SIGNATURE keys == term_signature_val")
+    except (OSError, KeyError) as e:
+        print(f"  FAIL BasisCompleteness.lean oracle: {e}")
+        ok = False
+    # sig(app f x) == mul(sig f, sig x) on random terms (hom property)
+    for text in _random_progs(32, alphabet="IKSBWC@"):
+        t = bc_compile(text, fuse_s=True)
+        if t.tag == Tag.APP:
+            good = signature(t) == mul(signature(t.l), signature(t.r))
+            if not good:
+                print(f"  FAIL sig hom on {text}")
+                ok = False
+    print(f"  ok signature algebra ({len(checks)} checks + hom on 32 terms)")
+    return ok
+
+
+def _g0b() -> bool:
+    """Signature-free emission: no matrix bytes, no sβ in default .text."""
+    ok = True
+    text = _text_offsets(build_pe(DEFAULT))
+    mats = list(BASIS.values()) + [K1]
+    for w in (1, 2, 4, 8):
+        for mi, m in enumerate(mats):
+            pat = b"".join(
+                struct.pack("<b" if w == 1 else {2: "<h", 4: "<i", 8: "<q"}[w],
+                            v) for v in m)
+            if pat in text:
+                print(f"  FAIL matrix {mi} pattern at width {w} in .text")
+                ok = False
+    labels_d = {i[1] for i in reducer_program(DEFAULT) if i[0] == "label"}
+    labels_f = {i[1] for i in reducer_program(Realization(fuse_s=True))
+                if i[0] == "label"}
+    if "st_s" in labels_d:
+        print("  FAIL sβ (st_s) emitted in default build")
+        ok = False
+    if "st_s" not in labels_f or "build_ds" in labels_f:
+        print("  FAIL fuse_s build missing st_s / has build_ds")
+        ok = False
+    if "build_ds" not in labels_d:
+        print("  FAIL default build missing build_ds")
+        ok = False
+    return ok
 
 
 def _g1() -> bool:
@@ -1266,13 +1661,14 @@ def _g1() -> bool:
     return ok
 
 
-def _random_progs(n: int, seed_: int = 83) -> List[str]:
+def _random_progs(n: int, seed_: int = 83,
+                  alphabet: str = "IKS@") -> List[str]:
     import random
     rng = random.Random(seed_)
     out = []
     for _ in range(n):
         k = rng.randint(1, 14)
-        out.append(" ".join(rng.choice("IKS@") for _ in range(k)))
+        out.append(" ".join(rng.choice(alphabet) for _ in range(k)))
     return out
 
 
@@ -1307,31 +1703,116 @@ def _tokens_of_prog(prog) -> str:
 
 def _g2() -> bool:
     hreduce, bcd, hp = _host()
+    import tower
     ok = True
-    cases: List[Tuple[str, T]] = []
-    for label, term, _exp in hreduce.GOLDENS:
-        cases.append((label, t_from_host(term)))
-    for text in _random_progs(24):
+    # (a) basis mirror (fuse_s=False, S expands via derived_s) vs graph.lo:
+    # the host basis reducer — same translate-then-IStepBasis discipline.
+    graph = hp.by_name("graph.lo")
+    basis_cases: List[Tuple[str, T]] = []
+    for text in _random_progs(32, alphabet="IKSBWC@"):
         try:
-            cases.append((text, bc_compile(text)))
+            basis_cases.append((text, bc_compile(text)))
         except ValueError:
             pass
     for label, prog, _exp in bcd.GOLDENS:
-        cases.append(("bc:" + label, bc_compile(_tokens_of_prog(prog))))
-    for label, sterm in cases:
+        basis_cases.append(("bc:" + label, bc_compile(_tokens_of_prog(prog))))
+    for label, sterm in basis_cases:
         nf_s, st_s = reduce(sterm, fuel=1_000_000)
+        nf_h, st_h, _ = graph.reduce(
+            tower.translate_to_basis(t_to_host(sterm, hreduce)),
+            fuel=1_000_000)
+        # NF equality only: graph.lo shares redexes (dag), the mirror walks
+        # the tree — step counts legitimately differ on shared subterms.
+        good = tower.quote_surface(t_to_host(nf_s, hreduce)) == nf_h
+        if not good:
+            print(f"  FAIL basis {label}: seed {nf_s}/{st_s} "
+                  f"vs graph.lo {nf_h}/{st_h}")
+            ok = False
+    print(f"  ok basis mirror vs graph.lo: {len(basis_cases)} terms")
+    # (b) fused mirror (fuse_s=True, primitive sβ) vs host reduce.py surface.
+    surf_cases: List[Tuple[str, T]] = []
+    for label, term, _exp in hreduce.GOLDENS:
+        surf_cases.append((label, t_from_host(term)))
+    for text in _random_progs(24, alphabet="IKS@"):
+        try:
+            surf_cases.append((text, bc_compile(text, fuse_s=True)))
+        except ValueError:
+            pass
+    for label, sterm in surf_cases:
+        nf_s, st_s = reduce(sterm, fuel=1_000_000, fuse_s=True)
         nf_h, st_h = hreduce.reduce(t_to_host(sterm, hreduce), fuel=1_000_000)
         good = (nf_s == t_from_host(nf_h)) and st_s == st_h
         if not good:
-            print(f"  FAIL {label}: seed {nf_s}/{st_s} vs host {nf_h}/{st_h}")
+            print(f"  FAIL surface {label}: seed {nf_s}/{st_s} "
+                  f"vs host {nf_h}/{st_h}")
+            ok = False
+    print(f"  ok fused mirror vs reduce.py: {len(surf_cases)} terms")
+    return ok
+
+
+def _g3_build(R: Realization, probes, exe_bytes: bytes) -> bool:
+    """One build's probes.  Expected values come through the view:
+    DEFAULT (fuse_s=False) is observed as translate_to_basis + IStepBasis +
+    quote_surface — exactly graph.lo's import/reduce/export discipline;
+    fuse_s=True is observed raw against host reduce.py (surface IStep+sβ)."""
+    hreduce, bcd, hp = _host()
+    import tower
+    graph = hp.by_name("graph.lo")
+    exe = _exe_for(R)
+    ok = True
+    for label, text, t in probes:
+        try:
+            term = t if t is not None else bcd.compile_bytecode(
+                bcd.parse_prog(text))
+            sterm = bc_compile(text, fuse_s=R.fuse_s)
+            nf_seed, steps_seed = reduce(sterm, fuel=1_000_000,
+                                         fuse_s=R.fuse_s)
+            if R.fuse_s:
+                nf_ref, steps_ref = hreduce.reduce(term, fuel=1_000_000)
+                expect_nf = nf_ref
+            else:
+                # NF oracle is graph.lo (same IStepBasis discipline); its
+                # step count is dag-shared and lower, so the count oracle
+                # is the §1 mirror, which walks the tree like the exe.
+                nf_ref, _, _ = graph.reduce(term, fuel=1_000_000)
+                steps_ref = steps_seed
+                expect_nf = nf_ref
+            out, err, rc = run_native(exe, text)
+            line = out.strip()
+            good = rc == 0
+            detail = ""
+            if good:
+                got = _parse_native_out(line)
+                if not R.fuse_s:
+                    got = tower.quote_surface(got)
+                    seed_nf_h = tower.quote_surface(t_to_host(nf_seed, hreduce))
+                else:
+                    seed_nf_h = t_to_host(nf_seed, hreduce)
+                good = (got == expect_nf) and (seed_nf_h == expect_nf)
+                import re
+                m = re.search(r"steps=(\d+)", err)
+                steps_native = int(m.group(1)) if m else -1
+                if steps_native != steps_ref:
+                    good = False
+                    detail += f" steps {steps_native}!={steps_ref}"
+                squashed = text.replace(" ", "")
+                if len(squashed) > 4 and squashed.encode() in exe_bytes:
+                    good = False
+                    detail += " probe-text-in-exe"
+            if not good:
+                print(f"  FAIL {label}: rc={rc} out={line!r} "
+                      f"err={err!r}{detail}")
+                ok = False
+            else:
+                print(f"  ok {label}: nf={line[:120]!r} steps={steps_ref}")
+        except Exception as e:
+            print(f"  FAIL {label}: {e}")
             ok = False
     return ok
 
 
 def _g3() -> bool:
     hreduce, bcd, hp = _host()
-    exe = _exe_for(DEFAULT)
-    exe_bytes = open(exe, "rb").read()
     ok = True
     probes: List[Tuple[str, str, object]] = []
     for label, prog, _exp in bcd.GOLDENS:
@@ -1343,39 +1824,11 @@ def _g3() -> bool:
         probes.append((label, _tokens_of_prog(bcd.decompile(t)), t))
     # streaming-boundary probe: token text > read_buf_bytes (64 KiB granule)
     probes.append(("stream>64KiB", "I K @ " * 20000, None))
-    for label, text, t in probes:
-        try:
-            term = t if t is not None else bcd.compile_bytecode(
-                bcd.parse_prog(text))
-            nf_host, steps_host = hreduce.reduce(term, fuel=1_000_000)
-            bcd.decompile(nf_host)  # must be decompilable
-            nf_seed, steps_seed = reduce(t_from_host(term))
-            out, err, rc = run_native(exe, text)
-            line = out.strip()
-            good = rc == 0
-            detail = ""
-            if good:
-                import fasm_dialect as fd
-                got = bcd.compile_bytecode(fd.parse_fasm(line))
-                good = (got == nf_host) and (nf_seed == t_from_host(nf_host))
-                import re
-                m = re.search(r"steps=(\d+)", err)
-                steps_native = int(m.group(1)) if m else -1
-                if steps_native != steps_host:
-                    good = False
-                    detail += f" steps {steps_native}!={steps_host}"
-                squashed = text.replace(" ", "")
-                if len(squashed) > 4 and squashed.encode() in exe_bytes:
-                    good = False
-                    detail += " probe-text-in-exe"
-            if not good:
-                print(f"  FAIL {label}: rc={rc} out={line!r} err={err!r}{detail}")
-                ok = False
-            else:
-                print(f"  ok {label}: nf={line!r} steps={steps_host}")
-        except Exception as e:
-            print(f"  FAIL {label}: {e}")
-            ok = False
+    for tag, R in [("default(expanded)", DEFAULT),
+                   ("fuse_s", Realization(fuse_s=True))]:
+        print(f" build {tag}:")
+        exe = _exe_for(R)
+        ok = _g3_build(R, probes, open(exe, "rb").read()) and ok
     return ok
 
 
@@ -1425,6 +1878,8 @@ def _variant_exe(tag: str, R: Realization) -> str:
 
 def _g4() -> bool:
     hreduce, bcd, hp = _host()
+    import tower
+    graph = hp.by_name("graph.lo")
     ok = True
     # medium-term probe crossing many 4KiB chunks + streaming boundary
     deep_text = _tokens_of_prog(bcd.decompile(_deep_terms()[0][1]))
@@ -1435,21 +1890,27 @@ def _g4() -> bool:
         ("chunk4k", Realization(chunk_bytes=4096)),
         ("stack8m", Realization(stack_reserve=8 << 20)),
         ("buf16", Realization(read_buf_bytes=16)),
+        ("fuse_s", Realization(fuse_s=True)),
     ]
     for tag, Rv in variants:
         exe = _variant_exe(tag, Rv)
         for text in probes:
             term = bcd.compile_bytecode(bcd.parse_prog(text))
-            nf_host, steps_host = hreduce.reduce(term, fuel=1_000_000)
+            if Rv.fuse_s:
+                nf_ref, steps_ref = hreduce.reduce(term, fuel=1_000_000)
+            else:
+                nf_ref, _, _ = graph.reduce(term, fuel=1_000_000)
+                _, steps_ref = reduce(bc_compile(text), fuel=1_000_000)
             out, err, rc = run_native(exe, text)
             good = rc == 0
             if good:
-                import fasm_dialect as fd
-                got = bcd.compile_bytecode(fd.parse_fasm(out.strip()))
+                got = _parse_native_out(out.strip())
+                if not Rv.fuse_s:
+                    got = tower.quote_surface(got)
                 import re
                 m = re.search(r"steps=(\d+)", err)
-                good = (got == nf_host
-                        and m and int(m.group(1)) == steps_host)
+                good = (got == nf_ref
+                        and m and int(m.group(1)) == steps_ref)
             if not good:
                 print(f"  FAIL {tag} probe: rc={rc} out={out[:60]!r}")
                 ok = False
@@ -1457,6 +1918,8 @@ def _g4() -> bool:
 
     # structural diffs: operands may differ only in Realization fields
     for tag, Rv in variants:
+        if Rv.fuse_s:
+            continue  # fuse_s changes program shape (st_s/build_ds), not operands
         diffs = _program_diffs(DEFAULT, Rv)
         if diffs:
             print(f"  diffs {tag}: {[(d[0], d[1]) for d in diffs]}")
@@ -1474,20 +1937,20 @@ def _g4() -> bool:
     except NotRealized as e:
         print(f"  ok cd refused: {e}")
 
-    # fuel variants on church exp 3 5 (3148 steps)
+    # fuel variants on church exp 3 5 under fuse_s=True (3148 surface steps;
+    # the expanded build needs ~20x more, so fuel is exercised on the fused
+    # strategy where the reference count is the host sβ count)
     exp_text = _tokens_of_prog(bcd.decompile(_deep_terms()[1][1]))
-    exe_f = _variant_exe("fuel50", Realization(fuel=50))
+    exe_f = _variant_exe("fuel50", Realization(fuel=50, fuse_s=True))
     out, err, rc = run_native(exe_f, exp_text)
     good = rc == 2 and out.strip() == ""
     print(f"  {'ok' if good else 'FAIL'} fuel=50 -> rc={rc} out={out[:40]!r}")
     ok = ok and good
-    exe_f2 = _variant_exe("fuel10k", Realization(fuel=10000))
+    exe_f2 = _variant_exe("fuel10k", Realization(fuel=10000, fuse_s=True))
     out2, err2, rc2 = run_native(exe_f2, exp_text)
     term = bcd.compile_bytecode(bcd.parse_prog(exp_text))
     nf_host, steps_host = hreduce.reduce(term, fuel=1_000_000)
-    import fasm_dialect as fd
-    good2 = (rc2 == 0
-             and bcd.compile_bytecode(fd.parse_fasm(out2.strip())) == nf_host)
+    good2 = (rc2 == 0 and _parse_native_out(out2.strip()) == nf_host)
     print(f"  {'ok' if good2 else 'FAIL'} fuel=10000 -> rc={rc2}")
     ok = ok and good2
     return ok
@@ -1497,7 +1960,6 @@ def _g5() -> bool:
     hreduce, bcd, hp = _host()
     import cogen
     import mine_adopt as ma
-    from observation_regime import oper_eq_regime
     ok = True
     hp.register_piece(piece())
     c = cogen.MachineContext.detect()
@@ -1520,23 +1982,51 @@ def _g5() -> bool:
     print(f"  {'ok' if good else 'FAIL'} try_adopt compile_bytecode -> {r}")
     ok = ok and good
 
-    # try_adopt has no piece hook: inline check that native NF ~_O graph.lo NF
-    R = oper_eq_regime()
-    graph = hp.by_name("graph.lo")
-    for p in progs:
-        term = bcd.compile_bytecode(p)
-        nfn, _, _ = npiece.reduce(term, 100_000)
-        nfg, _, _ = graph.reduce(term, 100_000)
-        if not R.sim(nfn, nfg):
-            print(f"  FAIL native NF != graph.lo NF on {p}")
-            ok = False
-    print(f"  ok native NF ~_O graph.lo on {len(progs)} probes "
-          "(inline; try_adopt has no piece hook)")
+    rp = ma.try_adopt_piece(
+        npiece, probes=[bcd.compile_bytecode(p) for p in progs])
+    good = rp.accepted and rp.matched_map == "graph.lo"
+    print(f"  {'ok' if good else 'FAIL'} try_adopt_piece native -> {rp}")
+    ok = ok and good
+
+    # same probes through the fuse_s=True build: reference is the host
+    # surface reducer (reduce.py: primitive sβ), matching its own view
+    fpiece = piece(Realization(fuse_s=True))
+    surface = hp.HostPiece(
+        name="reduce.py.surface", kind="graph",
+        reduce=lambda t, fuel=100_000: (
+            lambda nf: (nf[0], nf[1], 0))(hreduce.reduce(t, fuel)))
+    rf = ma.try_adopt_piece(
+        fpiece, probes=[bcd.compile_bytecode(p) for p in progs],
+        reference=surface)
+    good = rf.accepted and rf.matched_map == "reduce.py.surface"
+    print(f"  {'ok' if good else 'FAIL'} try_adopt_piece fuse_s -> {rf}")
+    ok = ok and good
     return ok
 
 
 def main() -> int:
     results = []
+    print("G0 signature algebra")
+    try:
+        g0 = _g0()
+    except Exception as e:
+        print(f"  FAIL gate error: {e}")
+        g0 = False
+    print(f"{'OK' if g0 else 'FAIL'} G0")
+    results.append(g0)
+
+    print("G0b signature-free emission")
+    try:
+        g0b = _g0b()
+    except Exception as e:
+        print(f"  FAIL gate error: {e}")
+        g0b = False
+    print(f"{'OK' if g0b else 'FAIL'} G0b")
+    results.append(g0b)
+
+    # smoke exe at the canonical path
+    write_exe(os.path.join(BUILD_DIR, "reducer.exe"), DEFAULT)
+
     print("G1 encoder vs fasmg")
     try:
         g1 = _g1()

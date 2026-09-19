@@ -79,6 +79,44 @@ def try_adopt(
     )
 
 
+def try_adopt_piece(
+    piece,
+    *,
+    probes: Sequence[T],
+    reference=None,
+    fuel: int = 100_000,
+) -> AdoptResult:
+    """Adopt a HostPiece iff for every probe NF_piece(t) ~_O NF_reference(t)
+    (reference default: graph.lo)."""
+    import host_pieces as hp
+
+    if reference is None:
+        reference = hp.by_name("graph.lo")
+    R = oper_eq_regime()
+    n = 0
+    for t in probes:
+        try:
+            nf_p, _, _ = piece.reduce(t, fuel)
+        except Exception as e:  # noqa: BLE001 — gate must refuse failing pieces
+            return AdoptResult(
+                False, None,
+                f"piece.reduce raised on probe {t!r}: {e}")
+        try:
+            nf_r, _, _ = reference.reduce(t, fuel)
+        except Exception as e:  # noqa: BLE001
+            return AdoptResult(
+                False, None,
+                f"reference.reduce raised on probe {t!r}: {e}")
+        if not R.sim(nf_p, nf_r):
+            return AdoptResult(
+                False, None,
+                f"NF mismatch on probe {t!r}: piece={nf_p!r} ref={nf_r!r}")
+        n += 1
+    return AdoptResult(
+        True, reference.name,
+        f"OperEq matches piece {reference.name} on {n} probes")
+
+
 def main() -> int:
     ok = True
     probes = default_probes()
@@ -116,6 +154,24 @@ def main() -> int:
     tag3 = "OK" if not r3.accepted else "FAIL"
     print(f"{tag3} refuse always_K encode -> {r3}")
     if r3.accepted:
+        ok = False
+
+    # Piece adoption: graph.lo adopts against itself; spurious piece refuses.
+    import host_pieces as hp  # noqa: E402
+
+    r4 = try_adopt_piece(hp.by_name("graph.lo"), probes=probes)
+    tag4 = "OK" if r4.accepted and r4.matched_map == "graph.lo" else "FAIL"
+    print(f"{tag4} adopt graph.lo piece -> {r4}")
+    if not r4.accepted:
+        ok = False
+
+    spurious = hp.HostPiece(
+        name="always_K", kind="cpu",
+        reduce=lambda t, fuel=0: (KK, 0, 0))
+    r5 = try_adopt_piece(spurious, probes=probes)
+    tag5 = "OK" if not r5.accepted else "FAIL"
+    print(f"{tag5} refuse always_K piece -> {r5}")
+    if r5.accepted:
         ok = False
 
     print("mine-adopt: OperEq match or explicit QuotientMap")
