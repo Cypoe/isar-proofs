@@ -26,3 +26,4 @@ home_page/_site/
 home_page/*.pdf
 
 isar_proofs.egg-info/
+seed/build/

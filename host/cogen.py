@@ -5,7 +5,8 @@ choose → LoaderPlan → emit → HostPiece (catalog).
 IdentityRealize (graph) and FasmRealize (family=fasm, qm=fasm_map) — reduce still graph.lo.
 
 Bootstrap = truthful representation for this machine, never InvariantLayer "IT".
-No external fasmg assemble/link this wave.
+A native PE loader (seed/seed.py) is the first family=cpu backend; fasmg is
+used by the seed only as a byte oracle, never to assemble/link the product.
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from host_pieces import (  # noqa: E402
 from strategy import Strategy, IdentityStrategy  # noqa: E402
 from quotient_map import QuotientMap, identity_map  # noqa: E402
 from fasm_dialect import fasm_map, GOLDENS as FASM_GOLDENS, show_fasm  # noqa: E402
+from bytecode_dialect import bytecode_map  # noqa: E402
 
 
 class Budget(Enum):
@@ -114,7 +116,16 @@ def choose(
     )
     note = "reduce via source piece; simd/gpu stub to graph"
 
-    if prefer_family == "fasm" or (
+    if (
+        prefer_family is None
+        and budget is Budget.SERIAL
+        and "x86_64" in context.features
+        and "native.x86_64.pe" in names
+    ):
+        family = "cpu"
+        src = "native.x86_64.pe"
+        note = "native PE loader (seed/seed.py)"
+    elif prefer_family == "fasm" or (
         prefer_family is None
         and budget is Budget.SERIAL
         and "x86_64" in context.features
@@ -247,6 +258,43 @@ def fasm_realize(
     return spec, plan, piece
 
 
+def native_realize(
+    *,
+    budget: Budget = Budget.SERIAL,
+    context: Optional[MachineContext] = None,
+    strategy: Optional[Strategy] = None,
+) -> Tuple[RealizeSpec, LoaderPlan, HostPiece]:
+    """
+    Native CoGen instance: bytecode_map → native.x86_64.pe → family=cpu.
+    Requires seed/seed.py's piece registered; KeyError otherwise.
+    """
+    c = context if context is not None else MachineContext.detect()
+    strat = strategy if strategy is not None else IdentityStrategy()
+    qm = bytecode_map()
+    probes = tuple(prog for _, prog, _ in FASM_GOLDENS)
+    spec = RealizeSpec(
+        name="NativeRealize",
+        regime=qm.regime,
+        strategy=strat,
+        context=c,
+        budget=budget,
+        qm=qm,
+        probes=probes,
+    )
+    names = {p.name for p in full_catalog()}
+    if "native.x86_64.pe" not in names:
+        raise KeyError(
+            "native piece 'native.x86_64.pe' not registered "
+            "(import seed.seed and register_piece(seed.piece()))"
+        )
+    plan = choose(
+        full_catalog(), budget, c,
+        prefer="native.x86_64.pe", prefer_family="cpu",
+    )
+    piece = emit(plan)
+    return spec, plan, piece
+
+
 def preserves_spec(spec: RealizeSpec, piece: HostPiece, *, fuel: int = 100_000) -> bool:
     """Emitted piece agrees with regime observe on probes (and qm.preserves)."""
     for p in spec.probes:
@@ -266,18 +314,33 @@ def main() -> int:
     c = MachineContext.detect()
     print(f"MachineContext: arch={c.arch} machine={c.machine} bits={c.bits} features={c.features}")
 
+    # Register the native PE piece if seed/seed.py is importable.
+    _seed_dir = os.path.join(os.path.dirname(_HOST), "seed")
+    have_native = False
+    if _seed_dir not in sys.path:
+        sys.path.insert(0, _seed_dir)
+    try:
+        from seed import piece as _native_piece
+        register_piece(_native_piece())
+        have_native = True
+        print("OK native piece registered (seed/seed.py)")
+    except ImportError:
+        print("SKIP native (seed not importable)")
+
     for b in Budget:
         plan = choose(full_catalog(), b, c)
         print(f"OK choose {b.value} -> family={plan.family} source={plan.source_piece}")
 
-    # On x86_64, default SERIAL choose should prefer fasm
+    # On x86_64, default SERIAL choose prefers the native PE piece when the
+    # seed is importable, else fasm.
     if "x86_64" in c.features:
         p0 = choose(full_catalog(), Budget.SERIAL, c)
-        if p0.family != "fasm":
-            print(f"FAIL default SERIAL choose expected fasm got {p0.family}")
+        expected = "cpu" if have_native else "fasm"
+        if p0.family != expected:
+            print(f"FAIL default SERIAL choose expected {expected} got {p0.family}")
             ok = False
         else:
-            print("OK default SERIAL+x86_64 -> fasm")
+            print(f"OK default SERIAL+x86_64 -> {p0.family} ({p0.source_piece})")
 
     spec, plan, piece = identity_realize()
     print(f"OK IdentityRealize plan={plan.name} piece={piece.name} kind={piece.kind}")
@@ -294,6 +357,18 @@ def main() -> int:
     else:
         print(f"OK emit reduce I K => K (steps={steps} alloc={n})")
 
+    if have_native:
+        nspec, nplan, npiece = native_realize()
+        print(f"OK NativeRealize plan={nplan.name} piece={npiece.name} kind={npiece.kind}")
+        if npiece.kind != "cpu" or nplan.family != "cpu":
+            print("FAIL NativeRealize family/kind")
+            ok = False
+        if not preserves_spec(nspec, npiece):
+            print("FAIL NativeRealize does not preserve O")
+            ok = False
+        else:
+            print(f"OK NativeRealize preserves {nspec.regime.name} on {len(nspec.probes)} probes")
+
     fspec, fplan, fpiece = fasm_realize()
     print(f"OK FasmRealize plan={fplan.name} piece={fpiece.name} kind={fpiece.kind}")
     if fpiece.kind != "fasm" or fplan.family != "fasm":
@@ -308,7 +383,7 @@ def main() -> int:
         print(f"  sample probe lines: {sample}")
 
     print(f"full_catalog: {[p.name for p in full_catalog()]}")
-    print("Phase 4b: FasmRealize emit backend; no external fasmg")
+    print("Phase 4b: FasmRealize + NativeRealize emit backends")
     return 0 if ok else 1
 
 
