@@ -54,7 +54,7 @@ if _HOST not in sys.path:
 
 from reduce import T, K, I, KK, B, S, app, reduce as tree_reduce  # noqa: E402
 from strategy import MixStrategy  # noqa: E402
-from host_pieces import GRAPH_PIECE, HostPiece  # noqa: E402
+from host_pieces import GRAPH_PIECE, GRAPH_CD_PIECE, HostPiece  # noqa: E402
 from lambda_dialect import bracket_abstract0 as bracket  # noqa: E402  (I/K/S only: host/reduce.py has no swap/dup β)
 from lambda_bench import church, MULT, PLUS, EXP  # noqa: E402
 
@@ -137,6 +137,7 @@ def witnesses() -> List[Tuple[str, str, HostPiece]]:
     out: List[Tuple[str, str, HostPiece]] = [
         ("tree.surface", "fused", _tree_piece()),
         ("graph.lo", "basis", GRAPH_PIECE),
+        ("graph.cd", "basis", GRAPH_CD_PIECE),
     ]
     seed_dir = os.path.join(os.path.dirname(_HOST), "seed")
     if seed_dir not in sys.path:

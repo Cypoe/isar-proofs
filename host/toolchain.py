@@ -1,49 +1,61 @@
 """
-toolchain — the catalog cogen chooses from.
+toolchain — loader for the declarations-only spec `host/toolchain.json`.
 
-A Toolchain names (dialect, isa, routines, target).  Exactly one entry is
-realized today: native.x86_64.pe = bytecode.postfix tokens ->
-x86_64.win64.lo routines -> pe64 container.  Everything else is
-*declared*: resolve() raises NotRealized — refusal, never fallback.
+The cogen reads declarations, not Python literals: dialects, ISAs,
+routine sets, targets, pieces, realization paths, strategy axes,
+observation regimes, obligations (gates), witnesses.  Status is never
+stored: a component or toolchain is realized iff its `module` imports
+and has `record` — the loader tries it, the spec cannot lie.
 
 Owns `NotRealized` (seed/seed.py re-exports it).
 """
 from __future__ import annotations
 
+import importlib
+import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 
+SPEC_PATH = os.path.join(_HOST, "toolchain.json")
+
 
 class NotRealized(Exception):
-    """Declared-but-unrealized strategy/toolchain value (refusal, never fallback)."""
+    """Declared-but-unrealized component/toolchain (refusal, never fallback)."""
 
 
-# Registries: component name -> (module, record attribute).  A toolchain is
-# realized iff every component resolves — the catalog cannot assert a status
-# the registries can't back.
-ISAS: Dict[str, Tuple[str, str]] = {
-    "x86_64": ("isa_x86_64", "X86_64"),
-}
-ROUTINES: Dict[str, Tuple[str, str]] = {
-    "x86_64.win64.lo": ("routines_x86_64_win64", "X86_64_WIN64"),
-}
-TARGETS: Dict[str, Tuple[str, str]] = {
-    "pe64": ("target_pe64", "PE64"),
-}
-DIALECTS: Dict[str, Tuple[str, str]] = {
-    "bytecode.postfix": ("bytecode_dialect", "bytecode_map"),
-}
+@dataclass(frozen=True)
+class Component:
+    """One declared dialect/isa/routines/target/piece/regime entry."""
+    name: str
+    module: Optional[str] = None
+    record: Optional[str] = None
+    note: str = ""
+    data: Tuple[Tuple[str, object], ...] = ()   # extra JSON keys, frozen view
 
+    def resolve(self):
+        """The record object; NotRealized if module/record absent or
+        the import/lookup fails."""
+        if not self.module or not self.record:
+            raise NotRealized(f"{self.name}: no module/record declared")
+        try:
+            mod = importlib.import_module(self.module)
+            return getattr(mod, self.record)
+        except (ImportError, AttributeError) as e:
+            raise NotRealized(f"{self.name}: {e}")
 
-def components() -> Dict[str, Dict[str, Tuple[str, str]]]:
-    return {"dialect": DIALECTS, "isa": ISAS, "routines": ROUTINES,
-            "target": TARGETS}
+    @property
+    def realized(self) -> bool:
+        try:
+            self.resolve()
+            return True
+        except NotRealized:
+            return False
 
 
 @dataclass(frozen=True)
@@ -53,114 +65,144 @@ class Toolchain:
     isa: str           # "x86_64"
     routines: str      # "x86_64.win64.lo"
     target: str        # "pe64"
+    path: str = ""     # "runtime" | "native"
     note: str = ""
 
     @property
     def status(self) -> str:        # "realized" | "declared" — derived
-        regs = components()
-        vals = {"dialect": self.dialect, "isa": self.isa,
-                "routines": self.routines, "target": self.target}
-        return "realized" if all(vals[k] in regs[k] for k in regs) \
-            else "declared"
+        try:
+            resolve(self)
+            return "realized"
+        except NotRealized:
+            return "declared"
 
 
-CATALOG: Tuple[Toolchain, ...] = (
-    Toolchain(
-        "native.x86_64.pe", "bytecode.postfix", "x86_64",
-        "x86_64.win64.lo", "pe64",
-        "seed/seed.py emit chain: IStepBasis reducer -> PE exe"),
-    # declared ISAs
-    Toolchain("isa.aarch64", "bytecode.postfix", "aarch64",
-              "aarch64.win64.lo", "pe64",
-              "no aarch64 ISA table"),
-    Toolchain("isa.riscv64", "bytecode.postfix", "riscv64",
-              "riscv64.linux.lo", "elf64",
-              "no riscv64 ISA table"),
-    # declared routine sets
-    Toolchain("x86_64.win64.cd", "bytecode.postfix", "x86_64",
-              "x86_64.win64.cd", "pe64",
-              "Lean ParStep / host reduce_cd contract, native unrealized"),
-    Toolchain("x86_64.linux.lo", "bytecode.postfix", "x86_64",
-              "x86_64.linux.lo", "elf64",
-              "syscall ABI, no kernel32 IAT"),
-    Toolchain("x86_64.uefi.lo", "bytecode.postfix", "x86_64",
-              "x86_64.uefi.lo", "pe64.uefi",
-              "UEFI boot services ABI"),
-    # declared targets
-    Toolchain("elf64", "bytecode.postfix", "x86_64",
-              "x86_64.linux.lo", "elf64",
-              "ELF64 container writer"),
-    Toolchain("macho64", "bytecode.postfix", "x86_64",
-              "x86_64.macho.lo", "macho64",
-              "Mach-O 64 container writer"),
-    Toolchain("flat", "bytecode.postfix", "x86_64",
-              "x86_64.baremetal.lo", "flat",
-              "flat binary, no loader"),
-    Toolchain("pe64.uefi", "bytecode.postfix", "x86_64",
-              "x86_64.uefi.lo", "pe64.uefi",
-              "PE32+ EFI application subsystem"),
-    # declared dialects
-    Toolchain("lambda.bracket", "lambda.bracket", "x86_64",
-              "x86_64.win64.lo", "pe64",
-              "host QuotientMap exists (lambda_dialect.py); "
-              "no native token alphabet"),
-    Toolchain("phi.rel", "phi.rel", "x86_64",
-              "x86_64.win64.lo", "pe64",
-              "spec only, no parser"),
-)
+@dataclass(frozen=True)
+class Obligation:
+    id: str
+    suite: str
+    what: str
+    witnesses: Tuple[str, ...] = ()
 
-# Realization strategy axes: which values are realized vs declared.
-STRATEGY_AXES: Dict[str, Dict[str, str]] = {
-    "order":   {"lo": "realized", "cd": "declared"},
-    "fuse_s":  {"False": "realized", "True": "realized"},
-    "alloc":   {"bump-chunked": "realized", "arena": "declared"},
-    "reclaim": {"none": "realized", "refcount": "declared",
-                "mark-sweep": "declared"},
-    "stack":   {"machine": "realized", "explicit": "declared"},
-    "io":      {"stdin/stdout": "realized", "memory": "declared"},
-    "fuel":    {"None": "realized", "int": "realized"},
-}
+
+_SPEC = None
+
+
+def load() -> dict:
+    """Read toolchain.json once into frozen records; returns the spec dict
+    {dialects, isas, routines, targets, pieces, paths, toolchains,
+     strategy_axes, regimes, obligations, witnesses}."""
+    global _SPEC
+    if _SPEC is not None:
+        return _SPEC
+    with open(SPEC_PATH, encoding="utf-8") as f:
+        raw = json.load(f)
+
+    def comps(section: str) -> Dict[str, Component]:
+        out = {}
+        for name, d in raw.get(section, {}).items():
+            extra = tuple((k, v) for k, v in d.items()
+                          if k not in ("module", "record", "note"))
+            out[name] = Component(
+                name=name, module=d.get("module"), record=d.get("record"),
+                note=d.get("note", ""), data=extra)
+        return out
+
+    _SPEC = {
+        "dialects": comps("dialects"),
+        "isas": comps("isas"),
+        "routines": comps("routines"),
+        "targets": comps("targets"),
+        "pieces": comps("pieces"),
+        "paths": raw.get("paths", {}),
+        "toolchains": tuple(
+            Toolchain(
+                name=t["name"], dialect=t["dialect"], isa=t["isa"],
+                routines=t["routines"], target=t["target"],
+                path=t.get("path", ""), note=t.get("note", ""))
+            for t in raw.get("toolchains", [])),
+        "strategy_axes": raw.get("strategy_axes", {}),
+        "regimes": comps("regimes"),
+        "obligations": tuple(
+            Obligation(id=o["id"], suite=o["suite"], what=o["what"],
+                       witnesses=tuple(o.get("witnesses", ())))
+            for o in raw.get("obligations", [])),
+        "witnesses": tuple(raw.get("witnesses", ())),
+    }
+    return _SPEC
+
+
+def components() -> Dict[str, Dict[str, Component]]:
+    s = load()
+    return {"dialect": s["dialects"], "isa": s["isas"],
+            "routines": s["routines"], "target": s["targets"]}
 
 
 def realized() -> List[Toolchain]:
-    return [t for t in CATALOG if t.status == "realized"]
+    return [t for t in load()["toolchains"] if t.status == "realized"]
 
 
 def declared() -> List[Toolchain]:
-    return [t for t in CATALOG if t.status == "declared"]
+    return [t for t in load()["toolchains"] if t.status == "declared"]
 
 
 def by_name(name: str) -> Toolchain:
-    for t in CATALOG:
+    for t in load()["toolchains"]:
         if t.name == name:
             return t
     raise KeyError(f"unknown toolchain {name!r}")
 
 
+def paths() -> Dict[str, dict]:
+    return load()["paths"]
+
+
+def obligations() -> Tuple[Obligation, ...]:
+    return load()["obligations"]
+
+
+def regimes() -> Dict[str, Component]:
+    return load()["regimes"]
+
+
+def pieces() -> Dict[str, Component]:
+    return load()["pieces"]
+
+
+def strategy_axes() -> Dict[str, object]:
+    return load()["strategy_axes"]
+
+
+def witnesses() -> Tuple[str, ...]:
+    return load()["witnesses"]
+
+
 def resolve(tc: Toolchain):
     """(ISA, Routines, Target) records for a realized toolchain.
-    Each component is dispatched through its registry; a miss raises
+    Each named component is resolved through the spec; a failure raises
     NotRealized naming the missing component — never a fallback."""
-    import importlib
-    regs = components()
+    comps = components()
     vals = {"dialect": tc.dialect, "isa": tc.isa,
             "routines": tc.routines, "target": tc.target}
     recs = {}
     for comp, value in vals.items():
-        ent = regs[comp].get(value)
-        if ent is None:
+        ent = comps[comp].get(value)
+        try:
+            if ent is None:
+                raise NotRealized(f"undeclared {comp}")
+            recs[comp] = ent.resolve()
+        except NotRealized as e:
             raise NotRealized(
-                f"{tc.name}: {comp} {value!r} not realized")
-        modname, attr = ent
-        recs[comp] = getattr(importlib.import_module(modname), attr)
+                f"{tc.name}: {comp} {value!r} not realized ({e})")
     return recs["isa"], recs["routines"], recs["target"]
 
 
 def main() -> int:
-    print("toolchain catalog:")
-    for t in CATALOG:
+    load()
+    print(f"toolchain spec: {SPEC_PATH}")
+    for t in load()["toolchains"]:
         print(f"  {t.status:9s} {t.name:22s} {t.dialect} | {t.isa} | "
-              f"{t.routines} | {t.target}  {t.note}")
+              f"{t.routines} | {t.target} | {t.path}  {t.note}")
     ok = True
     for t in realized():
         isa, rts, tgt = resolve(t)

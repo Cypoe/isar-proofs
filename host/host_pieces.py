@@ -16,7 +16,7 @@ if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 
 from reduce import T  # noqa: E402
-from graph_runtime import Graph  # noqa: E402
+from graph_runtime import Graph, reduce_tree_cd  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,17 @@ def _graph_reduce(t: T, fuel: int = 100_000) -> Tuple[T, int, int]:
 
 GRAPH_PIECE = HostPiece(name="graph.lo", kind="graph", reduce=_graph_reduce)
 
+
+def _graph_reduce_cd(t: T, fuel: int = 1000) -> Tuple[T, int, int]:
+    """cd (complete-development) reduction: returns (nf, rounds, alloc).
+    Rounds are NEVER compared to step counts — parallel semantics on a
+    serial executor."""
+    return reduce_tree_cd(t, fuel)
+
+
+GRAPH_CD_PIECE = HostPiece(name="graph.cd", kind="graph",
+                           reduce=_graph_reduce_cd)
+
 _REGISTERED: Dict[str, HostPiece] = {}
 
 
@@ -52,7 +63,8 @@ def clear_registered() -> None:
 
 def catalog() -> List[HostPiece]:
     """Base graph piece plus any CoGen-registered loaders."""
-    out: Dict[str, HostPiece] = {"graph.lo": GRAPH_PIECE}
+    out: Dict[str, HostPiece] = {"graph.lo": GRAPH_PIECE,
+                                 "graph.cd": GRAPH_CD_PIECE}
     out.update(_REGISTERED)
     return list(out.values())
 

@@ -1,0 +1,73 @@
+<!-- Generated from host/toolchain.json — do not edit. -->
+
+# Catalog (derived status — never asserted)
+
+## Components
+
+| component | name | module.record | status | note |
+| --- | --- | --- | --- | --- |
+| dialect | bytecode.postfix | bytecode_dialect.bytecode_map | realized |  |
+| dialect | lambda.named | lambda_dialect.lambda_turner_map | realized | host QuotientMap exists; no native token alphabet |
+| dialect | xdu.json | xdu_dialect.XDU | declared | nibble transducer plex (W3) |
+| dialect | phi.rel | — | declared | spec only |
+| isa | x86_64 | isa_x86_64.X86_64 | realized |  |
+| isa | aarch64 | — | declared | no aarch64 ISA table |
+| isa | riscv64 | — | declared | no riscv64 ISA table |
+| routines | x86_64.win64.lo | routines_x86_64_win64.X86_64_WIN64 | realized |  |
+| routines | x86_64.win64.xdu | routines_x86_64_win64_xdu.X86_64_WIN64_XDU | declared | nibble transducer plex routines (W3) |
+| routines | x86_64.win64.cd | — | declared | Lean ParStep / host reduce_cd contract, native unrealized |
+| routines | x86_64.linux.lo | — | declared | syscall ABI, no kernel32 IAT |
+| routines | x86_64.uefi.lo | — | declared | UEFI boot services ABI |
+| target | pe64 | target_pe64.PE64 | realized |  |
+| target | elf64 | — | declared | ELF64 container writer |
+| target | macho64 | — | declared | Mach-O 64 container writer |
+| target | flat | — | declared | flat binary, no loader |
+| target | pe64.uefi | — | declared | PE32+ EFI application subsystem |
+| piece | graph.lo | host_pieces.GRAPH_PIECE | realized |  |
+| piece | graph.cd | host_pieces.GRAPH_CD_PIECE | realized |  |
+| regime | operEq | observation_regime.oper_eq_regime | realized |  |
+| regime | stdout+rc | xdu_dialect.stdout_rc_regime | declared | declared (W3) |
+| regime | syscall-trace | — | declared | declared |
+
+## Toolchains
+
+| name | dialect | isa | routines | target | path | status |
+| --- | --- | --- | --- | --- | --- | --- |
+| native.x86_64.pe | bytecode.postfix | x86_64 | x86_64.win64.lo | pe64 | runtime | realized |
+| xdu.x86_64.pe | xdu.json | x86_64 | x86_64.win64.xdu | pe64 | native | declared |
+| isa.aarch64 | bytecode.postfix | aarch64 | aarch64.win64.lo | pe64 | runtime | declared |
+| isa.riscv64 | bytecode.postfix | riscv64 | riscv64.linux.lo | elf64 | runtime | declared |
+| x86_64.win64.cd | bytecode.postfix | x86_64 | x86_64.win64.cd | pe64 | runtime | declared |
+| x86_64.linux.lo | bytecode.postfix | x86_64 | x86_64.linux.lo | elf64 | runtime | declared |
+| x86_64.uefi.lo | bytecode.postfix | x86_64 | x86_64.uefi.lo | pe64.uefi | runtime | declared |
+| elf64 | bytecode.postfix | x86_64 | x86_64.linux.lo | elf64 | runtime | declared |
+| macho64 | bytecode.postfix | x86_64 | x86_64.macho.lo | macho64 | runtime | declared |
+| flat | bytecode.postfix | x86_64 | x86_64.baremetal.lo | flat | runtime | declared |
+| pe64.uefi | bytecode.postfix | x86_64 | x86_64.uefi.lo | pe64.uefi | runtime | declared |
+| lambda.bracket | lambda.bracket | x86_64 | x86_64.win64.lo | pe64 | runtime | declared |
+| phi.rel | phi.rel | x86_64 | x86_64.win64.lo | pe64 | runtime | declared |
+
+## Strategy axes
+
+- **order**: lo=realized, cd=declared
+- **fuse_s**: False=realized, True=realized
+- **alloc**: bump-chunked=realized, arena=declared
+- **reclaim**: none=realized, refcount=declared, mark-sweep=declared
+- **stack**: machine=realized, explicit=declared
+- **io**: stdin/stdout=realized, memory=declared
+- **fuel**: None=realized, int=realized
+- **geometry**: chunk_bytes, stack_reserve, read_buf_bytes, node_bytes
+
+## Paths
+
+### native
+- meaning: program behaviour compiled to code; no reducer, no tags in the image
+- input: bytes (program-declared parser)
+- regime: stdout+rc
+- covers: xdu.json
+- uncovered: bytecode.postfix, lambda.named, counting (unbounded state), byte alphabet (256-way dispatch)
+
+### runtime
+- meaning: term reduced live by a host piece
+- regime: operEq NF
+- pieces: graph.lo, graph.cd, native.x86_64.pe, native.x86_64.pe.fuse_s

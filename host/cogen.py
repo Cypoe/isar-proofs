@@ -21,7 +21,7 @@ _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 
-from reduce import T, I, KK, app  # noqa: E402
+from reduce import T, I, KK, S, app  # noqa: E402
 from observation_regime import ObservationRegime, oper_eq_regime  # noqa: E402
 from host_pieces import (  # noqa: E402
     HostPiece,
@@ -41,7 +41,7 @@ class Budget(Enum):
     """Loader family hint — stubs until SIMD/GPU product."""
 
     SERIAL = "serial"  # → graph / fasm / cpu
-    PARALLEL_PARTIAL = "parallel_partial"  # → SIMD family (stub → graph)
+    PARALLEL_PARTIAL = "parallel_partial"  # → graph.cd (cd rounds, serial executor)
     FULL_TILE = "full_tile"  # → GPU family (stub → graph)
 
 
@@ -152,9 +152,17 @@ def choose(
     elif prefer_family is not None:
         family = prefer_family
     elif budget is Budget.PARALLEL_PARTIAL:
-        family = "simd"
+        # runtime path (toolchain.paths()["runtime"]): cd rounds are the
+        # parallel semantics, executed serially
+        family = "graph"
+        runtime_pieces = set(
+            toolchain.paths().get("runtime", {}).get("pieces", ()))
+        if "graph.cd" in names and "graph.cd" in runtime_pieces:
+            src = "graph.cd"
+            note = "cd rounds — parallel semantics, serial executor"
     elif budget is Budget.FULL_TILE:
         family = "gpu"
+        note = "stub: no GPU executor — wraps the graph source piece"
     else:
         family = "graph" if src.startswith("graph") else "cpu"
 
@@ -349,6 +357,22 @@ def main() -> int:
     for b in Budget:
         plan = choose(full_catalog(), b, c)
         print(f"OK choose {b.value} -> family={plan.family} source={plan.source_piece}")
+
+    for pname, p in toolchain.paths().items():
+        print(f"OK path {pname}: {p.get('meaning', '')}")
+
+    # PARALLEL_PARTIAL plan reduces S K K I -> I via graph.cd (cd rounds,
+    # never compared to steps)
+    pcd = choose(full_catalog(), Budget.PARALLEL_PARTIAL, c)
+    if pcd.source_piece != "graph.cd":
+        print(f"FAIL PARALLEL_PARTIAL source {pcd.source_piece} != graph.cd")
+        ok = False
+    else:
+        nf, rounds, _ = run_piece(emit(pcd), app(app(app(S, KK), KK), I))
+        good = str(nf) == "I"
+        print(f"{'OK' if good else 'FAIL'} graph.cd S K K I -> {nf} "
+              f"({rounds} rounds)")
+        ok = ok and good
 
     # On x86_64, default SERIAL choose prefers the native PE piece when the
     # seed is importable, else fasm.
