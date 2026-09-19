@@ -33,6 +33,8 @@ from strategy import Strategy, IdentityStrategy  # noqa: E402
 from quotient_map import QuotientMap, identity_map  # noqa: E402
 from fasm_dialect import fasm_map, GOLDENS as FASM_GOLDENS, show_fasm  # noqa: E402
 from bytecode_dialect import bytecode_map  # noqa: E402
+import toolchain  # noqa: E402
+from toolchain import NotRealized  # noqa: E402
 
 
 class Budget(Enum):
@@ -79,6 +81,7 @@ class LoaderPlan:
     budget: Budget
     context: MachineContext
     note: str = ""
+    toolchain: Optional[str] = None  # toolchain.CATALOG name for cpu plans
 
 
 @dataclass(frozen=True)
@@ -116,14 +119,24 @@ def choose(
     )
     note = "reduce via source piece; simd/gpu stub to graph"
 
+    # A realized toolchain whose ISA matches this machine and whose target
+    # OS is windows, with its piece registered, beats the fasm default.
+    native_tc = None
+    for tc in toolchain.realized():
+        if tc.isa in context.features and tc.name in names:
+            _isa, _rts, tgt = toolchain.resolve(tc)
+            if tgt.os == context.arch:
+                native_tc = tc
+                break
+
     if (
         prefer_family is None
         and budget is Budget.SERIAL
         and "x86_64" in context.features
-        and "native.x86_64.pe" in names
+        and native_tc is not None
     ):
         family = "cpu"
-        src = "native.x86_64.pe"
+        src = native_tc.name
         note = "native PE loader (seed/seed.py)"
     elif prefer_family == "fasm" or (
         prefer_family is None
@@ -157,6 +170,7 @@ def choose(
         budget=budget,
         context=context,
         note=note,
+        toolchain=native_tc.name if family == "cpu" and native_tc else None,
     )
 
 
@@ -263,11 +277,16 @@ def native_realize(
     budget: Budget = Budget.SERIAL,
     context: Optional[MachineContext] = None,
     strategy: Optional[Strategy] = None,
+    toolchain_name: str = "native.x86_64.pe",
 ) -> Tuple[RealizeSpec, LoaderPlan, HostPiece]:
     """
     Native CoGen instance: bytecode_map → native.x86_64.pe → family=cpu.
     Requires seed/seed.py's piece registered; KeyError otherwise.
+    Declared (unrealized) toolchains raise NotRealized — never a fallback.
     """
+    tc = toolchain.by_name(toolchain_name)          # KeyError if unlisted
+    if tc.status != "realized":
+        raise NotRealized(f"{tc.name}: {tc.status}")
     c = context if context is not None else MachineContext.detect()
     strat = strategy if strategy is not None else IdentityStrategy()
     qm = bytecode_map()
@@ -282,14 +301,14 @@ def native_realize(
         probes=probes,
     )
     names = {p.name for p in full_catalog()}
-    if "native.x86_64.pe" not in names:
+    if tc.name not in names:
         raise KeyError(
-            "native piece 'native.x86_64.pe' not registered "
+            f"native piece {tc.name!r} not registered "
             "(import seed.seed and register_piece(seed.piece()))"
         )
     plan = choose(
         full_catalog(), budget, c,
-        prefer="native.x86_64.pe", prefer_family="cpu",
+        prefer=tc.name, prefer_family="cpu",
     )
     piece = emit(plan)
     return spec, plan, piece
@@ -359,7 +378,7 @@ def main() -> int:
 
     if have_native:
         nspec, nplan, npiece = native_realize()
-        print(f"OK NativeRealize plan={nplan.name} piece={npiece.name} kind={npiece.kind}")
+        print(f"OK NativeRealize plan={nplan.name} piece={npiece.name} kind={npiece.kind} toolchain={nplan.toolchain}")
         if npiece.kind != "cpu" or nplan.family != "cpu":
             print("FAIL NativeRealize family/kind")
             ok = False
@@ -368,6 +387,16 @@ def main() -> int:
             ok = False
         else:
             print(f"OK NativeRealize preserves {nspec.regime.name} on {len(nspec.probes)} probes")
+
+    print("toolchain catalog:")
+    for t in toolchain.realized() + toolchain.declared():
+        print(f"  {t.status:9s} {t.name}")
+    try:
+        native_realize(toolchain_name="x86_64.win64.cd")
+        print("FAIL declared toolchain x86_64.win64.cd realized silently")
+        ok = False
+    except NotRealized as e:
+        print(f"OK declared toolchain refused: {e}")
 
     fspec, fplan, fpiece = fasm_realize()
     print(f"OK FasmRealize plan={fplan.name} piece={fpiece.name} kind={fpiece.kind}")

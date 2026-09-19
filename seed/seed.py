@@ -20,14 +20,18 @@ Strategy  : `Realization` (§2) — a frozen data record: evaluation order,
             read granule, fuse_s, ABI.  `order="cd"` is a declared
             parameter value but is *refused* (NotRealized) — mine_adopt
             semantics, never a fallback.
-Data      : the ISA table (§3), the reducer program as asm-data (§5),
-            the PE layout table (§6), the import table (§6).
-Mechanism : encode() (ISA-intrinsic), assemble() (two-pass fixups),
-            build_pe() (header construction).
-Oracles   : fasmg.exe (byte equality, env ISAR_FASMG), host graph.lo
-            piece / graph_runtime (basis NF equality), host reduce.py
-            (surface NF for the fuse_s build) — imported lazily in §7/§8
-            only.
+Chain     : §3 emit() — the seed = basis + mirror + strategy + chain
+            driver; ISA (host/isa_x86_64), reducer routines
+            (host/routines_x86_64_win64) and the PE64 target
+            (host/target_pe64) are host DATA the cogen lists/chooses/
+            refuses via host/toolchain.py's CATALOG.
+Mechanism : toolchain.resolve -> isa.assemble -> target.pack
+            (build_pe is a compat alias for emit).
+Oracles   : fasmg.exe (byte equality, env ISAR_FASMG — via
+            isa_x86_64), host graph.lo piece / graph_runtime (basis NF
+            equality), host reduce.py (surface NF for the fuse_s
+            build) — host modules imported lazily in §7/§8 only, except
+            toolchain which is the §3 chain catalog.
 
 Gates: G0 signature algebra + homomorphism | G0b signature-free emission
 | G1 encoder vs fasmg | G2 basis mirror vs host graph.lo | G3 native exe
@@ -37,7 +41,10 @@ adoption through both builds).
 
 Hard rules: no fixed heap (chunked VirtualAlloc growth), fuel optional
 (default off — run to NF), cd refused, no cross-repo *code* (oracle
-binaries and host oracle modules only), §0–§6 import nothing from host.
+binaries and host oracle modules only).  §0–§2 import nothing from
+host; §3 imports only host/toolchain (the catalog) and touches ISA/
+routines/target solely through resolve(); §7–§8 import host oracle
+modules lazily.
 """
 from __future__ import annotations
 
@@ -54,14 +61,12 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 SEED_DIR = os.path.dirname(os.path.abspath(__file__))
 BUILD_DIR = os.path.join(SEED_DIR, "build")
 
-DEFAULT_FASMG = os.path.normpath(os.path.join(
-    SEED_DIR, "..", "..", "isa-physics", "boostrap", "fasmg", "fasmg.exe"))
-FASMG = os.environ.get("ISAR_FASMG", DEFAULT_FASMG)
-FASMG_INC = os.path.join(os.path.dirname(FASMG), "examples", "x86", "include")
+_HOST_DIR = os.path.normpath(os.path.join(SEED_DIR, "..", "host"))
+if _HOST_DIR not in sys.path:
+    sys.path.insert(0, _HOST_DIR)
+import toolchain                      # noqa: E402  host catalog (see §3 CHAIN)
 
-
-class NotRealized(Exception):
-    """Declared-but-unrealized strategy value (refusal, never fallback)."""
+NotRealized = toolchain.NotRealized   # owned by host/toolchain.py, re-exported
 
 
 # ======================================================================
@@ -324,922 +329,28 @@ DEFAULT = Realization()
 
 
 # ======================================================================
-# §3  ISA DATA (x86-64, authored from ISA; each row oracle-checked)
+# §3  CHAIN (toolchain.resolve -> isa.assemble -> target.pack)
+#
+# The seed only seeds: ISA, reducer routines and the PE64 container are
+# host data modules (host/isa_x86_64.py, host/routines_x86_64_win64.py,
+# host/target_pe64.py) listed in host/toolchain.py's CATALOG.  emit()
+# resolves the toolchain, assembles the program, packs the image.
 # ======================================================================
 
-REG64: Dict[str, int] = {
-    "rax": 0, "rcx": 1, "rdx": 2, "rbx": 3, "rsp": 4, "rbp": 5, "rsi": 6,
-    "rdi": 7, "r8": 8, "r9": 9, "r10": 10, "r11": 11, "r12": 12, "r13": 13,
-    "r14": 14, "r15": 15,
-}
-REG32: Dict[str, int] = {"eax": 0, "ecx": 1, "edx": 2, "ebx": 3, "esp": 4,
-                         "ebp": 5, "esi": 6, "edi": 7}
-REG32.update({f"r{i}d": i for i in range(8, 16)})
-REG8: Dict[str, int] = {"al": 0, "cl": 1, "dl": 2, "bl": 3, "spl": 4, "bpl": 5,
-                        "sil": 6, "dil": 7}
-REG8.update({f"r{i}b": i for i in range(8, 16)})
-
-# INSN rows: (form, mnemonic, opcode, rex_w, modrm_reg_ext|'+'=opcode+rd, imm_kind)
-# imm_kind: 0 none | io imm64 | i4 imm32 | i1r imm8 after reg-modrm
-#           | i1m/i4m imm after mem-modrm | g grp1 (83/81/acc sel) | gm grp1 mem
-#           | l rel32 label | p rip-rel32
-INSN: Tuple[Tuple[str, str, int, int, object, object], ...] = (
-    ("mov_r64_imm",   "mov",   0xB8,   1, "+",   "io"),
-    ("mov_r64_r64",   "mov",   0x89,   1, None,  0),
-    ("mov_r64_m64",   "mov",   0x8B,   1, None,  0),
-    ("mov_m64_r64",   "mov",   0x89,   1, None,  0),
-    ("mov_r64_rip",   "mov",   0x8B,   1, None,  "p"),
-    ("mov_rip_r64",   "mov",   0x89,   1, None,  "p"),
-    ("movzx_r32_m8",  "movzx", 0x0FB6, 0, None,  0),
-    ("mov_r8_m8",     "mov",   0x8A,   0, None,  0),
-    ("mov_m8_r8",     "mov",   0x88,   0, None,  0),
-    ("mov_m8_imm8",   "mov",   0xC6,   0, 0,     "i1m"),
-    ("mov_m64_imm32", "mov",   0xC7,   1, 0,     "i4m"),
-    ("mov_r32_imm32", "mov",   0xB8,   0, "+",   "i4"),
-    ("lea_r64_m64",   "lea",   0x8D,   1, None,  0),
-    ("lea_r64_rip",   "lea",   0x8D,   1, None,  "p"),
-    ("add_r64_imm",   "add",   0x81,   1, 0,     "g"),
-    ("and_r64_imm",   "and",   0x81,   1, 4,     "g"),
-    ("sub_r64_imm",   "sub",   0x81,   1, 5,     "g"),
-    ("cmp_r64_imm",   "cmp",   0x81,   1, 7,     "g"),
-    ("cmp_m64_imm",   "cmp",   0x81,   1, 7,     "gm"),
-    ("add_r64_r64",   "add",   0x01,   1, None,  0),
-    ("sub_r64_r64",   "sub",   0x29,   1, None,  0),
-    ("cmp_r64_r64",   "cmp",   0x39,   1, None,  0),
-    ("test_r64_r64",  "test",  0x85,   1, None,  0),
-    ("xor_r32_r32",   "xor",   0x31,   0, None,  0),
-    ("add_r8_imm8",   "add",   0x80,   0, 0,     "i1r"),
-    ("shl_r64_imm8",  "shl",   0xC1,   1, 4,     "i1r"),
-    ("push_r64",      "push",  0x50,   0, "+",   0),
-    ("pop_r64",       "pop",   0x58,   0, "+",   0),
-    ("call_rel32",    "call",  0xE8,   0, None,  "l"),
-    ("call_mrip",     "call",  0xFF,   0, 2,     "p"),
-    ("jmp_rel32",     "jmp",   0xE9,   0, None,  "l"),
-    ("je_rel32",      "je",    0x0F84, 0, None,  "l"),
-    ("jne_rel32",     "jne",   0x0F85, 0, None,  "l"),
-    ("jl_rel32",      "jl",    0x0F8C, 0, None,  "l"),
-    ("jge_rel32",     "jge",   0x0F8D, 0, None,  "l"),
-    ("jb_rel32",      "jb",    0x0F82, 0, None,  "l"),
-    ("jbe_rel32",     "jbe",   0x0F86, 0, None,  "l"),
-    ("ret",           "ret",   0xC3,   0, None,  0),
-    ("inc_r64",       "inc",   0xFF,   1, 0,     0),
-    ("dec_r64",       "dec",   0xFF,   1, 1,     0),
-    ("inc_mrip",      "inc",   0xFF,   1, 0,     "p"),
-    ("div_r64",       "div",   0xF7,   1, 6,     0),
-)
-FORMS: Dict[str, Tuple[str, int, int, object, object]] = {r[0]: r[1:] for r in INSN}
-
-_ACC_OP = {"add": 0x05, "and": 0x25, "sub": 0x2D, "cmp": 0x3D}
-
-
-def _opbytes(op: int) -> bytes:
-    if op > 0xFFFF:
-        return bytes(((op >> 16) & 0xFF, (op >> 8) & 0xFF, op & 0xFF))
-    if op > 0xFF:
-        return bytes(((op >> 8) & 0xFF, op & 0xFF))
-    return bytes((op,))
-
-
-def _i8s(v: int) -> bool:
-    return -128 <= v <= 127
-
-
-def _i32s(v: int) -> bool:
-    return -(1 << 31) <= v <= (1 << 31) - 1
-
-
-def _mem_modrm(reg_field: int, memop) -> Tuple[int, bytes, bytes]:
-    """Return (rex_b, modrm+sib, disp) for ('m', base, disp) or ('p', disp/label)."""
-    kind = memop[0]
-    if kind == "p":
-        return 0, bytes((((reg_field & 7) << 3) | 5,)), b"\x00\x00\x00\x00"
-    _, base, disp = memop
-    b = REG64[base]
-    lo = b & 7
-    if disp == 0 and lo != 5:
-        mod = 0
-        db = b""
-    elif _i8s(disp):
-        mod = 1
-        db = struct.pack("<b", disp)
-    else:
-        mod = 2
-        db = struct.pack("<i", disp)
-    if lo == 4:
-        rm, sib = 4, bytes((4 << 3 | lo,))        # index=100 none
-    else:
-        rm, sib = lo, b""
-    return b >> 3, bytes((mod << 6 | (reg_field & 7) << 3 | rm,)) + sib, db
-
-
-def _reg_code(name: str) -> int:
-    if name in REG64:
-        return REG64[name]
-    if name in REG32:
-        return REG32[name]
-    if name in REG8:
-        return REG8[name]
-    raise ValueError(f"bad register {name}")
-
-
-# Insn datum: (form, *operands).  Label operand: ("l", name|disp).
-# Rip operand: ("p", name|disp).  Mem operand: ("m", base_reg, disp).
-Insn = Tuple
-
-
-def _rexb(v: int) -> bytes:
-    """Emit a REX prefix only when needed (W set, or any ext bit)."""
-    return bytes((v,)) if v != 0x40 else b""
-
-
-def encode(insn: Insn, resolve=None) -> bytes:
-    """ISA-intrinsic encoding: REX/ModRM/SIB/disp/imm assembly."""
-    form, ops = insn[0], insn[1:]
-    mnem, op, w, ext, immk = FORMS[form]
-    rex = 0x40 | (0x08 if w else 0)
-    opcode = _opbytes(op)
-
-    def rel(opnd) -> bytes:
-        if isinstance(opnd[1], int):
-            return struct.pack("<i", opnd[1])
-        if resolve is None:
-            return b"\x00\x00\x00\x00"
-        return struct.pack("<i", resolve(opnd[1]))
-
-    if immk == "l":                                 # call/jmp/jcc rel32
-        return opcode + rel(ops[0])
-
-    if form in ("call_mrip", "inc_mrip"):
-        rex_b, modrm, _ = _mem_modrm(ext, ops[0])
-        return _rexb(rex | rex_b) + opcode + modrm + rel(ops[0])
-
-    if immk == "p":                                 # rip mem forms
-        if form in ("mov_r64_rip", "lea_r64_rip"):
-            regf, memop = _reg_code(ops[0]), ops[1]
-        else:                                       # mov_rip_r64
-            regf, memop = _reg_code(ops[1]), ops[0]
-        rex_b, modrm, _ = _mem_modrm(regf, memop)
-        return _rexb(rex | (regf >> 3) << 2 | rex_b) + opcode + modrm + rel(memop)
-
-    if ext == "+":                                  # push/pop/mov imm (+rd)
-        rd = _reg_code(ops[0])
-        if form == "mov_r64_imm":
-            v = ops[1]
-            if _i32s(v):
-                return bytes((rex | (rd >> 3),)) + b"\xC7" \
-                    + bytes((0xC0 | (rd & 7),)) + struct.pack("<i", v)
-            return bytes((rex | (rd >> 3),)) + bytes((0xB8 + (rd & 7),)) \
-                + struct.pack("<q", v)
-        if immk == "i4":                            # mov r32,imm32
-            return _rexb(0x40 | (rd >> 3)) + bytes((op + (rd & 7),)) \
-                + struct.pack("<i", ops[1])
-        return _rexb(0x40 | (rd >> 3)) + bytes((op + (rd & 7),))
-
-    if immk in ("g", "gm"):                         # grp1 r64/mem, imm
-        dst, v = ops
-        ib = _i8s(v)
-        opb = 0x83 if ib else op
-        imm = struct.pack("<b" if ib else "<i", v)
-        if immk == "gm":
-            rex_b, modrm, disp = _mem_modrm(ext, dst)
-            return _rexb(rex | rex_b) + bytes((opb,)) + modrm + disp + imm
-        rd = _reg_code(dst)
-        if not ib and rd == 0:                      # accumulator special
-            return bytes((rex,)) + bytes((_ACC_OP[mnem],)) + struct.pack("<i", v)
-        modrm = bytes((0xC0 | (ext << 3) | (rd & 7),))
-        return bytes((rex | (rd >> 3),)) + bytes((opb,)) + modrm + imm
-
-    if immk == "i1r":                               # shl r64 / add r8, imm8
-        dst, v = ops
-        rd = _reg_code(dst)
-        modrm = bytes((0xC0 | (ext << 3) | (rd & 7),))
-        if form == "add_r8_imm8":
-            return _rexb(0x40 | (rd >> 3) | (1 if rd >= 4 else 0)) \
-                + opcode + modrm + struct.pack("<b", v)
-        return bytes((rex | (rd >> 3),)) + opcode + modrm + struct.pack("<b", v)
-
-    if immk in ("i1m", "i4m"):                      # mov m,imm
-        memop, v = ops
-        rex_b, modrm, disp = _mem_modrm(ext, memop)
-        imm = struct.pack("<b" if immk == "i1m" else "<i", v)
-        return _rexb(rex | rex_b) + opcode + modrm + disp + imm
-
-    if ext is not None:                             # inc/dec/div reg, mod=11
-        rd = _reg_code(ops[0])
-        modrm = bytes((0xC0 | (ext << 3) | (rd & 7),))
-        return bytes((rex | (rd >> 3),)) + opcode + modrm
-
-    if len(ops) == 2 and isinstance(ops[0], str) and isinstance(ops[1], str):
-        dst, src = _reg_code(ops[0]), _reg_code(ops[1])
-        modrm = bytes((0xC0 | (src & 7) << 3 | (dst & 7),))
-        return _rexb(rex | (src >> 3) << 2 | (dst >> 3)) + opcode + modrm
-
-    if len(ops) == 2:                               # reg<->mem
-        if isinstance(ops[0], str):                 # reg, mem
-            regf, memop = _reg_code(ops[0]), ops[1]
-        else:                                       # mem, reg
-            memop, regf = ops[0], _reg_code(ops[1])
-        rex_b, modrm, disp = _mem_modrm(regf, memop)
-        need = w or (regf >> 3) or rex_b or _reg8_ext(ops[0]) or _reg8_ext(ops[1])
-        return _rexb(rex | (regf >> 3) << 2 | rex_b) + opcode + modrm + disp \
-            if need else opcode + modrm + disp
-
-    return opcode                                   # ret
-
-
-def _reg8_ext(o) -> bool:
-    return isinstance(o, str) and o in REG8 and REG8[o] >= 4
-
-
-def render_fasm(insn: Insn, resolve=None) -> str:
-    """Mnemonic text for the oracle (one line, 'near' forced on branches)."""
-    form, ops = insn[0], insn[1:]
-    mnem = FORMS[form][0]
-
-    def mem(m) -> str:
-        if m[0] == "p":
-            d = m[1] if isinstance(m[1], int) else (resolve(m[1]) if resolve else 0)
-            return f"[rip{'+' if d >= 0 else ''}{d}]"
-        _, base, d = m
-        if d == 0:
-            return f"[{base}]"
-        return f"[{base}{'+' if d > 0 else ''}{d}]"
-
-    if FORMS[form][4] == "l":
-        return f"{mnem} near {ops[0][1]}"
-    if form in ("call_mrip", "inc_mrip"):
-        m = ops[0]
-        d = m[1] if isinstance(m[1], int) else (resolve(m[1]) if resolve else 0)
-        sz = "qword "
-        return f"{mnem} {sz}[rip{'+' if d >= 0 else ''}{d}]"
-    if form in ("mov_r64_rip", "lea_r64_rip"):
-        return f"{mnem} {ops[0]}, {mem(ops[1])}"
-    if form == "mov_rip_r64":
-        return f"mov {mem(ops[0])}, {ops[1]}"
-    if form == "mov_r64_imm":
-        return f"mov {ops[0]}, {ops[1]}"
-    if form == "mov_r32_imm32":
-        return f"mov {ops[0]}, {ops[1]}"
-    if form == "movzx_r32_m8":
-        return f"movzx {ops[0]}, byte {mem(ops[1])}"
-    if form == "mov_r8_m8":
-        return f"mov {ops[0]}, byte {mem(ops[1])}"
-    if form == "mov_m8_r8":
-        return f"mov byte {mem(ops[0])}, {ops[1]}"
-    if form == "mov_m8_imm8":
-        return f"mov byte {mem(ops[0])}, {ops[1]}"
-    if form == "mov_m64_imm32":
-        return f"mov qword {mem(ops[0])}, {ops[1]}"
-    if form in ("mov_r64_m64", "lea_r64_m64"):
-        return f"{mnem} {ops[0]}, {mem(ops[1])}"
-    if form in ("mov_m64_r64",):
-        return f"mov {mem(ops[0])}, {ops[1]}"
-    if form == "cmp_m64_imm":
-        return f"cmp qword {mem(ops[0])}, {ops[1]}"
-    if form == "add_r8_imm8":
-        return f"add {ops[0]}, {ops[1]}"
-    if len(ops) == 0:
-        return mnem
-    if len(ops) == 1:
-        return f"{mnem} {ops[0]}"
-    return f"{mnem} {ops[0]}, {ops[1]}"
-
-
-# ======================================================================
-# §4  ASSEMBLER (two-pass, labels)
-# ======================================================================
-
-Program = List[Tuple]
-
-
-def LBL(name: str) -> Tuple:
-    return ("label", name)
-
-
-def I(form: str, *ops) -> Tuple:
-    return ("i", form, *ops)
-
-
-def assemble(program: Program, symbols: Dict[str, int]) -> Tuple[bytes, Dict[str, int]]:
-    """Two-pass assembly; labels + rip/rel32 fixups to `symbols` + local labels."""
-    local: Dict[str, int] = {}
-    offs: List[int] = []
-    pos = 0
-    for item in program:
-        if item[0] == "label":
-            local[item[1]] = pos
-            offs.append(pos)
-        else:
-            offs.append(pos)
-            pos += len(encode(item[1:]))
-    out = bytearray()
-    for item, off in zip(program, offs):
-        if item[0] == "label":
-            continue
-        insn = item[1:]
-        end = off + len(encode(insn))
-        resolver = lambda name, _e=end: (
-            symbols[name] if name in symbols else local[name]) - _e
-        out += encode(insn, resolve=resolver)
-    return bytes(out), local
-
-
-# ======================================================================
-# §5  REDUCER PROGRAM (asm-as-data, built from Realization)
-# ======================================================================
-
-IMPORTS: Tuple[str, ...] = (
-    "GetStdHandle", "ReadFile", "WriteFile", "VirtualAlloc", "ExitProcess",
-)
-
-# .data slots (labels; 8 bytes each unless noted)
-DATA_SLOTS: Tuple[Tuple[str, int], ...] = (
-    ("hin", 8), ("hout", 8), ("herr", 8), ("nread", 8), ("nw", 8),
-    ("nalloc", 8), ("ds", 8), ("scratch", 64),
-)
-
-VA_COMMIT_RESERVE = 0x3000
-PAGE_RW = 4
-STK_TAG = 7   # native-internal parse-stack cons cell tag (never a term node;
-              # tags 1..6 are atoms generated from SIGNATURE); excluded from
-              # nalloc so `alloc=` counts term nodes only
-
-
-def reducer_program(R: Realization) -> Program:
-    if R.order != "lo":
-        raise NotRealized(f"order={R.order!r} declared but not realized")
-    iat = lambda n: ("p", f"iat_{n}")
-    p: Program = []
-
-    def stats_str(s: str) -> None:
-        for ch in s:
-            p.append(I("mov_m8_imm8", ("m", "rsi", 0), ord(ch)))
-            p.append(I("inc_r64", "rsi"))
-
-    p += [
-        LBL("_start"),
-        I("sub_r64_imm", "rsp", 0x28),
-        # handles: stdin -10, stdout -11, stderr -12
-        I("mov_r32_imm32", "ecx", -10), I("call_mrip", iat("GetStdHandle")),
-        I("mov_rip_r64", ("p", "hin"), "rax"),
-        I("mov_r32_imm32", "ecx", -11), I("call_mrip", iat("GetStdHandle")),
-        I("mov_rip_r64", ("p", "hout"), "rax"),
-        I("mov_r32_imm32", "ecx", -12), I("call_mrip", iat("GetStdHandle")),
-        I("mov_rip_r64", ("p", "herr"), "rax"),
-        # one streaming read buffer (granule, not a cap) + empty parse stack
-        I("xor_r32_r32", "ecx", "ecx"),
-        I("mov_r32_imm32", "edx", R.read_buf_bytes),
-        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-        I("mov_r32_imm32", "r9d", PAGE_RW),
-        I("call_mrip", iat("VirtualAlloc")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-        I("mov_r64_r64", "r12", "rax"),          # read buffer base
-        I("xor_r32_r32", "r14d", "r14d"),        # r14 = parse stack top (0)
-        # first heap chunk (sets rbx=bump, rbp=end)
-        I("call_rel32", ("l", "grow_heap")),
-    ]
-    if not R.fuse_s:
-        # build the shared derived_s template (L0-only tree); `S` tokens push it
-        p += [I("call_rel32", ("l", "build_ds"))]
-    p += [
-        # ---- streaming parse: ReadFile granule -> parse bytes -> repeat ----
-        # bytecode stack = heap cons cells {tag=STK_TAG, l=value, r=next}
-        LBL("read_loop"),
-        I("mov_r64_rip", "rcx", ("p", "hin")),
-        I("mov_r64_r64", "rdx", "r12"),
-        I("mov_r32_imm32", "r8d", R.read_buf_bytes),
-        I("lea_r64_rip", "r9", ("p", "nread")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("ReadFile")),
-        # FALSE from an anonymous pipe = EOF (ERROR_BROKEN_PIPE), not an error
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "parse_done")),
-        I("mov_r64_rip", "rax", ("p", "nread")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "parse_done")),
-        I("mov_r64_r64", "rsi", "r12"),          # cursor
-        I("mov_r64_r64", "rdi", "r12"),
-        I("add_r64_r64", "rdi", "rax"),          # end
-        LBL("parse_bytes"),
-        I("cmp_r64_r64", "rsi", "rdi"), I("jge_rel32", ("l", "read_loop")),
-        I("movzx_r32_m8", "eax", ("m", "rsi", 0)),
-        I("cmp_r64_imm", "rax", 0x49), I("je_rel32", ("l", "p_i")),
-        I("cmp_r64_imm", "rax", 0x4B), I("je_rel32", ("l", "p_k")),
-        I("cmp_r64_imm", "rax", 0x53), I("je_rel32", ("l", "p_s")),
-        I("cmp_r64_imm", "rax", 0x42), I("je_rel32", ("l", "p_b")),
-        I("cmp_r64_imm", "rax", 0x57), I("je_rel32", ("l", "p_w")),
-        I("cmp_r64_imm", "rax", 0x43), I("je_rel32", ("l", "p_c")),
-        I("cmp_r64_imm", "rax", 0x40), I("je_rel32", ("l", "p_app")),
-        I("cmp_r64_imm", "rax", 0x20), I("je_rel32", ("l", "p_next")),
-        I("cmp_r64_imm", "rax", 0x09), I("je_rel32", ("l", "p_next")),
-        I("cmp_r64_imm", "rax", 0x0A), I("je_rel32", ("l", "p_next")),
-        I("cmp_r64_imm", "rax", 0x0D), I("je_rel32", ("l", "p_next")),
-        I("jmp_rel32", ("l", "exit3")),
-        LBL("p_i"), I("mov_r32_imm32", "edx", Tag.norm),
-        I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-        LBL("p_k"), I("mov_r32_imm32", "edx", Tag.konst),
-        I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-        LBL("p_b"), I("mov_r32_imm32", "edx", Tag.comp),
-        I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-        LBL("p_w"), I("mov_r32_imm32", "edx", Tag.dup),
-        I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-        LBL("p_c"), I("mov_r32_imm32", "edx", Tag.swap),
-        I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-    ]
-    if R.fuse_s:
-        p += [
-            LBL("p_s"), I("mov_r32_imm32", "edx", Tag.s),
-            I("call_rel32", ("l", "mkleaf")), I("jmp_rel32", ("l", "p_push")),
-        ]
-    else:
-        # view expansion: `S` pushes the shared derived_s root (no sβ emitted)
-        p += [
-            LBL("p_s"), I("mov_r64_rip", "rax", ("p", "ds")),
-            I("jmp_rel32", ("l", "p_push")),
-        ]
-    p += [
-        LBL("p_push"),
-        I("push_r64", "rdi"), I("sub_r64_imm", "rsp", 8),
-        I("mov_r64_r64", "rdi", "rax"), I("call_rel32", ("l", "mkstk")),
-        I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
-        I("jmp_rel32", ("l", "p_next")),
-        LBL("p_app"),
-        # depth >= 2 iff top cell and its next exist
-        I("test_r64_r64", "r14", "r14"), I("je_rel32", ("l", "p_under")),
-        I("mov_r64_m64", "rax", ("m", "r14", 16)),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "p_under")),
-        # x = top.l, y = next.l; pop both; push app(y, x)
-        I("mov_r64_m64", "rcx", ("m", "r14", 8)),
-        I("mov_r64_m64", "rdx", ("m", "rax", 8)),
-        I("mov_r64_m64", "r14", ("m", "rax", 16)),
-        I("push_r64", "rdi"), I("push_r64", "rsi"),   # save end, cursor
-        I("mov_r64_r64", "rdi", "rdx"), I("mov_r64_r64", "rsi", "rcx"),
-        I("call_rel32", ("l", "mkapp")),               # rax = app(y, x)
-        I("mov_r64_r64", "rdi", "rax"),
-        I("call_rel32", ("l", "mkstk")),
-        I("pop_r64", "rsi"), I("pop_r64", "rdi"),
-        I("jmp_rel32", ("l", "p_next")),
-        LBL("p_under"),
-        # depth 0 or 1 -> push I (Lean underflow: []->[I], [t]->[I,t])
-        I("mov_r32_imm32", "edx", Tag.norm),
-        I("call_rel32", ("l", "mkleaf")),
-        I("push_r64", "rdi"), I("sub_r64_imm", "rsp", 8),
-        I("mov_r64_r64", "rdi", "rax"), I("call_rel32", ("l", "mkstk")),
-        I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
-        LBL("p_next"), I("inc_r64", "rsi"), I("jmp_rel32", ("l", "parse_bytes")),
-        LBL("parse_done"),
-        I("test_r64_r64", "r14", "r14"), I("je_rel32", ("l", "empty")),
-        I("mov_r64_m64", "r12", ("m", "r14", 8)),
-        I("jmp_rel32", ("l", "do_reduce")),
-        LBL("empty"), I("mov_r32_imm32", "edx", Tag.norm),
-        I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r12", "rax"),
-        # ---- reduce loop (r15 = steps) ----
-        LBL("do_reduce"), I("xor_r32_r32", "r15d", "r15d"),
-        LBL("red_loop"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "red_done")),
-        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
-    ]
-    if R.fuel is not None:
-        p += [
-            I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2")),
-        ]
-    p += [
-        I("jmp_rel32", ("l", "red_loop")),
-        # ---- out: count nodes, VirtualAlloc exact, postfix emit, WriteFile ----
-        LBL("red_done"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
-        I("lea_r64_m64", "rdx", ("m", "rax", 0)), I("add_r64_r64", "rdx", "rdx"),
-        I("add_r64_imm", "rdx", 16),
-        I("xor_r32_r32", "ecx", "ecx"),
-        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-        I("mov_r32_imm32", "r9d", PAGE_RW),
-        I("call_mrip", iat("VirtualAlloc")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-        I("mov_r64_r64", "r14", "rax"),          # out base
-        I("mov_r64_r64", "rsi", "rax"),          # out cursor
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "emit_nf")),
-        I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
-        I("mov_r64_rip", "rcx", ("p", "hout")),
-        I("mov_r64_r64", "rdx", "r14"),
-        I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "r14"),
-        I("lea_r64_rip", "r9", ("p", "nw")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("WriteFile")),
-    ]
-    # ---- stats: "steps=N alloc=M\n" to stderr ----
-    p += [
-        I("lea_r64_rip", "rsi", ("p", "scratch")),
-    ]
-    stats_str("steps=")
-    p += [
-        I("mov_r64_r64", "rdi", "r15"), I("call_rel32", ("l", "itoa")),
-    ]
-    stats_str(" alloc=")
-    p += [
-        I("mov_r64_rip", "rdi", ("p", "nalloc")), I("call_rel32", ("l", "itoa")),
-        I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
-        I("mov_r64_rip", "rcx", ("p", "herr")),
-        I("lea_r64_rip", "rdx", ("p", "scratch")),
-        I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "rdx"),
-        I("lea_r64_rip", "r9", ("p", "nw")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("WriteFile")),
-        # ---- exit ----
-        I("xor_r32_r32", "ecx", "ecx"), I("call_mrip", iat("ExitProcess")),
-        LBL("exit2"), I("mov_r32_imm32", "ecx", 2), I("call_mrip", iat("ExitProcess")),
-        LBL("exit3"), I("mov_r32_imm32", "ecx", 3), I("call_mrip", iat("ExitProcess")),
-        LBL("exit4"), I("mov_r32_imm32", "ecx", 4), I("call_mrip", iat("ExitProcess")),
-        # ---- grow_heap: rbx=bump, rbp=chunk end (chunked VirtualAlloc) ----
-        LBL("grow_heap"),
-        I("sub_r64_imm", "rsp", 0x28),
-        I("xor_r32_r32", "ecx", "ecx"),
-        I("mov_r64_imm", "rdx", R.chunk_bytes),
-        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-        I("mov_r32_imm32", "r9d", PAGE_RW),
-        I("call_mrip", iat("VirtualAlloc")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "grow_fail")),
-        I("mov_r64_r64", "rbx", "rax"),
-        I("lea_r64_m64", "rbp", ("m", "rax", R.chunk_bytes)),
-        I("add_r64_imm", "rsp", 0x28), I("ret"),
-        LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
-        I("call_mrip", iat("ExitProcess")),
-        # ---- mkleaf: rdx=tag -> rax node ----
-        LBL("mkleaf"),
-        I("lea_r64_m64", "rax", ("m", "rbx", R.node_bytes)),
-        I("cmp_r64_r64", "rax", "rbp"), I("jbe_rel32", ("l", "mkleaf_ok")),
-        I("push_r64", "rdx"), I("call_rel32", ("l", "grow_heap")),
-        I("pop_r64", "rdx"),
-        LBL("mkleaf_ok"),
-        I("mov_r64_r64", "rax", "rbx"), I("add_r64_imm", "rbx", R.node_bytes),
-        I("mov_m64_r64", ("m", "rax", 0), "rdx"),
-        I("mov_m64_imm32", ("m", "rax", 8), 0),
-        I("mov_m64_imm32", ("m", "rax", 16), 0),
-        I("inc_mrip", ("p", "nalloc")), I("ret"),
-        # ---- mkapp: rdi=f, rsi=x -> rax node ----
-        LBL("mkapp"),
-        I("lea_r64_m64", "rax", ("m", "rbx", R.node_bytes)),
-        I("cmp_r64_r64", "rax", "rbp"), I("jbe_rel32", ("l", "mkapp_ok")),
-        I("push_r64", "rdi"), I("push_r64", "rsi"), I("sub_r64_imm", "rsp", 8),
-        I("call_rel32", ("l", "grow_heap")),
-        I("add_r64_imm", "rsp", 8), I("pop_r64", "rsi"), I("pop_r64", "rdi"),
-        LBL("mkapp_ok"),
-        I("mov_r64_r64", "rax", "rbx"), I("add_r64_imm", "rbx", R.node_bytes),
-        I("mov_m64_imm32", ("m", "rax", 0), 0),
-        I("mov_m64_r64", ("m", "rax", 8), "rdi"),
-        I("mov_m64_r64", ("m", "rax", 16), "rsi"),
-        I("inc_mrip", ("p", "nalloc")), I("ret"),
-        # ---- mkstk: rdi=value -> rax cons cell, r14=new stack top ----
-        # parse-stack cells share the dynamic heap; NOT counted in nalloc
-        LBL("mkstk"),
-        I("lea_r64_m64", "rax", ("m", "rbx", R.node_bytes)),
-        I("cmp_r64_r64", "rax", "rbp"), I("jbe_rel32", ("l", "mkstk_ok")),
-        I("push_r64", "rdi"), I("call_rel32", ("l", "grow_heap")),
-        I("pop_r64", "rdi"),
-        LBL("mkstk_ok"),
-        I("mov_r64_r64", "rax", "rbx"), I("add_r64_imm", "rbx", R.node_bytes),
-        I("mov_m64_imm32", ("m", "rax", 0), STK_TAG),
-        I("mov_m64_r64", ("m", "rax", 8), "rdi"),
-        I("mov_m64_r64", ("m", "rax", 16), "r14"),
-        I("mov_r64_r64", "r14", "rax"), I("ret"),
-        # ---- step(rdi=t) -> rax : LO single step, Lean order ----
-        LBL("step"),
-        I("push_r64", "r12"), I("push_r64", "r13"), I("push_r64", "r14"),
-        I("mov_r64_r64", "r12", "rdi"),
-        I("cmp_m64_imm", ("m", "r12", 0), Tag.APP),
-        I("jne_rel32", ("l", "st_none")),
-        I("mov_r64_m64", "r13", ("m", "r12", 8)),    # f
-        I("mov_r64_m64", "r14", ("m", "r12", 16)),   # x
-        I("cmp_m64_imm", ("m", "r13", 0), Tag.norm),
-        I("je_rel32", ("l", "st_norm")),
-        I("cmp_m64_imm", ("m", "r13", 0), Tag.APP),
-        I("jne_rel32", ("l", "st_left")),
-        I("mov_r64_m64", "rax", ("m", "r13", 8)),    # fl
-        I("mov_r64_m64", "rcx", ("m", "r13", 16)),   # fr
-        I("cmp_m64_imm", ("m", "rax", 0), Tag.konst),
-        I("je_rel32", ("l", "st_konst")),
-        I("cmp_m64_imm", ("m", "rax", 0), Tag.dup),
-        I("je_rel32", ("l", "st_dup")),
-        I("cmp_m64_imm", ("m", "rax", 0), Tag.APP),
-        I("jne_rel32", ("l", "st_left")),
-        I("mov_r64_m64", "rdx", ("m", "rax", 8)),    # fll
-        I("mov_r64_m64", "rsi", ("m", "rax", 16)),   # flr
-        I("cmp_m64_imm", ("m", "rdx", 0), Tag.comp),
-        I("je_rel32", ("l", "st_comp")),
-        I("cmp_m64_imm", ("m", "rdx", 0), Tag.swap),
-        I("je_rel32", ("l", "st_swap")),
-    ]
-    if R.fuse_s:
-        p += [
-            I("cmp_m64_imm", ("m", "rdx", 0), Tag.s),
-            I("je_rel32", ("l", "st_s")),
-        ]
-    p += [
-        I("jmp_rel32", ("l", "st_left")),
-        LBL("st_norm"), I("mov_r64_r64", "rax", "r14"),
-        I("jmp_rel32", ("l", "st_out")),
-        LBL("st_konst"), I("mov_r64_r64", "rax", "rcx"),
-        I("jmp_rel32", ("l", "st_out")),
-        LBL("st_dup"),                                 # W f x -> f x x
-        I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")),               # rax = (f x)
-        I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")),               # rax = (f x) x
-        I("jmp_rel32", ("l", "st_out")),
-        LBL("st_swap"),                                # C f x y -> f y x
-        I("push_r64", "rcx"), I("sub_r64_imm", "rsp", 8),  # save fr (=y-side)
-        I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")),               # rax = (f y)
-        I("add_r64_imm", "rsp", 8), I("pop_r64", "rsi"),
-        I("mov_r64_r64", "rdi", "rax"),
-        I("call_rel32", ("l", "mkapp")),               # rax = (f y) x
-        I("jmp_rel32", ("l", "st_out")),
-        LBL("st_comp"),                                # B f g x -> f (g x)
-        I("push_r64", "rcx"), I("push_r64", "rsi"),
-        I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")),               # rax = (g x)
-        I("pop_r64", "rdi"), I("pop_r64", "rdx"),      # rdi = flr
-        I("mov_r64_r64", "rsi", "rax"),
-        I("call_rel32", ("l", "mkapp")),               # rax = f (g x)
-        I("jmp_rel32", ("l", "st_out")),
-    ]
-    if R.fuse_s:
-        p += [
-            LBL("st_s"),                               # S f g x -> (f x)(g x)
-            I("push_r64", "rcx"), I("push_r64", "rsi"),  # [rsp]=flr,[rsp+8]=fr
-            I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
-            I("call_rel32", ("l", "mkapp")),             # rax = (f x)
-            I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
-            I("mov_r64_m64", "rdi", ("m", "rsp", 24)),   # fr
-            I("mov_r64_r64", "rsi", "r14"),
-            I("call_rel32", ("l", "mkapp")),             # rax = (g x)
-            I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
-            I("mov_r64_r64", "rsi", "rax"),
-            I("call_rel32", ("l", "mkapp")),
-            I("add_r64_imm", "rsp", 16),
-            I("jmp_rel32", ("l", "st_out")),
-        ]
-    p += [
-        LBL("st_left"),
-        I("mov_r64_r64", "rdi", "r13"), I("call_rel32", ("l", "step")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "st_right")),
-        I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")), I("jmp_rel32", ("l", "st_out")),
-        LBL("st_right"),
-        I("mov_r64_r64", "rdi", "r14"), I("call_rel32", ("l", "step")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "st_none")),
-        I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "rax"),
-        I("call_rel32", ("l", "mkapp")), I("jmp_rel32", ("l", "st_out")),
-        LBL("st_none"), I("xor_r32_r32", "eax", "eax"),
-        LBL("st_out"),
-        I("pop_r64", "r14"), I("pop_r64", "r13"), I("pop_r64", "r12"), I("ret"),
-        # ---- count_nodes(rdi) -> rax ----
-        LBL("count_nodes"),
-        I("push_r64", "r12"), I("push_r64", "r13"), I("sub_r64_imm", "rsp", 8),
-        I("mov_r64_r64", "r12", "rdi"),
-        I("cmp_m64_imm", ("m", "r12", 0), Tag.APP),
-        I("jne_rel32", ("l", "cn_leaf")),
-        I("mov_r64_m64", "rdi", ("m", "r12", 8)),
-        I("call_rel32", ("l", "count_nodes")),
-        I("mov_r64_r64", "r13", "rax"),
-        I("mov_r64_m64", "rdi", ("m", "r12", 16)),
-        I("call_rel32", ("l", "count_nodes")),
-        I("add_r64_r64", "rax", "r13"), I("inc_r64", "rax"),
-        I("jmp_rel32", ("l", "cn_out")),
-        LBL("cn_leaf"), I("mov_r32_imm32", "eax", 1),
-        LBL("cn_out"),
-        I("add_r64_imm", "rsp", 8),
-        I("pop_r64", "r13"), I("pop_r64", "r12"), I("ret"),
-        # ---- emit(rdi=node, rsi=cur) -> rsi : postfix decompile ----
-        LBL("emit_nf"),
-        I("mov_r64_m64", "rax", ("m", "rdi", 0)),
-        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "en_leaf")),
-        I("push_r64", "rdi"),
-        I("mov_r64_m64", "rdi", ("m", "rdi", 8)),
-        I("call_rel32", ("l", "emit_nf")),
-        I("mov_r64_m64", "rdi", ("m", "rsp", 0)),
-        I("mov_r64_m64", "rdi", ("m", "rdi", 16)),
-        I("call_rel32", ("l", "emit_nf")),
-        I("add_r64_imm", "rsp", 8),
-        I("mov_m8_imm8", ("m", "rsi", 0), 0x40), I("inc_r64", "rsi"),
-        I("mov_m8_imm8", ("m", "rsi", 0), 0x20), I("inc_r64", "rsi"), I("ret"),
-        LBL("en_leaf"),
-        I("cmp_r64_imm", "rax", Tag.norm), I("je_rel32", ("l", "en_i")),
-        I("cmp_r64_imm", "rax", Tag.konst), I("je_rel32", ("l", "en_k")),
-        I("cmp_r64_imm", "rax", Tag.s), I("je_rel32", ("l", "en_s")),
-        I("cmp_r64_imm", "rax", Tag.comp), I("je_rel32", ("l", "en_b")),
-        I("cmp_r64_imm", "rax", Tag.dup), I("je_rel32", ("l", "en_d")),
-        I("cmp_r64_imm", "rax", Tag.swap), I("je_rel32", ("l", "en_c")),
-        I("mov_r32_imm32", "ecx", 0x3F), I("jmp_rel32", ("l", "en_w")),
-        LBL("en_i"), I("mov_r32_imm32", "ecx", 0x49), I("jmp_rel32", ("l", "en_w")),
-        LBL("en_k"), I("mov_r32_imm32", "ecx", 0x4B), I("jmp_rel32", ("l", "en_w")),
-        LBL("en_s"), I("mov_r32_imm32", "ecx", 0x53), I("jmp_rel32", ("l", "en_w")),
-        LBL("en_b"), I("mov_r32_imm32", "ecx", 0x42), I("jmp_rel32", ("l", "en_w")),
-        LBL("en_d"), I("mov_r32_imm32", "ecx", 0x57), I("jmp_rel32", ("l", "en_w")),
-        LBL("en_c"), I("mov_r32_imm32", "ecx", 0x43),
-        LBL("en_w"),
-        I("mov_m8_r8", ("m", "rsi", 0), "cl"), I("inc_r64", "rsi"),
-        I("mov_m8_imm8", ("m", "rsi", 0), 0x20), I("inc_r64", "rsi"), I("ret"),
-        # ---- itoa(rdi=val, rsi=cur) -> rsi ----
-        LBL("itoa"),
-        I("sub_r64_imm", "rsp", 0x28),
-        I("mov_r64_r64", "rax", "rdi"),
-        I("lea_r64_m64", "r9", ("m", "rsp", 0x20)),
-        I("mov_r32_imm32", "r8d", 10),
-        LBL("it_dig"),
-        I("xor_r32_r32", "edx", "edx"), I("div_r64", "r8"),
-        I("add_r8_imm8", "dl", 0x30),
-        I("dec_r64", "r9"), I("mov_m8_r8", ("m", "r9", 0), "dl"),
-        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "it_dig")),
-        LBL("it_cp"),
-        I("lea_r64_m64", "rcx", ("m", "rsp", 0x20)),
-        I("cmp_r64_r64", "r9", "rcx"), I("jge_rel32", ("l", "it_done")),
-        I("mov_r8_m8", "al", ("m", "r9", 0)),
-        I("mov_m8_r8", ("m", "rsi", 0), "al"),
-        I("inc_r64", "r9"), I("inc_r64", "rsi"),
-        I("jmp_rel32", ("l", "it_cp")),
-        LBL("it_done"), I("add_r64_imm", "rsp", 0x28), I("ret"),
-    ]
-    if not R.fuse_s:
-        # build_ds: construct DERIVED_S once into [rip+ds]; r13/r14/r15 scratch
-        # (pre-parse; r14 re-zeroed after — it is the parse-stack top).
-        p += [
-            LBL("build_ds"),
-            I("sub_r64_imm", "rsp", 8),
-            I("mov_r32_imm32", "edx", Tag.comp),
-            I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r13", "rax"),
-            I("mov_r32_imm32", "edx", Tag.dup),
-            I("call_rel32", ("l", "mkleaf")),
-            I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "rax"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r13", "rax"),
-            I("mov_r32_imm32", "edx", Tag.comp),
-            I("call_rel32", ("l", "mkleaf")),
-            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r13"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r13", "rax"),
-            I("mov_r32_imm32", "edx", Tag.comp),        # r13 = (B (B D))
-            I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r15", "rax"),
-            I("mov_r32_imm32", "edx", Tag.comp),
-            I("call_rel32", ("l", "mkleaf")),
-            I("mov_r64_r64", "rdi", "r15"), I("mov_r64_r64", "rsi", "rax"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
-            I("mov_r32_imm32", "edx", Tag.comp),        # r15 = (B B)
-            I("call_rel32", ("l", "mkleaf")), I("mov_r64_r64", "r14", "rax"),
-            I("mov_r32_imm32", "edx", Tag.comp),
-            I("call_rel32", ("l", "mkleaf")),
-            I("mov_r64_r64", "rdi", "r14"), I("mov_r64_r64", "rsi", "rax"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r14", "rax"),
-            I("mov_r32_imm32", "edx", Tag.swap),        # r14 = (B B)
-            I("call_rel32", ("l", "mkleaf")),
-            I("mov_r64_r64", "rdi", "r14"), I("mov_r64_r64", "rsi", "rax"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r14", "rax"),
-            I("mov_r64_r64", "rdi", "r15"), I("mov_r64_r64", "rsi", "r14"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
-            I("mov_r32_imm32", "edx", Tag.swap),        # r15 = ((B B)(B C))
-            I("call_rel32", ("l", "mkleaf")),
-            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r15"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
-            I("mov_r32_imm32", "edx", Tag.norm),        # r15 = (C ((B B)(B C)))
-            I("call_rel32", ("l", "mkleaf")),
-            I("mov_r64_r64", "rdi", "r15"), I("mov_r64_r64", "rsi", "rax"),
-            I("call_rel32", ("l", "mkapp")), I("mov_r64_r64", "r15", "rax"),
-            I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "r15"),
-            I("call_rel32", ("l", "mkapp")),            # rax = derived_s
-            I("mov_rip_r64", ("p", "ds"), "rax"),
-            I("xor_r32_r32", "r14d", "r14d"),
-            I("add_r64_imm", "rsp", 8), I("ret"),
-        ]
-    return p
-
-
-# ======================================================================
-# §6  PE64 WRITER (layout as table)
-# ======================================================================
-
-TEXT_RVA = 0x1000
-IDATA_RVA = 0x2000
-DATA_RVA = 0x3000
-FILE_ALIGN = 0x200
-SECT_ALIGN = 0x1000
-IMAGE_BASE = 0x140000000
-
-
-def build_idata() -> Tuple[bytes, Dict[str, int]]:
-    """Import directory + ILT + IAT + hint/names; returns bytes and iat symbols."""
-    n = len(IMPORTS)
-    idt_sz, ilt_sz = (n // n + 1) * 20, (n + 1) * 8   # 1 dll desc + null; n+1 thunks
-    idt_sz = 40
-    ilt_off = idt_sz
-    iat_off = ilt_off + ilt_sz
-    names_off = iat_off + ilt_sz
-    recs: List[Tuple[str, bytes]] = []
-    off = names_off
-    hn_rvas: List[int] = []
-    for name in IMPORTS:
-        hn = struct.pack("<H", 0) + name.encode() + b"\x00"
-        if len(hn) & 1:
-            hn += b"\x00"
-        hn_rvas.append(IDATA_RVA + off)
-        off += len(hn)
-    dll_rva = IDATA_RVA + off
-    dll = b"kernel32.dll\x00"
-    off += len(dll)
-    ilt = b"".join(struct.pack("<Q", r) for r in hn_rvas) + b"\x00" * 8
-    idt = struct.pack("<IIIII", IDATA_RVA + ilt_off, 0, 0, dll_rva,
-                      IDATA_RVA + iat_off) + b"\x00" * 20
-    body = idt + ilt + ilt  # ILT and IAT identical content
-    names = b"".join(
-        struct.pack("<H", 0) + nm.encode() + b"\x00"
-        + (b"\x00" if (2 + len(nm) + 1) & 1 else b"")
-        for nm in IMPORTS)
-    body += names + dll
-    syms = {f"iat_{nm}": IDATA_RVA + iat_off + i * 8
-            for i, nm in enumerate(IMPORTS)}
-    return body, syms
-
-
-def build_data() -> Tuple[bytes, Dict[str, int]]:
-    syms: Dict[str, int] = {}
-    off = 0
-    for name, sz in DATA_SLOTS:
-        syms[name] = DATA_RVA + off
-        off += sz
-    return b"\x00" * off, syms
+def emit(R: Realization = DEFAULT, tc=None) -> bytes:
+    """Module-agnostic chain: resolve the toolchain, assemble the routines'
+    program against the target's symbol table at its text base, pack."""
+    tc = tc or toolchain.by_name("native.x86_64.pe")
+    isa, rts, tgt = toolchain.resolve(tc)
+    prog = rts.program(R)
+    text, labels = isa.assemble(
+        prog, tgt.symbols(rts.imports, rts.data_slots), base=tgt.text_base)
+    return tgt.pack(text, labels, rts.imports, rts.data_slots, R)
 
 
 def build_pe(R: Realization = DEFAULT) -> bytes:
-    prog = reducer_program(R)
-    idata, iat_syms = build_idata()
-    data, data_syms = build_data()
-    base_rva = TEXT_RVA
-    all_syms = dict(iat_syms)
-    all_syms.update(data_syms)
-
-    # assemble with symbols resolved as absolute RVAs; labels local offsets
-    local: Dict[str, int] = {}
-    pos = 0
-    offs = []
-    for item in prog:
-        if item[0] == "label":
-            local[item[1]] = base_rva + pos
-        offs.append(pos)
-        if item[0] != "label":
-            pos += len(encode(item[1:]))
-    code = bytearray()
-    for item, off in zip(prog, offs):
-        if item[0] == "label":
-            continue
-        insn = item[1:]
-        end = base_rva + off + len(encode(insn))
-        resolver = lambda name, _e=end: (
-            all_syms[name] if name in all_syms else local[name]) - _e
-        code += encode(insn, resolve=resolver)
-    code = bytes(code)
-
-    def sect(name: bytes, vsize: int, vaddr: int, raw: bytes, chars: int,
-             rawptr: int) -> bytes:
-        return struct.pack("<8sIIIIIIHHI", name, vsize, vaddr,
-                           _align(len(raw), FILE_ALIGN), rawptr, 0, 0, 0, 0,
-                           chars)
-
-    text_raw = code + b"\x00" * (_align(len(code), FILE_ALIGN) - len(code))
-    idata_raw = idata + b"\x00" * (_align(len(idata), FILE_ALIGN) - len(idata))
-    data_raw = data + b"\x00" * (_align(len(data), FILE_ALIGN) - len(data))
-    text_ptr = FILE_ALIGN
-    idata_ptr = text_ptr + len(text_raw)
-    data_ptr = idata_ptr + len(idata_raw)
-    size_image = _align(DATA_RVA + len(data), SECT_ALIGN)
-
-    dos = bytearray(0x40)
-    dos[0:2] = b"MZ"
-    struct.pack_into("<I", dos, 0x3C, 0x40)
-    coff = struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x0022)
-    dd = [(0, 0)] * 16
-    dd[1] = (IDATA_RVA, len(idata))
-    opt = struct.pack(
-        "<HBBIIIIIQIIHHHHHHIIIIHHQQQQII",
-        0x20B, 0, 0,                      # magic, linker ver
-        len(text_raw), len(idata_raw) + len(data_raw), 0,
-        TEXT_RVA, TEXT_RVA,               # entry, base of code
-        IMAGE_BASE, SECT_ALIGN, FILE_ALIGN,
-        6, 0, 0, 0, 6, 0,                 # OS/img/subsys ver
-        0, size_image, FILE_ALIGN, 0,     # win32ver, img, hdrs, checksum
-        3, 0x8100,                        # subsystem CUI, dllchars (no DYNAMIC_BASE)
-        R.stack_reserve, 0x1000,          # stack reserve/commit
-        0x100000, 0x1000,                 # heap reserve/commit
-        0, 16,                            # loader flags, #rva+size
-    ) + b"".join(struct.pack("<II", r, s) for r, s in dd)
-    assert len(opt) == 0xF0, len(opt)
-    sh = (sect(b".text\x00\x00\x00", len(code), TEXT_RVA, text_raw, 0x60000020,
-               text_ptr)
-          + sect(b".idata\x00\x00", len(idata), IDATA_RVA, idata_raw, 0x40000040,
-                 idata_ptr)
-          + sect(b".data\x00\x00\x00", len(data), DATA_RVA, data_raw, 0xC0000040,
-                 data_ptr))
-    headers = bytes(dos) + b"PE\x00\x00" + coff + opt + sh
-    headers += b"\x00" * (FILE_ALIGN - len(headers))
-    return headers + text_raw + idata_raw + data_raw
-
-
-def _align(v: int, a: int) -> int:
-    return (v + a - 1) // a * a
+    """Compatibility alias: emit the realized toolchain's PE image."""
+    return emit(R)
 
 
 def write_exe(path: str, R: Realization = DEFAULT) -> str:
@@ -1363,27 +474,30 @@ def piece(R: Realization = DEFAULT):
 # §8  ORACLES + GATES
 # ======================================================================
 
-def _fasmg(src: str) -> bytes:
-    if not os.path.exists(FASMG):
-        raise FileNotFoundError(f"fasmg oracle missing: {FASMG}")
-    with tempfile.TemporaryDirectory() as td:
-        asm = os.path.join(td, "in.asm")
-        binp = os.path.join(td, "out.bin")
-        with open(asm, "w", newline="\n") as f:
-            f.write(src)
-        cp = subprocess.run([FASMG, asm, binp], capture_output=True, text=True)
-        if cp.returncode != 0 or not os.path.exists(binp):
-            raise RuntimeError(f"fasmg failed rc={cp.returncode}: "
-                               f"{cp.stdout}{cp.stderr}")
-        with open(binp, "rb") as f:
-            return f.read()
+# The gates reach the realized chain's data modules directly (§8 is
+# oracle/gate plumbing; §3 stays module-agnostic).  Lazy access for
+# _routines: it imports seed back, so only function bodies may touch it.
+import isa_x86_64 as _isa                    # noqa: E402
+import routines_x86_64_win64 as _routines    # noqa: E402
+import target_pe64 as _target                # noqa: E402
+
+Insn = _isa.Insn
+Program = _isa.Program
+LBL = _isa.LBL
+I = _isa.I
+INSN = _isa.INSN
+FORMS = _isa.FORMS
+encode = _isa.encode
+render_fasm = _isa.render_fasm
+assemble = _isa.assemble
+_fasmg = _isa._fasmg
+_FASM_HDR = _isa._FASM_HDR
+FASMG = _isa.FASMG
+TEXT_RVA = _target.TEXT_RVA
 
 
-_FASM_HDR = (
-    f"include '{FASMG_INC}/format/format.inc'\n"
-    f"include '{FASMG_INC}/x64.inc'\n"
-    "use64\nformat binary\n"
-)
+def reducer_program(R: Realization) -> Program:
+    return _routines.program(R)
 
 
 def _lean_matrices(path: str) -> Dict[str, Matrix]:
@@ -1526,94 +640,12 @@ def _g0b() -> bool:
 
 
 def _g1() -> bool:
-    ok = True
-    samples: List[Tuple[str, Insn]] = [
-        ("mov_r64_imm", ("mov_r64_imm", "rax", 0x1122334455667788)),
-        ("mov_r64_imm", ("mov_r64_imm", "r15", 1)),
-        ("mov_r64_imm", ("mov_r64_imm", "rcx", -10)),
-        ("mov_r64_r64", ("mov_r64_r64", "rax", "rbx")),
-        ("mov_r64_r64", ("mov_r64_r64", "r14", "r13")),
-        ("mov_r64_m64", ("mov_r64_m64", "r14", ("m", "r13", 8))),
-        ("mov_r64_m64", ("mov_r64_m64", "rax", ("m", "rsp", 0x20))),
-        ("mov_r64_m64", ("mov_r64_m64", "rax", ("m", "rbp", 0))),
-        ("mov_r64_m64", ("mov_r64_m64", "r12", ("m", "r15", -8))),
-        ("mov_m64_r64", ("mov_m64_r64", ("m", "r13", 16), "r14")),
-        ("mov_m64_r64", ("mov_m64_r64", ("m", "r15", 0), "rax")),
-        ("mov_r64_rip", ("mov_r64_rip", "rcx", ("p", 0x1234))),
-        ("mov_rip_r64", ("mov_rip_r64", ("p", 0x1234), "rax")),
-        ("movzx_r32_m8", ("movzx_r32_m8", "eax", ("m", "rsi", 0))),
-        ("movzx_r32_m8", ("movzx_r32_m8", "ecx", ("m", "rsi", 3))),
-        ("mov_r8_m8", ("mov_r8_m8", "al", ("m", "r9", 0))),
-        ("mov_m8_r8", ("mov_m8_r8", ("m", "rsi", 0), "cl")),
-        ("mov_m8_imm8", ("mov_m8_imm8", ("m", "rsi", 0), 0x40)),
-        ("mov_m64_imm32", ("mov_m64_imm32", ("m", "rsp", 0x20), 0)),
-        ("mov_m64_imm32", ("mov_m64_imm32", ("m", "rax", 8), 0)),
-        ("mov_r32_imm32", ("mov_r32_imm32", "ecx", -10)),
-        ("mov_r32_imm32", ("mov_r32_imm32", "r8d", 0x3000)),
-        ("lea_r64_m64", ("lea_r64_m64", "r14", ("m", "rax", 0x100000))),
-        ("lea_r64_m64", ("lea_r64_m64", "r9", ("m", "rsp", 0x20))),
-        ("lea_r64_rip", ("lea_r64_rip", "rsi", ("p", 0x400))),
-        ("add_r64_imm", ("add_r64_imm", "rax", 5)),
-        ("add_r64_imm", ("add_r64_imm", "r14", 0x100000)),
-        ("add_r64_imm", ("add_r64_imm", "rax", 200)),
-        ("and_r64_imm", ("and_r64_imm", "r14", 0xFF)),
-        ("sub_r64_imm", ("sub_r64_imm", "rsp", 0x28)),
-        ("sub_r64_imm", ("sub_r64_imm", "r15", 8)),
-        ("cmp_r64_imm", ("cmp_r64_imm", "rax", 0x49)),
-        ("cmp_r64_imm", ("cmp_r64_imm", "r15", 1000)),
-        ("cmp_m64_imm", ("cmp_m64_imm", ("m", "r12", 0), 3)),
-        ("cmp_m64_imm", ("cmp_m64_imm", ("m", "rax", 0), 0)),
-        ("add_r64_r64", ("add_r64_r64", "rax", "rcx")),
-        ("sub_r64_r64", ("sub_r64_r64", "rax", "r13")),
-        ("cmp_r64_r64", ("cmp_r64_r64", "r13", "r14")),
-        ("test_r64_r64", ("test_r64_r64", "rax", "rax")),
-        ("xor_r32_r32", ("xor_r32_r32", "eax", "eax")),
-        ("xor_r32_r32", ("xor_r32_r32", "r15d", "r15d")),
-        ("add_r8_imm8", ("add_r8_imm8", "dl", 0x30)),
-        ("shl_r64_imm8", ("shl_r64_imm8", "rdx", 3)),
-        ("push_r64", ("push_r64", "r14")),
-        ("push_r64", ("push_r64", "rsi")),
-        ("pop_r64", ("pop_r64", "r12")),
-        ("call_rel32", ("call_rel32", ("l", 0x40))),
-        ("call_mrip", ("call_mrip", ("p", 0x2000))),
-        ("jmp_rel32", ("jmp_rel32", ("l", 0x30))),
-        ("je_rel32", ("je_rel32", ("l", 0x20))),
-        ("jne_rel32", ("jne_rel32", ("l", 0x20))),
-        ("jl_rel32", ("jl_rel32", ("l", 0x20))),
-        ("jge_rel32", ("jge_rel32", ("l", 0x20))),
-        ("jb_rel32", ("jb_rel32", ("l", 0x20))),
-        ("jbe_rel32", ("jbe_rel32", ("l", 0x20))),
-        ("ret", ("ret",)),
-        ("inc_r64", ("inc_r64", "r15")),
-        ("dec_r64", ("dec_r64", "r9")),
-        ("inc_mrip", ("inc_mrip", ("p", 0x3000))),
-        ("div_r64", ("div_r64", "r8")),
-    ]
-    for form, insn in samples:
-        if FORMS[form][4] == "l":
-            d = insn[1][1]
-            src = f"{FORMS[form][0]} near lbl\nrb {d}\nlbl: ret\n"
-        else:
-            src = render_fasm(insn) + "\n"
-        try:
-            want = _fasmg(_FASM_HDR + src)
-        except Exception as e:
-            print(f"  FAIL {src!r}: oracle {e}")
-            ok = False
-            continue
-        got = encode(insn)
-        if FORMS[form][4] == "l":
-            match = want[:len(got)] == got and len(want) == len(got) + d + 1
-        else:
-            match = got == want
-        if not match:
-            print(f"  FAIL {src!r}: got {got.hex()} want {want.hex()}")
-            ok = False
+    ok = _isa.check_rows()
     # whole-program: assemble reducer .text, compare with fasmg on the same
     # rendered listing (rel32 via labels, rip via computed displacements).
     prog = reducer_program(DEFAULT)
-    idata, iat_syms = build_idata()
-    data, data_syms = build_data()
+    idata, iat_syms = _target.build_idata(_routines.IMPORTS)
+    data, data_syms = _target.build_data(_routines.DATA_SLOTS)
     all_syms = dict(iat_syms)
     all_syms.update(data_syms)
     local: Dict[str, int] = {}
