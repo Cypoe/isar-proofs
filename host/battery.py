@@ -43,6 +43,7 @@ def run_suite(name: str, script: str, cwd: str) -> tuple[bool, float, str]:
 
 def main() -> int:
     skip_seed = "--skip-seed" in sys.argv[1:]
+    print(f"python {sys.version.split()[0]} {sys.executable}")
     ok = True
     for script in HOST_SUITES:
         name = os.path.splitext(script)[0]
