@@ -1037,6 +1037,9 @@ def _g5() -> bool:
 
 
 def main() -> int:
+    # Host-side tree comparisons on Church NFs reach depth ~600; dataclass
+    # __eq__ costs two frames per level on Python <= 3.12.  Gate-only.
+    sys.setrecursionlimit(20_000)
     results = []
     print("G0 signature algebra")
     try:

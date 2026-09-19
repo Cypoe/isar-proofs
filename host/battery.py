@@ -25,6 +25,7 @@ HOST_SUITES = [
     "routines_x86_64_win64.py",
     "target_pe64.py",
     "toolchain.py",
+    "futamura_cube.py",
 ]
 
 
