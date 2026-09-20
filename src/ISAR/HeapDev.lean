@@ -1007,6 +1007,83 @@ theorem Splice_red {s T a b : ITerm}
   | here => exact hred
   | app ha hb iha ihb => exact IRedBasis_app iha ihb
 
+/-- Observational equivalence of terms: both reduce to a common
+    reduct.  This is the equivalence heap-level sharing must preserve —
+    `GraphDev` proved syntactic `cdBasis`-equality; here redirects can
+    interleave developments, so readbacks only agree up to `Join`. -/
+def Join (a b : ITerm) : Prop := ∃ u, IRedBasis a u ∧ IRedBasis b u
+
+theorem Join.refl (t : ITerm) : Join t t := ⟨t, .refl, .refl⟩
+
+theorem Join.symm {a b : ITerm} (h : Join a b) : Join b a :=
+  let ⟨u, ha, hb⟩ := h; ⟨u, hb, ha⟩
+
+theorem Join.trans {a b c : ITerm} (h₁ : Join a b) (h₂ : Join b c) :
+    Join a c := by
+  obtain ⟨u, hau, hbu⟩ := h₁
+  obtain ⟨v, hbv, hcv⟩ := h₂
+  obtain ⟨w, huw, hvw⟩ := IRedBasis_confluence hbu hbv
+  exact ⟨w, hau.trans huw, hcv.trans hvw⟩
+
+theorem Join_app {a a' b b' : ITerm} (ha : Join a a') (hb : Join b b') :
+    Join (.app a b) (.app a' b') := by
+  obtain ⟨u, hau, hbu⟩ := ha
+  obtain ⟨v, hav, hbv⟩ := hb
+  exact ⟨.app u v, IRedBasis_app hau hav, IRedBasis_app hbu hbv⟩
+
+theorem Join_of_ired {a b : ITerm} (h : IRedBasis a b) : Join a b :=
+  ⟨b, h, .refl⟩
+
+theorem Join.ired_l {a b c : ITerm} (h : IRedBasis a b)
+    (hbc : Join b c) : Join a c := by
+  obtain ⟨u, hbu, hcu⟩ := hbc
+  exact ⟨u, h.trans hbu, hcu⟩
+
+theorem Join.ired_r {a b c : ITerm} (h : IRedBasis b c)
+    (hab : Join a b) : Join a c := by
+  obtain ⟨u, hau, hbu⟩ := hab
+  obtain ⟨w, hcw, huw⟩ := IRedBasis_confluence h hbu
+  exact ⟨w, hau.trans huw, hcw⟩
+
+/-- `cd` lands below `t`; a term joins its own development. -/
+theorem Join_cd_self (t : ITerm) : Join (cdBasis t) t :=
+  (Join_of_ired (cdBasis_ired t)).symm
+
+/-- Reduction commutes with `cdBasis` up to joining. -/
+theorem cdJoin {a b : ITerm} (h : IRedBasis a b) :
+    Join (cdBasis a) (cdBasis b) := by
+  obtain ⟨u, h₁, h₂⟩ := IRedBasis_confluence (cdBasis_ired a)
+    (h.trans (cdBasis_ired b))
+  exact ⟨u, h₁, h₂⟩
+
+/-- Joining commutes with `cdBasis`. -/
+theorem cdJoin_of_join {a b : ITerm} (h : Join a b) :
+    Join (cdBasis a) (cdBasis b) := by
+  obtain ⟨u, hau, hbu⟩ := h
+  exact Join.trans (cdJoin hau) (cdJoin hbu).symm
+
+/-- A development result joins the input: `Join a (cd b)` collapses to
+    `Join b a` since `b →* cd b`. -/
+theorem Join_cd_left {a b : ITerm} (h : Join a (cdBasis b)) :
+    Join b a :=
+  (h.trans (Join_cd_self b)).symm
+
+/-- Splicing `Join`-equivalent endpoints keeps the terms `Join`
+    equivalent — redirects preserve readback observational class. -/
+theorem Splice_join {s T a b : ITerm} (hsp : Splice s T a b)
+    (hst : Join s T) : Join a b := by
+  induction hsp with
+  | refl => exact Join.refl _
+  | here => exact hst
+  | app _ _ iha ihb => exact Join_app iha ihb
+
+/-- `cd` fixes atoms. -/
+theorem cdBasis_atom (a : GAtom) : cdBasis a.toTerm = a.toTerm := by
+  cases a <;> rfl
+
+/-- `cd` fixes variables. -/
+theorem cdBasis_var (n : Nat) : cdBasis (.var n) = .var n := rfl
+
 /-- Out-of-range indices resolve to themselves. -/
 theorem Heap.repr_oob {h : Heap} {i : Nat} (hi : h.fw.length ≤ i) :
     h.repr i = i := by
@@ -1171,5 +1248,1284 @@ theorem heapUnfold_redirect {h : Heap} (hwf : HeapWf h) {src dst : Nat}
               (HeapWf_redirect hwf hsrc hdst hne hguard) i = .var 0 := by
           conv_lhs => rw [heapUnfold]; rw [hri', hnone']
         rw [e1, e2]; exact Splice.refl
+
+/-- `mk_app`: allocate a fresh `app l r` node or return an interned
+    representative — the host's hash-consing.  The interned case only
+    promises a `Join`: the table hit may be a node whose readback
+    merely agrees with `app (unfold l) (unfold r)` observationally
+    (its raw children can themselves be redirect sources). -/
+def MkApp (h : Heap) (l r : Nat) (h' : Heap) (o : Nat) : Prop :=
+  (h' = h.push (GNode.app l r) ∧ o = h.len ∧ l < h.len ∧ r < h.len) ∨
+  (h' = h ∧ o < h.len ∧ h.fw[o]? = some none ∧
+    ∀ hwf : HeapWf h,
+      Join (heapUnfold h hwf o)
+        (.app (heapUnfold h hwf l) (heapUnfold h hwf r)))
+
+/-- Resolved-node redex check: children are read through `repr`,
+    matching the host's `kind[self.repr(child)]` in `_fun_arg`. -/
+def isRedexNodeR (h : Heap) (i : Nat) : Bool :=
+  match h.ns[i]? with
+  | some (.app l _) =>
+      match h.ns[h.repr l]? with
+      | some (.atom .norm) => true
+      | some (.app kl _) =>
+          match h.ns[h.repr kl]? with
+          | some (.atom .konst) | some (.atom .dup) => true
+          | some (.app kll _) =>
+              match h.ns[h.repr kll]? with
+              | some (.atom .comp) | some (.atom .swap) => true
+              | _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
+/-- Preconditions for `redirect s d` to preserve `HeapWf`: source is
+    still a rep, target is a rep, they differ, and splicing `s` into
+    `d`'s subtree-position creates no cycle. -/
+def RedirectOk (h : Heap) (s d : Nat) : Prop :=
+  h.fw[s]? = some none ∧ h.fw[d]? = some none ∧ s ≠ d ∧ ¬ RSub h s d
+
+/-- Heap-level complete development: `HDev D h i h' o D'` — developing
+    node `i` in heap `h` under memo `D` (reps already developed this
+    round — the seal makes results memoized too) yields heap `h'`,
+    output index `o`, and extended memo `D'`.  One constructor per
+    `Graph.cd` clause; `hit` is the memo path. -/
+inductive HDev : Finset Nat → Heap → Nat → Heap → Nat → Finset Nat → Prop where
+  | hit {D : Finset Nat} {h : Heap} {i : Nat} :
+      h.repr i ∈ D → HDev D h i h (h.repr i) D
+  | atom {D : Finset Nat} {h : Heap} {i : Nat} {a : GAtom} :
+      h.ns[h.repr i]? = some (GNode.atom a) → h.repr i ∉ D →
+      HDev D h i h (h.repr i) (insert (h.repr i) D)
+  | var {D : Finset Nat} {h : Heap} {i n : Nat} :
+      h.ns[h.repr i]? = some (GNode.var n) → h.repr i ∉ D →
+      HDev D h i h (h.repr i) (insert (h.repr i) D)
+  | norm_red {D : Finset Nat} {h h₁ : Heap} {i l r j : Nat}
+      {D₁ : Finset Nat} :
+      h.ns[h.repr i]? = some (GNode.app l r) →
+      h.ns[h.repr l]? = some (GNode.atom GAtom.norm) →
+      h.repr i ∉ D →
+      HDev D h r h₁ j D₁ →
+      RedirectOk h₁ (h.repr i) j →
+      HDev D h i (h₁.redirect (h.repr i) j) j (insert j D₁)
+  | konst_red {D : Finset Nat} {h h₁ : Heap} {i l r kl kr j : Nat}
+      {D₁ : Finset Nat} :
+      h.ns[h.repr i]? = some (GNode.app l r) →
+      h.ns[h.repr l]? = some (GNode.app kl kr) →
+      h.ns[h.repr kl]? = some (GNode.atom GAtom.konst) →
+      h.repr i ∉ D →
+      HDev D h kr h₁ j D₁ →
+      RedirectOk h₁ (h.repr i) j →
+      HDev D h i (h₁.redirect (h.repr i) j) j (insert j D₁)
+  | dup_red {D : Finset Nat} {h h₁ h₂ h₃ h₄ : Heap}
+      {i l r kl kr jx jf a b : Nat}
+      {D₁ D₂ : Finset Nat} :
+      h.ns[h.repr i]? = some (GNode.app l r) →
+      h.ns[h.repr l]? = some (GNode.app kl kr) →
+      h.ns[h.repr kl]? = some (GNode.atom GAtom.dup) →
+      h.repr i ∉ D →
+      HDev D h r h₁ jx D₁ →
+      HDev D₁ h₁ kr h₂ jf D₂ →
+      MkApp h₂ jf jx h₃ a → MkApp h₃ a jx h₄ b →
+      RedirectOk h₄ (h.repr i) b →
+      HDev D h i (h₄.redirect (h.repr i) b) b (insert b D₂)
+  | comp_red {D : Finset Nat} {h h₁ h₂ h₃ h₄ h₅ : Heap}
+      {i l r kl kr kll klr jf jg jx a b : Nat}
+      {D₁ D₂ D₃ : Finset Nat} :
+      h.ns[h.repr i]? = some (GNode.app l r) →
+      h.ns[h.repr l]? = some (GNode.app kl kr) →
+      h.ns[h.repr kl]? = some (GNode.app kll klr) →
+      h.ns[h.repr kll]? = some (GNode.atom GAtom.comp) →
+      h.repr i ∉ D →
+      HDev D h klr h₁ jf D₁ →
+      HDev D₁ h₁ kr h₂ jg D₂ →
+      HDev D₂ h₂ r h₃ jx D₃ →
+      MkApp h₃ jg jx h₄ a → MkApp h₄ jf a h₅ b →
+      RedirectOk h₅ (h.repr i) b →
+      HDev D h i (h₅.redirect (h.repr i) b) b (insert b D₃)
+  | swap_red {D : Finset Nat} {h h₁ h₂ h₃ h₄ h₅ : Heap}
+      {i l r kl kr kll klr jf jx jy a b : Nat}
+      {D₁ D₂ D₃ : Finset Nat} :
+      h.ns[h.repr i]? = some (GNode.app l r) →
+      h.ns[h.repr l]? = some (GNode.app kl kr) →
+      h.ns[h.repr kl]? = some (GNode.app kll klr) →
+      h.ns[h.repr kll]? = some (GNode.atom GAtom.swap) →
+      h.repr i ∉ D →
+      HDev D h klr h₁ jf D₁ →
+      HDev D₁ h₁ kr h₂ jx D₂ →
+      HDev D₂ h₂ r h₃ jy D₃ →
+      MkApp h₃ jf jy h₄ a → MkApp h₄ a jx h₅ b →
+      RedirectOk h₅ (h.repr i) b →
+      HDev D h i (h₅.redirect (h.repr i) b) b (insert b D₃)
+  | app_dev {D : Finset Nat} {h h₁ h₂ h₃ : Heap} {i l r jf jx o : Nat}
+      {D₁ D₂ : Finset Nat} :
+      h.ns[h.repr i]? = some (GNode.app l r) →
+      (∀ W : HeapWf h,
+        isRedexHead (heapUnfold h W (h.repr l)) = false) →
+      h.repr i ∉ D →
+      HDev D h l h₁ jf D₁ →
+      HDev D₁ h₁ r h₂ jx D₂ →
+      MkApp h₂ jf jx h₃ o →
+      RedirectOk h₃ (h.repr i) o →
+      HDev D h i (h₃.redirect (h.repr i) o) o (insert o D₂)
+
+/-- `t` occurs in `u` (reflexive). -/
+inductive Occ (t : ITerm) : ITerm → Prop where
+  | here : Occ t t
+  | left {a b : ITerm} : Occ t a → Occ t (.app a b)
+  | right {a b : ITerm} : Occ t b → Occ t (.app a b)
+
+theorem Occ_trans {t u v : ITerm} (h₁ : Occ t u) (h₂ : Occ u v) :
+    Occ t v := by
+  induction h₂ with
+  | here => exact h₁
+  | left _ ih => exact Occ.left ih
+  | right _ ih => exact Occ.right ih
+
+/-- Term size, for the occurrence/strict-subterm argument. -/
+def tsize : ITerm → Nat
+  | .app f x => tsize f + tsize x + 1
+  | _ => 1
+
+theorem Occ_size {t u : ITerm} (h : Occ t u) : tsize t ≤ tsize u := by
+  induction h with
+  | here => exact Nat.le_refl _
+  | left _ ih =>
+    show tsize t ≤ tsize _ + tsize _ + 1; omega
+  | right _ ih =>
+    show tsize t ≤ tsize _ + tsize _ + 1; omega
+
+/-- `t` occurs strictly inside `u`. -/
+def SOcc (t u : ITerm) : Prop :=
+  ∃ a b, u = .app a b ∧ (Occ t a ∨ Occ t b)
+
+theorem Occ_of_SOcc {a b : ITerm} (h : SOcc a b) : Occ a b := by
+  obtain ⟨x, y, hxy, hmem⟩ := h
+  subst hxy
+  exact hmem.elim Occ.left Occ.right
+
+theorem SOcc_trans {a b c : ITerm} (h₁ : SOcc a b) (h₂ : SOcc b c) :
+    SOcc a c := by
+  obtain ⟨x, y, hxy, hmem⟩ := h₂
+  subst hxy
+  have hab : Occ a b := Occ_of_SOcc h₁
+  exact ⟨x, y, rfl, hmem.elim
+    (fun hb => Or.inl (Occ_trans hab hb))
+    (fun hb => Or.inr (Occ_trans hab hb))⟩
+
+theorem SOcc_size {t u : ITerm} (h : SOcc t u) :
+    tsize t < tsize u := by
+  obtain ⟨a, b, hu, hmem⟩ := h
+  subst hu
+  show tsize t < tsize a + tsize b + 1
+  rcases hmem with hmem | hmem <;>
+    have hle := Occ_size hmem <;> omega
+
+theorem SOcc_irrefl {t : ITerm} : ¬ SOcc t t := by
+  intro h
+  exact absurd (SOcc_size h) (Nat.lt_irrefl _)
+
+/-- A resolved child reads back as a strict subterm. -/
+theorem heapUnfold_child_occ {h : Heap} (hwf : HeapWf h) {j i : Nat}
+    (hc : RChild h j i) :
+    SOcc (heapUnfold h hwf j) (heapUnfold h hwf i) := by
+  obtain ⟨l, r, hnode, hjl⟩ := hc
+  have e : heapUnfold h hwf i =
+      .app (heapUnfold h hwf (h.repr l))
+           (heapUnfold h hwf (h.repr r)) := by
+    conv_lhs => rw [heapUnfold]
+    rw [hnode]
+  rw [e]
+  rcases hjl with hjl | hjl
+  next =>
+    refine ⟨_, _, rfl, Or.inl ?_⟩
+    rw [← hjl]; exact Occ.here
+  next =>
+    refine ⟨_, _, rfl, Or.inr ?_⟩
+    rw [← hjl]; exact Occ.here
+
+/-- Resolved descendants read back as strict subterms. -/
+theorem heapUnfold_occ {h : Heap} (hwf : HeapWf h) {j i : Nat}
+    (hsub : RSub h j i) :
+    SOcc (heapUnfold h hwf j) (heapUnfold h hwf i) := by
+  induction hsub with
+  | single hc => exact heapUnfold_child_occ hwf hc
+  | tail _ hstep ih =>
+    exact SOcc_trans ih (heapUnfold_child_occ hwf hstep)
+
+/-- Below `dst`, the redirect is invisible to readback: any node in
+    `dst`'s post-redirect subtree either is `dst` or reads back
+    identically to before.  Positions resolving to `src` would force
+    `unfold' dst` to be a strict subterm of itself. -/
+theorem heapUnfold_redirect_below {h : Heap} (hwf : HeapWf h)
+    {src dst : Nat}
+    (hsrc : h.fw[src]? = some none) (hdst : h.fw[dst]? = some none)
+    (hne : src ≠ dst) (hguard : ¬ RSub h src dst) :
+    ∀ i, i = dst ∨ RSub (h.redirect src dst) i dst →
+      heapUnfold (h.redirect src dst)
+        (HeapWf_redirect hwf hsrc hdst hne hguard) i =
+      heapUnfold h hwf i := by
+  intro i
+  generalize hcard : (RSubSet (h.redirect src dst) i).card = m
+  induction m using Nat.strong_induction_on generalizing i with
+  | h m ih =>
+    intro hbel
+    set hwf' := HeapWf_redirect hwf hsrc hdst hne hguard with hwf'e
+    have hlen : (h.redirect src dst).len = h.len := rfl
+    have hi : i < h.len := by
+      rcases hbel with hii | hsub
+      next =>
+        rw [hii, Heap.len_eq, ← hwf.fwlen]
+        exact (List.getElem?_eq_some_iff.1 hdst).1
+      next =>
+        induction hsub using Relation.TransGen.head_induction_on with
+        | single hstep =>
+          have hlt := RChild_lt hwf' hstep
+          rw [hlen] at hlt; exact hlt
+        | head hstep _hsub _ih =>
+          have hlt := RChild_lt hwf' hstep
+          rw [hlen] at hlt; exact hlt
+    have hlt : i < h.fw.length := by rw [hwf.fwlen]; exact hi
+    rcases Nat.decEq (h.repr i) src with hrne | hreq
+    next =>
+      -- `repr i ≠ src`: the node is read as before; children by ih.
+      have hri' : (h.redirect src dst).repr i = h.repr i := by
+        rw [Heap.repr_redirect hwf.fwok hsrc hdst hne hlt, if_neg hrne]
+      have hb : h.repr i < h.ns.length := by
+        rw [← hwf.fwlen]; exact (h.repr_spec hwf.fwok hlt).1
+      rcases hnode : h.ns[h.repr i]? with _ | g
+      next =>
+        exfalso
+        rw [List.getElem?_eq_none_iff] at hnode; omega
+      next =>
+        cases g with
+        | atom a =>
+          have hnc : (h.redirect src dst).ns[h.repr i]? =
+              some (GNode.atom a) := hnode
+          have e1 : heapUnfold h hwf i = a.toTerm := by
+            conv_lhs => rw [heapUnfold]; rw [hnode]
+          have e2 : heapUnfold (h.redirect src dst) hwf' i =
+              a.toTerm := by
+            conv_lhs => rw [heapUnfold]; rw [hri', hnc]
+          rw [e1, e2]
+        | var n =>
+          have hnc : (h.redirect src dst).ns[h.repr i]? =
+              some (GNode.var n) := hnode
+          have e1 : heapUnfold h hwf i = .var n := by
+            conv_lhs => rw [heapUnfold]; rw [hnode]
+          have e2 : heapUnfold (h.redirect src dst) hwf' i =
+              .var n := by
+            conv_lhs => rw [heapUnfold]; rw [hri', hnc]
+          rw [e1, e2]
+        | app l r =>
+          obtain ⟨hplt, hget⟩ := List.getElem?_eq_some_iff.1 hnode
+          obtain ⟨hllt, hrlt⟩ := hwf.dagwf (h.repr i) hplt l r hget
+          have hll : l < h.fw.length := by
+            rw [hwf.fwlen]; exact lt_trans hllt hb
+          have hrr : r < h.fw.length := by
+            rw [hwf.fwlen]; exact lt_trans hrlt hb
+          have hnc : (h.redirect src dst).ns[h.repr i]? =
+              some (GNode.app l r) := hnode
+          have hnc' : (h.redirect src dst).ns[(h.redirect src dst).repr i]? =
+              some (GNode.app l r) := by
+            rw [hri']; exact hnc
+          have e1 : heapUnfold h hwf i =
+              .app (heapUnfold h hwf (h.repr l))
+                   (heapUnfold h hwf (h.repr r)) := by
+            conv_lhs => rw [heapUnfold]
+            rw [hnode]
+          have e2 : heapUnfold (h.redirect src dst) hwf' i =
+              .app (heapUnfold (h.redirect src dst) hwf'
+                     ((h.redirect src dst).repr l))
+                   (heapUnfold (h.redirect src dst) hwf'
+                     ((h.redirect src dst).repr r)) := by
+            conv_lhs => rw [heapUnfold]
+            rw [hri', hnc]
+          -- each child: `repr' c = dst` is either a cycle (dead) or the
+          -- `repr c = dst` case; otherwise `repr' c = repr c` and ih.
+          have child : ∀ c : Nat, c < h.fw.length →
+              RChild (h.redirect src dst)
+                ((h.redirect src dst).repr c) i →
+              heapUnfold (h.redirect src dst) hwf'
+                ((h.redirect src dst).repr c) =
+              heapUnfold h hwf (h.repr c) := by
+            intro c hcw hcc
+            have hcre : (h.redirect src dst).repr c =
+                if h.repr c = src then dst else h.repr c :=
+              Heap.repr_redirect hwf.fwok hsrc hdst hne hcw
+            have hsubc : RSub (h.redirect src dst)
+                ((h.redirect src dst).repr c) i :=
+              Relation.TransGen.single hcc
+            have hbelc : (h.redirect src dst).repr c = dst ∨
+                RSub (h.redirect src dst)
+                  ((h.redirect src dst).repr c) dst := by
+              rcases hbel with hii | hsi
+              next =>
+                rw [hii] at hsubc
+                exact Or.inr hsubc
+              next =>
+                exact Or.inr (Relation.TransGen.trans hsubc hsi)
+            have hdec : (RSubSet (h.redirect src dst)
+                ((h.redirect src dst).repr c)).card < m := by
+              rw [← hcard]; exact RSubSet_lt hwf' hcc
+            rcases Nat.decEq ((h.redirect src dst).repr c) dst
+              with hcd | hcd
+            next =>
+              -- `repr' c ≠ dst`: `repr c` can't be `src`, so `repr' c =
+              -- repr c` and the ih applies.
+              have hcs : h.repr c ≠ src := by
+                intro hcs
+                rw [hcre, if_pos hcs] at hcd
+                exact hcd rfl
+              have hcre' : (h.redirect src dst).repr c = h.repr c := by
+                rw [hcre, if_neg hcs]
+              have eih := ih _ hdec ((h.redirect src dst).repr c)
+                rfl hbelc
+              rw [hcre'] at eih ⊢
+              exact eih
+            next =>
+              -- `repr' c = dst`: `repr c = src` would cycle back into
+              -- `dst`'s subtree; `repr c = dst` closes via ih at `dst`.
+              rcases Nat.decEq (h.repr c) src with hcs | hcs
+              next =>
+                have hcd' : h.repr c = dst := by
+                  have h0 := hcd
+                  rw [hcre, if_neg hcs] at h0
+                  exact h0
+                have hcc' : RChild (h.redirect src dst) dst i := by
+                  obtain ⟨l', r', hn', hm'⟩ := hcc
+                  exact ⟨l', r', hn', hm'.elim
+                    (fun e => Or.inl (e.trans hcd))
+                    (fun e => Or.inr (e.trans hcd))⟩
+                have hdec' : (RSubSet (h.redirect src dst) dst).card
+                    < m := by
+                  rw [← hcard]; exact RSubSet_lt hwf' hcc'
+                have eih := ih _ hdec' dst rfl (Or.inl rfl)
+                rw [hcd, hcd']
+                exact eih
+              next =>
+                exfalso
+                have hcc' : RChild (h.redirect src dst) dst i := by
+                  obtain ⟨l', r', hn', hm'⟩ := hcc
+                  exact ⟨l', r', hn', hm'.elim
+                    (fun e => Or.inl (e.trans hcd))
+                    (fun e => Or.inr (e.trans hcd))⟩
+                have hdsub : RSub (h.redirect src dst) dst dst := by
+                  rcases hbel with hii | hsi
+                  next =>
+                    have hs := Relation.TransGen.single hcc'
+                    rw [hii] at hs
+                    exact hs
+                  next =>
+                    exact Relation.TransGen.trans
+                      (Relation.TransGen.single hcc') hsi
+                exact hwf'.acyc dst hdsub
+          have ecl := child l hll ⟨l, r, hnc', Or.inl rfl⟩
+          have ecr := child r hrr ⟨l, r, hnc', Or.inr rfl⟩
+          rw [e1, e2, ecl, ecr]
+    next =>
+      -- `repr i = src`: below `dst` this is impossible — it would make
+      -- `unfold' dst` a strict subterm of itself.
+      exfalso
+      have hri' : (h.redirect src dst).repr i = dst := by
+        rw [Heap.repr_redirect hwf.fwok hsrc hdst hne hlt, if_pos hreq]
+      rcases hbel with hii | hsi
+      next =>
+        rw [hii] at hreq
+        have hrd : h.repr dst = dst := by
+          show (resolveS h.fw ∅ dst).getD dst = dst
+          rw [resolveS_rep (by simp) hdst]
+          rfl
+        rw [hrd] at hreq
+        exact hne hreq.symm
+      next =>
+        have hi' : i < (h.redirect src dst).len := by
+          rw [hlen]; exact hi
+        have e : heapUnfold (h.redirect src dst) hwf' i =
+            heapUnfold (h.redirect src dst) hwf' dst := by
+          rw [heapUnfold_repr hwf' hi', hri']
+        have hocc := heapUnfold_occ hwf' hsi
+        rw [e] at hocc
+        exact SOcc_irrefl hocc
+
+/-- Allocation does not change old readbacks. -/
+theorem heapUnfold_push {h : Heap} (hwf : HeapWf h) {n : GNode}
+    (hn : ∀ l r, n = GNode.app l r → l < h.len ∧ r < h.len)
+    (hwf' : HeapWf (h.push n)) :
+    ∀ i, i < h.len →
+      heapUnfold (h.push n) hwf' i = heapUnfold h hwf i := by
+  intro i
+  generalize hcard : (RSubSet h i).card = m
+  induction m using Nat.strong_induction_on generalizing i with
+  | h m ih =>
+    intro hi
+    have hif : i < h.fw.length := by rw [hwf.fwlen]; exact hi
+    have hri : (h.push n).repr i = h.repr i :=
+      Heap.repr_push hwf.fwok n hif
+    have hrb : h.repr i < h.ns.length := by
+      rw [← hwf.fwlen]; exact (h.repr_spec hwf.fwok hif).1
+    rcases hnode : h.ns[h.repr i]? with _ | g
+    next =>
+      exfalso
+      rw [List.getElem?_eq_none_iff] at hnode; omega
+    next =>
+      have hnode' : (h.push n).ns[h.repr i]? = some g := by
+        show (h.ns ++ [n])[h.repr i]? = some g
+        rw [List.getElem?_append_left hrb]; exact hnode
+      cases g with
+      | atom a =>
+        have e1 : heapUnfold h hwf i = a.toTerm := by
+          conv_lhs => rw [heapUnfold]; rw [hnode]
+        have e2 : heapUnfold (h.push n) hwf' i = a.toTerm := by
+          conv_lhs => rw [heapUnfold]; rw [hri, hnode']
+        rw [e1, e2]
+      | var k =>
+        have e1 : heapUnfold h hwf i = .var k := by
+          conv_lhs => rw [heapUnfold]; rw [hnode]
+        have e2 : heapUnfold (h.push n) hwf' i = .var k := by
+          conv_lhs => rw [heapUnfold]; rw [hri, hnode']
+        rw [e1, e2]
+      | app l r =>
+        obtain ⟨hplt, hget⟩ := List.getElem?_eq_some_iff.1 hnode
+        obtain ⟨hllt, hrlt⟩ := hwf.dagwf (h.repr i) hplt l r hget
+        have hll : l < h.fw.length := by rw [hwf.fwlen]; omega
+        have hrr : r < h.fw.length := by rw [hwf.fwlen]; omega
+        have hrl : (h.push n).repr l = h.repr l :=
+          Heap.repr_push hwf.fwok n hll
+        have hrrp : (h.push n).repr r = h.repr r :=
+          Heap.repr_push hwf.fwok n hrr
+        have e1 : heapUnfold h hwf i =
+            .app (heapUnfold h hwf (h.repr l))
+                 (heapUnfold h hwf (h.repr r)) := by
+          conv_lhs => rw [heapUnfold]; rw [hnode]
+        have e2 : heapUnfold (h.push n) hwf' i =
+            .app (heapUnfold (h.push n) hwf' ((h.push n).repr l))
+                 (heapUnfold (h.push n) hwf' ((h.push n).repr r)) := by
+          conv_lhs => rw [heapUnfold]
+          rw [hri]; rw [show (h.push n).ns[h.repr i]? = _ from hnode']
+        rw [e1, e2, hrl, hrrp]
+        have hcl : RChild h (h.repr l) i := ⟨l, r, hnode, Or.inl rfl⟩
+        have hcr : RChild h (h.repr r) i := ⟨l, r, hnode, Or.inr rfl⟩
+        have hlb : h.repr l < h.len := by
+          rw [Heap.len_eq]; show h.repr l < h.ns.length
+          rw [← hwf.fwlen]; exact (h.repr_spec hwf.fwok hll).1
+        have hrb2 : h.repr r < h.len := by
+          rw [Heap.len_eq]; show h.repr r < h.ns.length
+          rw [← hwf.fwlen]; exact (h.repr_spec hwf.fwok hrr).1
+        have ihl := ih _ (by rw [← hcard]; exact RSubSet_lt hwf hcl)
+          (h.repr l) rfl hlb
+        have ihr := ih _ (by rw [← hcard]; exact RSubSet_lt hwf hcr)
+          (h.repr r) rfl hrb2
+        rw [ihl, ihr]
+
+/-- Heap evolution: `h'` grew from `h` (indices stable, table extended)
+    and every old readback joins the new one — redirects splice
+    developed results into old positions. -/
+def HLe {h h' : Heap} (hwf : HeapWf h) (hwf' : HeapWf h') : Prop :=
+  h.len ≤ h'.len ∧
+    ∀ j, j < h.len → Join (heapUnfold h hwf j) (heapUnfold h' hwf' j)
+
+theorem HLe.refl {h : Heap} (hwf : HeapWf h) : HLe hwf hwf :=
+  ⟨Nat.le_refl _, fun _ _ => Join.refl _⟩
+
+theorem HLe.trans {h₁ h₂ h₃ : Heap} {w₁ : HeapWf h₁} {w₂ : HeapWf h₂}
+    {w₃ : HeapWf h₃} (h12 : HLe w₁ w₂) (h23 : HLe w₂ w₃) :
+    HLe w₁ w₃ := by
+  refine ⟨h12.1.trans h23.1, ?_⟩
+  intro j hj
+  exact Join.trans (h12.2 j hj)
+    (h23.2 j (Nat.lt_of_lt_of_le hj h12.1))
+
+/-- Allocation extends the heap order. -/
+theorem HLe.push {h : Heap} (hwf : HeapWf h) {n : GNode}
+    (hn : ∀ l r, n = GNode.app l r → l < h.len ∧ r < h.len) :
+    HLe hwf (HeapWf_push hwf hn) := by
+  refine ⟨?_, ?_⟩
+  next =>
+    show h.ns.length ≤ (h.ns ++ [n]).length
+    rw [List.length_append]; omega
+  next =>
+    intro j hj
+    rw [heapUnfold_push hwf hn (HeapWf_push hwf hn) j hj]
+    exact Join.refl _
+
+/-- A sound redirect extends the heap order: every old readback gets
+    `src`-subtrees spliced to `dst`, and the two join. -/
+theorem HLe.redirect {h : Heap} (hwf : HeapWf h) {src dst : Nat}
+    (hok : RedirectOk h src dst)
+    (hsd : Join (heapUnfold h hwf src) (heapUnfold h hwf dst)) :
+    HLe hwf (HeapWf_redirect hwf hok.1 hok.2.1 hok.2.2.1 hok.2.2.2) := by
+  refine ⟨Nat.le_refl _, ?_⟩
+  intro j _
+  have hsp := heapUnfold_redirect hwf hok.1 hok.2.1 hok.2.2.1 hok.2.2.2 j
+  have hself : heapUnfold (h.redirect src dst)
+      (HeapWf_redirect hwf hok.1 hok.2.1 hok.2.2.1 hok.2.2.2) dst =
+      heapUnfold h hwf dst :=
+    heapUnfold_redirect_below hwf hok.1 hok.2.1 hok.2.2.1 hok.2.2.2 dst
+      (Or.inl rfl)
+  rw [hself] at hsp
+  exact Splice_join hsp hsd
+
+/-- `mk_app` extends the heap order. -/
+theorem MkApp_hle {h h' : Heap} {l r o : Nat} (hwf : HeapWf h)
+    (hwf' : HeapWf h') (hm : MkApp h l r h' o) : HLe hwf hwf' := by
+  rcases hm with ⟨hhp, -, hlb, hrb⟩ | ⟨hhe, -, -, -⟩
+  next =>
+    subst hhp
+    exact HLe.push hwf (fun l0 r0 e => by
+      cases e; exact ⟨hlb, hrb⟩)
+  next =>
+    subst hhe
+    exact HLe.refl hwf
+
+/-- The `mk_app` readback spec: the output unfolds to the application
+    of the argument readbacks, up to joining. -/
+theorem MkApp_join {h h' : Heap} {l r o : Nat}
+    (hwf : HeapWf h) (hwf' : HeapWf h') (hm : MkApp h l r h' o) :
+    Join (heapUnfold h' hwf' o)
+      (.app (heapUnfold h' hwf' l) (heapUnfold h' hwf' r)) := by
+  rcases hm with ⟨hhp, hoe, hlb, hrb⟩ | ⟨hhe, -, -, hj⟩
+  next =>
+    subst hhp; subst hoe
+    -- `o = h.len` is fresh: its readback is exactly `app l r`.
+    have hre : (h.push (GNode.app l r)).repr h.len = h.len := by
+      show (resolveS (h.fw ++ [none]) ∅ h.ns.length).getD h.ns.length =
+          h.ns.length
+      rw [← hwf.fwlen]
+      rw [resolveS, if_neg (by simp)]
+      rw [List.getElem?_append_right (Nat.le_refl _), Nat.sub_self]
+      rfl
+    have e : heapUnfold (h.push (GNode.app l r)) hwf' h.len =
+        .app (heapUnfold (h.push (GNode.app l r)) hwf'
+               ((h.push (GNode.app l r)).repr l))
+             (heapUnfold (h.push (GNode.app l r)) hwf'
+               ((h.push (GNode.app l r)).repr r)) := by
+      conv_lhs => rw [heapUnfold]
+      rw [hre]
+      rw [show (h.push (GNode.app l r)).ns[h.len]? =
+          some (GNode.app l r) from by
+        show (h.ns ++ [GNode.app l r])[h.ns.length]? = _
+        rw [List.getElem?_append_right (Nat.le_refl _), Nat.sub_self]
+        rfl]
+    rw [e]
+    have hnl : ∀ l0 r0, GNode.app l r = GNode.app l0 r0 →
+        l0 < h.len ∧ r0 < h.len := fun l0 r0 e0 => by
+      cases e0; exact ⟨hlb, hrb⟩
+    have hlp : (h.push (GNode.app l r)).repr l = h.repr l :=
+      Heap.repr_push hwf.fwok _ (by rw [hwf.fwlen]; exact hlb)
+    have hrp : (h.push (GNode.app l r)).repr r = h.repr r :=
+      Heap.repr_push hwf.fwok _ (by rw [hwf.fwlen]; exact hrb)
+    have hrlb : h.repr l < h.len := by
+      rw [Heap.len_eq, ← hwf.fwlen]
+      exact (h.repr_spec hwf.fwok (by rw [hwf.fwlen]; exact hlb)).1
+    have hrrb : h.repr r < h.len := by
+      rw [Heap.len_eq, ← hwf.fwlen]
+      exact (h.repr_spec hwf.fwok (by rw [hwf.fwlen]; exact hrb)).1
+    rw [hlp, hrp,
+        heapUnfold_push hwf hnl hwf' (h.repr l) hrlb,
+        heapUnfold_push hwf hnl hwf' (h.repr r) hrrb,
+        heapUnfold_push hwf hnl hwf' l hlb,
+        heapUnfold_push hwf hnl hwf' r hrb,
+        heapUnfold_repr hwf hlb, heapUnfold_repr hwf hrb]
+    exact Join.refl _
+  next =>
+    subst hhe; exact hj hwf'
+
+/-- The `mk_app` output is an in-range rep. -/
+theorem MkApp_out {h h' : Heap} {l r o : Nat} (hwf : HeapWf h)
+    (hm : MkApp h l r h' o) :
+    o < h'.len ∧ h'.fw[o]? = some none := by
+  rcases hm with ⟨hhp, hoe, -, -⟩ | ⟨hhe, holt, horep, -⟩
+  next =>
+    subst hhp; subst hoe
+    refine ⟨?_, ?_⟩
+    next =>
+      show h.ns.length < (h.ns ++ [GNode.app l r]).length
+      rw [List.length_append]; simp
+    next =>
+      show (h.fw ++ [none])[h.ns.length]? = some none
+      rw [← hwf.fwlen]
+      rw [List.getElem?_append_right (Nat.le_refl _), Nat.sub_self]
+      rfl
+  next =>
+    subst hhe; exact ⟨holt, horep⟩
+
+/-- `repr` stays in range. -/
+theorem Heap.repr_lt {h : Heap} (hwf : HeapWf h) {i : Nat}
+    (hi : i < h.len) : h.repr i < h.len := by
+  have hb := (h.repr_spec hwf.fwok (by rw [hwf.fwlen]; exact hi)).1
+  rw [hwf.fwlen] at hb; exact hb
+
+/-- Left child of an in-range app node is in range. -/
+theorem heap_child_lt_l {h : Heap} (hwf : HeapWf h) {p c r : Nat}
+    (hp : p < h.len) (hn : h.ns[p]? = some (GNode.app c r)) :
+    c < h.len := by
+  obtain ⟨hplt, hget⟩ := List.getElem?_eq_some_iff.1 hn
+  exact Nat.lt_trans (hwf.dagwf p hplt c r hget).1 hp
+
+/-- Right child of an in-range app node is in range. -/
+theorem heap_child_lt_r {h : Heap} (hwf : HeapWf h) {p c r : Nat}
+    (hp : p < h.len) (hn : h.ns[p]? = some (GNode.app c r)) :
+    r < h.len := by
+  obtain ⟨hplt, hget⟩ := List.getElem?_eq_some_iff.1 hn
+  exact Nat.lt_trans (hwf.dagwf p hplt c r hget).2 hp
+
+/-- Readback of an atom node. -/
+theorem heapUnfold_atom {h : Heap} (hwf : HeapWf h) {i : Nat} {a : GAtom}
+    (hn : h.ns[h.repr i]? = some (GNode.atom a)) :
+    heapUnfold h hwf i = a.toTerm := by
+  conv_lhs => rw [heapUnfold]; rw [hn]
+
+/-- Readback of a var node. -/
+theorem heapUnfold_var {h : Heap} (hwf : HeapWf h) {i n : Nat}
+    (hn : h.ns[h.repr i]? = some (GNode.var n)) :
+    heapUnfold h hwf i = .var n := by
+  conv_lhs => rw [heapUnfold]; rw [hn]
+
+/-- Readback of an app node. -/
+theorem heapUnfold_app {h : Heap} (hwf : HeapWf h) {i l r : Nat}
+    (hn : h.ns[h.repr i]? = some (GNode.app l r)) :
+    heapUnfold h hwf i =
+      .app (heapUnfold h hwf (h.repr l)) (heapUnfold h hwf (h.repr r)) := by
+  conv_lhs => rw [heapUnfold]; rw [hn]
+
+/-- The resolved-node redex check computes the term-level redex head
+    of the left child's readback — the host correspondence for `cd`'s
+    fall-through branch. -/
+theorem isRedexNodeR_eq {h : Heap} (hwf : HeapWf h) {i l r : Nat}
+    (hn : h.ns[h.repr i]? = some (GNode.app l r)) :
+    isRedexNodeR h (h.repr i) =
+      isRedexHead (heapUnfold h hwf (h.repr l)) := by
+  have hplt : h.repr i < h.len := (List.getElem?_eq_some_iff.1 hn).1
+  have hlt : l < h.len := heap_child_lt_l hwf hplt hn
+  have hrl : h.repr l < h.len := h.repr_lt hwf hlt
+  have hidem : h.repr (h.repr l) = h.repr l :=
+    Heap.repr_idem hwf.fwok (by rw [hwf.fwlen]; exact hlt)
+  simp only [isRedexNodeR, hn]
+  cases hgl : h.ns[h.repr l]? with
+  | none =>
+      exfalso
+      rw [List.getElem?_eq_none_iff] at hgl
+      have hb : h.repr l < h.ns.length := hrl
+      omega
+  | some gl =>
+      cases gl with
+      | atom a =>
+          have hgl' : h.ns[h.repr (h.repr l)]? = some (.atom a) := by
+            rw [hidem]; exact hgl
+          rw [heapUnfold_atom hwf hgl']
+          cases a <;> rfl
+      | var n =>
+          have hgl' : h.ns[h.repr (h.repr l)]? = some (.var n) := by
+            rw [hidem]; exact hgl
+          rw [heapUnfold_var hwf hgl']
+          rfl
+      | app kl kr =>
+          have hgl' : h.ns[h.repr (h.repr l)]? = some (.app kl kr) := by
+            rw [hidem]; exact hgl
+          rw [heapUnfold_app hwf hgl']
+          have hklt : kl < h.len := heap_child_lt_l hwf hrl hgl
+          have hrk : h.repr kl < h.len := h.repr_lt hwf hklt
+          have hidemk : h.repr (h.repr kl) = h.repr kl :=
+            Heap.repr_idem hwf.fwok (by rw [hwf.fwlen]; exact hklt)
+          simp only []
+          cases hgk : h.ns[h.repr kl]? with
+          | none =>
+              exfalso
+              rw [List.getElem?_eq_none_iff] at hgk
+              have hb : h.repr kl < h.ns.length := hrk
+              omega
+          | some gk =>
+              cases gk with
+              | atom a =>
+                  have hgk' : h.ns[h.repr (h.repr kl)]? =
+                      some (.atom a) := by
+                    rw [hidemk]; exact hgk
+                  rw [heapUnfold_atom hwf hgk']
+                  cases a <;> rfl
+              | var n =>
+                  have hgk' : h.ns[h.repr (h.repr kl)]? =
+                      some (.var n) := by
+                    rw [hidemk]; exact hgk
+                  rw [heapUnfold_var hwf hgk']
+                  rfl
+              | app kll klr =>
+                  have hgk' : h.ns[h.repr (h.repr kl)]? =
+                      some (.app kll klr) := by
+                    rw [hidemk]; exact hgk
+                  rw [heapUnfold_app hwf hgk']
+                  have hkllt : kll < h.len :=
+                    heap_child_lt_l hwf hrk hgk
+                  have hrkl : h.repr kll < h.len :=
+                    h.repr_lt hwf hkllt
+                  have hideml : h.repr (h.repr kll) = h.repr kll :=
+                    Heap.repr_idem hwf.fwok
+                      (by rw [hwf.fwlen]; exact hkllt)
+                  simp only []
+                  cases hgl2 : h.ns[h.repr kll]? with
+                  | none =>
+                      exfalso
+                      rw [List.getElem?_eq_none_iff] at hgl2
+                      have hb : h.repr kll < h.ns.length := hrkl
+                      omega
+                  | some g2 =>
+                      cases g2 with
+                      | atom a =>
+                          have hgl2' : h.ns[h.repr (h.repr kll)]? =
+                              some (.atom a) := by
+                            rw [hideml]; exact hgl2
+                          rw [heapUnfold_atom hwf hgl2']
+                          cases a <;> rfl
+                      | var n =>
+                          have hgl2' : h.ns[h.repr (h.repr kll)]? =
+                              some (.var n) := by
+                            rw [hideml]; exact hgl2
+                          rw [heapUnfold_var hwf hgl2']
+                          rfl
+                      | app ka kb =>
+                          have hgl2' : h.ns[h.repr (h.repr kll)]? =
+                              some (.app ka kb) := by
+                            rw [hideml]; exact hgl2
+                          rw [heapUnfold_app hwf hgl2']
+                          rfl
+
+/-- `mk_app` preserves well-formedness; the output is an in-range
+    rep. -/
+theorem MkApp_wf {h h' : Heap} {l r o : Nat} (hwf : HeapWf h)
+    (hm : MkApp h l r h' o) (hl : l < h.len) (hr : r < h.len) :
+    ∃ hwf' : HeapWf h', h.len ≤ h'.len ∧ o < h'.len ∧
+      h'.fw[o]? = some none := by
+  rcases hm with ⟨hhp, hoe, -, -⟩ | ⟨hhe, holt, horep, -⟩
+  next =>
+    subst hhp; subst hoe
+    refine ⟨HeapWf_push hwf (fun l0 r0 e0 => by
+      cases e0; exact ⟨hl, hr⟩), ?_, ?_, ?_⟩
+    next =>
+      show h.ns.length ≤ (h.ns ++ [GNode.app l r]).length
+      rw [List.length_append]; omega
+    next =>
+      show h.ns.length < (h.ns ++ [GNode.app l r]).length
+      rw [List.length_append]; simp
+    next =>
+      show (h.fw ++ [none])[h.ns.length]? = some none
+      rw [← hwf.fwlen]
+      rw [List.getElem?_append_right (Nat.le_refl _), Nat.sub_self]
+      rfl
+  next =>
+    subst hhe; exact ⟨hwf, Nat.le_refl _, holt, horep⟩
+
+/-- `HDev` preserves heap well-formedness: heaps only grow and the
+    output index is in range. -/
+theorem HDev_wf {D D' : Finset Nat} {h h' : Heap} {i o : Nat}
+    (hd : HDev D h i h' o D') (hwf : HeapWf h) (hi : i < h.len) :
+    ∃ hwf' : HeapWf h', h.len ≤ h'.len ∧ o < h'.len := by
+  induction hd with
+  | hit =>
+      exact ⟨hwf, Nat.le_refl _, Heap.repr_lt hwf hi⟩
+  | atom hn hmem =>
+      exact ⟨hwf, Nat.le_refl _, Heap.repr_lt hwf hi⟩
+  | var hn hmem =>
+      exact ⟨hwf, Nat.le_refl _, Heap.repr_lt hwf hi⟩
+  | norm_red hn_i hn_l hmem hdr hok ih =>
+      have hrlt := heap_child_lt_r hwf (Heap.repr_lt hwf hi) hn_i
+      obtain ⟨w₁, hle1, hjlt⟩ := ih hwf hrlt
+      exact ⟨HeapWf_redirect w₁ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        hle1, hjlt⟩
+  | konst_red hn_i hn_l hn_kl hmem hdr hok ih =>
+      have hrilt := Heap.repr_lt hwf hi
+      have hrllt := Heap.repr_lt hwf (heap_child_lt_l hwf hrilt hn_i)
+      have hkrlt := heap_child_lt_r hwf hrllt hn_l
+      obtain ⟨w₁, hle1, hjlt⟩ := ih hwf hkrlt
+      exact ⟨HeapWf_redirect w₁ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        hle1, hjlt⟩
+  | dup_red hn_i hn_l hn_kl hmem hdrx hdrf hmk1 hmk2 hok ihx ihf =>
+      have hrilt := Heap.repr_lt hwf hi
+      have hrlt := heap_child_lt_r hwf hrilt hn_i
+      have hrllt := Heap.repr_lt hwf (heap_child_lt_l hwf hrilt hn_i)
+      have hkrlt := heap_child_lt_r hwf hrllt hn_l
+      obtain ⟨w₁, le1, jxlt⟩ := ihx hwf hrlt
+      obtain ⟨w₂, le2, jflt⟩ := ihf w₁
+        (Nat.lt_of_lt_of_le hkrlt le1)
+      obtain ⟨w₃, le3, halt, -⟩ := MkApp_wf w₂ hmk1 jflt
+        (Nat.lt_of_lt_of_le jxlt le2)
+      obtain ⟨w₄, le4, hblt, -⟩ := MkApp_wf w₃ hmk2 halt
+        (Nat.lt_of_lt_of_le jxlt (le2.trans le3))
+      exact ⟨HeapWf_redirect w₄ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        le1.trans (le2.trans (le3.trans le4)), hblt⟩
+  | comp_red hn_i hn_l hn_kl hn_kll hmem hdf hdg hdx hmk1 hmk2 hok
+      ihf ihg ihx =>
+      have hrilt := Heap.repr_lt hwf hi
+      have hrlt := heap_child_lt_r hwf hrilt hn_i
+      have hrllt := Heap.repr_lt hwf (heap_child_lt_l hwf hrilt hn_i)
+      have hkrlt := heap_child_lt_r hwf hrllt hn_l
+      have hrkllt := Heap.repr_lt hwf (heap_child_lt_l hwf hrllt hn_l)
+      have hklrlt := heap_child_lt_r hwf hrkllt hn_kl
+      obtain ⟨w₁, le1, jflt⟩ := ihf hwf hklrlt
+      obtain ⟨w₂, le2, jglt⟩ := ihg w₁
+        (Nat.lt_of_lt_of_le hkrlt le1)
+      obtain ⟨w₃, le3, jxlt⟩ := ihx w₂
+        (Nat.lt_of_lt_of_le hrlt (le1.trans le2))
+      obtain ⟨w₄, le4, halt, -⟩ := MkApp_wf w₃ hmk1
+        (Nat.lt_of_lt_of_le jglt le3) jxlt
+      obtain ⟨w₅, le5, hblt, -⟩ := MkApp_wf w₄ hmk2
+        (Nat.lt_of_lt_of_le jflt (le2.trans (le3.trans le4))) halt
+      exact ⟨HeapWf_redirect w₅ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        le1.trans (le2.trans (le3.trans (le4.trans le5))), hblt⟩
+  | swap_red hn_i hn_l hn_kl hn_kll hmem hdf hdx hdy hmk1 hmk2 hok
+      ihf ihx ihy =>
+      have hrilt := Heap.repr_lt hwf hi
+      have hrlt := heap_child_lt_r hwf hrilt hn_i
+      have hrllt := Heap.repr_lt hwf (heap_child_lt_l hwf hrilt hn_i)
+      have hkrlt := heap_child_lt_r hwf hrllt hn_l
+      have hrkllt := Heap.repr_lt hwf (heap_child_lt_l hwf hrllt hn_l)
+      have hklrlt := heap_child_lt_r hwf hrkllt hn_kl
+      obtain ⟨w₁, le1, jflt⟩ := ihf hwf hklrlt
+      obtain ⟨w₂, le2, jxlt⟩ := ihx w₁
+        (Nat.lt_of_lt_of_le hkrlt le1)
+      obtain ⟨w₃, le3, jylt⟩ := ihy w₂
+        (Nat.lt_of_lt_of_le hrlt (le1.trans le2))
+      obtain ⟨w₄, le4, halt, -⟩ := MkApp_wf w₃ hmk1
+        (Nat.lt_of_lt_of_le jflt (le2.trans le3)) jylt
+      obtain ⟨w₅, le5, hblt, -⟩ := MkApp_wf w₄ hmk2 halt
+        (Nat.lt_of_lt_of_le jxlt (le3.trans le4))
+      exact ⟨HeapWf_redirect w₅ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        le1.trans (le2.trans (le3.trans (le4.trans le5))), hblt⟩
+  | app_dev hn_i hguard hmem hdl hdr hmk hok ihl ihr =>
+      have hrilt := Heap.repr_lt hwf hi
+      have hllt := heap_child_lt_l hwf hrilt hn_i
+      have hrlt := heap_child_lt_r hwf hrilt hn_i
+      obtain ⟨w₁, le1, jflt⟩ := ihl hwf hllt
+      obtain ⟨w₂, le2, jxlt⟩ := ihr w₁
+        (Nat.lt_of_lt_of_le hrlt le1)
+      obtain ⟨w₃, le3, holt, -⟩ := MkApp_wf w₂ hmk
+        (Nat.lt_of_lt_of_le jflt le2) jxlt
+      exact ⟨HeapWf_redirect w₃ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        le1.trans (le2.trans le3), holt⟩
+
+/-- **Soundness of heap-level complete development.**  The output
+    readback joins `cdBasis` of the input readback — `GraphDev`'s
+    `DevRel_sound` lifted through forwarding redirects, allocation, and
+    hash-consing (`MkApp`).  `HLe` records that intermediate heaps only
+    splice developed results into old positions. -/
+theorem HDev_sound {D D' : Finset Nat} {h h' : Heap} {i o : Nat}
+    (hwf : HeapWf h) (hd : HDev D h i h' o D') (hi : i < h.len) :
+    ∃ hwf' : HeapWf h',
+      o < h'.len ∧ HLe hwf hwf' ∧
+      Join (heapUnfold h' hwf' o) (cdBasis (heapUnfold h hwf i)) := by
+  induction hd with
+  | hit hmem =>
+      rename_i D₀ h i
+      refine ⟨hwf, Heap.repr_lt hwf hi, HLe.refl hwf, ?_⟩
+      rw [← heapUnfold_repr hwf hi]
+      exact Join_of_ired (cdBasis_ired _)
+  | atom hn hmem =>
+      rename_i D₀ h i a
+      refine ⟨hwf, Heap.repr_lt hwf hi, HLe.refl hwf, ?_⟩
+      rw [← heapUnfold_repr hwf hi, heapUnfold_atom hwf hn, cdBasis_atom]
+      exact Join.refl _
+  | var hn hmem =>
+      rename_i D₀ h i n
+      refine ⟨hwf, Heap.repr_lt hwf hi, HLe.refl hwf, ?_⟩
+      rw [← heapUnfold_repr hwf hi, heapUnfold_var hwf hn, cdBasis_var]
+      exact Join.refl _
+  | norm_red hn_i hn_l hmem hdr hok ih =>
+      rename_i D₀ h h₁ i l r j D₁
+      have hrilt : h.repr i < h.len := Heap.repr_lt hwf hi
+      have hllt : l < h.len := heap_child_lt_l hwf hrilt hn_i
+      have hrlt : r < h.len := heap_child_lt_r hwf hrilt hn_i
+      obtain ⟨w₁, hjlt, hle1, ihj⟩ := ih hwf hrlt
+      have e_l : heapUnfold h hwf (h.repr l) = .norm := by
+        rw [← heapUnfold_repr hwf hllt]
+        exact heapUnfold_atom hwf hn_l
+      have e_i : heapUnfold h hwf i =
+          .app .norm (heapUnfold h hwf (h.repr r)) := by
+        rw [heapUnfold_app hwf hn_i, e_l]
+      have hcd : cdBasis (heapUnfold h hwf i) =
+          cdBasis (heapUnfold h hwf r) := by
+        rw [e_i]
+        show cdBasis (heapUnfold h hwf (h.repr r)) =
+            cdBasis (heapUnfold h hwf r)
+        rw [← heapUnfold_repr hwf hrlt]
+      have ihj' : Join (heapUnfold h₁ w₁ j)
+          (cdBasis (heapUnfold h hwf i)) := by
+        rw [hcd]; exact ihj
+      have hsd : Join (heapUnfold h₁ w₁ (h.repr i))
+          (heapUnfold h₁ w₁ j) := by
+        have h1 := (hle1.2 (h.repr i) hrilt).symm
+        rw [← heapUnfold_repr hwf hi] at h1
+        exact h1.trans (Join_cd_left ihj')
+      refine ⟨HeapWf_redirect w₁ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        hjlt, hle1.trans (HLe.redirect w₁ hok hsd), ?_⟩
+      rw [heapUnfold_redirect_below w₁ hok.1 hok.2.1 hok.2.2.1
+        hok.2.2.2 j (Or.inl rfl)]
+      exact ihj'
+  | konst_red hn_i hn_l hn_kl hmem hdr hok ih =>
+      rename_i D₀ h h₁ i l r kl kr j D₁
+      have hrilt : h.repr i < h.len := Heap.repr_lt hwf hi
+      have hllt : l < h.len := heap_child_lt_l hwf hrilt hn_i
+      have hrlt : r < h.len := heap_child_lt_r hwf hrilt hn_i
+      have hrllt : h.repr l < h.len := Heap.repr_lt hwf hllt
+      have hkllt : kl < h.len := heap_child_lt_l hwf hrllt hn_l
+      have hkrlt : kr < h.len := heap_child_lt_r hwf hrllt hn_l
+      obtain ⟨w₁, hjlt, hle1, ihj⟩ := ih hwf hkrlt
+      have e_kl : heapUnfold h hwf (h.repr kl) = .konst := by
+        rw [← heapUnfold_repr hwf hkllt]
+        exact heapUnfold_atom hwf hn_kl
+      have e_l : heapUnfold h hwf (h.repr l) =
+          .app .konst (heapUnfold h hwf (h.repr kr)) := by
+        rw [← heapUnfold_repr hwf hllt]
+        rw [heapUnfold_app hwf hn_l, e_kl]
+      have e_i : heapUnfold h hwf i =
+          .app (.app .konst (heapUnfold h hwf (h.repr kr)))
+            (heapUnfold h hwf (h.repr r)) := by
+        rw [heapUnfold_app hwf hn_i, e_l]
+      have hcd : cdBasis (heapUnfold h hwf i) =
+          cdBasis (heapUnfold h hwf kr) := by
+        rw [e_i]
+        show cdBasis (heapUnfold h hwf (h.repr kr)) =
+            cdBasis (heapUnfold h hwf kr)
+        rw [← heapUnfold_repr hwf hkrlt]
+      have ihj' : Join (heapUnfold h₁ w₁ j)
+          (cdBasis (heapUnfold h hwf i)) := by
+        rw [hcd]; exact ihj
+      have hsd : Join (heapUnfold h₁ w₁ (h.repr i))
+          (heapUnfold h₁ w₁ j) := by
+        have h1 := (hle1.2 (h.repr i) hrilt).symm
+        rw [← heapUnfold_repr hwf hi] at h1
+        exact h1.trans (Join_cd_left ihj')
+      refine ⟨HeapWf_redirect w₁ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        hjlt, hle1.trans (HLe.redirect w₁ hok hsd), ?_⟩
+      rw [heapUnfold_redirect_below w₁ hok.1 hok.2.1 hok.2.2.1
+        hok.2.2.2 j (Or.inl rfl)]
+      exact ihj'
+  | dup_red hn_i hn_l hn_kl hmem hdrx hdrf hmk1 hmk2 hok ihx ihf =>
+      rename_i D₀ h h₁ h₂ h₃ h₄ i l r kl kr jx jf a b D₁ D₂
+      have hrilt : h.repr i < h.len := Heap.repr_lt hwf hi
+      have hllt : l < h.len := heap_child_lt_l hwf hrilt hn_i
+      have hrlt : r < h.len := heap_child_lt_r hwf hrilt hn_i
+      have hrllt : h.repr l < h.len := Heap.repr_lt hwf hllt
+      have hkllt : kl < h.len := heap_child_lt_l hwf hrllt hn_l
+      have hkrlt : kr < h.len := heap_child_lt_r hwf hrllt hn_l
+      obtain ⟨w₁, jxlt, hle1, ihxj⟩ := ihx hwf hrlt
+      obtain ⟨w₂, jflt, hle2, ihfj⟩ := ihf w₁
+        (Nat.lt_of_lt_of_le hkrlt hle1.1)
+      obtain ⟨w₃, le3, halt, -⟩ := MkApp_wf w₂ hmk1 jflt
+        (Nat.lt_of_lt_of_le jxlt hle2.1)
+      obtain ⟨w₄, le4, hblt, -⟩ := MkApp_wf w₃ hmk2 halt
+        (Nat.lt_of_lt_of_le jxlt (hle2.1.trans le3))
+      have e_kl : heapUnfold h hwf (h.repr kl) = .dup := by
+        rw [← heapUnfold_repr hwf hkllt]
+        exact heapUnfold_atom hwf hn_kl
+      have e_l : heapUnfold h hwf (h.repr l) =
+          .app .dup (heapUnfold h hwf (h.repr kr)) := by
+        rw [← heapUnfold_repr hwf hllt]
+        rw [heapUnfold_app hwf hn_l, e_kl]
+      have e_i : heapUnfold h hwf i =
+          .app (.app .dup (heapUnfold h hwf (h.repr kr)))
+            (heapUnfold h hwf (h.repr r)) := by
+        rw [heapUnfold_app hwf hn_i, e_l]
+      have hcd : cdBasis (heapUnfold h hwf i) =
+          .app (.app (cdBasis (heapUnfold h hwf (h.repr kr)))
+                (cdBasis (heapUnfold h hwf (h.repr r))))
+            (cdBasis (heapUnfold h hwf (h.repr r))) := by
+        rw [e_i]; rfl
+      have hle23 : HLe w₂ w₃ := MkApp_hle w₂ w₃ hmk1
+      have hle34 : HLe w₃ w₄ := MkApp_hle w₃ w₄ hmk2
+      have jX : Join (heapUnfold h₂ w₂ jx)
+          (cdBasis (heapUnfold h hwf (h.repr r))) := by
+        rw [heapUnfold_repr hwf hrlt] at ihxj
+        exact (hle2.2 jx jxlt).symm.trans ihxj
+      have jF : Join (heapUnfold h₂ w₂ jf)
+          (cdBasis (heapUnfold h hwf (h.repr kr))) := by
+        have hkr : Join (cdBasis (heapUnfold h hwf (h.repr kr)))
+            (cdBasis (heapUnfold h₁ w₁ kr)) := by
+          rw [← heapUnfold_repr hwf hkrlt]
+          exact cdJoin_of_join (hle1.2 kr hkrlt)
+        exact ihfj.trans hkr.symm
+      have jF3 : Join (heapUnfold h₃ w₃ jf)
+          (cdBasis (heapUnfold h hwf (h.repr kr))) :=
+        (hle23.2 jf jflt).symm.trans jF
+      have jX3 : Join (heapUnfold h₃ w₃ jx)
+          (cdBasis (heapUnfold h hwf (h.repr r))) :=
+        (hle23.2 jx (Nat.lt_of_lt_of_le jxlt hle2.1)).symm.trans jX
+      have ja : Join (heapUnfold h₃ w₃ a)
+          (.app (cdBasis (heapUnfold h hwf (h.repr kr)))
+            (cdBasis (heapUnfold h hwf (h.repr r)))) :=
+        (MkApp_join w₂ w₃ hmk1).trans (Join_app jF3 jX3)
+      have hle14 : HLe hwf w₄ :=
+        hle1.trans (hle2.trans (hle23.trans hle34))
+      have ja4 : Join (heapUnfold h₄ w₄ a)
+          (.app (cdBasis (heapUnfold h hwf (h.repr kr)))
+            (cdBasis (heapUnfold h hwf (h.repr r)))) :=
+        (hle34.2 a halt).symm.trans ja
+      have jX4 : Join (heapUnfold h₄ w₄ jx)
+          (cdBasis (heapUnfold h hwf (h.repr r))) :=
+        (hle34.2 jx
+          (Nat.lt_of_lt_of_le jxlt (hle2.1.trans le3))).symm.trans jX3
+      have jb : Join (heapUnfold h₄ w₄ b)
+          (cdBasis (heapUnfold h hwf i)) := by
+        rw [hcd]
+        exact (MkApp_join w₃ w₄ hmk2).trans (Join_app ja4 jX4)
+      have hsd : Join (heapUnfold h₄ w₄ (h.repr i))
+          (heapUnfold h₄ w₄ b) := by
+        have h1 := (hle14.2 (h.repr i) hrilt).symm
+        rw [← heapUnfold_repr hwf hi] at h1
+        exact h1.trans (Join_cd_left jb)
+      refine ⟨HeapWf_redirect w₄ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        hblt, hle14.trans (HLe.redirect w₄ hok hsd), ?_⟩
+      rw [heapUnfold_redirect_below w₄ hok.1 hok.2.1 hok.2.2.1
+        hok.2.2.2 b (Or.inl rfl)]
+      exact jb
+  | comp_red hn_i hn_l hn_kl hn_kll hmem hdf hdg hdx hmk1 hmk2 hok
+      ihf ihg ihx =>
+      rename_i D₀ h h₁ h₂ h₃ h₄ h₅ i l r kl kr kll klr jf jg jx a b
+        D₁ D₂ D₃
+      have hrilt : h.repr i < h.len := Heap.repr_lt hwf hi
+      have hllt : l < h.len := heap_child_lt_l hwf hrilt hn_i
+      have hrlt : r < h.len := heap_child_lt_r hwf hrilt hn_i
+      have hrllt : h.repr l < h.len := Heap.repr_lt hwf hllt
+      have hkllt : kl < h.len := heap_child_lt_l hwf hrllt hn_l
+      have hkrlt : kr < h.len := heap_child_lt_r hwf hrllt hn_l
+      have hrkllt : h.repr kl < h.len := Heap.repr_lt hwf hkllt
+      have hklllt : kll < h.len := heap_child_lt_l hwf hrkllt hn_kl
+      have hklrlt : klr < h.len := heap_child_lt_r hwf hrkllt hn_kl
+      obtain ⟨w₁, jflt, hle1, ihfj⟩ := ihf hwf hklrlt
+      obtain ⟨w₂, jglt, hle2, ihgj⟩ := ihg w₁
+        (Nat.lt_of_lt_of_le hkrlt hle1.1)
+      obtain ⟨w₃, jxlt, hle3, ihxj⟩ := ihx w₂
+        (Nat.lt_of_lt_of_le hrlt (hle1.1.trans hle2.1))
+      obtain ⟨w₄, le4, halt, -⟩ := MkApp_wf w₃ hmk1
+        (Nat.lt_of_lt_of_le jglt hle3.1) jxlt
+      obtain ⟨w₅, le5, hblt, -⟩ := MkApp_wf w₄ hmk2
+        (Nat.lt_of_lt_of_le jflt
+          (hle2.1.trans (hle3.1.trans le4))) halt
+      have e_kll : heapUnfold h hwf (h.repr kll) = .comp := by
+        rw [← heapUnfold_repr hwf hklllt]
+        exact heapUnfold_atom hwf hn_kll
+      have e_kl : heapUnfold h hwf (h.repr kl) =
+          .app .comp (heapUnfold h hwf (h.repr klr)) := by
+        rw [← heapUnfold_repr hwf hkllt]
+        rw [heapUnfold_app hwf hn_kl, e_kll]
+      have e_l : heapUnfold h hwf (h.repr l) =
+          .app (.app .comp (heapUnfold h hwf (h.repr klr)))
+            (heapUnfold h hwf (h.repr kr)) := by
+        rw [← heapUnfold_repr hwf hllt]
+        rw [heapUnfold_app hwf hn_l, e_kl]
+      have e_i : heapUnfold h hwf i =
+          .app (.app (.app .comp (heapUnfold h hwf (h.repr klr)))
+              (heapUnfold h hwf (h.repr kr)))
+            (heapUnfold h hwf (h.repr r)) := by
+        rw [heapUnfold_app hwf hn_i, e_l]
+      have hcd : cdBasis (heapUnfold h hwf i) =
+          .app (cdBasis (heapUnfold h hwf (h.repr klr)))
+            (.app (cdBasis (heapUnfold h hwf (h.repr kr)))
+              (cdBasis (heapUnfold h hwf (h.repr r)))) := by
+        rw [e_i]; rfl
+      have hle34 : HLe w₃ w₄ := MkApp_hle w₃ w₄ hmk1
+      have hle45 : HLe w₄ w₅ := MkApp_hle w₄ w₅ hmk2
+      have jF : Join (heapUnfold h₁ w₁ jf)
+          (cdBasis (heapUnfold h hwf (h.repr klr))) := by
+        rw [heapUnfold_repr hwf hklrlt] at ihfj
+        exact ihfj
+      have jG : Join (heapUnfold h₂ w₂ jg)
+          (cdBasis (heapUnfold h hwf (h.repr kr))) := by
+        have hkr : Join (cdBasis (heapUnfold h hwf (h.repr kr)))
+            (cdBasis (heapUnfold h₁ w₁ kr)) := by
+          rw [← heapUnfold_repr hwf hkrlt]
+          exact cdJoin_of_join (hle1.2 kr hkrlt)
+        exact ihgj.trans hkr.symm
+      have jX : Join (heapUnfold h₃ w₃ jx)
+          (cdBasis (heapUnfold h hwf (h.repr r))) := by
+        have hr : Join (cdBasis (heapUnfold h hwf (h.repr r)))
+            (cdBasis (heapUnfold h₂ w₂ r)) := by
+          rw [← heapUnfold_repr hwf hrlt]
+          exact cdJoin_of_join
+            ((hle1.trans hle2).2 r hrlt)
+        exact ihxj.trans hr.symm
+      have jG4 : Join (heapUnfold h₄ w₄ jg)
+          (cdBasis (heapUnfold h hwf (h.repr kr))) :=
+        ((hle3.trans hle34).2 jg jglt).symm.trans jG
+      have jX4 : Join (heapUnfold h₄ w₄ jx)
+          (cdBasis (heapUnfold h hwf (h.repr r))) :=
+        (hle34.2 jx jxlt).symm.trans jX
+      have ja : Join (heapUnfold h₄ w₄ a)
+          (.app (cdBasis (heapUnfold h hwf (h.repr kr)))
+            (cdBasis (heapUnfold h hwf (h.repr r)))) :=
+        (MkApp_join w₃ w₄ hmk1).trans (Join_app jG4 jX4)
+      have ja5 : Join (heapUnfold h₅ w₅ a)
+          (.app (cdBasis (heapUnfold h hwf (h.repr kr)))
+            (cdBasis (heapUnfold h hwf (h.repr r)))) :=
+        (hle45.2 a halt).symm.trans ja
+      have jF5 : Join (heapUnfold h₅ w₅ jf)
+          (cdBasis (heapUnfold h hwf (h.repr klr))) :=
+        ((hle2.trans (hle3.trans (hle34.trans hle45))).2 jf jflt).symm.trans
+          jF
+      have jb : Join (heapUnfold h₅ w₅ b)
+          (cdBasis (heapUnfold h hwf i)) := by
+        rw [hcd]
+        exact (MkApp_join w₄ w₅ hmk2).trans (Join_app jF5 ja5)
+      have hle15 : HLe hwf w₅ :=
+        hle1.trans (hle2.trans (hle3.trans (hle34.trans hle45)))
+      have hsd : Join (heapUnfold h₅ w₅ (h.repr i))
+          (heapUnfold h₅ w₅ b) := by
+        have h1 := (hle15.2 (h.repr i) hrilt).symm
+        rw [← heapUnfold_repr hwf hi] at h1
+        exact h1.trans (Join_cd_left jb)
+      refine ⟨HeapWf_redirect w₅ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        hblt, hle15.trans (HLe.redirect w₅ hok hsd), ?_⟩
+      rw [heapUnfold_redirect_below w₅ hok.1 hok.2.1 hok.2.2.1
+        hok.2.2.2 b (Or.inl rfl)]
+      exact jb
+  | swap_red hn_i hn_l hn_kl hn_kll hmem hdf hdx hdy hmk1 hmk2 hok
+      ihf ihx ihy =>
+      rename_i D₀ h h₁ h₂ h₃ h₄ h₅ i l r kl kr kll klr jf jx jy a b
+        D₁ D₂ D₃
+      have hrilt : h.repr i < h.len := Heap.repr_lt hwf hi
+      have hllt : l < h.len := heap_child_lt_l hwf hrilt hn_i
+      have hrlt : r < h.len := heap_child_lt_r hwf hrilt hn_i
+      have hrllt : h.repr l < h.len := Heap.repr_lt hwf hllt
+      have hkllt : kl < h.len := heap_child_lt_l hwf hrllt hn_l
+      have hkrlt : kr < h.len := heap_child_lt_r hwf hrllt hn_l
+      have hrkllt : h.repr kl < h.len := Heap.repr_lt hwf hkllt
+      have hklllt : kll < h.len := heap_child_lt_l hwf hrkllt hn_kl
+      have hklrlt : klr < h.len := heap_child_lt_r hwf hrkllt hn_kl
+      obtain ⟨w₁, jflt, hle1, ihfj⟩ := ihf hwf hklrlt
+      obtain ⟨w₂, jxlt, hle2, ihxj⟩ := ihx w₁
+        (Nat.lt_of_lt_of_le hkrlt hle1.1)
+      obtain ⟨w₃, jylt, hle3, ihyj⟩ := ihy w₂
+        (Nat.lt_of_lt_of_le hrlt (hle1.1.trans hle2.1))
+      obtain ⟨w₄, le4, halt, -⟩ := MkApp_wf w₃ hmk1
+        (Nat.lt_of_lt_of_le jflt (hle2.1.trans hle3.1)) jylt
+      obtain ⟨w₅, le5, hblt, -⟩ := MkApp_wf w₄ hmk2 halt
+        (Nat.lt_of_lt_of_le jxlt (hle3.1.trans le4))
+      have e_kll : heapUnfold h hwf (h.repr kll) = .swap := by
+        rw [← heapUnfold_repr hwf hklllt]
+        exact heapUnfold_atom hwf hn_kll
+      have e_kl : heapUnfold h hwf (h.repr kl) =
+          .app .swap (heapUnfold h hwf (h.repr klr)) := by
+        rw [← heapUnfold_repr hwf hkllt]
+        rw [heapUnfold_app hwf hn_kl, e_kll]
+      have e_l : heapUnfold h hwf (h.repr l) =
+          .app (.app .swap (heapUnfold h hwf (h.repr klr)))
+            (heapUnfold h hwf (h.repr kr)) := by
+        rw [← heapUnfold_repr hwf hllt]
+        rw [heapUnfold_app hwf hn_l, e_kl]
+      have e_i : heapUnfold h hwf i =
+          .app (.app (.app .swap (heapUnfold h hwf (h.repr klr)))
+              (heapUnfold h hwf (h.repr kr)))
+            (heapUnfold h hwf (h.repr r)) := by
+        rw [heapUnfold_app hwf hn_i, e_l]
+      have hcd : cdBasis (heapUnfold h hwf i) =
+          .app (.app (cdBasis (heapUnfold h hwf (h.repr klr)))
+                (cdBasis (heapUnfold h hwf (h.repr r))))
+            (cdBasis (heapUnfold h hwf (h.repr kr))) := by
+        rw [e_i]; rfl
+      have hle34 : HLe w₃ w₄ := MkApp_hle w₃ w₄ hmk1
+      have hle45 : HLe w₄ w₅ := MkApp_hle w₄ w₅ hmk2
+      have jF : Join (heapUnfold h₁ w₁ jf)
+          (cdBasis (heapUnfold h hwf (h.repr klr))) := by
+        rw [heapUnfold_repr hwf hklrlt] at ihfj
+        exact ihfj
+      have jX : Join (heapUnfold h₂ w₂ jx)
+          (cdBasis (heapUnfold h hwf (h.repr kr))) := by
+        have hkr : Join (cdBasis (heapUnfold h hwf (h.repr kr)))
+            (cdBasis (heapUnfold h₁ w₁ kr)) := by
+          rw [← heapUnfold_repr hwf hkrlt]
+          exact cdJoin_of_join (hle1.2 kr hkrlt)
+        exact ihxj.trans hkr.symm
+      have jY : Join (heapUnfold h₃ w₃ jy)
+          (cdBasis (heapUnfold h hwf (h.repr r))) := by
+        have hr : Join (cdBasis (heapUnfold h hwf (h.repr r)))
+            (cdBasis (heapUnfold h₂ w₂ r)) := by
+          rw [← heapUnfold_repr hwf hrlt]
+          exact cdJoin_of_join
+            ((hle1.trans hle2).2 r hrlt)
+        exact ihyj.trans hr.symm
+      have jF4 : Join (heapUnfold h₄ w₄ jf)
+          (cdBasis (heapUnfold h hwf (h.repr klr))) :=
+        ((hle2.trans (hle3.trans hle34)).2 jf jflt).symm.trans jF
+      have jY4 : Join (heapUnfold h₄ w₄ jy)
+          (cdBasis (heapUnfold h hwf (h.repr r))) :=
+        (hle34.2 jy jylt).symm.trans jY
+      have ja : Join (heapUnfold h₄ w₄ a)
+          (.app (cdBasis (heapUnfold h hwf (h.repr klr)))
+            (cdBasis (heapUnfold h hwf (h.repr r)))) :=
+        (MkApp_join w₃ w₄ hmk1).trans (Join_app jF4 jY4)
+      have ja5 : Join (heapUnfold h₅ w₅ a)
+          (.app (cdBasis (heapUnfold h hwf (h.repr klr)))
+            (cdBasis (heapUnfold h hwf (h.repr r)))) :=
+        (hle45.2 a halt).symm.trans ja
+      have jX5 : Join (heapUnfold h₅ w₅ jx)
+          (cdBasis (heapUnfold h hwf (h.repr kr))) :=
+        ((hle3.trans (hle34.trans hle45)).2 jx jxlt).symm.trans jX
+      have jb : Join (heapUnfold h₅ w₅ b)
+          (cdBasis (heapUnfold h hwf i)) := by
+        rw [hcd]
+        exact (MkApp_join w₄ w₅ hmk2).trans (Join_app ja5 jX5)
+      have hle15 : HLe hwf w₅ :=
+        hle1.trans (hle2.trans (hle3.trans (hle34.trans hle45)))
+      have hsd : Join (heapUnfold h₅ w₅ (h.repr i))
+          (heapUnfold h₅ w₅ b) := by
+        have h1 := (hle15.2 (h.repr i) hrilt).symm
+        rw [← heapUnfold_repr hwf hi] at h1
+        exact h1.trans (Join_cd_left jb)
+      refine ⟨HeapWf_redirect w₅ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        hblt, hle15.trans (HLe.redirect w₅ hok hsd), ?_⟩
+      rw [heapUnfold_redirect_below w₅ hok.1 hok.2.1 hok.2.2.1
+        hok.2.2.2 b (Or.inl rfl)]
+      exact jb
+  | app_dev hn_i hguard hmem hdl hdr hmk hok ihl ihr =>
+      rename_i D₀ h h₁ h₂ h₃ i l r jf jx o D₁ D₂
+      have hrilt : h.repr i < h.len := Heap.repr_lt hwf hi
+      have hllt : l < h.len := heap_child_lt_l hwf hrilt hn_i
+      have hrlt : r < h.len := heap_child_lt_r hwf hrilt hn_i
+      have hrllt : h.repr l < h.len := Heap.repr_lt hwf hllt
+      obtain ⟨w₁, jflt, hle1, ihlf⟩ := ihl hwf hllt
+      obtain ⟨w₂, jxlt, hle2, ihrf⟩ := ihr w₁
+        (Nat.lt_of_lt_of_le hrlt hle1.1)
+      obtain ⟨w₃, le3, holt, -⟩ := MkApp_wf w₂ hmk
+        (Nat.lt_of_lt_of_le jflt hle2.1) jxlt
+      have e_i : heapUnfold h hwf i =
+          .app (heapUnfold h hwf (h.repr l))
+            (heapUnfold h hwf (h.repr r)) :=
+        heapUnfold_app hwf hn_i
+      have hnr : isRedexHead (heapUnfold h hwf (h.repr l)) = false :=
+        hguard hwf
+      have hcd : cdBasis (heapUnfold h hwf i) =
+          .app (cdBasis (heapUnfold h hwf (h.repr l)))
+            (cdBasis (heapUnfold h hwf (h.repr r))) := by
+        rw [e_i]; exact cdBasis_app_generic hnr
+      have hle23 : HLe w₂ w₃ := MkApp_hle w₂ w₃ hmk
+      have jF : Join (heapUnfold h₂ w₂ jf)
+          (cdBasis (heapUnfold h hwf (h.repr l))) := by
+        rw [heapUnfold_repr hwf hllt] at ihlf
+        exact (hle2.2 jf jflt).symm.trans ihlf
+      have jX : Join (heapUnfold h₂ w₂ jx)
+          (cdBasis (heapUnfold h hwf (h.repr r))) := by
+        have hr : Join (cdBasis (heapUnfold h hwf (h.repr r)))
+            (cdBasis (heapUnfold h₁ w₁ r)) := by
+          rw [← heapUnfold_repr hwf hrlt]
+          exact cdJoin_of_join (hle1.2 r hrlt)
+        exact ihrf.trans hr.symm
+      have jF3 : Join (heapUnfold h₃ w₃ jf)
+          (cdBasis (heapUnfold h hwf (h.repr l))) :=
+        (hle23.2 jf (Nat.lt_of_lt_of_le jflt hle2.1)).symm.trans jF
+      have jX3 : Join (heapUnfold h₃ w₃ jx)
+          (cdBasis (heapUnfold h hwf (h.repr r))) :=
+        (hle23.2 jx jxlt).symm.trans jX
+      have jo : Join (heapUnfold h₃ w₃ o)
+          (cdBasis (heapUnfold h hwf i)) := by
+        rw [hcd]
+        exact (MkApp_join w₂ w₃ hmk).trans (Join_app jF3 jX3)
+      have hle13 : HLe hwf w₃ := hle1.trans (hle2.trans hle23)
+      have hsd : Join (heapUnfold h₃ w₃ (h.repr i))
+          (heapUnfold h₃ w₃ o) := by
+        have h1 := (hle13.2 (h.repr i) hrilt).symm
+        rw [← heapUnfold_repr hwf hi] at h1
+        exact h1.trans (Join_cd_left jo)
+      refine ⟨HeapWf_redirect w₃ hok.1 hok.2.1 hok.2.2.1 hok.2.2.2,
+        holt, hle13.trans (HLe.redirect w₃ hok hsd), ?_⟩
+      rw [heapUnfold_redirect_below w₃ hok.1 hok.2.1 hok.2.2.1
+        hok.2.2.2 o (Or.inl rfl)]
+      exact jo
 
 end ISAR
