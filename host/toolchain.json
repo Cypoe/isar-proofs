@@ -24,12 +24,15 @@
     "x86_64.win64.cd": {"module": "routines_x86_64_win64_cd",
       "record": "X86_64_WIN64_CD", "path": "runtime",
       "note": "Lean ParStep / host reduce_cd contract"},
-    "x86_64.linux.lo": {"note": "syscall ABI, no kernel32 IAT"},
+    "x86_64.linux.lo": {"module": "routines_x86_64_linux_lo",
+      "record": "X86_64_LINUX_LO", "path": "runtime",
+      "note": "syscall ABI, no kernel32 IAT"},
     "x86_64.uefi.lo": {"note": "UEFI boot services ABI"}
   },
   "targets": {
     "pe64": {"module": "target_pe64", "record": "PE64"},
-    "elf64": {"note": "ELF64 container writer"},
+    "elf64": {"module": "target_elf64", "record": "ELF64",
+      "note": "ELF64 container writer"},
     "macho64": {"note": "Mach-O 64 container writer"},
     "flat": {"note": "flat binary, no loader"},
     "pe64.uefi": {"note": "PE32+ EFI application subsystem"}
@@ -98,6 +101,7 @@
   ],
   "strategy_axes": {
     "order":   {"lo": "realized", "cd": "realized"},
+    "abi":     {"win64": "realized", "linux": "realized", "uefi": "declared"},
     "fuse_s":  {"False": "realized", "True": "realized"},
     "alloc":   {"bump-chunked": "realized", "arena": "declared"},
     "reclaim": {"none": "realized", "refcount": "declared", "mark-sweep": "declared"},

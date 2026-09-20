@@ -374,8 +374,9 @@ def main() -> int:
         from seed import piece as _native_piece, Realization as _R
         register_piece(_native_piece())
         register_piece(_native_piece(_R(order="cd")))
+        register_piece(_native_piece(_R(abi="linux")))
         have_native = True
-        print("OK native pieces registered (seed/seed.py: lo + cd)")
+        print("OK native pieces registered (seed/seed.py: lo + cd + linux)")
     except ImportError:
         print("SKIP native (seed not importable)")
 
@@ -448,10 +449,18 @@ def main() -> int:
         print(f"{'OK' if good else 'FAIL'} NativeRealize cd "
               f"piece={cdpiece.name} toolchain={cdplan.toolchain}")
         ok = ok and good
+    # x86_64.linux.lo is realized now: native_realize runs through the
+    # registered linux piece (same operEq NF; syscall ABI under wsl).
+    if have_native:
+        lspec, lplan, lpiece = native_realize(toolchain_name="x86_64.linux.lo")
+        good = lpiece.kind == "cpu" and preserves_spec(lspec, lpiece)
+        print(f"{'OK' if good else 'FAIL'} NativeRealize linux "
+              f"piece={lpiece.name} toolchain={lplan.toolchain}")
+        ok = ok and good
     # a still-declared toolchain still refuses
     try:
-        native_realize(toolchain_name="x86_64.linux.lo")
-        print("FAIL declared toolchain x86_64.linux.lo realized silently")
+        native_realize(toolchain_name="x86_64.uefi.lo")
+        print("FAIL declared toolchain x86_64.uefi.lo realized silently")
         ok = False
     except NotRealized as e:
         print(f"OK declared toolchain refused: {e}")

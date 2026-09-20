@@ -20,7 +20,10 @@ Strategy  : `Realization` (§2) — a frozen data record: evaluation order,
             read granule, fuse_s, ABI.  `order="cd"` is realized by a
             SECOND routines module (toolchain x86_64.win64.cd); the lo
             routines still refuse it (NotRealized) — mine_adopt
-            semantics, never a fallback.
+            semantics, never a fallback.  `abi="linux"` is a second
+            HOST realization: same ISA encoder + lo semantics, syscall
+            ABI + ELF64 container (host/routines_x86_64_linux_lo,
+            host/target_elf64) — emitted ELFs run under WSL.
 Chain     : §3 emit() — the seed = basis + mirror + strategy + chain
             driver; ISA (host/isa_x86_64), reducer routines
             (host/routines_x86_64_win64) and the PE64 target
@@ -342,9 +345,14 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
     """Module-agnostic chain: resolve the toolchain, assemble the routines'
     program against the target's symbol table at its text base, pack.
     Path `native` passes the loaded program record to the routines;
-    path `runtime` assembles the routines' program from R alone."""
+    path `runtime` assembles the routines' program from R alone.
+    A routines record whose abi differs from R.abi is refused
+    (NotRealized) — never emitted under the wrong ABI."""
     tc = tc or toolchain.by_name("native.x86_64.pe")
     isa, rts, tgt = toolchain.resolve(tc)
+    if getattr(rts, "abi", R.abi) != R.abi:
+        raise NotRealized(
+            f"abi={R.abi!r} not realized by routines {rts.name!r}")
     prog = rts.program(program, R) if tc.path == "native" \
         else rts.program(R)
     text, labels = isa.assemble(
@@ -385,6 +393,15 @@ def run_native(exe: str, tokens_text: str) -> Tuple[str, str, int]:
         cp.stderr.decode("utf-8", "replace"), cp.returncode
 
 
+def run_elf(elf: str, tokens_text: str) -> Tuple[str, str, int]:
+    """run_native for an ELF64 image: execute under WSL (the target's
+    run path lives in target_elf64 — drvfs /mnt/<drive>/...)."""
+    import target_elf64
+    out, err, rc = target_elf64.run_elf(elf, tokens_text.encode())
+    return out.decode("utf-8", "replace"), \
+        err.decode("utf-8", "replace"), rc
+
+
 _EXE_CACHE: Dict[str, str] = {}
 
 
@@ -393,7 +410,12 @@ def _exe_for(R: Realization = DEFAULT, tc=None) -> str:
     if key not in _EXE_CACHE:
         tag = "default" if R == DEFAULT and tc is None else \
             f"v{abs(hash(key)) & 0xFFFF:x}"
-        path = os.path.join(BUILD_DIR, f"reducer_{tag}.exe")
+        ext = ".exe"
+        tgt = None
+        if tc is not None:
+            _, _, tgt = toolchain.resolve(tc)
+            ext = tgt.ext
+        path = os.path.join(BUILD_DIR, f"reducer_{tag}{ext}")
         if tc is None:
             _EXE_CACHE[key] = write_exe(path, R)
         else:
@@ -401,6 +423,9 @@ def _exe_for(R: Realization = DEFAULT, tc=None) -> str:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:
                 f.write(emit(R, tc=tc))
+            if tgt.os == "linux":
+                import target_elf64
+                target_elf64.prepare(path)     # chmod +x via wsl
             _EXE_CACHE[key] = path
     return _EXE_CACHE[key]
 
@@ -454,9 +479,13 @@ def _reduce_via(t, R: Realization):
     import tower
     if not R.fuse_s:
         t = tower.translate_to_basis(t)
-    exe = _exe_for(R) if R.order != "cd" else _exe_for(
-        R, toolchain.by_name("x86_64.win64.cd"))
-    out, err, rc = run_native(exe, _tokens_of_term(t))
+    if R.abi == "linux":
+        exe = _exe_for(R, toolchain.by_name("x86_64.linux.lo"))
+        out, err, rc = run_elf(exe, _tokens_of_term(t))
+    else:
+        exe = _exe_for(R) if R.order != "cd" else _exe_for(
+            R, toolchain.by_name("x86_64.win64.cd"))
+        out, err, rc = run_native(exe, _tokens_of_term(t))
     if rc != 0:
         raise RuntimeError(f"native reducer rc={rc} stderr={err!r}")
     nf = _parse_native_out(out)
@@ -476,7 +505,8 @@ def reduce_native(t, fuel: Optional[int] = None):
 
 def piece(R: Realization = DEFAULT):
     _, _, hp = _host()
-    name = ("x86_64.win64.cd" if R.order == "cd" else
+    name = ("x86_64.linux.lo" if R.abi == "linux" else
+            "x86_64.win64.cd" if R.order == "cd" else
             "native.x86_64.pe" if R == DEFAULT else
             "native.x86_64.pe.fuse_s")
     return hp.HostPiece(

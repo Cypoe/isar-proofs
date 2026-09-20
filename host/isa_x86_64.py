@@ -124,6 +124,7 @@ INSN: Tuple[Tuple[str, str, int, int, object, object], ...] = (
     ("dec_r64",       "dec",   0xFF,   1, 1,     0),
     ("inc_mrip",      "inc",   0xFF,   1, 0,     "p"),
     ("div_r64",       "div",   0xF7,   1, 6,     0),
+    ("syscall",       "syscall", 0x0F05, 0, None, 0),
 )
 FORMS: Dict[str, Tuple[str, int, int, object, object]] = {r[0]: r[1:] for r in INSN}
 
@@ -282,6 +283,7 @@ ENCS: Dict[str, Tuple] = {
     "inc_mrip":      (((), (("rex", "w"), ("op",),
                            ("modrm", "ext", "rip"), ("rel", 0))),),
     "div_r64":       (((), _EXT_RM),),
+    "syscall":       (((), (("op",),)),),
 }
 
 
@@ -574,6 +576,7 @@ ROW_SAMPLES: List[Tuple[str, Insn]] = [
     ("dec_r64", ("dec_r64", "r9")),
     ("inc_mrip", ("inc_mrip", ("p", 0x3000))),
     ("div_r64", ("div_r64", "r8")),
+    ("syscall", ("syscall",)),
 ]
 
 
