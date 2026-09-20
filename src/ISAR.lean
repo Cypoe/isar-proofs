@@ -35,3 +35,4 @@ import ISAR.Reduce
 import ISAR.LambdaEval
 import ISAR.BasisDev
 import ISAR.GraphDev
+import ISAR.HeapDev
