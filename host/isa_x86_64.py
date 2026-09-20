@@ -8,10 +8,11 @@ math is identical to the old inline build_pe assembly.
 
 The encoder is fasmg-shaped: ENCS keeps each instruction's encoding as
 ordered row data (named predicates selecting among alternative field
-lists); _interpret is a generic field engine that knows the field and
-predicate *names* only — no instruction-family branching.  The x86-64
-field vocabulary (FIELDS) and quirks-as-predicates (PREDS) are the data
-the core interprets.
+lists); the generic field engine is enc_core.interpret — shared code
+that knows the field and predicate *names* only — no instruction-family
+branching.  The x86-64 field vocabulary (FIELDS) and
+quirks-as-predicates (PREDS) are the data the core interprets; the
+combiner is b"".join (byte-chunk field model).
 
 Oracle: fasmg.exe (env ISAR_FASMG) byte-equality per INSN row — see
 check_rows() / main().  Missing oracle = FAIL, never SKIP.
@@ -29,6 +30,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
+
+from enc_core import interpret  # noqa: E402
 
 DEFAULT_FASMG = os.path.normpath(os.path.join(
     _HOST, "..", "..", "isa-physics", "boostrap", "fasmg", "fasmg.exe"))
@@ -368,24 +371,16 @@ PREDS: Dict[str, Callable[..., bool]] = {
 
 
 # ======================================================================
-# GENERIC ENCODER CORE — knows field/predicate NAMES, no instruction.
-# The same _interpret loop can drive another ISA's fields/preds/alts.
+# GENERIC ENCODER CORE — now host/enc_core.py (G10): interpret() is the
+# shared loop; x86-64 injects the byte-chunk combiner b"".join, aarch64
+# injects the bit-slice combiner enc_core.word32.
 # ======================================================================
-
-def _interpret(fields, preds, alts, ctx) -> bytes:
-    """First alternative whose named predicates all hold -> concat of its
-    named field ops.  No mnemonic, form, or operand-shape branching."""
-    for conds, tmpl in alts:
-        if all(preds[c[0]](ctx, *c[1:]) for c in conds):
-            return b"".join(fields[f[0]](ctx, *f[1:]) for f in tmpl)
-    raise ValueError(f"uncovered insn operands: {ctx.ops!r}")
-
 
 def encode(insn: Insn, resolve=None) -> bytes:
     """ISA-intrinsic encoding: ENCS row data through the field engine."""
     form, ops = insn[0], insn[1:]
-    return _interpret(FIELDS, PREDS, ENCS[form],
-                      _Ctx(FORMS[form], ops, resolve))
+    return interpret(FIELDS, PREDS, ENCS[form],
+                     _Ctx(FORMS[form], ops, resolve), b"".join)
 
 
 def render_fasm(insn: Insn, resolve=None) -> str:

@@ -24,6 +24,7 @@ HOST_SUITES = [
     "mine_adopt.py",
     "tower.py",
     "isa_x86_64.py",
+    "isa_aarch64.py",
     "routines_x86_64_win64.py",
     "routines_x86_64_win64_cd.py",
     "target_pe64.py",

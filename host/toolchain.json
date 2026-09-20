@@ -12,7 +12,7 @@
   },
   "isas": {
     "x86_64": {"module": "isa_x86_64", "record": "X86_64"},
-    "aarch64": {"note": "no aarch64 ISA table"},
+    "aarch64": {"module": "isa_aarch64", "record": "AARCH64"},
     "riscv64": {"note": "no riscv64 ISA table"}
   },
   "routines": {
@@ -64,7 +64,7 @@
      "note": "nibble transducer plex -> PE exe (W3)"},
     {"name": "isa.aarch64", "dialect": "bytecode.postfix", "isa": "aarch64",
      "routines": "aarch64.win64.lo", "target": "pe64", "path": "runtime",
-     "note": "no aarch64 ISA table"},
+     "note": "ISA table realized (G10); no aarch64 routines"},
     {"name": "isa.riscv64", "dialect": "bytecode.postfix", "isa": "riscv64",
      "routines": "riscv64.linux.lo", "target": "elf64", "path": "runtime",
      "note": "no riscv64 ISA table"},
