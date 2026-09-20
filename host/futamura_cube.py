@@ -57,6 +57,8 @@ from strategy import MixStrategy  # noqa: E402
 from host_pieces import GRAPH_PIECE, GRAPH_CD_PIECE, HostPiece  # noqa: E402
 from lambda_dialect import bracket_abstract0 as bracket  # noqa: E402  (I/K/S only: host/reduce.py has no swap/dup β)
 from lambda_bench import church, MULT, PLUS, EXP  # noqa: E402
+from lambda_eval import LSTEP_PIECE, t_to_nexpr  # noqa: E402
+import lean_eval  # noqa: E402
 
 FUEL = 2_000_000
 
@@ -138,6 +140,7 @@ def witnesses() -> List[Tuple[str, str, HostPiece]]:
         ("tree.surface", "fused", _tree_piece()),
         ("graph.lo", "basis", GRAPH_PIECE),
         ("graph.cd", "basis", GRAPH_CD_PIECE),
+        ("lambda.lstep", "lstep", LSTEP_PIECE),
     ]
     seed_dir = os.path.join(os.path.dirname(_HOST), "seed")
     if seed_dir not in sys.path:
@@ -191,6 +194,30 @@ def main() -> int:
     # the P1 check at the toolchain level (already gated by seed G3/G5).
     print("CHECK cogen-level P1: native.default ~O graph.lo, native.fuse_s ~O tree.surface "
           "on all probes (covered by the cells above)")
+    # lean.eval spot oracle: the P0 (fully-supplied) probe terms batched
+    # through ONE `lake env lean` call; NF compared against the probe's
+    # expected value routed through the same lambda-expansion path.
+    if "--with-lean" in sys.argv[1:]:
+        if not lean_eval.available():
+            print("SKIP lean.eval (lake not found)")
+        else:
+            batch = []
+            pairs = []
+            for i, (label, prog, static, dynamic, expected) in \
+                    enumerate(PROBES):
+                full = dict(static)
+                full.update(dynamic)
+                batch.append((f"p{i}", t_to_nexpr(subst(prog, full))))
+                batch.append((f"p{i} [expected]", t_to_nexpr(expected)))
+                pairs.append((f"p{i}", expected))
+            got = lean_eval.run_batch(batch)
+            for key, expected in pairs:
+                good = got[key] == got[key + " [expected]"]
+                ok = ok and good
+                print(f"  {'OK ' if good else 'FAIL'} lean.eval      oracle "
+                      f"{key}: {got[key]} ~ {got[key + ' [expected]']}")
+    else:
+        print("SKIP lean.eval (--with-lean not passed)")
     print("DECLARED P2 (compiler = spec specTerm int): no beta-level specTerm; seed emit() is a "
           "hand-written generating extension")
     print("DECLARED P3 (cogen = spec specTerm specTerm): open — Futamura.lean 1993-mix item; "

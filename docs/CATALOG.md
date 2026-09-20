@@ -25,6 +25,7 @@
 | target | pe64.uefi | — | declared | PE32+ EFI application subsystem |
 | piece | graph.lo | host_pieces.GRAPH_PIECE | realized |  |
 | piece | graph.cd | host_pieces.GRAPH_CD_PIECE | realized |  |
+| piece | lambda.lstep | lambda_eval.LSTEP_PIECE | realized | weak-beta NExpr evaluator (Lean LStep mirror) + saturated combs |
 | regime | operEq | observation_regime.oper_eq_regime | realized |  |
 | regime | stdout+rc | xdu_dialect.stdout_rc_regime | realized | declared (W3) |
 | regime | syscall-trace | — | declared | declared |

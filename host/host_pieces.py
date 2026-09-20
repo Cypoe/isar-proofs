@@ -62,9 +62,11 @@ def clear_registered() -> None:
 
 
 def catalog() -> List[HostPiece]:
-    """Base graph piece plus any CoGen-registered loaders."""
+    """Base graph + lambda.lstep pieces plus CoGen-registered loaders."""
     out: Dict[str, HostPiece] = {"graph.lo": GRAPH_PIECE,
                                  "graph.cd": GRAPH_CD_PIECE}
+    import lambda_eval  # lazy: lambda_eval imports host_pieces
+    out["lambda.lstep"] = lambda_eval.LSTEP_PIECE
     out.update(_REGISTERED)
     return list(out.values())
 

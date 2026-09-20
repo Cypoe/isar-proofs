@@ -35,7 +35,9 @@
   "pieces": {
     "graph.lo": {"module": "host_pieces", "record": "GRAPH_PIECE"},
     "graph.cd": {"module": "host_pieces", "record": "GRAPH_CD_PIECE",
-      "counts": "rounds"}
+      "counts": "rounds"},
+    "lambda.lstep": {"module": "lambda_eval", "record": "LSTEP_PIECE",
+      "note": "weak-beta NExpr evaluator (Lean LStep mirror) + saturated combs"}
   },
   "paths": {
     "native": {
