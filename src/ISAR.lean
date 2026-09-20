@@ -33,3 +33,5 @@ import ISAR.QuineProof
 import ISAR.Eval
 import ISAR.Reduce
 import ISAR.LambdaEval
+import ISAR.BasisDev
+import ISAR.GraphDev
