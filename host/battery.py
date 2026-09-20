@@ -37,6 +37,7 @@ HOST_SUITES = [
     "xdu_dialect.py",
     "routines_x86_64_win64_xdu.py",
     "xdu_gate.py",
+    "spec_term.py",
     "lambda_eval.py",
     "lean_eval.py",
 ]
