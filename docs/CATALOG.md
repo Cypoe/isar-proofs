@@ -15,7 +15,7 @@
 | isa | riscv64 | — | declared | no riscv64 ISA table |
 | routines | x86_64.win64.lo | routines_x86_64_win64.X86_64_WIN64 | realized |  |
 | routines | x86_64.win64.xdu | routines_x86_64_win64_xdu.X86_64_WIN64_XDU | realized | nibble transducer plex routines (W3) |
-| routines | x86_64.win64.cd | — | declared | Lean ParStep / host reduce_cd contract, native unrealized |
+| routines | x86_64.win64.cd | routines_x86_64_win64_cd.X86_64_WIN64_CD | realized | Lean ParStep / host reduce_cd contract |
 | routines | x86_64.linux.lo | — | declared | syscall ABI, no kernel32 IAT |
 | routines | x86_64.uefi.lo | — | declared | UEFI boot services ABI |
 | target | pe64 | target_pe64.PE64 | realized |  |
@@ -38,7 +38,7 @@
 | xdu.x86_64.pe | xdu.json | x86_64 | x86_64.win64.xdu | pe64 | native | realized |
 | isa.aarch64 | bytecode.postfix | aarch64 | aarch64.win64.lo | pe64 | runtime | declared |
 | isa.riscv64 | bytecode.postfix | riscv64 | riscv64.linux.lo | elf64 | runtime | declared |
-| x86_64.win64.cd | bytecode.postfix | x86_64 | x86_64.win64.cd | pe64 | runtime | declared |
+| x86_64.win64.cd | bytecode.postfix | x86_64 | x86_64.win64.cd | pe64 | runtime | realized |
 | x86_64.linux.lo | bytecode.postfix | x86_64 | x86_64.linux.lo | elf64 | runtime | declared |
 | x86_64.uefi.lo | bytecode.postfix | x86_64 | x86_64.uefi.lo | pe64.uefi | runtime | declared |
 | elf64 | bytecode.postfix | x86_64 | x86_64.linux.lo | elf64 | runtime | declared |
@@ -50,7 +50,7 @@
 
 ## Strategy axes
 
-- **order**: lo=realized, cd=declared
+- **order**: lo=realized, cd=realized
 - **fuse_s**: False=realized, True=realized
 - **alloc**: bump-chunked=realized, arena=declared
 - **reclaim**: none=realized, refcount=declared, mark-sweep=declared

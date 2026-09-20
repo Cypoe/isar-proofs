@@ -17,8 +17,9 @@ Basis     : §0 carries the ISARMatrices signature algebra.  The matrix
             the atom name, never on the matrix value.
 Strategy  : `Realization` (§2) — a frozen data record: evaluation order,
             node layout, allocation discipline, fuel policy, stack reserve,
-            read granule, fuse_s, ABI.  `order="cd"` is a declared
-            parameter value but is *refused* (NotRealized) — mine_adopt
+            read granule, fuse_s, ABI.  `order="cd"` is realized by a
+            SECOND routines module (toolchain x86_64.win64.cd); the lo
+            routines still refuse it (NotRealized) — mine_adopt
             semantics, never a fallback.
 Chain     : §3 emit() — the seed = basis + mirror + strategy + chain
             driver; ISA (host/isa_x86_64), reducer routines
@@ -40,7 +41,7 @@ G5 host registration (cogen.choose -> cpu, native_realize, piece
 adoption through both builds).
 
 Hard rules: no fixed heap (chunked VirtualAlloc growth), fuel optional
-(default off — run to NF), cd refused, no cross-repo *code* (oracle
+(default off — run to NF), no cross-repo *code* (oracle
 binaries and host oracle modules only).  §0–§2 import nothing from
 host; §3 imports only host/toolchain (the catalog) and touches ISA/
 routines/target solely through resolve(); §7–§8 import host oracle
@@ -309,7 +310,7 @@ def t_from_host(h) -> T:
 
 @dataclass(frozen=True)
 class Realization:
-    order: str = "lo"                 # "lo" realized | "cd" declared, REFUSED
+    order: str = "lo"                 # "lo"|"cd" realized (separate modules)
     node_bytes: int = 24              # {tag:u64 @0, l:ptr @8, r:ptr @16}
     alloc: str = "bump-chunked"       # VirtualAlloc(chunk) on exhaustion
     chunk_bytes: int = 1 << 20
@@ -387,13 +388,20 @@ def run_native(exe: str, tokens_text: str) -> Tuple[str, str, int]:
 _EXE_CACHE: Dict[str, str] = {}
 
 
-def _exe_for(R: Realization = DEFAULT) -> str:
-    key = repr(R)
+def _exe_for(R: Realization = DEFAULT, tc=None) -> str:
+    key = repr(R) + ("|" + tc.name if tc is not None else "")
     if key not in _EXE_CACHE:
-        tag = "default" if R == DEFAULT else \
+        tag = "default" if R == DEFAULT and tc is None else \
             f"v{abs(hash(key)) & 0xFFFF:x}"
-        _EXE_CACHE[key] = write_exe(
-            os.path.join(BUILD_DIR, f"reducer_{tag}.exe"), R)
+        path = os.path.join(BUILD_DIR, f"reducer_{tag}.exe")
+        if tc is None:
+            _EXE_CACHE[key] = write_exe(path, R)
+        else:
+            # explicit toolchain (e.g. the cd routines module)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(emit(R, tc=tc))
+            _EXE_CACHE[key] = path
     return _EXE_CACHE[key]
 
 
@@ -446,7 +454,9 @@ def _reduce_via(t, R: Realization):
     import tower
     if not R.fuse_s:
         t = tower.translate_to_basis(t)
-    out, err, rc = run_native(_exe_for(R), _tokens_of_term(t))
+    exe = _exe_for(R) if R.order != "cd" else _exe_for(
+        R, toolchain.by_name("x86_64.win64.cd"))
+    out, err, rc = run_native(exe, _tokens_of_term(t))
     if rc != 0:
         raise RuntimeError(f"native reducer rc={rc} stderr={err!r}")
     nf = _parse_native_out(out)
@@ -454,7 +464,7 @@ def _reduce_via(t, R: Realization):
         nf = tower.quote_surface(nf)
     steps = alloc = 0
     import re
-    m = re.search(r"steps=(\d+)\s+alloc=(\d+)", err)
+    m = re.search(r"(?:steps|rounds)=(\d+)\s+alloc=(\d+)", err)
     if m:
         steps, alloc = int(m.group(1)), int(m.group(2))
     return nf, steps, alloc
@@ -466,8 +476,9 @@ def reduce_native(t, fuel: Optional[int] = None):
 
 def piece(R: Realization = DEFAULT):
     _, _, hp = _host()
-    name = "native.x86_64.pe" if R == DEFAULT else \
-        f"native.x86_64.pe.fuse_s"
+    name = ("x86_64.win64.cd" if R.order == "cd" else
+            "native.x86_64.pe" if R == DEFAULT else
+            "native.x86_64.pe.fuse_s")
     return hp.HostPiece(
         name=name, kind="cpu",
         reduce=lambda t, fuel=100_000: _reduce_via(t, R))

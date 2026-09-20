@@ -21,7 +21,9 @@
     "x86_64.win64.xdu": {"module": "routines_x86_64_win64_xdu",
       "record": "X86_64_WIN64_XDU", "path": "native",
       "note": "nibble transducer plex routines (W3)"},
-    "x86_64.win64.cd": {"note": "Lean ParStep / host reduce_cd contract, native unrealized"},
+    "x86_64.win64.cd": {"module": "routines_x86_64_win64_cd",
+      "record": "X86_64_WIN64_CD", "path": "runtime",
+      "note": "Lean ParStep / host reduce_cd contract"},
     "x86_64.linux.lo": {"note": "syscall ABI, no kernel32 IAT"},
     "x86_64.uefi.lo": {"note": "UEFI boot services ABI"}
   },
@@ -68,7 +70,7 @@
      "note": "no riscv64 ISA table"},
     {"name": "x86_64.win64.cd", "dialect": "bytecode.postfix", "isa": "x86_64",
      "routines": "x86_64.win64.cd", "target": "pe64", "path": "runtime",
-     "note": "Lean ParStep / host reduce_cd contract, native unrealized"},
+     "note": "Lean ParStep / host reduce_cd contract"},
     {"name": "x86_64.linux.lo", "dialect": "bytecode.postfix", "isa": "x86_64",
      "routines": "x86_64.linux.lo", "target": "elf64", "path": "runtime",
      "note": "syscall ABI, no kernel32 IAT"},
@@ -95,7 +97,7 @@
      "note": "spec only, no parser"}
   ],
   "strategy_axes": {
-    "order":   {"lo": "realized", "cd": "declared"},
+    "order":   {"lo": "realized", "cd": "realized"},
     "fuse_s":  {"False": "realized", "True": "realized"},
     "alloc":   {"bump-chunked": "realized", "arena": "declared"},
     "reclaim": {"none": "realized", "refcount": "declared", "mark-sweep": "declared"},

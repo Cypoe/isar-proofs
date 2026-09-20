@@ -25,6 +25,7 @@ HOST_SUITES = [
     "tower.py",
     "isa_x86_64.py",
     "routines_x86_64_win64.py",
+    "routines_x86_64_win64_cd.py",
     "target_pe64.py",
     "toolchain.py",
     "spec_project.py",

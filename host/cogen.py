@@ -371,10 +371,11 @@ def main() -> int:
     if _seed_dir not in sys.path:
         sys.path.insert(0, _seed_dir)
     try:
-        from seed import piece as _native_piece
+        from seed import piece as _native_piece, Realization as _R
         register_piece(_native_piece())
+        register_piece(_native_piece(_R(order="cd")))
         have_native = True
-        print("OK native piece registered (seed/seed.py)")
+        print("OK native pieces registered (seed/seed.py: lo + cd)")
     except ImportError:
         print("SKIP native (seed not importable)")
 
@@ -439,9 +440,18 @@ def main() -> int:
     print("toolchain catalog:")
     for t in toolchain.realized() + toolchain.declared():
         print(f"  {t.status:9s} {t.name}")
+    # x86_64.win64.cd is realized now: native_realize runs through the
+    # registered cd piece (NF equality on probes; rounds, not steps).
+    if have_native:
+        cdspec, cdplan, cdpiece = native_realize(toolchain_name="x86_64.win64.cd")
+        good = cdpiece.kind == "cpu" and preserves_spec(cdspec, cdpiece)
+        print(f"{'OK' if good else 'FAIL'} NativeRealize cd "
+              f"piece={cdpiece.name} toolchain={cdplan.toolchain}")
+        ok = ok and good
+    # a still-declared toolchain still refuses
     try:
-        native_realize(toolchain_name="x86_64.win64.cd")
-        print("FAIL declared toolchain x86_64.win64.cd realized silently")
+        native_realize(toolchain_name="x86_64.linux.lo")
+        print("FAIL declared toolchain x86_64.linux.lo realized silently")
         ok = False
     except NotRealized as e:
         print(f"OK declared toolchain refused: {e}")
