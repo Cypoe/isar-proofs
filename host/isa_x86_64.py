@@ -142,10 +142,14 @@ def _i32s(v: int) -> bool:
 
 
 def _mem_modrm(reg_field: int, memop) -> Tuple[int, bytes, bytes]:
-    """Return (rex_b, modrm+sib, disp) for ('m', base, disp) or ('p', disp/label)."""
-    kind = memop[0]
-    if kind == "p":
-        return 0, bytes((((reg_field & 7) << 3) | 5,)), b"\x00\x00\x00\x00"
+    """Return (rex_b, modrm+sib, disp) for ('m', base, disp).
+    ('p', …) is rejected here: rip-relative operands resolve ONLY through
+    the "rip"/"rel" field roles — a label in a generic mem position would
+    otherwise silently encode disp=0."""
+    if memop[0] != "m":
+        raise ValueError(
+            f"mem operand must be ('m', base, disp), got {memop!r} "
+            "(('p', …) resolves only via rip/rel fields)")
     _, base, disp = memop
     b = REG64[base]
     lo = b & 7
