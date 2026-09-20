@@ -972,4 +972,204 @@ theorem HeapWf_redirect {h : Heap} (hwf : HeapWf h) {src dst : Nat}
     (List.getElem?_eq_some_iff.1 hdst).1
   acyc := Acyc_redirect hwf hsrc hdst hne hguard
 
+/-- `repr` is idempotent (a rep resolves to itself). -/
+theorem Heap.repr_idem {h : Heap} (hfw : FwOk h.fw) {i : Nat}
+    (hi : i < h.fw.length) : h.repr (h.repr i) = h.repr i := by
+  obtain ⟨r, -, hrep, hres⟩ := hfw i hi
+  have hri : h.repr i = r := by unfold Heap.repr; rw [hres]; rfl
+  rw [hri]
+  exact Heap.repr_of_isRep hrep
+
+/-- Readback is a function of the representative, not the index. -/
+theorem heapUnfold_repr {h : Heap} (hwf : HeapWf h) {i : Nat}
+    (hi : i < h.len) :
+    heapUnfold h hwf i = heapUnfold h hwf (h.repr i) := by
+  have hri : h.repr (h.repr i) = h.repr i :=
+    Heap.repr_idem hwf.fwok (by rw [hwf.fwlen]; exact hi)
+  conv_rhs => rw [heapUnfold]
+  rw [hri]
+  conv_lhs => rw [heapUnfold]
+
+/-- `t'` is `t` with some occurrences of `s` replaced by `T` — the
+    readback effect of `src ↦ dst` (a `repr`-level splice). -/
+inductive Splice (s T : ITerm) : ITerm → ITerm → Prop where
+  | refl {t : ITerm} : Splice s T t t
+  | here : Splice s T s T
+  | app {a b a' b' : ITerm} :
+      Splice s T a a' → Splice s T b b' → Splice s T (.app a b) (.app a' b')
+
+/-- Splicing is substitutive under reduction: if `s →* T` then the
+    spliced term is reachable. -/
+theorem Splice_red {s T a b : ITerm}
+    (hsp : Splice s T a b) (hred : IRedBasis s T) : IRedBasis a b := by
+  induction hsp with
+  | refl => exact Relation.ReflTransGen.refl
+  | here => exact hred
+  | app ha hb iha ihb => exact IRedBasis_app iha ihb
+
+/-- Out-of-range indices resolve to themselves. -/
+theorem Heap.repr_oob {h : Heap} {i : Nat} (hi : h.fw.length ≤ i) :
+    h.repr i = i := by
+  unfold Heap.repr
+  rw [resolveS_oob (by simp) hi]
+  rfl
+
+/-- `repr'` and `repr` commute: `repr' (repr x) = repr' x`.  The σ-map
+    is idempotent because `repr` is. -/
+theorem Heap.repr_redirect_repr {h : Heap} (hfw : FwOk h.fw) {src dst x : Nat}
+    (hsrc : h.fw[src]? = some none) (hdst : h.fw[dst]? = some none)
+    (hne : src ≠ dst) (hx : x < h.fw.length) :
+    (h.redirect src dst).repr (h.repr x) = (h.redirect src dst).repr x := by
+  have hrlt : h.repr x < h.fw.length := (h.repr_spec hfw hx).1
+  rw [Heap.repr_redirect hfw hsrc hdst hne hrlt,
+      Heap.repr_redirect hfw hsrc hdst hne hx,
+      Heap.repr_idem hfw hx]
+
+/-- The readback substitution lemma: after `src ↦ dst`, every index's
+    unfold is the old unfold with each `unfold src`-subtree replaced by
+    `unfold' dst`.  This is the sharing step — nodes that resolved to
+    `src` now read the redirect target. -/
+theorem heapUnfold_redirect {h : Heap} (hwf : HeapWf h) {src dst : Nat}
+    (hsrc : h.fw[src]? = some none) (hdst : h.fw[dst]? = some none)
+    (hne : src ≠ dst) (hguard : ¬ RSub h src dst) :
+    ∀ i, Splice
+      (heapUnfold h hwf src)
+      (heapUnfold (h.redirect src dst)
+        (HeapWf_redirect hwf hsrc hdst hne hguard) dst)
+      (heapUnfold h hwf i)
+      (heapUnfold (h.redirect src dst)
+        (HeapWf_redirect hwf hsrc hdst hne hguard) i) := by
+  intro i
+  generalize hcard : (RSubSet h i).card = m
+  induction m using Nat.strong_induction_on generalizing i with
+  | h m ih =>
+      rcases lt_or_ge i h.fw.length with hlt | hge
+      next =>
+        rcases Nat.decEq (h.repr i) src with hrne | hreq
+        next =>
+          -- `repr i ≠ src`: the node is read as before; children are
+          -- spliced by the induction hypothesis.
+          have hri' : (h.redirect src dst).repr i = h.repr i := by
+            rw [Heap.repr_redirect hwf.fwok hsrc hdst hne hlt, if_neg hrne]
+          have hb : h.repr i < h.ns.length := by
+            rw [← hwf.fwlen]; exact (h.repr_spec hwf.fwok hlt).1
+          rcases hnode : h.ns[h.repr i]? with _ | g
+          next => -- impossible: `repr i < ns.length`
+            exfalso
+            rw [List.getElem?_eq_none_iff] at hnode; omega
+          next =>
+            cases g with
+            | atom a =>
+              have hnc : (h.redirect src dst).ns[h.repr i]? =
+                  some (GNode.atom a) := hnode
+              have e1 : heapUnfold h hwf i = a.toTerm := by
+                conv_lhs => rw [heapUnfold]; rw [hnode]
+              have e2 : heapUnfold (h.redirect src dst)
+                    (HeapWf_redirect hwf hsrc hdst hne hguard) i =
+                  a.toTerm := by
+                conv_lhs => rw [heapUnfold]; rw [hri', hnc]
+              rw [e1, e2]; exact Splice.refl
+            | var n =>
+              have hnc : (h.redirect src dst).ns[h.repr i]? =
+                  some (GNode.var n) := hnode
+              have e1 : heapUnfold h hwf i = .var n := by
+                conv_lhs => rw [heapUnfold]; rw [hnode]
+              have e2 : heapUnfold (h.redirect src dst)
+                    (HeapWf_redirect hwf hsrc hdst hne hguard) i =
+                  .var n := by
+                conv_lhs => rw [heapUnfold]; rw [hri', hnc]
+              rw [e1, e2]; exact Splice.refl
+            | app l r =>
+              obtain ⟨hplt, hget⟩ := List.getElem?_eq_some_iff.1 hnode
+              obtain ⟨hllt, hrlt⟩ := hwf.dagwf (h.repr i) hplt l r hget
+              have hll : l < h.fw.length := by
+                rw [hwf.fwlen]; exact lt_trans hllt hb
+              have hrr : r < h.fw.length := by
+                rw [hwf.fwlen]; exact lt_trans hrlt hb
+              have hnc : (h.redirect src dst).ns[h.repr i]? =
+                  some (GNode.app l r) := hnode
+              have e1 : heapUnfold h hwf i =
+                  .app (heapUnfold h hwf (h.repr l))
+                       (heapUnfold h hwf (h.repr r)) := by
+                conv_lhs => rw [heapUnfold]
+                rw [hnode]
+              have e2 : heapUnfold (h.redirect src dst)
+                    (HeapWf_redirect hwf hsrc hdst hne hguard) i =
+                  .app (heapUnfold (h.redirect src dst)
+                          (HeapWf_redirect hwf hsrc hdst hne hguard)
+                          ((h.redirect src dst).repr l))
+                       (heapUnfold (h.redirect src dst)
+                          (HeapWf_redirect hwf hsrc hdst hne hguard)
+                          ((h.redirect src dst).repr r)) := by
+                conv_lhs => rw [heapUnfold]
+                rw [hri', hnc]
+              have hcl : RChild h (h.repr l) i := ⟨l, r, hnode, Or.inl rfl⟩
+              have hcr : RChild h (h.repr r) i := ⟨l, r, hnode, Or.inr rfl⟩
+              have ihl := ih (RSubSet h (h.repr l)).card
+                (by rw [← hcard]; exact RSubSet_lt hwf hcl) (h.repr l) rfl
+              have ihr := ih (RSubSet h (h.repr r)).card
+                (by rw [← hcard]; exact RSubSet_lt hwf hcr) (h.repr r) rfl
+              have hrll : h.repr l < (h.redirect src dst).len := by
+                rw [Heap.len_eq]; show h.repr l < h.ns.length
+                rw [← hwf.fwlen]; exact (h.repr_spec hwf.fwok hll).1
+              have hrlr : h.repr r < (h.redirect src dst).len := by
+                rw [Heap.len_eq]; show h.repr r < h.ns.length
+                rw [← hwf.fwlen]; exact (h.repr_spec hwf.fwok hrr).1
+              have eql : heapUnfold (h.redirect src dst)
+                    (HeapWf_redirect hwf hsrc hdst hne hguard)
+                    ((h.redirect src dst).repr l) =
+                  heapUnfold (h.redirect src dst)
+                    (HeapWf_redirect hwf hsrc hdst hne hguard) (h.repr l) := by
+                have hc : (h.redirect src dst).repr (h.repr l) =
+                    (h.redirect src dst).repr l :=
+                  Heap.repr_redirect_repr hwf.fwok hsrc hdst hne hll
+                rw [← hc]
+                exact (heapUnfold_repr
+                  (HeapWf_redirect hwf hsrc hdst hne hguard) hrll).symm
+              have eqr : heapUnfold (h.redirect src dst)
+                    (HeapWf_redirect hwf hsrc hdst hne hguard)
+                    ((h.redirect src dst).repr r) =
+                  heapUnfold (h.redirect src dst)
+                    (HeapWf_redirect hwf hsrc hdst hne hguard) (h.repr r) := by
+                have hc : (h.redirect src dst).repr (h.repr r) =
+                    (h.redirect src dst).repr r :=
+                  Heap.repr_redirect_repr hwf.fwok hsrc hdst hne hrr
+                rw [← hc]
+                exact (heapUnfold_repr
+                  (HeapWf_redirect hwf hsrc hdst hne hguard) hrlr).symm
+              rw [e1, e2, eql, eqr]
+              exact Splice.app ihl ihr
+        next =>
+          -- `repr i = src`: the whole subtree becomes `unfold' dst`.
+          have hri' : (h.redirect src dst).repr i = dst := by
+            rw [Heap.repr_redirect hwf.fwok hsrc hdst hne hlt, if_pos hreq]
+          have hi' : i < (h.redirect src dst).len := by
+            rw [Heap.len_eq]; show i < h.ns.length
+            rw [← hwf.fwlen]; exact hlt
+          have e1 : heapUnfold h hwf i = heapUnfold h hwf src := by
+            rw [heapUnfold_repr hwf
+                  (by rw [Heap.len_eq, ← hwf.fwlen]; exact hlt), hreq]
+          have e2 : heapUnfold (h.redirect src dst)
+                (HeapWf_redirect hwf hsrc hdst hne hguard) i =
+              heapUnfold (h.redirect src dst)
+                (HeapWf_redirect hwf hsrc hdst hne hguard) dst := by
+            rw [heapUnfold_repr (HeapWf_redirect hwf hsrc hdst hne hguard)
+                  hi', hri']
+          rw [e1, e2]; exact Splice.here
+      next => -- `i` out of range: both sides read nothing.
+        have hri : h.repr i = i := Heap.repr_oob hge
+        have hri' : (h.redirect src dst).repr i = i := by
+          apply Heap.repr_oob
+          show (h.fw.set src (some dst)).length ≤ i
+          rw [List.length_set]; exact hge
+        have hnone : h.ns[i]? = none := by
+          rw [List.getElem?_eq_none_iff, ← hwf.fwlen]; exact hge
+        have hnone' : (h.redirect src dst).ns[i]? = none := hnone
+        have e1 : heapUnfold h hwf i = .var 0 := by
+          conv_lhs => rw [heapUnfold]; rw [hri, hnone]
+        have e2 : heapUnfold (h.redirect src dst)
+              (HeapWf_redirect hwf hsrc hdst hne hguard) i = .var 0 := by
+          conv_lhs => rw [heapUnfold]; rw [hri', hnone']
+        rw [e1, e2]; exact Splice.refl
+
 end ISAR
