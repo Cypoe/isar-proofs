@@ -1,0 +1,5 @@
+{"name": "toggle", "alphabet": "nibble", "start": "s0",
+ "states": {"s0": {"on": {"*": {"emit": ["$in"], "next": "s1"}},
+                  "eof": {"emit": [], "halt": 0}},
+            "s1": {"on": {"*": {"emit": [], "next": "s0"}},
+                  "eof": {"emit": [], "halt": 0}}}}

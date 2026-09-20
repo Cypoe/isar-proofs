@@ -8,13 +8,13 @@
 | --- | --- | --- | --- | --- |
 | dialect | bytecode.postfix | bytecode_dialect.bytecode_map | realized |  |
 | dialect | lambda.named | lambda_dialect.lambda_turner_map | realized | host QuotientMap exists; no native token alphabet |
-| dialect | xdu.json | xdu_dialect.XDU | declared | nibble transducer plex (W3) |
+| dialect | xdu.json | xdu_dialect.XDU | realized | nibble transducer plex (W3) |
 | dialect | phi.rel | — | declared | spec only |
 | isa | x86_64 | isa_x86_64.X86_64 | realized |  |
 | isa | aarch64 | — | declared | no aarch64 ISA table |
 | isa | riscv64 | — | declared | no riscv64 ISA table |
 | routines | x86_64.win64.lo | routines_x86_64_win64.X86_64_WIN64 | realized |  |
-| routines | x86_64.win64.xdu | routines_x86_64_win64_xdu.X86_64_WIN64_XDU | declared | nibble transducer plex routines (W3) |
+| routines | x86_64.win64.xdu | routines_x86_64_win64_xdu.X86_64_WIN64_XDU | realized | nibble transducer plex routines (W3) |
 | routines | x86_64.win64.cd | — | declared | Lean ParStep / host reduce_cd contract, native unrealized |
 | routines | x86_64.linux.lo | — | declared | syscall ABI, no kernel32 IAT |
 | routines | x86_64.uefi.lo | — | declared | UEFI boot services ABI |
@@ -26,7 +26,7 @@
 | piece | graph.lo | host_pieces.GRAPH_PIECE | realized |  |
 | piece | graph.cd | host_pieces.GRAPH_CD_PIECE | realized |  |
 | regime | operEq | observation_regime.oper_eq_regime | realized |  |
-| regime | stdout+rc | xdu_dialect.stdout_rc_regime | declared | declared (W3) |
+| regime | stdout+rc | xdu_dialect.stdout_rc_regime | realized | declared (W3) |
 | regime | syscall-trace | — | declared | declared |
 
 ## Toolchains
@@ -34,7 +34,7 @@
 | name | dialect | isa | routines | target | path | status |
 | --- | --- | --- | --- | --- | --- | --- |
 | native.x86_64.pe | bytecode.postfix | x86_64 | x86_64.win64.lo | pe64 | runtime | realized |
-| xdu.x86_64.pe | xdu.json | x86_64 | x86_64.win64.xdu | pe64 | native | declared |
+| xdu.x86_64.pe | xdu.json | x86_64 | x86_64.win64.xdu | pe64 | native | realized |
 | isa.aarch64 | bytecode.postfix | aarch64 | aarch64.win64.lo | pe64 | runtime | declared |
 | isa.riscv64 | bytecode.postfix | riscv64 | riscv64.linux.lo | elf64 | runtime | declared |
 | x86_64.win64.cd | bytecode.postfix | x86_64 | x86_64.win64.cd | pe64 | runtime | declared |

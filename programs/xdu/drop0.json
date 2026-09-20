@@ -1,0 +1,4 @@
+{"name": "drop0", "alphabet": "nibble", "start": "s0",
+ "states": {"s0": {"on": {"0": {"emit": [], "next": "s0"},
+                         "*": {"emit": ["$in"], "next": "s0"}},
+                  "eof": {"emit": [], "halt": 0}}}}

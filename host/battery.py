@@ -30,6 +30,9 @@ HOST_SUITES = [
     "spec_project.py",
     "spec_check.py",
     "futamura_cube.py",
+    "xdu_dialect.py",
+    "routines_x86_64_win64_xdu.py",
+    "xdu_gate.py",
 ]
 
 

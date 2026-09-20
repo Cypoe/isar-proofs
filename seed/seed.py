@@ -331,18 +331,21 @@ DEFAULT = Realization()
 # ======================================================================
 # §3  CHAIN (toolchain.resolve -> isa.assemble -> target.pack)
 #
-# The seed only seeds: ISA, reducer routines and the PE64 container are
-# host data modules (host/isa_x86_64.py, host/routines_x86_64_win64.py,
-# host/target_pe64.py) listed in host/toolchain.py's CATALOG.  emit()
-# resolves the toolchain, assembles the program, packs the image.
+# The seed only seeds: ISA, routines and the PE64 container are host
+# data modules (host/isa_x86_64.py, host/routines_*.py, host/target_pe64.py)
+# declared in host/toolchain.json.  emit() resolves the toolchain,
+# assembles the program, packs the image.
 # ======================================================================
 
-def emit(R: Realization = DEFAULT, tc=None) -> bytes:
+def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
     """Module-agnostic chain: resolve the toolchain, assemble the routines'
-    program against the target's symbol table at its text base, pack."""
+    program against the target's symbol table at its text base, pack.
+    Path `native` passes the loaded program record to the routines;
+    path `runtime` assembles the routines' program from R alone."""
     tc = tc or toolchain.by_name("native.x86_64.pe")
     isa, rts, tgt = toolchain.resolve(tc)
-    prog = rts.program(R)
+    prog = rts.program(program, R) if tc.path == "native" \
+        else rts.program(R)
     text, labels = isa.assemble(
         prog, tgt.symbols(rts.imports, rts.data_slots), base=tgt.text_base)
     return tgt.pack(text, labels, rts.imports, rts.data_slots, R)

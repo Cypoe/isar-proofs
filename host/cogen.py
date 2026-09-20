@@ -107,13 +107,37 @@ def choose(
     *,
     prefer: Optional[str] = None,
     prefer_family: Optional[str] = None,
+    path: Optional[str] = None,
+    program: Optional[Any] = None,
 ) -> LoaderPlan:
     """
     Pure selection: budget + c → loader family plan. No emit side effects.
     SERIAL + x86_64 defaults to family=fasm unless prefer_family forces otherwise.
     SIMD/GPU families still wrap graph.lo until native loaders exist.
+    path="native" selects the realized native-path toolchain (program
+    required — the transducer is the plan's input, no piece is emitted).
     """
     names = {p.name for p in catalog}
+    if path == "native":
+        assert program is not None, "path='native' requires a program"
+        for tc in toolchain.realized():
+            if tc.path != "native" or tc.isa not in context.features:
+                continue
+            _isa, _rts, tgt = toolchain.resolve(tc)
+            if tgt.os != context.arch:
+                continue
+            pname = getattr(program, "name", type(program).__name__)
+            return LoaderPlan(
+                name=f"plan.native.{tc.name}",
+                family="cpu",
+                source_piece=tc.name,
+                budget=budget,
+                context=context,
+                note=f"native path: program {pname!r} compiled to code; "
+                     "no reducer, no tags in the image",
+                toolchain=tc.name,
+            )
+        raise NotRealized("no realized native-path toolchain for this machine")
     src = prefer if prefer in names else (
         "graph.lo" if "graph.lo" in names else (catalog[0].name if catalog else "graph.lo")
     )

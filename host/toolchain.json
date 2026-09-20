@@ -5,7 +5,9 @@
     "lambda.named": {"module": "lambda_dialect", "record": "lambda_turner_map",
       "note": "host QuotientMap exists; no native token alphabet"},
     "xdu.json": {"module": "xdu_dialect", "record": "XDU",
-      "note": "nibble transducer plex (W3)"},
+      "note": "nibble transducer plex (W3)",
+      "maps": {"input": "nibbles_to_term", "output": "term_to_nibbles",
+               "program": "to_lambda"}},
     "phi.rel": {"note": "spec only"}
   },
   "isas": {
