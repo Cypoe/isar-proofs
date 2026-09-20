@@ -1,10 +1,17 @@
 """
-isa_x86_64 — pure x86-64 ISA data + encoder + two-pass assembler.
+isa_x86_64 — pure x86-64 ISA data + table-driven encoder + assembler.
 
 Moved verbatim from seed/seed.py §3/§4 (the seed only seeds; the ISA is
 host data the toolchain catalog can list/choose/refuse).  `assemble`
 gained a `base` parameter (default 0): with base=TEXT_RVA the resolver
 math is identical to the old inline build_pe assembly.
+
+The encoder is fasmg-shaped: ENCS keeps each instruction's encoding as
+ordered row data (named predicates selecting among alternative field
+lists); _interpret is a generic field engine that knows the field and
+predicate *names* only — no instruction-family branching.  The x86-64
+field vocabulary (FIELDS) and quirks-as-predicates (PREDS) are the data
+the core interprets.
 
 Oracle: fasmg.exe (env ISAR_FASMG) byte-equality per INSN row — see
 check_rows() / main().  Missing oracle = FAIL, never SKIP.
@@ -117,8 +124,6 @@ INSN: Tuple[Tuple[str, str, int, int, object, object], ...] = (
 )
 FORMS: Dict[str, Tuple[str, int, int, object, object]] = {r[0]: r[1:] for r in INSN}
 
-_ACC_OP = {"add": 0x05, "and": 0x25, "sub": 0x2D, "cmp": 0x3D}
-
 
 def _opbytes(op: int) -> bytes:
     if op > 0xFFFF:
@@ -175,108 +180,208 @@ def _reg_code(name: str) -> int:
 Insn = Tuple
 
 
-def _rexb(v: int) -> bytes:
-    """Emit a REX prefix only when needed (W set, or any ext bit)."""
-    return bytes((v,)) if v != 0x40 else b""
+# ======================================================================
+# ENCODING TEMPLATES (x86-64 row data)
+#
+# ENCS[form] = ordered alternatives; the first whose PREDS all hold is
+# emitted as the concatenation of its FIELDS ops.  Operand roles name
+# ops[i] by use: reg<i> = modrm reg field, rm<i> = modrm r/m (mod=11),
+# mem<i> = ("m",base,disp), rip = r/m=101 (rip+disp32), ext = the row's
+# fixed reg field.  REX roles: "w" applies the row's W flag, R<i>/B<i>
+# take operand i's register (or mem base) code into the R/B bit.
+# ======================================================================
+
+_R64_R64 = (("rex", "w", "R1", "B0"), ("op",), ("modrm", "reg1", "rm0"))
+_R64_MEM = (("rex", "w", "R0", "B1"), ("op",), ("modrm", "reg0", "mem1"),
+            ("disp",))
+_MEM_R64 = (("rex", "w", "B0", "R1"), ("op",), ("modrm", "reg1", "mem0"),
+            ("disp",))
+_EXT_RM = (("rex", "w", "B0"), ("op",), ("modrm", "ext", "rm0"))
+_REL32 = (("op",), ("rel", 0))
+
+
+def _grp1(acc_op: int) -> Tuple:
+    """grp1 r64,imm alternative chain — the quirks as matching order:
+    imm8 shrink (0x83/ib), accumulator short form (imm32 only), default."""
+    return (
+        ((("i8", 1),),  (("rex", "w", "B0"), ("op", 0x83),
+                         ("modrm", "ext", "rm0"), ("imm", "i8", 1))),
+        ((("acc", 0),), (("rex", "w"), ("op", acc_op), ("imm", "i32", 1))),
+        ((),            _EXT_RM + (("imm", "i32", 1),)),
+    )
+
+
+ENCS: Dict[str, Tuple] = {
+    "mov_r64_imm": (
+        ((("i32", 1),), (("rex", "w", "B0"), ("op", 0xC7),
+                         ("modrm", 0, "rm0"), ("imm", "i32", 1))),
+        ((),            (("rex", "w", "B0"), ("oprd",),
+                         ("imm", "i64", 1))),
+    ),
+    "mov_r64_r64":   (((), _R64_R64),),
+    "mov_r64_m64":   (((), _R64_MEM),),
+    "mov_m64_r64":   (((), _MEM_R64),),
+    "mov_r64_rip":   (((), (("rex", "w", "R0"), ("op",),
+                           ("modrm", "reg0", "rip"), ("rel", 1))),),
+    "mov_rip_r64":   (((), (("rex", "w", "R1"), ("op",),
+                           ("modrm", "reg1", "rip"), ("rel", 0))),),
+    "movzx_r32_m8":  (((), _R64_MEM),),
+    "mov_r8_m8":     (((), _R64_MEM),),
+    "mov_m8_r8":     (((), _MEM_R64),),
+    "mov_m8_imm8":   (((), (("rex", "B0"), ("op",),
+                           ("modrm", "ext", "mem0"), ("disp",),
+                           ("imm", "i8", 1))),),
+    "mov_m64_imm32": (((), (("rex", "w", "B0"), ("op",),
+                           ("modrm", "ext", "mem0"), ("disp",),
+                           ("imm", "i32", 1))),),
+    "mov_r32_imm32": (((), (("rex", "B0"), ("oprd",), ("imm", "i32", 1))),),
+    "lea_r64_m64":   (((), _R64_MEM),),
+    "lea_r64_rip":   (((), (("rex", "w", "R0"), ("op",),
+                           ("modrm", "reg0", "rip"), ("rel", 1))),),
+    "add_r64_imm":   _grp1(0x05),
+    "and_r64_imm":   _grp1(0x25),
+    "sub_r64_imm":   _grp1(0x2D),
+    "cmp_r64_imm":   _grp1(0x3D),
+    "cmp_m64_imm": (
+        ((("i8", 1),), (("rex", "w", "B0"), ("op", 0x83),
+                        ("modrm", "ext", "mem0"), ("disp",),
+                        ("imm", "i8", 1))),
+        ((),           (("rex", "w", "B0"), ("op",),
+                        ("modrm", "ext", "mem0"), ("disp",),
+                        ("imm", "i32", 1))),
+    ),
+    "add_r64_r64":   (((), _R64_R64),),
+    "sub_r64_r64":   (((), _R64_R64),),
+    "cmp_r64_r64":   (((), _R64_R64),),
+    "test_r64_r64":  (((), _R64_R64),),
+    "xor_r32_r32":   (((), _R64_R64),),
+    "add_r8_imm8":   (((), _EXT_RM + (("imm", "i8", 1),)),),
+    "shl_r64_imm8":  (((), _EXT_RM + (("imm", "i8", 1),)),),
+    "push_r64":      (((), (("rex", "B0"), ("oprd",))),),
+    "pop_r64":       (((), (("rex", "B0"), ("oprd",))),),
+    "call_rel32":    (((), _REL32),),
+    "call_mrip":     (((), (("rex", "w"), ("op",),
+                           ("modrm", "ext", "rip"), ("rel", 0))),),
+    "jmp_rel32":     (((), _REL32),),
+    "je_rel32":      (((), _REL32),),
+    "jne_rel32":     (((), _REL32),),
+    "jl_rel32":      (((), _REL32),),
+    "jge_rel32":     (((), _REL32),),
+    "jb_rel32":      (((), _REL32),),
+    "jbe_rel32":     (((), _REL32),),
+    "ret":           (((), (("op",),)),),
+    "inc_r64":       (((), _EXT_RM),),
+    "dec_r64":       (((), _EXT_RM),),
+    "inc_mrip":      (((), (("rex", "w"), ("op",),
+                           ("modrm", "ext", "rip"), ("rel", 0))),),
+    "div_r64":       (((), _EXT_RM),),
+}
+
+
+# ======================================================================
+# FIELD + PREDICATE VOCABULARY (x86-64) — the named ops ENCS references.
+# ======================================================================
+
+class _Ctx:
+    """Field-interpreter scratch: row data + operands + label resolver."""
+    __slots__ = ("op", "w", "ext", "ops", "resolve", "disp")
+
+    def __init__(self, row: tuple, ops: tuple, resolve) -> None:
+        _, self.op, self.w, self.ext, _ = row
+        self.ops, self.resolve, self.disp = ops, resolve, b""
+
+
+def _rex_reg(o) -> Tuple[int, bool]:
+    """Operand -> (code, needs-REX): byte regs with code>=4 (spl..dil and
+    r8b+ — the AH..BH exclusion quirk) force REX even with no R/B bits."""
+    if isinstance(o, str):
+        return _reg_code(o), o in REG8 and REG8[o] >= 4
+    if o[0] == "m":
+        return REG64[o[1]], False
+    return 0, False                               # ("p", ...): rip, no bits
+
+
+def _f_rex(ctx: _Ctx, *roles) -> bytes:
+    v, need = 0x40, False
+    for r in roles:
+        if r == "w":
+            v |= ctx.w << 3
+            continue
+        code, b_ext = _rex_reg(ctx.ops[int(r[1:])])
+        v |= (code >> 3) << (2 if r[0] == "R" else 0)
+        need = need or b_ext
+    return bytes((v,)) if v != 0x40 or need else b""
+
+
+def _f_op(ctx: _Ctx, *v) -> bytes:
+    return _opbytes(v[0] if v else ctx.op)
+
+
+def _f_oprd(ctx: _Ctx) -> bytes:
+    return bytes((ctx.op + (_reg_code(ctx.ops[0]) & 7),))
+
+
+def _f_modrm(ctx: _Ctx, reg, rm) -> bytes:
+    r = (reg & 7 if isinstance(reg, int) else ctx.ext if reg == "ext"
+         else _reg_code(ctx.ops[int(reg[3:])]) & 7)
+    if rm == "rip":
+        return bytes(((r & 7) << 3 | 5,))
+    if rm.startswith("rm"):
+        return bytes((0xC0 | (r & 7) << 3
+                      | (_reg_code(ctx.ops[int(rm[2:])]) & 7),))
+    _, m, ctx.disp = _mem_modrm(r & 7, ctx.ops[int(rm[3:])])   # "mem<i>"
+    return m
+
+
+def _f_disp(ctx: _Ctx) -> bytes:
+    return ctx.disp
+
+
+def _f_imm(ctx: _Ctx, kind: str, i: int) -> bytes:
+    return struct.pack({"i8": "<b", "i32": "<i", "i64": "<q"}[kind],
+                       ctx.ops[i])
+
+
+def _f_rel(ctx: _Ctx, i: int) -> bytes:
+    o = ctx.ops[i]
+    if isinstance(o[1], int):
+        return struct.pack("<i", o[1])
+    if ctx.resolve is None:
+        return b"\x00\x00\x00\x00"
+    return struct.pack("<i", ctx.resolve(o[1]))
+
+
+FIELDS: Dict[str, Callable[..., bytes]] = {
+    "rex": _f_rex, "op": _f_op, "oprd": _f_oprd, "modrm": _f_modrm,
+    "disp": _f_disp, "imm": _f_imm, "rel": _f_rel,
+}
+
+PREDS: Dict[str, Callable[..., bool]] = {
+    "i8": lambda ctx, i: _i8s(ctx.ops[i]),            # imm8-shrink selector
+    "i32": lambda ctx, i: _i32s(ctx.ops[i]),          # sign-extended imm32
+    "acc": lambda ctx, i: _reg_code(ctx.ops[i]) == 0,  # accumulator form
+}
+
+
+# ======================================================================
+# GENERIC ENCODER CORE — knows field/predicate NAMES, no instruction.
+# The same _interpret loop can drive another ISA's fields/preds/alts.
+# ======================================================================
+
+def _interpret(fields, preds, alts, ctx) -> bytes:
+    """First alternative whose named predicates all hold -> concat of its
+    named field ops.  No mnemonic, form, or operand-shape branching."""
+    for conds, tmpl in alts:
+        if all(preds[c[0]](ctx, *c[1:]) for c in conds):
+            return b"".join(fields[f[0]](ctx, *f[1:]) for f in tmpl)
+    raise ValueError(f"uncovered insn operands: {ctx.ops!r}")
 
 
 def encode(insn: Insn, resolve=None) -> bytes:
-    """ISA-intrinsic encoding: REX/ModRM/SIB/disp/imm assembly."""
+    """ISA-intrinsic encoding: ENCS row data through the field engine."""
     form, ops = insn[0], insn[1:]
-    mnem, op, w, ext, immk = FORMS[form]
-    rex = 0x40 | (0x08 if w else 0)
-    opcode = _opbytes(op)
-
-    def rel(opnd) -> bytes:
-        if isinstance(opnd[1], int):
-            return struct.pack("<i", opnd[1])
-        if resolve is None:
-            return b"\x00\x00\x00\x00"
-        return struct.pack("<i", resolve(opnd[1]))
-
-    if immk == "l":                                 # call/jmp/jcc rel32
-        return opcode + rel(ops[0])
-
-    if form in ("call_mrip", "inc_mrip"):
-        rex_b, modrm, _ = _mem_modrm(ext, ops[0])
-        return _rexb(rex | rex_b) + opcode + modrm + rel(ops[0])
-
-    if immk == "p":                                 # rip mem forms
-        if form in ("mov_r64_rip", "lea_r64_rip"):
-            regf, memop = _reg_code(ops[0]), ops[1]
-        else:                                       # mov_rip_r64
-            regf, memop = _reg_code(ops[1]), ops[0]
-        rex_b, modrm, _ = _mem_modrm(regf, memop)
-        return _rexb(rex | (regf >> 3) << 2 | rex_b) + opcode + modrm + rel(memop)
-
-    if ext == "+":                                  # push/pop/mov imm (+rd)
-        rd = _reg_code(ops[0])
-        if form == "mov_r64_imm":
-            v = ops[1]
-            if _i32s(v):
-                return bytes((rex | (rd >> 3),)) + b"\xC7" \
-                    + bytes((0xC0 | (rd & 7),)) + struct.pack("<i", v)
-            return bytes((rex | (rd >> 3),)) + bytes((0xB8 + (rd & 7),)) \
-                + struct.pack("<q", v)
-        if immk == "i4":                            # mov r32,imm32
-            return _rexb(0x40 | (rd >> 3)) + bytes((op + (rd & 7),)) \
-                + struct.pack("<i", ops[1])
-        return _rexb(0x40 | (rd >> 3)) + bytes((op + (rd & 7),))
-
-    if immk in ("g", "gm"):                         # grp1 r64/mem, imm
-        dst, v = ops
-        ib = _i8s(v)
-        opb = 0x83 if ib else op
-        imm = struct.pack("<b" if ib else "<i", v)
-        if immk == "gm":
-            rex_b, modrm, disp = _mem_modrm(ext, dst)
-            return _rexb(rex | rex_b) + bytes((opb,)) + modrm + disp + imm
-        rd = _reg_code(dst)
-        if not ib and rd == 0:                      # accumulator special
-            return bytes((rex,)) + bytes((_ACC_OP[mnem],)) + struct.pack("<i", v)
-        modrm = bytes((0xC0 | (ext << 3) | (rd & 7),))
-        return bytes((rex | (rd >> 3),)) + bytes((opb,)) + modrm + imm
-
-    if immk == "i1r":                               # shl r64 / add r8, imm8
-        dst, v = ops
-        rd = _reg_code(dst)
-        modrm = bytes((0xC0 | (ext << 3) | (rd & 7),))
-        if form == "add_r8_imm8":
-            return _rexb(0x40 | (rd >> 3) | (1 if rd >= 4 else 0)) \
-                + opcode + modrm + struct.pack("<b", v)
-        return bytes((rex | (rd >> 3),)) + opcode + modrm + struct.pack("<b", v)
-
-    if immk in ("i1m", "i4m"):                      # mov m,imm
-        memop, v = ops
-        rex_b, modrm, disp = _mem_modrm(ext, memop)
-        imm = struct.pack("<b" if immk == "i1m" else "<i", v)
-        return _rexb(rex | rex_b) + opcode + modrm + disp + imm
-
-    if ext is not None:                             # inc/dec/div reg, mod=11
-        rd = _reg_code(ops[0])
-        modrm = bytes((0xC0 | (ext << 3) | (rd & 7),))
-        return bytes((rex | (rd >> 3),)) + opcode + modrm
-
-    if len(ops) == 2 and isinstance(ops[0], str) and isinstance(ops[1], str):
-        dst, src = _reg_code(ops[0]), _reg_code(ops[1])
-        modrm = bytes((0xC0 | (src & 7) << 3 | (dst & 7),))
-        return _rexb(rex | (src >> 3) << 2 | (dst >> 3)) + opcode + modrm
-
-    if len(ops) == 2:                               # reg<->mem
-        if isinstance(ops[0], str):                 # reg, mem
-            regf, memop = _reg_code(ops[0]), ops[1]
-        else:                                       # mem, reg
-            memop, regf = ops[0], _reg_code(ops[1])
-        rex_b, modrm, disp = _mem_modrm(regf, memop)
-        need = w or (regf >> 3) or rex_b or _reg8_ext(ops[0]) or _reg8_ext(ops[1])
-        return _rexb(rex | (regf >> 3) << 2 | rex_b) + opcode + modrm + disp \
-            if need else opcode + modrm + disp
-
-    return opcode                                   # ret
-
-
-def _reg8_ext(o) -> bool:
-    return isinstance(o, str) and o in REG8 and REG8[o] >= 4
+    return _interpret(FIELDS, PREDS, ENCS[form],
+                      _Ctx(FORMS[form], ops, resolve))
 
 
 def render_fasm(insn: Insn, resolve=None) -> str:
@@ -380,6 +485,8 @@ class ISA:
     name: str            # "x86_64"
     bits: int            # 64
     insn: tuple          # INSN rows
+    fields: dict         # FIELDS — per-ISA field vocabulary
+    templates: dict      # ENCS — per-form encoding alternatives
     encode: Callable     # encode(insn, resolve=None) -> bytes
     assemble: Callable   # assemble(program, symbols, base=0) -> (bytes, labels)
     render: Callable     # render_fasm
@@ -389,6 +496,8 @@ X86_64 = ISA(
     name="x86_64",
     bits=64,
     insn=INSN,
+    fields=FIELDS,
+    templates=ENCS,
     encode=encode,
     assemble=assemble,
     render=render_fasm,
@@ -417,7 +526,10 @@ ROW_SAMPLES: List[Tuple[str, Insn]] = [
     ("movzx_r32_m8", ("movzx_r32_m8", "eax", ("m", "rsi", 0))),
     ("movzx_r32_m8", ("movzx_r32_m8", "ecx", ("m", "rsi", 3))),
     ("mov_r8_m8", ("mov_r8_m8", "al", ("m", "r9", 0))),
+    ("mov_r8_m8", ("mov_r8_m8", "sil", ("m", "rax", 0))),   # byte-reg REX
+    ("mov_r8_m8", ("mov_r8_m8", "r8b", ("m", "rax", 0))),   # REX.R
     ("mov_m8_r8", ("mov_m8_r8", ("m", "rsi", 0), "cl")),
+    ("mov_m8_r8", ("mov_m8_r8", ("m", "rax", 0), "bpl")),   # byte-reg REX
     ("mov_m8_imm8", ("mov_m8_imm8", ("m", "rsi", 0), 0x40)),
     ("mov_m64_imm32", ("mov_m64_imm32", ("m", "rsp", 0x20), 0)),
     ("mov_m64_imm32", ("mov_m64_imm32", ("m", "rax", 8), 0)),
@@ -443,6 +555,8 @@ ROW_SAMPLES: List[Tuple[str, Insn]] = [
     ("xor_r32_r32", ("xor_r32_r32", "eax", "eax")),
     ("xor_r32_r32", ("xor_r32_r32", "r15d", "r15d")),
     ("add_r8_imm8", ("add_r8_imm8", "dl", 0x30)),
+    ("add_r8_imm8", ("add_r8_imm8", "spl", 0x30)),   # byte-reg REX
+    ("add_r8_imm8", ("add_r8_imm8", "r15b", 1)),     # REX.B
     ("shl_r64_imm8", ("shl_r64_imm8", "rdx", 3)),
     ("push_r64", ("push_r64", "r14")),
     ("push_r64", ("push_r64", "rsi")),
@@ -468,6 +582,10 @@ def check_rows() -> bool:
     """fasmg byte oracle on every ROW_SAMPLES entry (per-row only; the
     whole-.text oracle needs the routines and stays in the seed's G1)."""
     ok = True
+    missing = [r[0] for r in INSN if r[0] not in ENCS]
+    if missing:
+        print(f"  FAIL ENCS missing rows: {missing}")
+        ok = False
     for form, insn in ROW_SAMPLES:
         if FORMS[form][4] == "l":
             d = insn[1][1]
