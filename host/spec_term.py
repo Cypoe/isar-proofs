@@ -105,6 +105,17 @@ rounds vs ~12k).  v1 must stay free in the residual — a residual with
 no dynamic input left would mean the specializer evaluated, not
 specialized.
 
+G9c — `resolveOf`: emit stage 1 (`toolchain.resolve`) at term level.
+The fold walks entry -> {dialect,isa,routines,target} names -> catalog
+sections -> {module,record}; the result is the Scott list of the eight
+resolved field strings, "!" for any missing link (the NotRealized
+shadow).  No string concatenation — an earlier flat-string draft used
+a bounded revOnto-append fold that diverges at L0 when the bound
+exceeds the list length by ~5 (the nil-case pack fixpoint is only
+benign over value lists); the field list is the honest observable for
+a multi-part resolution.  Decoding probes the NF's cons cells and
+nibble selectors directly.
+
 Usage: python host/spec_term.py
 """
 from __future__ import annotations
@@ -305,6 +316,93 @@ PATH_OF = (
            "(\\l. \\o. o)) I (\\v. " + EMIT + " v __NEMIT__)))"
 )
 
+# ---------------------------------------------------------------------------
+# G9c: resolveOf — the emit chain's resolve stage at term level.
+#
+# toolchain.resolve(name) is, at data level: walk toolchains for the entry,
+# take its dialect/isa/routines/target names, and look each up in the
+# matching catalog section for {module, record}.  All assoc folds — the
+# same machinery as pathOf.
+#
+# OBSERVABLE: a Scott list of the eight resolved field strings
+#     [d_mod, d_rec, i_mod, i_rec, r_mod, r_rec, t_mod, t_rec]
+# built by pure cons of lookup results — no string concatenation.
+#
+# (The earlier flat-string version used a bounded revOnto-append fold;
+# it diverged at the L0 level whenever the fold bound exceeded the list
+# length by ~5 — the nil-case pack fixpoint is only benign when the
+# list argument is already a value, and nested lazy applications made
+# the excess iterations feed a self-rebuilding residual.  The field
+# list is the honest observable for a multi-part resolution anyway.)
+#
+# "!" stands in for a component that is undeclared or lacks the key —
+# the term-level shadow of NotRealized.
+# ---------------------------------------------------------------------------
+
+# cons h t = \n.\c. c h t  (λ-source — the T-level _CONS above is taken)
+_CONS_SRC = "(\\h2. \\t2. \\n2. \\c2. c2 h2 t2)"
+
+
+def _cons(h_src: str, t_src: str) -> str:
+    return "(" + _CONS_SRC + " " + h_src + " " + t_src + ")"
+
+
+# _FIELD fk sk rk k — continuation-passing field resolution, open in
+# context (spec, entry):  entry[fk] -> cn ; spec[sk] -> sect ;
+# sect[cn] -> rec ; rec[rk] -> v ; then `k v`.  Any missing link calls
+# k on "!" instead.
+_FIELD = (
+    "(\\k9. (" + SPECGET + " entry __FK__ __NENT__ __NBF__) (k9 __BANG__) "
+    "(\\cn. (" + SPECGET + " spec __SK__ __NTOP__ __NBS__) (k9 __BANG__) "
+    "(\\sect. (" + SPECGET + " sect cn __NSECT__ __NBC__) (k9 __BANG__) "
+    "(\\rec. (" + SPECGET + " rec __RK__ __NREC__ __NBM__) (k9 __BANG__) "
+    "(\\v. k9 v)))))"
+)
+
+
+def _field_src(field: str, section: str, reckey: str, k_src: str) -> str:
+    return ("(" + _FIELD.replace("__FK__", _str_src(field))
+                        .replace("__SK__", _str_src(section))
+                        .replace("__RK__", _str_src(reckey))
+            + " " + k_src + ")")
+
+
+# resolve result: cons-list of the 8 resolved field strings
+_FIELDS = (
+    ("dialect", "dialects"), ("isa", "isas"),
+    ("routines", "routines"), ("target", "targets"),
+)
+
+
+def _resstr() -> str:
+    body = "K"
+    for i in range(7, -1, -1):
+        body = _cons("v%d" % i, body)
+    for i in range(7, -1, -1):
+        field, sect = _FIELDS[i // 2]
+        reckey = "module" if i % 2 == 0 else "record"
+        body = _field_src(field, sect, reckey,
+                          "(\\v%d. " % i + body + ")")
+    return body
+
+
+_STEP_R = (
+    "\\acc. acc (\\l. \\o. l "
+    "(\\k2. k2 l o) "
+    "(\\entry. \\t. (" + SPECGET + " entry __NAMET__ __NENT__ __NBE__) "
+    "(\\k2. k2 t o) "
+    "(\\v. " + EQSTR + " name v __NBEQ__ "
+    "(\\k2. k2 t (\\n4. \\j4. j4 (" + _resstr() + "))) "
+    "(\\k2. k2 t o))))"
+)
+
+RESOLVE_OF = (
+    "(\\spec. \\name. (" + SPECGET + " spec __TOOLST__ __NTOP__ __NBT__) I "
+    "(\\arr. ((__NARR__ (" + _STEP_R + ") "
+    "(\\k2. k2 arr (\\n4. \\j4. n4))) "
+           "(\\l. \\o. o)) I I))"
+)
+
 
 def query_src(n_top: int, n_ent: int, n_arr: int, n_emit: int,
               n_beq: int, n_bt: int, n_be: int) -> str:
@@ -368,6 +466,59 @@ def query(name: str, spec_t: Optional[T] = None) -> T:
     return _appn(QUERY, SPEC if spec_t is None else spec_t, str_term(name))
 
 
+def resolve_src(n_top: int, n_arr: int, n_ent: int, n_be: int,
+                n_beq: int, n_bf: int, n_bs: int, n_sect: int,
+                n_bc: int, n_rec: int, n_bm: int, n_bt: int) -> str:
+    """λ-source of `\\spec. \\name. resolveOf` with bounds instantiated."""
+    src = RESOLVE_OF
+    for ph, val in (
+        ("__TOOLST__", _str_src("toolchains")),
+        ("__NAMET__", _str_src("name")),
+        ("__BANG__", _str_src("!")),
+        ("__NTOP__", _church_src(n_top)),
+        ("__NARR__", _church_src(n_arr)),
+        ("__NENT__", _church_src(n_ent)),
+        ("__NBE__", _church_src(n_be)),
+        ("__NBEQ__", _church_src(n_beq)),
+        ("__NBF__", _church_src(n_bf)),
+        ("__NBS__", _church_src(n_bs)),
+        ("__NSECT__", _church_src(n_sect)),
+        ("__NBC__", _church_src(n_bc)),
+        ("__NREC__", _church_src(n_rec)),
+        ("__NBM__", _church_src(n_bm)),
+        ("__NBT__", _church_src(n_bt)),
+    ):
+        src = src.replace(ph, val)
+    assert "__" not in src, "uninstantiated placeholder"
+    return src
+
+
+def build_resolve(raw: dict) -> T:
+    """resolveOf instantiated to this catalog's bounds."""
+    entries = raw["toolchains"]
+    sects = [raw.get(s, {}) for s in
+             ("dialects", "isas", "routines", "targets")]
+    comps = [c for s in sects for c in s.values()]
+
+    def nib(s: str) -> int:
+        return 2 * len(s.encode("utf-8"))
+
+    return bracket(parse(resolve_src(
+        n_top=len(raw),
+        n_arr=len(entries),
+        n_ent=max(len(e) for e in entries),
+        n_be=nib("name") + 2,
+        n_beq=max(nib(e["name"]) for e in entries) + nib(NEGATIVE) + 2,
+        n_bf=nib("routines") + 2,          # longest field key
+        n_bs=nib("dialects") + 2,          # longest section key
+        n_sect=max(len(s) for s in sects),
+        n_bc=max(nib(n) for s in sects for n in s) + 2,
+        n_rec=max(len(c) for c in comps) + 2,
+        n_bm=nib("record") + 2,          # longer of module/record
+        n_bt=nib("toolchains") + 2,
+    )))
+
+
 # ---------------------------------------------------------------------------
 # independent expected value: direct dict walk (shares no code)
 # ---------------------------------------------------------------------------
@@ -379,6 +530,31 @@ def python_walk(name: str, raw: Optional[dict] = None) -> Optional[str]:
         if e.get("name") == name:
             return e.get("path")
     return None
+
+
+def python_resolve(name: str, raw: Optional[dict] = None) -> Optional[list]:
+    """resolveOf by dict walk: the eight resolved field strings
+    [d_mod, d_rec, i_mod, i_rec, r_mod, r_rec, t_mod, t_rec] — "!" for a
+    link that is undeclared or lacks the key (the NotRealized shadow)."""
+    raw = _RAW if raw is None else raw
+    ent = next((e for e in raw.get("toolchains", [])
+                if e.get("name") == name), None)
+    if ent is None:
+        return None
+    out = []
+    for field, sect in _FIELDS:
+        rec = raw.get(sect, {}).get(ent.get(field, ""), {})
+        out.append(rec.get("module") or "!")
+        out.append(rec.get("record") or "!")
+    return out
+
+
+RESOLVE = build_resolve(_RAW)
+
+
+def resolve_query(name: str) -> T:
+    """`resolveOf SPEC <name>` — emit stage-1 (resolve) at term level."""
+    return _appn(RESOLVE, SPEC, str_term(name))
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +588,85 @@ def decode_result(nf: T) -> Optional[str]:
         raise ValueError("output map: odd nibble count (no rc convention)")
     return bytes(nibs[i] << 4 | nibs[i + 1]
                  for i in range(0, len(nibs), 2)).decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# resolve output map: bare I = none; Scott list of nibble-strings else.
+# Destructured by probes: cell I K -> head, cell I (K I) -> tail;
+# nibble sel applied to 16 VAR markers -> v_k.  The probes are tiny
+# closed applications, reduced by a minimal L0 stepper (the exported NF
+# is already normal — probes only fire the cell/selector λs).
+# ---------------------------------------------------------------------------
+
+_KI = app(KK, I)
+_MARKS = tuple(T(K.VAR, n=i) for i in range(16))
+
+
+def _l0_step(t: T) -> Optional[T]:
+    if t.k != K.APP:
+        return None
+    f, x = t.l, t.r
+    if f.k == K.NORM:
+        return x
+    if f.k == K.APP:
+        fl, fr = f.l, f.r
+        if fl.k == K.KONST:
+            return fr
+        if fl.k == K.DUP:
+            return app(app(fr, x), x)
+        if fl.k == K.APP:
+            fll, flr = fl.l, fl.r
+            if fll.k == K.COMP:
+                return app(flr, app(fr, x))
+            if fll.k == K.SWAP:
+                return app(app(flr, x), fr)
+            if (fll.k == K.APP and fll.l is not None
+                    and fll.l.k == K.S):
+                return app(app(fll.r, x), app(flr, x))
+    sf = _l0_step(f)
+    if sf is not None:
+        return app(sf, x)
+    sx = _l0_step(x)
+    return None if sx is None else app(f, sx)
+
+
+def _l0_nf(t: T, cap: int = 100_000) -> T:
+    for _ in range(cap):
+        nxt = _l0_step(t)
+        if nxt is None:
+            return t
+        t = nxt
+    raise ValueError("decode probe did not terminate")
+
+
+def _cell_parts(cell: T) -> tuple:
+    return (_l0_nf(app(app(cell, I), KK)),
+            _l0_nf(app(app(cell, I), _KI)))
+
+
+def _decode_str(s: T) -> str:
+    nibs: List[int] = []
+    while s.k != K.KONST:
+        nib, s = _cell_parts(s)
+        probe = _l0_nf(_appn(nib, *_MARKS))
+        if probe.k != K.VAR:
+            raise ValueError(f"nibble probe returned {probe}")
+        nibs.append(probe.n)
+    if len(nibs) & 1:
+        raise ValueError("odd nibble count in resolve field")
+    return bytes(nibs[i] << 4 | nibs[i + 1]
+                 for i in range(0, len(nibs), 2)).decode("utf-8")
+
+
+def decode_resolve(nf: T) -> Optional[List[str]]:
+    """NF -> None (bare I) or the eight resolved field strings."""
+    if nf.k == K.NORM:
+        return None
+    out = []
+    while nf.k != K.KONST:
+        field, nf = _cell_parts(nf)
+        out.append(_decode_str(field))
+    return out
 
 
 def has_var(t: T, n: int) -> bool:
@@ -475,6 +730,48 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # G9c: resolveOf — emit stage 1 (toolchain.resolve) at term level.
+    # For each toolchain name the term walks: entry -> field names ->
+    # catalog sections -> {module, record}; the result is the Scott list
+    # of the eight resolved field strings ("!" = declared but unrealized
+    # — the NotRealized shadow).
+    # ------------------------------------------------------------------
+    # All names are gated on graph.lo + the python-walk oracle; the
+    # expensive witnesses (native token text, cd rounds) run on a
+    # representative subset — full sweep behind --resolve-all.
+    heavy = set(NAMES[:2] + [NEGATIVE])
+    resolve_all = "--resolve-all" in sys.argv[1:]
+    for name in NAMES + [NEGATIVE]:
+        expected = python_resolve(name)
+        n_q += 1
+        t = resolve_query(name)
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_resolve(nf_lo)
+
+        ran_heavy = resolve_all or name in heavy
+        if ran_heavy:
+            nf_nat, steps_nat, _ = seed.reduce_native(t, 0)
+            val_nat = decode_resolve(nf_nat)
+            nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+            val_cd = decode_resolve(nf_cd)
+        else:
+            steps_nat, val_nat, rounds_cd, val_cd = -1, expected, -1, expected
+
+        line = (f"{'OK ' if val_lo == expected else 'FAIL'} "
+                f"{name:18s} resolve -> {val_lo} "
+                f"[lo {steps_lo} | native {steps_nat} | "
+                f"cd {rounds_cd} rounds]")
+        good = (val_lo == expected and val_nat == expected
+                and val_cd == expected)
+        if ran_heavy:
+            good = good and nf_lo == nf_nat
+        if not good:
+            nfail += 1
+            line = "FAIL " + line[4:] + f"  expected {expected}"
+        print(line)
+
+    # ------------------------------------------------------------------
     # G9b: specialize the query program against the static catalog.
     # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
     # residual[1 := str_term name] must agree with the direct query on
@@ -518,9 +815,9 @@ def main() -> int:
         print(line)
 
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
-          f"({n_q} queries x 4 witnesses: graph.lo, native lo exe, "
-          "graph.cd full-spec, python walk; "
-          f"{n_q} residual instances: specialize+run)")
+          f"({len(NAMES) + 1} pathOf + {len(NAMES) + 1} resolveOf + "
+          f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
+          "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0
 
 

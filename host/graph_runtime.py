@@ -26,6 +26,7 @@ class Graph:
         "kind", "varn", "left", "right", "fwd",
         "_atom", "_var_intern", "_app_intern",
         "_step_memo", "_cd_memo", "_nf",
+        "_pending", "_pnd_dup",
         "_macro_k",
     )
 
@@ -41,6 +42,25 @@ class Graph:
         self._step_memo: Dict[int, Optional[int]] = {}
         self._cd_memo: Dict[int, int] = {}
         self._nf: Dict[int, bool] = {}
+        # pending = nodes inside an in-flight step()/cd() call (the spine
+        # ancestors of the current focus).  A redirect target whose
+        # effective subtree contains a pending node fabricates a cyclic
+        # graph once that pending node forwards — HeapDev.Acyc — and
+        # step()'s spine descent diverges on it.
+        #
+        # The only way a pending node can enter a result is an interned
+        # hit in mk_app: the interned node's raw children may have
+        # redirected since interning, so its *effective* term is no
+        # longer the requested one and can reach a live spine node.
+        # All mk_app arguments are pending-free by induction (they are
+        # descendants of the focus or prior results — pending nodes are
+        # strictly ancestors; a descendant containing an ancestor would
+        # already be a cycle), so an interned hit is verified by
+        # comparing its repr-resolved children against the request —
+        # a drifted hit is abandoned and the literal term gets a fresh
+        # node.  _pnd_dup backs _freeze for the residual direct case.
+        self._pending: set = set()
+        self._pnd_dup: Dict[int, int] = {}
         # L0 only
         for kind in (K.NORM, K.COMP, K.DUP, K.SWAP):
             self._atom[kind] = self._alloc(kind)
@@ -68,11 +88,26 @@ class Graph:
             self.fwd[s] = i
         return i
 
+    def _push_pending(self, i: int) -> None:
+        if not self._pending:
+            self._pnd_dup.clear()
+        self._pending.add(i)
+
     def redirect(self, src: int, dst: int) -> int:
         src = self.repr(src)
         dst = self.repr(dst)
         if src == dst:
             return src
+        # Acyc (HeapDev): a redirect target must be pending-free — a dst
+        # containing a pending node gains a back-edge once that node
+        # forwards.  Contracta are pending-free by construction (mk_app
+        # verifies interned hits); a still-pending dst is the residual
+        # case — the occurrence keeps its finite-term semantics as a
+        # frozen duplicate.
+        if dst in self._pending:
+            dst = self._freeze(dst)
+            if dst == src:
+                return src
         self.fwd[src] = dst
         self._step_memo[src] = dst
         self._cd_memo[src] = dst
@@ -95,12 +130,44 @@ class Graph:
         self._nf[i] = True
         return i
 
+    def _freeze(self, i: int) -> int:
+        """Frozen copy of a pending node: fresh non-interned APP nodes
+        along pending paths, shared elsewhere.  The copy keeps the
+        pre-reduction occurrence as an independent node so it reduces in
+        its own context instead of back-edging into the live spine."""
+        i = self.repr(i)
+        if i not in self._pending:
+            return i
+        got = self._pnd_dup.get(i)
+        if got is not None:
+            return got
+        n = self._alloc(K.APP, n=0, left=self._freeze(self.left[i]),
+                        right=self._freeze(self.right[i]))
+        self._pnd_dup[i] = n
+        return n
+
     def mk_app(self, left: int, right: int) -> int:
         left, right = self.repr(left), self.repr(right)
         key = (left, right)
         got = self._app_intern.get(key)
         if got is not None:
-            return self.repr(got)
+            got = self.repr(got)
+            # The interned node's raw children may have redirected since
+            # interning — then its effective term is no longer `left
+            # right` (and can reach a live spine node → fabricated cycle,
+            # HeapDev.Acyc).  A hit is only honoured if its repr-resolved
+            # children are exactly the request — then it denotes the same
+            # term and is pending-free because the arguments are (pending
+            # nodes are strictly ancestors of the focus; an argument
+            # containing one would already be a cycle).  A pending `got`
+            # likewise cannot be returned — fresh node = the literal term.
+            if got not in self._pending \
+                    and self.repr(self.left[got]) == left \
+                    and self.repr(self.right[got]) == right:
+                return got
+            i = self._alloc(K.APP, left=left, right=right)
+            self._app_intern[key] = i
+            return i
         i = self._alloc(K.APP, left=left, right=right)
         self._app_intern[key] = i
         return i
@@ -165,6 +232,13 @@ class Graph:
             self._step_memo[i] = None
             return None
 
+        self._push_pending(i)
+        try:
+            return self._step_body(i)
+        finally:
+            self._pending.discard(i)
+
+    def _step_body(self, i: int) -> Optional[int]:
         f, x = self._fun_arg(i)
         fk = self.kind[f]
 
@@ -271,6 +345,13 @@ class Graph:
             self._cd_memo[i] = i
             return i
 
+        self._push_pending(i)
+        try:
+            return self._cd_body(i)
+        finally:
+            self._pending.discard(i)
+
+    def _cd_body(self, i: int) -> int:
         f, x = self._fun_arg(i)
         fk = self.kind[f]
 

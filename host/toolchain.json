@@ -155,6 +155,9 @@
      "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]},
     {"id": "G9b", "suite": "spec_term",
      "what": "specialize pathOf against the static catalog (P1 shape); residual instances agree with direct queries",
+     "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]},
+    {"id": "G9c", "suite": "spec_term",
+     "what": "resolveOf: emit stage 1 (toolchain.resolve) at term level — entry -> field names -> sections -> {module,record}; result = Scott list of 8 field strings ('!' = NotRealized shadow)",
      "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]}
   ],
   "witnesses": ["tree.surface", "graph.lo", "graph.cd", "native.x86_64.pe",

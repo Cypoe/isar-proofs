@@ -17,6 +17,7 @@
 | G9 | lambda_eval | witness 3: lambda LStep evaluator + Lean #eval spot oracle | lambda.lstep, lean.eval | ✓ |
 | G9a | spec_term | catalog-as-term: pathOf over toolchain.json (full spec) agrees across witnesses | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9b | spec_term | specialize pathOf against the static catalog (P1 shape); residual instances agree with direct queries | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
+| G9c | spec_term | resolveOf: emit stage 1 (toolchain.resolve) at term level — entry -> field names -> sections -> {module,record}; result = Scott list of 8 field strings ('!' = NotRealized shadow) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 
 live column: `✓` suite ok, `✗` suite failed, `·` no battery record
 (battery_last.json: battery_last.json)
