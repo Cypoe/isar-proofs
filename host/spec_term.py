@@ -116,6 +116,29 @@ benign over value lists); the field list is the honest observable for
 a multi-part resolution.  Decoding probes the NF's cons cells and
 nibble selectors directly.
 
+G9d — `symbolsOf`: `target.symbols` at term level (emit stage 2).  Two
+structurally-bounded folds (imports, then data slots) build the Scott
+assoc map `name -> addr`: each import conses `pair ("iat_"++nm) addr`
+and advances addr by 8 (`8 SUCC o`); each slot conses `pair nm addr`
+and advances by `ADD o sz`.  Bases are real term arithmetic —
+`IDATA_RVA + IDT_SZ + (n+1)*8` and `DATA_RVA` as ADD/MUL/SUCC
+compositions — and `iat_` is a literal cons prefix, not a fold.
+
+Representation boundary (the open question, answered at lift time):
+computed addresses are Church numerals because they are added and
+subtracted (assemble's `rel32 = addr - end` is the real consumer);
+large literals stay byte-list data — that is the "is it ever
+added/subtracted" line, and `0x1122334455667788` never needs to be a
+magnitude, only a little-endian byte string.  Numeral literals are
+MUL-compositions of <=16 factors (`_num_src`) so the source stays
+small.  Numerals decode behaviorally: `n VF VX` normalizes to a right
+spine of n `app(VF, ·)` applications counted by a pointer walk —
+reduced on graph.cd (lo re-descends the growing spine quadratically).
+Two dead ends are recorded in decision 024: marker-cell probes cost
+~10^5 allocs/cell on MUL-composed literals, and no closed atom
+survives n applications as an app-spine base (B dies at 3, K at 2,
+I at 1) — only fresh VARs make the unfold inert end-to-end.
+
 Usage: python host/spec_term.py
 """
 from __future__ import annotations
@@ -123,7 +146,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -404,6 +427,114 @@ RESOLVE_OF = (
 )
 
 
+# ---------------------------------------------------------------------------
+# G9d: symbolsOf — target.symbols (IAT + .data RVA map) at term level.
+#
+# First fragment of the emit chain's sparse->dense seam (memory decision
+# 024): the sparse-relational product is an assoc map of `\\f. f key addr`
+# pairs built by two structurally-bounded folds (imports by count, slots
+# by count), and the dense part is SMALL-NUMERAL arithmetic only.
+#
+#   addresses are Church numerals — precisely because pass-2's
+#       rel32 = addr - end adds/subtracts them (the boundary is "is it
+#       ever added/subtracted"); a byte-list repr would need a
+#       ripple-carry adder in term machinery.  Literal immediates stay
+#       byte-lists when `program` lifts.
+#   bounds are measured, never padded (the append-divergence rule).
+#   `iat_` is prepended as 8 literal cons cells — a real nibble-string
+#       key, not a fold, so the emitted map is SPECGET-probeable as-is.
+#
+# Signature mirrors tgt.symbols(imports, data_slots) -> dict.
+# Whether the routines *record* should declare imports/data_slots as
+# catalog fields (so the term walks spec -> rts -> symbols) is deferred
+# to the `program` lift — the typed-IR-package direction (research note)
+# wants that surface designed, not accreted.
+#
+#   iat_<name> -> IDATA_RVA + IDT_SZ + (n_imp+1)*8 + i*8   (build_idata)
+#   <slot>     -> DATA_RVA + running offset                (build_data)
+# ---------------------------------------------------------------------------
+
+_SUCC_SRC = "(\\n5. \\f5. \\x5. f5 (n5 f5 x5))"
+_ADD_SRC = "(\\m5. \\n5. \\f5. \\x5. m5 f5 (n5 f5 x5))"
+_MUL_SRC = "(\\m5. \\n5. \\f5. m5 (n5 f5))"
+_PAIR_SRC = "(\\k5. \\v5. \\f6. f6 k5 v5)"
+
+
+def _num_src(k: int) -> str:
+    """Church numeral for k as a MUL-composition of <=16 literals —
+    keeps the source small where _church_src would nest `f (` k deep."""
+    if k <= 16:
+        return _church_src(k)
+    for f in range(16, 1, -1):
+        if k % f == 0:
+            return ("(" + _MUL_SRC + " " + _church_src(f) + " "
+                    + _num_src(k // f) + ")")
+    return "(" + _ADD_SRC + " " + _num_src(k - 1) + " " + _church_src(1) + ")"
+
+
+def _prefix_src(pfx: str, tail_src: str) -> str:
+    """Cons pfx's nibble cells onto tail_src — literal prepend, no fold."""
+    out = tail_src
+    for byte in reversed(pfx.encode("utf-8")):
+        out = _cons(_sel_src(byte & 15), out)
+        out = _cons(_sel_src(byte >> 4), out)
+    return out
+
+
+# imports fold: state (l_in, addr, out); each step pops a name, conses
+# `pair ("iat_"++nm) addr` onto out and advances addr by 8.
+_STEP_I = (
+    "\\acc. acc (\\l. \\o. \\u. l "
+    "(\\k2. k2 l o u) "
+    "(\\nm. \\t. \\k2. k2 t (" + _church_src(8) + " " + _SUCC_SRC + " o) "
+    + _cons("(" + _PAIR_SRC + " __IATPFX__ o)", "u") + "))"
+)
+
+# slots fold: same state; each element is a 2-list [name, size] — cons
+# `pair nm addr` and advance addr by sz.
+_STEP_S = (
+    "\\acc. acc (\\l. \\o. \\u. l "
+    "(\\k2. k2 l o u) "
+    "(\\p. \\t. p (\\k2. k2 t o u) "
+    "(\\nm. \\rest. rest (\\k2. k2 t o u) "
+    "(\\sz. \\r2. \\k2. k2 t (" + _ADD_SRC + " o sz) "
+    + _cons("(" + _PAIR_SRC + " nm o)", "u") + "))))"
+)
+
+# iat base = IDATA_RVA + IDT_SZ + (n_imp+1)*8 — the build_idata layout,
+# expressed as real term arithmetic (no precomputed constants).
+_IATB = ("(" + _ADD_SRC + " (" + _ADD_SRC + " " + _num_src(0x2000)
+         + " " + _church_src(40) + ") (" + _MUL_SRC + " (" + _SUCC_SRC
+         + " __NIMP__) " + _church_src(8) + "))")
+
+SYMS_OF = (
+    "(\\imports. \\slots. (__NIMPB__ (" + _STEP_I + ") "
+    "(\\k2. k2 imports " + _IATB + " K)) "
+    "(\\li. \\ai. \\u. (__NSLOT__ (" + _STEP_S + ") "
+    "(\\k2. k2 slots " + _num_src(0x3000) + " u)) "
+    "(\\ls. \\as. \\u2. u2)))"
+)
+
+
+def symbols_src(n_imp: int, n_slot: int) -> str:
+    """λ-source of `\\imports. \\slots. symbolsOf` — bounds measured."""
+    src = SYMS_OF
+    for ph, val in (
+        ("__NIMP__", _church_src(n_imp)),
+        ("__NIMPB__", _church_src(n_imp)),
+        ("__NSLOT__", _church_src(n_slot)),
+        ("__IATPFX__", _prefix_src("iat_", "nm")),
+    ):
+        src = src.replace(ph, val)
+    assert "__" not in src, "uninstantiated placeholder"
+    return src
+
+
+def build_symbols(n_imp: int, n_slot: int) -> T:
+    """symbolsOf instantiated to (imports, data_slots) counts."""
+    return bracket(parse(symbols_src(n_imp, n_slot)))
+
+
 def query_src(n_top: int, n_ent: int, n_arr: int, n_emit: int,
               n_beq: int, n_bt: int, n_be: int) -> str:
     """λ-source of `\\spec. \\name. pathOf` with bounds instantiated."""
@@ -558,6 +689,34 @@ def resolve_query(name: str) -> T:
 
 
 # ---------------------------------------------------------------------------
+# G9d oracle: the real target.symbols — the independent witness the term
+# is checked against.  Cases: a synthetic minimal input and the real
+# x86_64.win64.lo imports/data_slots.
+# ---------------------------------------------------------------------------
+
+import target_pe64                                        # noqa: E402
+import routines_x86_64_win64                              # noqa: E402
+
+SYMS_CASES = {
+    "mini": (["a", "bc"], [("x", 8), ("y", 16)]),
+    "x86_64.win64.lo": (list(routines_x86_64_win64.IMPORTS),
+                        list(routines_x86_64_win64.DATA_SLOTS)),
+}
+
+
+def python_symbols(imports, slots) -> Dict[str, int]:
+    """tgt.symbols by the real host function — shares no code."""
+    return dict(target_pe64.symbols(imports, slots))
+
+
+def symbols_query(imports, slots) -> T:
+    """`symbolsOf IMPORTS SLOTS` — emit stage-2 fragment at term level."""
+    syms = build_symbols(len(imports), len(slots))
+    return _appn(syms, json_to_term(list(imports)),
+                 json_to_term([list(s) for s in slots]))
+
+
+# ---------------------------------------------------------------------------
 # output map: bare I = none; C (B^k I)…K spine = nibble-string
 # ---------------------------------------------------------------------------
 
@@ -669,6 +828,52 @@ def decode_resolve(nf: T) -> Optional[List[str]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# symbols output map: Scott list of `\\f. f key addr` pairs — an assoc
+# map of nibble-string -> Church numeral.  A numeral is probed with
+# `addr VF VX` (fresh vars): the numeral unfolds inertly into a left spine
+# `app(VF, app(VF, … VX))` and the count is an O(n) pointer walk — no
+# marker atoms (no closed base survives n applications; B dies at 3,
+# K at 2, I at 1) and no per-cell reduction (cons-cell probes cost
+# ~10^5 allocs/cell on MUL-composed literals — O(n^2)).
+# ---------------------------------------------------------------------------
+
+_VF = T(K.VAR, n=17)
+_VX = T(K.VAR, n=18)
+
+
+def _decode_num(n: T) -> int:
+    # `n VF VX` -> `app(VF, app(VF, … VX))` — a right spine of n var-headed
+    # applications.  VAR arguments let the numeral's own machinery unfold
+    # inertly (no rule fires on a var-headed app, so no marker cells and no
+    # per-cell reduction); the count is an O(n) pointer walk.  Reduced on
+    # graph.cd: lo re-descends the growing spine (~quadratic allocs on
+    # MUL-composed literals), cd unfolds at ~24 allocs/VF.
+    # Marker-cell probes (`n (cons M) z`) cost ~10^5 allocs/cell — O(n^2) —
+    # and no closed base survives n applications on an app-spine probe
+    # (B dies at 3, K at 2, I at 1).
+    spine = reduce_tree_cd(app(app(n, _VF), _VX), LO_FUEL)[0]
+    k = 0
+    while spine != _VX:
+        if spine.k != K.APP or spine.l != _VF:
+            raise ValueError(f"numeral probe spine {spine}, not f^n x")
+        k += 1
+        spine = spine.r
+    return k
+
+
+def decode_symbols(nf: T) -> Optional[Dict[str, int]]:
+    """NF -> None (bare I) or {symbol: rva} from the assoc-map cells."""
+    if nf.k == K.NORM:
+        return None
+    out: Dict[str, int] = {}
+    while nf.k != K.KONST:
+        pair, nf = _cell_parts(nf)
+        key = _decode_str(reduce_tree_lo(app(pair, KK), 1_000_000)[0])
+        out[key] = _decode_num(reduce_tree_lo(app(pair, _KI), 1_000_000)[0])
+    return out
+
+
 def has_var(t: T, n: int) -> bool:
     if t.k == K.VAR:
         return t.n == n
@@ -772,6 +977,38 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # G9d: symbolsOf — target.symbols (IAT + .data RVAs) at term level.
+    # Two structurally-bounded folds build the assoc map; addresses are
+    # Church numerals (the "is it ever added/subtracted" boundary).
+    # Oracle is the real target_pe64.symbols on the same inputs; all
+    # three witnesses run on both cases (the terms are small).
+    # ------------------------------------------------------------------
+    for cname, (imports, slots) in SYMS_CASES.items():
+        expected = python_symbols(imports, slots)
+        n_q += 1
+        t = symbols_query(imports, slots)
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_symbols(nf_lo)
+
+        nf_nat, steps_nat, _ = seed.reduce_native(t, 0)
+        val_nat = decode_symbols(nf_nat)
+
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+        val_cd = decode_symbols(nf_cd)
+
+        line = (f"{'OK ' if val_lo == expected else 'FAIL'} "
+                f"{cname:18s} symbols -> {len(val_lo or {})} entries "
+                f"[lo {steps_lo} | native {steps_nat} | "
+                f"cd {rounds_cd} rounds]")
+        good = (val_lo == expected and val_nat == expected
+                and val_cd == expected and nf_lo == nf_nat)
+        if not good:
+            nfail += 1
+            line = "FAIL " + line[4:] + f"  expected {expected}"
+        print(line)
+
+    # ------------------------------------------------------------------
     # G9b: specialize the query program against the static catalog.
     # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
     # residual[1 := str_term name] must agree with the direct query on
@@ -816,6 +1053,7 @@ def main() -> int:
 
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
           f"({len(NAMES) + 1} pathOf + {len(NAMES) + 1} resolveOf + "
+          f"{len(SYMS_CASES)} symbolsOf + "
           f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0

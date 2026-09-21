@@ -158,6 +158,9 @@
      "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]},
     {"id": "G9c", "suite": "spec_term",
      "what": "resolveOf: emit stage 1 (toolchain.resolve) at term level — entry -> field names -> sections -> {module,record}; result = Scott list of 8 field strings ('!' = NotRealized shadow)",
+     "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]},
+    {"id": "G9d", "suite": "spec_term",
+     "what": "symbolsOf: target.symbols at term level — imports/data-slots folds -> Scott assoc map name -> Church-numeral RVA ('iat_' prefix by literal cons; i*8 and cumulative offsets as real term arithmetic)",
      "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]}
   ],
   "witnesses": ["tree.surface", "graph.lo", "graph.cd", "native.x86_64.pe",

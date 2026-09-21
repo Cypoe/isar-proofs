@@ -18,6 +18,7 @@
 | G9a | spec_term | catalog-as-term: pathOf over toolchain.json (full spec) agrees across witnesses | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9b | spec_term | specialize pathOf against the static catalog (P1 shape); residual instances agree with direct queries | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9c | spec_term | resolveOf: emit stage 1 (toolchain.resolve) at term level — entry -> field names -> sections -> {module,record}; result = Scott list of 8 field strings ('!' = NotRealized shadow) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
+| G9d | spec_term | symbolsOf: target.symbols at term level — imports/data-slots folds -> Scott assoc map name -> Church-numeral RVA ('iat_' prefix by literal cons; i*8 and cumulative offsets as real term arithmetic) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 
 live column: `✓` suite ok, `✗` suite failed, `·` no battery record
 (battery_last.json: battery_last.json)
