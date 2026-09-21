@@ -81,6 +81,30 @@ WITNESSES in main():
               whole query runs ~12k honest cdIter rounds in seconds
               (was: hours-scale, hence the old projection gate).
 
+G9b — the specialization cell on the real catalog object, Futamura's
+P1 shape with the spec itself as the static input:
+
+    prog      = QUERY v0 v1            (v0 static spec, v1 dynamic name)
+    residual  = nf_lo(specialize(prog, {0: SPEC}))
+    check     = residual[1 := str_term(name)] ~O query(name)
+
+on every witness.  The residual is produced by graph.lo (the tree
+mirror cannot afford the shared-dag-as-tree walk at this size) and is
+kept honest by the independent witnesses downstream — a graph-produced
+wrong residual disagrees under the native exe and the dict walk.
+
+Honest measurement, not a hidden cost: the residual TREE is ~460k
+nodes — subst-mix unrolls every static Church-numeral fold over the
+dynamic name (each entry's eqStr and each n-iterated step body is
+inlined).  Real PE would residualize the loop instead of unrolling it
+— that is the documented open item (1993-mix / BTA in Futamura.lean).
+The win shows up only after hash-consing: the residual-instance dag is
+~6.7k unique nodes (≈ spec size — the toolchains array dominates the
+catalog anyway) and cd runs it faster than the direct query (~8.9k
+rounds vs ~12k).  v1 must stay free in the residual — a residual with
+no dynamic input left would mean the specializer evaluated, not
+specialized.
+
 Usage: python host/spec_term.py
 """
 from __future__ import annotations
@@ -102,6 +126,7 @@ sys.setrecursionlimit(1_000_000)   # cons-spine depth ~ #nibble cells
 from reduce import T, K, I, KK, B, S, C, app  # noqa: E402
 from lambda_dialect import parse, bracket, bracket_abstract0  # noqa: E402
 from graph_runtime import reduce_tree_lo, reduce_tree_cd     # noqa: E402
+from strategy import MixStrategy                             # noqa: E402
 import seed                                                  # noqa: E402
 
 TOOLCHAIN_JSON = os.path.join(_HOST, "toolchain.json")
@@ -389,6 +414,15 @@ def decode_result(nf: T) -> Optional[str]:
                  for i in range(0, len(nibs), 2)).decode("utf-8")
 
 
+def has_var(t: T, n: int) -> bool:
+    if t.k == K.VAR:
+        return t.n == n
+    if t.k == K.APP:
+        assert t.l is not None and t.r is not None
+        return has_var(t.l, n) or has_var(t.r, n)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # gate
 # ---------------------------------------------------------------------------
@@ -440,9 +474,53 @@ def main() -> int:
                 f"  expected {expected!r}")
         print(line)
 
+    # ------------------------------------------------------------------
+    # G9b: specialize the query program against the static catalog.
+    # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
+    # residual[1 := str_term name] must agree with the direct query on
+    # every witness.  See the module docstring for the honest cost note.
+    # ------------------------------------------------------------------
+    mix = MixStrategy()
+    prog = _appn(QUERY, T(K.VAR, n=0), T(K.VAR, n=1))
+    residual, s_res, _ = reduce_tree_lo(
+        mix.specialize(prog, {0: SPEC}), LO_FUEL)
+    live = has_var(residual, 1)
+    print(f"RESIDUAL: {term_nodes(residual)} tree nodes "
+          f"(spec {term_nodes(SPEC)}; {s_res} lo steps to build); "
+          f"v1 {'free' if live else 'ABSENT'}")
+    if not live:
+        nfail += 1
+        print("FAIL residual has no dynamic input — "
+              "the specializer evaluated instead of specializing")
+
+    for name in NAMES + [NEGATIVE]:
+        expected = python_walk(name)
+        inst = mix.specialize(residual, {1: str_term(name)})
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(inst, LO_FUEL)
+        val_lo = decode_result(nf_lo)
+
+        nf_nat, steps_nat, _ = seed.reduce_native(inst, 0)
+        val_nat = decode_result(nf_nat)
+
+        nf_cd, rounds_cd, _ = reduce_tree_cd(inst, CD_FUEL)
+        val_cd = decode_result(nf_cd)
+
+        line = (f"{'OK ' if val_lo == expected else 'FAIL'} "
+                f"{name:18s} residual -> {val_lo!r} "
+                f"[lo {steps_lo} | native {steps_nat} | "
+                f"cd {rounds_cd} rounds]")
+        good = (val_lo == expected and val_nat == expected
+                and val_cd == expected and nf_lo == nf_nat)
+        if not good:
+            nfail += 1
+            line = "FAIL " + line[4:] + f"  expected {expected!r}"
+        print(line)
+
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
           f"({n_q} queries x 4 witnesses: graph.lo, native lo exe, "
-          "graph.cd full-spec, python walk)")
+          "graph.cd full-spec, python walk; "
+          f"{n_q} residual instances: specialize+run)")
     return 1 if nfail else 0
 
 

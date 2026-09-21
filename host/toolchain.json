@@ -152,6 +152,9 @@
      "witnesses": ["lambda.lstep", "lean.eval"]},
     {"id": "G9a", "suite": "spec_term",
      "what": "catalog-as-term: pathOf over toolchain.json (full spec) agrees across witnesses",
+     "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]},
+    {"id": "G9b", "suite": "spec_term",
+     "what": "specialize pathOf against the static catalog (P1 shape); residual instances agree with direct queries",
      "witnesses": ["graph.lo", "graph.cd", "native.x86_64.pe", "python.walk"]}
   ],
   "witnesses": ["tree.surface", "graph.lo", "graph.cd", "native.x86_64.pe",
