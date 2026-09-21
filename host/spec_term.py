@@ -70,17 +70,16 @@ WITNESSES in main():
     native    seed.reduce_native(query(name)) — token text of the term
               fed to the win64 lo reducer exe (the runtime path's own
               native witness), NF parsed back and quote_surface'd.
-    graph.cd  the SAME query term on a PROJECTION of the spec:
-              `{"toolchains": [entry_i]}` for each name (plus 2-entry
-              slices for fold continuity and the negative case).
-              Full-spec graph.cd is infeasible: each round re-walks the
-              whole residual; measured ~150 s for even a 2-entry
-              full-top-object case and scaling superlinearly — a
-              13-entry run is hours.  The projection is documented, not
-              silent: every cd line names its projection.  (The task's
-              own escape hatch: gate cd on a projection of the spec
-              rather than shrink silently — the shrink here is the
-              declared one.)
+    graph.cd  the SAME query term on the FULL spec.  Feasible since the
+              heap-level memo wave: `cd` seals each round's results
+              (`_cd_memo[out] = out` — HeapDev's `insert o D`, so one
+              round is exactly one cdBasis pass, no mid-round residual
+              re-development) and marks identity-developed nodes in the
+              persistent `_nf` set (readback is NF ⟹ frozen forever —
+              no descendant rep can become a redirect source).  The
+              ~23k-node spec spine is walked once, then skipped; the
+              whole query runs ~12k honest cdIter rounds in seconds
+              (was: hours-scale, hence the old projection gate).
 
 Usage: python host/spec_term.py
 """
@@ -391,25 +390,6 @@ def decode_result(nf: T) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# cd projection (documented shrink — see module docstring)
-# ---------------------------------------------------------------------------
-
-def cd_projection(name: str) -> dict:
-    """{"toolchains": [...]} projection for the graph.cd witness.
-
-    Known names get the single-entry slice containing their entry;
-    the second catalog name gets the first-two-entries slice (exercises
-    skip-then-match fold continuity); the negative name gets the same
-    two-entry slice (exercises skip, skip, exhaust -> none)."""
-    if name in NAMES[1:2]:
-        return {"toolchains": _ENTRIES[:2]}
-    for e in _ENTRIES:
-        if e["name"] == name:
-            return {"toolchains": [e]}
-    return {"toolchains": _ENTRIES[:2]}
-
-
-# ---------------------------------------------------------------------------
 # gate
 # ---------------------------------------------------------------------------
 
@@ -444,30 +424,25 @@ def main() -> int:
         nf_nat, steps_nat, _ = seed.reduce_native(t, 0)
         val_nat = decode_result(nf_nat)
 
-        proj = cd_projection(name)
-        proj_raw = {"toolchains": proj["toolchains"]}
-        t_cd = query(name, json_to_term(proj_raw))
-        nf_cd, rounds_cd, _ = reduce_tree_cd(t_cd, CD_FUEL)
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
         val_cd = decode_result(nf_cd)
-        exp_cd = python_walk(name, proj_raw)
 
         line = (f"{tag} {name:18s} -> {val_lo!r} "
                 f"[lo {steps_lo} steps | native {steps_nat} steps | "
-                f"cd {rounds_cd} rounds on "
-                f"{len(proj['toolchains'])}-entry projection]")
+                f"cd {rounds_cd} rounds, full spec]")
         good = (val_lo == expected and val_nat == expected
-                and val_cd == exp_cd and nf_lo == nf_nat)
+                and val_cd == expected and nf_lo == nf_nat)
         if name == NEGATIVE:
             good = good and val_lo is None and val_nat is None
         if not good:
             nfail += 1
             line = "FAIL " + line[3:] + (
-                f"  expected {expected!r} (cd-expected {exp_cd!r})")
+                f"  expected {expected!r}")
         print(line)
 
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
           f"({n_q} queries x 4 witnesses: graph.lo, native lo exe, "
-          "graph.cd on projections, python walk)")
+          "graph.cd full-spec, python walk)")
     return 1 if nfail else 0
 
 

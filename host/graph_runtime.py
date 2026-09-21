@@ -235,12 +235,39 @@ class Graph:
         nf, n = self.reduce(i, fuel=fuel)
         return nf, n, 0
 
+    def _is_redex_r(self, i: int) -> bool:
+        """resolved-head redex test (HeapDev.isRedexNodeR) on a rep app-node."""
+        f = self.repr(self.left[i])
+        fk = self.kind[f]
+        if fk == K.NORM:
+            return True
+        if fk != K.APP:
+            return False
+        fl = self.repr(self.left[f])
+        flk = self.kind[fl]
+        if flk == K.KONST or flk == K.DUP:
+            return True
+        if flk != K.APP:
+            return False
+        return self.kind[self.repr(self.left[fl])] in (K.COMP, K.SWAP)
+
+    def _cd_app(self, i: int, f: int, x: int) -> int:
+        cf, cx = self.cd(f), self.cd(x)
+        out = self.redirect(i, self.mk_app(cf, cx))
+        if self._nf.get(cf) and self._nf.get(cx) and not self._is_redex_r(out):
+            # hereditary NF: proven-normal children + non-redex root.
+            # (cf == f alone is NOT proof — a memo seal can return an
+            #  unchanged node whose readback still has residuals.)
+            self._nf[out] = True
+        return out
+
     def cd(self, i: int) -> int:
         i = self.repr(i)
         hit = self._cd_memo.get(i)
         if hit is not None:
             return self.repr(hit)
         if self._nf.get(i) or self.kind[i] != K.APP:
+            self._nf[i] = True
             self._cd_memo[i] = i
             return i
 
@@ -269,13 +296,17 @@ class Graph:
                         i, self.mk_app(self.mk_app(self.cd(flr), self.cd(x)), self.cd(fr))
                     )
                 else:
-                    out = self.redirect(i, self.mk_app(self.cd(f), self.cd(x)))
+                    out = self._cd_app(i, f, x)
             else:
-                out = self.redirect(i, self.mk_app(self.cd(f), self.cd(x)))
+                out = self._cd_app(i, f, x)
         else:
-            out = self.redirect(i, self.mk_app(self.cd(f), self.cd(x)))
+            out = self._cd_app(i, f, x)
 
         self._cd_memo[i] = out
+        # seal the result (HDev's `insert o D`): residual redexes in `out`
+        # are contractum-born — re-entering them this round would compute
+        # cd(cd t), over-developing past a single cdBasis pass.
+        self._cd_memo[out] = out
         return out
 
     def par_step(self, i: int) -> int:

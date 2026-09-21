@@ -2528,4 +2528,51 @@ theorem HDev_sound {D D' : Finset Nat} {h h' : Heap} {i o : Nat}
         hok.2.2.2 o (Or.inl rfl)]
       exact jo
 
+/-- `Join` lifts through `cdIter`. -/
+theorem cdIter_join {a b : ITerm} (n : Nat) (h : Join a b) :
+    Join (cdIter n a) (cdIter n b) := by
+  induction n generalizing a b with
+  | zero => exact h
+  | succ n ih => exact ih (cdJoin_of_join h)
+
+/-- A chain of `n` heap development rounds — the host `reduce_cd`
+    loop.  Each round's input is the previous round's output node
+    (`HDev` outputs are representatives, matching the host's
+    `cur = repr(nxt)`). -/
+inductive HDevChain : Heap → Nat → Heap → Nat → Nat → Prop where
+  | nil {h : Heap} {i : Nat} : HDevChain h i h i 0
+  | cons {D₀ D₁ : Finset Nat} {h h₁ h₂ : Heap} {i j k n : Nat} :
+      HDev D₀ h i h₁ j D₁ → HDevChain h₁ j h₂ k n →
+      HDevChain h i h₂ k (n + 1)
+
+/-- Round parity for the shared path: `n` heap development rounds
+    produce a readback that joins `cdIter n` of the input readback —
+    the `rounds=` counter is formal iterated complete development. -/
+theorem HDevChain_unfold {h i h' j n} (hc : HDevChain h i h' j n)
+    (hwf : HeapWf h) (hi : i < h.len) :
+    ∃ hwf' : HeapWf h', j < h'.len ∧
+      Join (heapUnfold h' hwf' j)
+        (cdIter n (heapUnfold h hwf i)) := by
+  induction hc with
+  | nil => exact ⟨hwf, hi, Join.refl _⟩
+  | cons hd _ ih =>
+      obtain ⟨w₁, -, hjlt⟩ := HDev_wf hd hwf hi
+      obtain ⟨w₂, hklt, hjoin⟩ := ih w₁ hjlt
+      obtain ⟨w₁', -, -, hsound⟩ := HDev_sound hwf hd hi
+      refine ⟨w₂, hklt, ?_⟩
+      have hs : Join (heapUnfold _ w₁ _) (cdBasis (heapUnfold _ hwf _)) :=
+        hsound
+      exact hjoin.trans (cdIter_join _ hs)
+
+/-- Heap development chains stay inside basis reduction up to
+    joining — the observational-equivalence statement for the shared
+    executor loop. -/
+theorem HDevChain_join {h i h' j n} (hc : HDevChain h i h' j n)
+    (hwf : HeapWf h) (hi : i < h.len) :
+    ∃ hwf' : HeapWf h', j < h'.len ∧
+      Join (heapUnfold h hwf i) (heapUnfold h' hwf' j) := by
+  obtain ⟨w', hj, hjoin⟩ := HDevChain_unfold hc hwf hi
+  obtain ⟨u, hju, hcu⟩ := hjoin
+  exact ⟨w', hj, u, (cdIter_ired n _).trans hcu, hju⟩
+
 end ISAR

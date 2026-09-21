@@ -15,6 +15,7 @@
 | G6b | futamura_cube | cube: P0 == P1 across witnesses including graph.cd | tree.surface, graph.lo, graph.cd, native.x86_64.pe, native.x86_64.pe.fuse_s | ✓ |
 | G8 | xdu_gate | native == runtime on stdout+rc (nibble transducer plex) | graph.lo, graph.cd, native.x86_64.pe | ✓ |
 | G9 | lambda_eval | witness 3: lambda LStep evaluator + Lean #eval spot oracle | lambda.lstep, lean.eval | ✓ |
+| G9a | spec_term | catalog-as-term: pathOf over toolchain.json (full spec) agrees across witnesses | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 
 live column: `✓` suite ok, `✗` suite failed, `·` no battery record
 (battery_last.json: battery_last.json)
