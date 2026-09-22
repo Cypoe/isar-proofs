@@ -18,8 +18,9 @@
 | G9a | spec_term | catalog-as-term: pathOf over toolchain.json (full spec) agrees across witnesses | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9b | spec_term | specialize pathOf against the static catalog (P1 shape); residual instances agree with direct queries | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9c | spec_term | resolveOf: emit stage 1 (toolchain.resolve) at term level — entry -> field names -> sections -> {module,record}; result = Scott list of 8 field strings ('!' = NotRealized shadow) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
-| G9d | spec_term | symbolsOf: target.symbols at term level — imports/data-slots folds -> Scott assoc map name -> Church-numeral RVA ('iat_' prefix by literal cons; i*8 and cumulative offsets as real term arithmetic) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
+| G9d | spec_term | symbolsOf: target.symbols at term level — imports/data-slots folds -> Scott assoc map name -> bytes4 RVA ('iat_' prefix by literal cons; i*8 and cumulative offsets as real bytes4 ripple arithmetic — the rep the assemble resolver subtracts) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9e | spec_term | programOf: routines.program(R) at term level — generated λfs λfuel λrbb λcb λnb skeleton, per-routine fragment list, variant regions diffed from real builder outputs; immediates as bytes8 leaves; native deferred (exceeds exe 600s cap) | graph.lo, graph.cd, python.walk | ✓ |
+| G9f | spec_term | encodeOf + assembleOf: isa.encode (ENCS nibble-trie + field interpreter) and isa.assemble's two-pass fold at term level — pass-1 label map (bytes4 pos = base+off), pass-2 resolver (symbols shadow locals = the link seam) emitting rel32 via B4SUB; gate on the mini program (fwd/bwd rel32, rip-sym, mem disp, shadowing, nonzero base); native deferred (same exe throughput ceiling) | graph.lo, graph.cd, python.walk | ✓ |
 
 live column: `✓` suite ok, `✗` suite failed, `·` no battery record
 (battery_last.json: battery_last.json)

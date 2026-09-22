@@ -24,7 +24,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -143,10 +143,12 @@ def prepare(path: str) -> str:
     return path
 
 
-def run_elf(path: str, data: bytes) -> Tuple[bytes, bytes, int]:
-    """Execute an emitted ELF under WSL -> (stdout, stderr, rc)."""
+def run_elf(path: str, data: bytes,
+            timeout: Optional[int] = 600) -> Tuple[bytes, bytes, int]:
+    """Execute an emitted ELF under WSL -> (stdout, stderr, rc).
+    `timeout` is a test-run guard; actual toolchain runs pass None."""
     cp = subprocess.run(["wsl", "-e", wsl_path(path)], input=data,
-                        capture_output=True, timeout=600)
+                        capture_output=True, timeout=timeout)
     return cp.stdout, cp.stderr, cp.returncode
 
 

@@ -386,18 +386,25 @@ def _host():
     return hreduce, bcd, hp
 
 
-def run_native(exe: str, tokens_text: str) -> Tuple[str, str, int]:
+def run_native(exe: str, tokens_text: str,
+               timeout: Optional[int] = 600) -> Tuple[str, str, int]:
+    """Spawn the reducer exe on token text.  `timeout` is a TEST-RUN
+    guard — the principled bound for an actual toolchain run is the
+    realization's own fuel, not a wall-clock cap; pass None there."""
     cp = subprocess.run([exe], input=tokens_text.encode(),
-                        capture_output=True, timeout=600)
+                        capture_output=True, timeout=timeout)
     return cp.stdout.decode("utf-8", "replace"), \
         cp.stderr.decode("utf-8", "replace"), cp.returncode
 
 
-def run_elf(elf: str, tokens_text: str) -> Tuple[str, str, int]:
+def run_elf(elf: str, tokens_text: str,
+            timeout: Optional[int] = 600) -> Tuple[str, str, int]:
     """run_native for an ELF64 image: execute under WSL (the target's
-    run path lives in target_elf64 — drvfs /mnt/<drive>/...)."""
+    run path lives in target_elf64 — drvfs /mnt/<drive>/...).  Same
+    test-run guard discipline as run_native — pass None for actual."""
     import target_elf64
-    out, err, rc = target_elf64.run_elf(elf, tokens_text.encode())
+    out, err, rc = target_elf64.run_elf(elf, tokens_text.encode(),
+                                        timeout)
     return out.decode("utf-8", "replace"), \
         err.decode("utf-8", "replace"), rc
 
@@ -463,7 +470,7 @@ def _tokens_of_term(t) -> str:
     }[t.k.name]
 
 
-def _reduce_via(t, R: Realization):
+def _reduce_via(t, R: Realization, timeout: Optional[int] = 600):
     """HostPiece.reduce signature: (T_host, fuel) -> (nf, steps, alloc).
 
     The `fuel` argument is intentionally ignored: it is a graph-piece
@@ -481,11 +488,11 @@ def _reduce_via(t, R: Realization):
         t = tower.translate_to_basis(t)
     if R.abi == "linux":
         exe = _exe_for(R, toolchain.by_name("x86_64.linux.lo"))
-        out, err, rc = run_elf(exe, _tokens_of_term(t))
+        out, err, rc = run_elf(exe, _tokens_of_term(t), timeout)
     else:
         exe = _exe_for(R) if R.order != "cd" else _exe_for(
             R, toolchain.by_name("x86_64.win64.cd"))
-        out, err, rc = run_native(exe, _tokens_of_term(t))
+        out, err, rc = run_native(exe, _tokens_of_term(t), timeout)
     if rc != 0:
         raise RuntimeError(f"native reducer rc={rc} stderr={err!r}")
     nf = _parse_native_out(out)
@@ -499,8 +506,9 @@ def _reduce_via(t, R: Realization):
     return nf, steps, alloc
 
 
-def reduce_native(t, fuel: Optional[int] = None):
-    return _reduce_via(t, DEFAULT)
+def reduce_native(t, fuel: Optional[int] = None,
+                  timeout: Optional[int] = 600):
+    return _reduce_via(t, DEFAULT, timeout)
 
 
 def piece(R: Realization = DEFAULT):

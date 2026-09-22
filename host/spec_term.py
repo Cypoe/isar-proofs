@@ -119,25 +119,23 @@ nibble selectors directly.
 G9d — `symbolsOf`: `target.symbols` at term level (emit stage 2).  Two
 structurally-bounded folds (imports, then data slots) build the Scott
 assoc map `name -> addr`: each import conses `pair ("iat_"++nm) addr`
-and advances addr by 8 (`8 SUCC o`); each slot conses `pair nm addr`
-and advances by `ADD o sz`.  Bases are real term arithmetic —
-`IDATA_RVA + IDT_SZ + (n+1)*8` and `DATA_RVA` as ADD/MUL/SUCC
-compositions — and `iat_` is a literal cons prefix, not a fold.
+and advances addr by 8 (`B4ADD o b4_8`); each slot conses `pair nm
+addr` and advances by `B4ADD o sz`.  Addresses are bytes4 — the rep
+assemble's resolver subtracts — and bases are bytes4 literals computed
+at source-generation time (`IDATA_RVA + IDT_SZ + (n+1)*8`, `DATA_RVA`;
+the bounds are known, so no runtime numeral->bytes4 coercion — `N2B4`'s
+per-unit increment over a ~8k value is exactly the blowup the rep
+exists to avoid).  `iat_` is a literal cons prefix, not a fold.
 
-Representation boundary (the open question, answered at lift time):
-computed addresses are Church numerals because they are added and
-subtracted (assemble's `rel32 = addr - end` is the real consumer);
-large literals stay byte-list data — that is the "is it ever
-added/subtracted" line, and `0x1122334455667788` never needs to be a
-magnitude, only a little-endian byte string.  Numeral literals are
-MUL-compositions of <=16 factors (`_num_src`) so the source stays
-small.  Numerals decode behaviorally: `n VF VX` normalizes to a right
-spine of n `app(VF, ·)` applications counted by a pointer walk —
-reduced on graph.cd (lo re-descends the growing spine quadratically).
-Two dead ends are recorded in decision 024: marker-cell probes cost
-~10^5 allocs/cell on MUL-composed literals, and no closed atom
-survives n applications as an app-spine base (B dies at 3, K at 2,
-I at 1) — only fresh VARs make the unfold inert end-to-end.
+Representation boundary (the "is it ever added/subtracted" line,
+answered at lift time and revisited at G9f): computed addresses are
+bytes4 because assemble's `rel32 = addr - end` subtracts them — the
+ripple ops are constant-cost per value, where Church-numeral PRED
+subtraction is quadratic.  Large literals stay byte-list data —
+`0x1122334455667788` never needs to be a magnitude, only a
+little-endian byte string.  Byte cells decode structurally (each is a
+pair of nibble selectors); no behavioral numeral spine-probe is needed
+now that the arithmetic rep is not Church.
 
 G9e — `programOf`: `routines.program(R)` at term level (emit stage 3).
 One generated term `λfs λfuel λrbb λcb λnb. <fragments>`: the skeleton
@@ -153,6 +151,19 @@ immediates and mem displacements are bytes8 leaves (never arithmetic),
 "l"/"p" payloads stay nibble-string names for the G9d symbol map and
 the pass-1 label map.  Native is not gated on this stage — the reduce
 exceeds the exe's 600s subprocess cap; lo+cd+python witness all cases.
+
+G9f — `encodeOf` + `assembleOf`: `isa.encode`/`isa.assemble` at term
+level (emit stage 4).  The ENCS/FORMS/REG tables cross as nibble-trie
+DATA and a field interpreter walks the ordered alternatives; each
+insn encodes to pair(byte-list, nibble-length).  `assembleOf` is the
+two-pass fold: pass 1 builds a local label map (`pos4 = base+off`) and
+records each insn's (item, off4, len4); pass 2 resolves names —
+`symbols` SHADOWS `local`, the link seam — and emits rel32 as `B4SUB
+target end4`.  All addresses/positions/rel32 are bytes4 ripple ops.
+The gate covers fwd/bwd rel32, rip-symbol operands, mem disp8, symbol
+shadowing, multi-fragment and a nonzero base on lo+cd vs the
+isa.assemble oracle; the full 26-form encode sweep lives in
+_probe_g9f_enc.py.  Native is deferred (same exe throughput ceiling).
 
 Usage: python host/spec_term.py
 """
@@ -197,6 +208,7 @@ def _appn(*xs: T) -> T:
 _CONS = bracket_abstract0(parse("\\h. \\t. \\n. \\c. c h t"))
 _NIL = KK                                # \n. \c. n
 _PAIR = bracket_abstract0(parse("\\k. \\v. \\f. f k v"))
+_KI = app(KK, I)                           # \a. \b. b — false / Nothing
 _SELECTORS = tuple(
     bracket_abstract0(parse(
         "".join(f"\\c{i}. " for i in range(16)) + f"c{k}"))
@@ -264,6 +276,38 @@ def term_nodes(t: T, memo: Optional[set] = None) -> int:
     if t.k == K.APP:
         return 1 + term_nodes(t.l, memo) + term_nodes(t.r, memo)
     return 1
+
+
+# ---------------------------------------------------------------------------
+# G9f byte/nibble representation — the assembler's arithmetic layer.
+#
+# A byte is `_PAIR nibLo nibHi` (one cell, not two — arithmetic destructures
+# locally); a byte-word/list is a Scott list of byte cells.  Nibble ops are
+# 16-way selector argument permutations — no Church numerals in the hot
+# path (see _NIBADD &co. at the G9f section below).  The empirical rule
+# (decision 024 refined): Church numerals are for iteration bounds only;
+# any value that is added/subtracted lives as byte cells (constant-cost
+# ripple ops — numeral SUB is O(n*m) PRED chains and dies at rel32
+# offsets ~14k).
+# ---------------------------------------------------------------------------
+
+def byte_term(v: int) -> T:
+    """One byte as `\\f. f nibLo nibHi` (pair cell)."""
+    return _appn(_PAIR, _SELECTORS[v & 15], _SELECTORS[v >> 4])
+
+
+def bytelist_term(bs) -> T:
+    """bytes/iterable -> Scott list of byte cells."""
+    t = _NIL
+    for b in reversed(list(bs)):
+        t = _appn(_CONS, byte_term(b), t)
+    return t
+
+
+def word_term(v: int, nbytes: int) -> T:
+    """LE byte-word of `nbytes` cells."""
+    return bytelist_term(
+        (v & ((1 << (8 * nbytes)) - 1)).to_bytes(nbytes, "little"))
 
 
 # ---------------------------------------------------------------------------
@@ -455,13 +499,14 @@ RESOLVE_OF = (
 # First fragment of the emit chain's sparse->dense seam (memory decision
 # 024): the sparse-relational product is an assoc map of `\\f. f key addr`
 # pairs built by two structurally-bounded folds (imports by count, slots
-# by count), and the dense part is SMALL-NUMERAL arithmetic only.
+# by count), and the dense part is bytes4 ripple arithmetic — constant
+# cost per value, sized to the PE RVA space.
 #
-#   addresses are Church numerals — precisely because pass-2's
-#       rel32 = addr - end adds/subtracts them (the boundary is "is it
-#       ever added/subtracted"); a byte-list repr would need a
-#       ripple-carry adder in term machinery.  Literal immediates stay
-#       byte-lists when `program` lifts.
+#   addresses are bytes4 — precisely because assemble's resolver
+#       subtracts them (rel32 = addr - end; the boundary is "is it ever
+#       added/subtracted").  The ripple-carry vocabulary exists now, so
+#       the value rep matches the use; numeral SUB would be O(n*m)
+#       through PRED chains.  Literal immediates stay bytes8 leaves.
 #   bounds are measured, never padded (the append-divergence rule).
 #   `iat_` is prepended as 8 literal cons cells — a real nibble-string
 #       key, not a fold, so the emitted map is SPECGET-probeable as-is.
@@ -503,37 +548,227 @@ def _prefix_src(pfx: str, tail_src: str) -> str:
     return out
 
 
+# ---------------------------------------------------------------------------
+# term prelude: selector/nibble/byte-cell vocabulary, list utils,
+# λ-source builders, and bytes4 ripple arithmetic.  Shared by every
+# emit stage — moved ahead of G9d so symbolsOf can emit bytes4
+# addresses (they are added/subtracted by assemble's resolver).
+# ---------------------------------------------------------------------------
+
+# --- λ-source helpers -------------------------------------------------------
+
+def _let(v: str, val: str, body: str) -> str:
+    return f"(\\{v}. {body}) ({val})"
+
+
+def _lets(bindings, body: str) -> str:
+    """[(name, valsrc)] -> nested lets, first binding outermost."""
+    for name, val in reversed(bindings):
+        body = f"(\\{name}. {body}) ({val})"
+    return body
+
+
+def _peel(l: str, names: List[str], body: str) -> str:
+    """`l K (\\h0. \\t0. t0 K (\\h1. \\t1. … body))` — cons-destructure."""
+    src = body
+    for i in reversed(range(len(names))):
+        prev = l if i == 0 else f"t{i - 1}"
+        src = f"{prev} K (\\{names[i]}. \\t{i}. {src})"
+    return src
+
+
+def _sel16(sel: str, impls: List[str], extra: str = "") -> str:
+    """`sel i0 … i15` — nibble dispatch (pads to 16 args with K), then
+    applies `extra` (a space-separated arg tail) to the picked impl."""
+    args = " ".join(list(impls) + ["K"] * (16 - len(impls)))
+    out = f"({sel} {args})"
+    return f"{out} {extra}" if extra else out
+
+
+def _maybe(mv: str, body: str, bv: str = "mv") -> str:
+    """maybe-value unwrap: `mv K (\\bv. body)` — K is the never-taken
+    Nothing branch (the static tries here are present-keys only)."""
+    return f"{mv} K (\\{bv}. {body})"
+
+
+_CONSS = "(\\h2. \\t2. \\n2. \\c2. c2 h2 t2)"
+
+
+def _conss(h: str, t: str) -> str:
+    return f"({_CONSS} {h} {t})"
+
+
+def _prs(a: str, b: str) -> str:
+    return f"({_PAIR_SRC} {a} {b})"
+
+
+def _fst(e: str) -> str:
+    return f"({e} K)"
+
+
+def _snd(e: str) -> str:
+    return f"({e} (K I))"
+
+_SELS = [_sel_src(i) for i in range(16)]
+_BT, _BF = "K", "(K I)"
+
+_NIBADD = ("(\\a. \\b. a " + " ".join(
+    "(b " + " ".join(_SELS[(i + j) % 16] for j in range(16)) + ")"
+    for i in range(16)) + ")")
+_NIBCARRY = ("(\\a. \\b. a " + " ".join(
+    "(b " + " ".join(_BT if j >= 16 - i else _BF for j in range(16)) + ")"
+    for i in range(16)) + ")")
+_NIBGE8 = ("(\\a. a " + " ".join(_BT if j >= 8 else _BF
+                                for j in range(16)) + ")")
+_NIBSH1 = ("(\\a. a " + " ".join(_SELS[j >> 1] for j in range(16)) + ")")
+_NIBLO1 = ("(\\a. a " + " ".join(_BT if j % 2 == 1 else _BF
+                                for j in range(16)) + ")")
+_NIBMOD8 = ("(\\a. " + _NIBGE8 + " a (" + _NIBADD + " a "
+            + _SELS[8] + ") a)")
+_NIBNOT = ("(\\a. a " + " ".join(_SELS[15 - j] for j in range(16)) + ")")
+_NIBSUCC = ("(\\a. a " + " ".join(_SELS[(j + 1) % 16]
+                                 for j in range(16)) + ")")
+_B2N = "(\\b. b " + _SELS[1] + " " + _SELS[0] + ")"
+_OR = "(\\p. \\q. p K q)"
+_AND = "(\\p. \\q. p q (K I))"
+_NOT = "(\\p. p (K I) K)"
+_EQNIB_T = EQNIB            # source constant, defined in the G9c section
+
+# ADDBC x y cnib -> pair(byte_cell, carry_bool)
+_ADDBC = (
+    "(\\x. \\y. \\cn. x (\\xl. \\xh. y (\\yl. \\yh. "
+    "(\\t. (\\clo. (\\lo. (\\u. (\\cn2. (\\cout. (\\hi. "
+    "(" + _PAIR_SRC + " (" + _PAIR_SRC + " lo hi) cout))"
+    " (" + _NIBADD + " u cn2))"
+    " (" + _OR + " (" + _NIBCARRY + " xh yh) (" + _NIBCARRY
+    + " u cn2)))"
+    " (" + _B2N + " clo))"
+    " (" + _NIBADD + " xh yh))"
+    " (" + _NIBADD + " t cn))"
+    " (" + _OR + " (" + _NIBCARRY + " xl yl) (" + _NIBCARRY
+    + " t cn)))"
+    " (" + _NIBADD + " xl yl))))"
+)
+# EQB a b — byte equality (pair cells, EQNIB both nibs)
+_EQB = ("(\\x. \\y. x (\\xl. \\xh. y (\\yl. \\yh. "
+        + _AND + " (" + EQNIB + " xl yl) (" + EQNIB + " xh yh))))")
+# NOTB — byte complement
+_NOTB = ("(\\x. x (\\l. \\h. " + _PAIR_SRC + " (" + _NIBNOT + " l) ("
+         + _NIBNOT + " h)))")
+# MODRM3 m g r -> byte cell  mod<<6 | reg<<3 | rm   (pair is lo,hi —
+# byte-cell convention is lo first, like byte_term)
+_MODRM3 = ("(\\m. \\g. \\r. " + _PAIR_SRC + " ("
+           + _NIBADD + " ((" + _NIBLO1 + " g) " + _SELS[8] + " "
+           + _SELS[0] + ") (" + _NIBMOD8 + " r)) ("
+           + _NIBADD + " (" + _NIBADD + " (" + _NIBADD + " m m) ("
+           + _NIBADD + " m m)) (" + _NIBSH1 + " g)))")
+
+# Scott-list utils -----------------------------------------------------------
+# _FOLDL st l a — left fold bounded by the INPUT SPINE (self-application,
+# not fuel): the fold ends when the data does — the principled bound.
+_FOLDL = ("(\\st. \\l. \\a. (\\f. f f) (\\g. \\l2. \\a2. l2 a2 "
+          "(\\h. \\t. g g t (st a2 h))) l a)")
+_HEAD = "(\\x. x K K)"
+_TAIL = "(\\x. x K (K I))"
+_NTH = ("(\\i. \\l. " + _HEAD + " (i " + _TAIL + " l))")
+_REV = ("(\\l. " + _FOLDL
+        + " (\\a. \\h. (\\h2. \\t2. \\n. \\c. c h2 t2) h a) l K)")
+# _TAKE n l -> pair(reversed-prefix, rest)
+_TAKE = ("(\\n. \\l. n (\\p. p (\\ac. \\ll. ll p "
+         "(\\h. \\t. " + _PAIR_SRC + " ((\\h2. \\t2. \\n2. \\c2. c2 h2 t2)"
+         " h ac) t))) (" + _PAIR_SRC + " K l))")
+
+# bytes4 arithmetic ------------------------------------------------------------
+# Values that are ADDED OR SUBTRACTED (positions, addresses, rel32) are
+# byte-cell lists, never Church numerals — numeral SUB is O(n*m) through
+# PRED chains, while the ripple below is O(width).  Width is 4 cells =
+# u32: PE RVAs and rel32 displacements both live in 32 bits (two's
+# complement; carry-out is discarded, which is exactly mod-2^32).
+
+def _b4_src(v: int) -> str:
+    """bytes4 literal for v & 0xffffffff — cons-chain of 4 byte cells."""
+    out = "K"
+    for i in reversed(range(4)):
+        b = (v >> (8 * i)) & 0xFF
+        out = _conss("(" + _PAIR_SRC + " " + _SELS[b & 15] + " "
+                     + _SELS[b >> 4] + ")", out)
+    return out
+
+
+# zip-ripple: FOLDL over `a` carrying pair(rest-of-b, pair(carry_nib, out)).
+# ADDBC's carry-in is a nibble, its carry-out a bool — B2N converts per
+# step.  Input lists are little-endian (b0 first); out accumulates
+# consed-then-reversed.  `bl K f` on exhausted b is unreachable: same
+# length is the representation invariant.
+_B4ADD = (
+    "(\\a. \\b. (" + _FOLDL
+    + " (\\acc. \\x. acc (\\bl. \\cs. cs (\\cy. \\ou. "
+    "bl K (\\hb. \\tb. (" + _ADDBC + " x hb cy) (\\c. \\s. "
+    + _prs("tb", _prs("(" + _B2N + " s)", _conss("c", "ou")))
+    + ")))))"
+    + " a " + _prs("b", _prs(_SELS[0], "K")) + ") "
+    "(\\bl. \\cs. cs (\\cy. \\ou. " + _REV + " ou)))"
+)
+# a - b = a + ~b + 1 (per-byte NOTB, carry-in = 1) — two's complement.
+_B4SUB = (
+    "(\\a. \\b. (" + _FOLDL
+    + " (\\acc. \\x. acc (\\bl. \\cs. cs (\\cy. \\ou. "
+    "bl K (\\hb. \\tb. (" + _ADDBC + " x (" + _NOTB + " hb) cy) (\\c. \\s. "
+    + _prs("tb", _prs("(" + _B2N + " s)", _conss("c", "ou")))
+    + ")))))"
+    + " a " + _prs("b", _prs(_SELS[1], "K")) + ") "
+    "(\\bl. \\cs. cs (\\cy. \\ou. " + _REV + " ou)))"
+)
+# nibble -> bytes4 (a nibble is the only honest width to lift: x86 insns
+# are <=15 bytes, so insn length fits one nibble).  There is deliberately
+# NO Church-numeral -> bytes4 coercion: numeral->bytes4 by n increments
+# is O(n) B4ADDs, which is the blowup this rep exists to prevent — any
+# bytes4 quantity known at gen time is emitted as a `_b4_src` literal.
+_B0C = "(" + _PAIR_SRC + " " + _SELS[0] + " " + _SELS[0] + ")"
+_NIB2B4 = ("(\\n5. " + _conss(_prs("n5", _SELS[0]),
+           _conss(_B0C, _conss(_B0C, _conss(_B0C, "K")))) + ")")
+# list length as a Church numeral (structural fold — bounds for EQSTR)
+_LEN = ("(\\l. " + _FOLDL + " (\\a. \\c. " + _SUCC_SRC
+        + " a) l (K I))")
+# assoc lookup: list of pair(name,val) -> maybe val.  Nothing = K.
+_JUST_SRC = "(\\v. \\n. \\j. j v)"
+_ALOOK = ("(\\map. \\key. (" + _FOLDL
+          + " (\\acc. \\e. e (\\k2. \\v2. (" + EQSTR + " key k2 ("
+          + _LEN + " key)) (" + _JUST_SRC + " v2) acc)) map K))")
+
 # imports fold: state (l_in, addr, out); each step pops a name, conses
 # `pair ("iat_"++nm) addr` onto out and advances addr by 8.
+# addr is bytes4 — the value is subtracted by assemble's resolver, so it
+# lives in the arithmetic rep (ripple ops), not a Church numeral.
 _STEP_I = (
     "\\acc. acc (\\l. \\o. \\u. l "
     "(\\k2. k2 l o u) "
-    "(\\nm. \\t. \\k2. k2 t (" + _church_src(8) + " " + _SUCC_SRC + " o) "
+    "(\\nm. \\t. \\k2. k2 t (" + _B4ADD + " o " + _b4_src(8) + ") "
     + _cons("(" + _PAIR_SRC + " __IATPFX__ o)", "u") + "))"
 )
 
 # slots fold: same state; each element is a 2-list [name, size] — cons
-# `pair nm addr` and advance addr by sz.
+# `pair nm addr` and advance addr by sz.  sz arrives as a bytes4 literal
+# (the input encodes it in the arithmetic rep — N2B4's per-unit
+# increment would be O(sz) B4ADDs, which is exactly the explosion the
+# bytes4 rep exists to avoid).
 _STEP_S = (
     "\\acc. acc (\\l. \\o. \\u. l "
     "(\\k2. k2 l o u) "
     "(\\p. \\t. p (\\k2. k2 t o u) "
     "(\\nm. \\rest. rest (\\k2. k2 t o u) "
-    "(\\sz. \\r2. \\k2. k2 t (" + _ADD_SRC + " o sz) "
+    "(\\sz. \\r2. \\k2. k2 t (" + _B4ADD + " o sz) "
     + _cons("(" + _PAIR_SRC + " nm o)", "u") + "))))"
 )
 
-# iat base = IDATA_RVA + IDT_SZ + (n_imp+1)*8 — the build_idata layout,
-# expressed as real term arithmetic (no precomputed constants).
-_IATB = ("(" + _ADD_SRC + " (" + _ADD_SRC + " " + _num_src(0x2000)
-         + " " + _church_src(40) + ") (" + _MUL_SRC + " (" + _SUCC_SRC
-         + " __NIMP__) " + _church_src(8) + "))")
-
+# iat base = IDATA_RVA + IDT_SZ + (n_imp+1)*8 — the build_idata layout.
+# Computed at source-generation time (n_imp is a known bound) and
+# emitted as a bytes4 literal — never N2B4 over a ~8k numeral.
 SYMS_OF = (
     "(\\imports. \\slots. (__NIMPB__ (" + _STEP_I + ") "
-    "(\\k2. k2 imports " + _IATB + " K)) "
+    "(\\k2. k2 imports __IATB__ K)) "
     "(\\li. \\ai. \\u. (__NSLOT__ (" + _STEP_S + ") "
-    "(\\k2. k2 slots " + _num_src(0x3000) + " u)) "
+    "(\\k2. k2 slots " + _b4_src(0x3000) + " u)) "
     "(\\ls. \\as. \\u2. u2)))"
 )
 
@@ -542,10 +777,10 @@ def symbols_src(n_imp: int, n_slot: int) -> str:
     """λ-source of `\\imports. \\slots. symbolsOf` — bounds measured."""
     src = SYMS_OF
     for ph, val in (
-        ("__NIMP__", _church_src(n_imp)),
         ("__NIMPB__", _church_src(n_imp)),
         ("__NSLOT__", _church_src(n_slot)),
         ("__IATPFX__", _prefix_src("iat_", "nm")),
+        ("__IATB__", _b4_src(0x2000 + 40 + (n_imp + 1) * 8)),
     ):
         src = src.replace(ph, val)
     assert "__" not in src, "uninstantiated placeholder"
@@ -731,11 +966,23 @@ def python_symbols(imports, slots) -> Dict[str, int]:
     return dict(target_pe64.symbols(imports, slots))
 
 
+def _slots_term(slots) -> T:
+    """[(name, size)] -> Scott list of [nibble-name, bytes4-size]."""
+    t = _NIL
+    for name, sz in reversed(list(slots)):
+        cell = _appn(_CONS, str_term(name),
+                     _appn(_CONS, bytelist_term(
+                         int(sz).to_bytes(4, "little")), _NIL))
+        t = _appn(_CONS, cell, t)
+    return t
+
+
 def symbols_query(imports, slots) -> T:
-    """`symbolsOf IMPORTS SLOTS` — emit stage-2 fragment at term level."""
+    """`symbolsOf IMPORTS SLOTS` — emit stage-2 fragment at term level.
+    Slot sizes are bytes4 (the arithmetic rep) — they feed B4ADD."""
     syms = build_symbols(len(imports), len(slots))
     return _appn(syms, json_to_term(list(imports)),
-                 json_to_term([list(s) for s in slots]))
+                 _slots_term(slots))
 
 
 # ---------------------------------------------------------------------------
@@ -809,8 +1056,11 @@ def _nlist(items: List[NExpr], tail: NExpr = _NIL_E) -> NExpr:
 
 
 def _le8(v: int) -> T:
-    """Immediate/disp leaf: 8-byte little-endian as a nibble-list."""
-    return bytes_term(int(v & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little"))
+    """Immediate/disp leaf: 8-byte little-endian as a byte-cell list —
+    byte cells because assembler predicates slice and compare them
+    (`i8`/`i32` sign-extension), and disp values are byte-typed data
+    (never arithmetic — the G9f rep boundary)."""
+    return bytelist_term(int(v & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little"))
 
 
 def _val_expr(v: int) -> NExpr:
@@ -939,6 +1189,543 @@ def program_query(R) -> T:
                  _le8(R.node_bytes))
 
 
+# ---------------------------------------------------------------------------
+# G9f — isa.assemble at term level.
+#
+# `encode(insn, resolve)` = interpret(FIELDS, PREDS, ENCS[form], ctx,
+# b"".join) — the ordered-alternatives walk over the ENCS table is lifted
+# wholesale: ENCS/FORMS/REG become nibble-trie DATA (name -> entry, lookup
+# = one selector application per name nibble — the quotient-map keyed on
+# the name's own structure, not a string compare), field/predicate ops are
+# the λ vocabulary below, and operands/addresses are byte cells.
+#
+# Field tags (nibble dispatch — the name->code map is generated with the
+# table): 0 rex, 1 op, 2 oprd, 3 modrm, 4 disp, 5 imm, 6 rel.
+# Pred tags: 0 i8, 1 i32, 2 acc.
+# modrm reg-side: [0,nib] lit | [1] ext | [2,idx] regN.
+# modrm rm-side:  [0,idx] rm | [1,idx] mem | [2] rip.
+# Operand-tag trie: r->0 m->1 p->2 l->3.
+#
+# Addresses/positions are bytes4 (LE) — values under arithmetic, per the
+# rep boundary; rel32 = SUBB4 target end, emitted as the 4 result cells.
+# ---------------------------------------------------------------------------
+
+
+# tries ----------------------------------------------------------------------
+# node = PAIR maybeval childfn; childfn = \k. k c0..c15; absent child = _NIL
+# (lookups are only ever issued for present keys — ENCS/REG are static).
+
+def _nib_path(s: str) -> List[int]:
+    out = []
+    for b in s.encode("utf-8"):
+        out += [b >> 4, b & 15]
+    return out
+
+
+def _napp(*xs: NExpr) -> NExpr:
+    t = xs[0]
+    for x in xs[1:]:
+        t = NApp(t, x)
+    return t
+
+
+def _trie(entries: Dict[str, T]) -> T:
+    """Static name->value nibble trie.  Node = pair(maybeVal, \\k. k c0..c15).
+    Missing children point at _TRIE_DEAD, which answers Nothing at any
+    depth — descent on an absent path is total and terminates."""
+    kids: Dict[tuple, set] = {}
+    vals: Dict[tuple, T] = {}
+    for name, v in entries.items():
+        path = tuple(_nib_path(name))
+        for i in range(len(path)):
+            kids.setdefault(path[:i], set()).add(path[i])
+        vals[path] = v
+
+    def node_term(path: tuple) -> T:
+        chs = []
+        for i in range(16):
+            cp = path + (i,)
+            chs.append(NComb(node_term(cp)) if i in kids.get(path, ())
+                       else NComb(_TRIE_DEAD))
+        chfn = bracket(NAbs("k", _napp(NVar("k"), *chs)))
+        val = vals.get(path)
+        mv = KK if val is None else _appn(_JUST, val)
+        return _appn(_PAIR, mv, chfn)
+
+    return node_term(())
+
+
+# dead trie node: Nothing value, every child K — unreachable on the static
+# tries (present keys only), total if ever descended.
+_TRIE_DEAD = _appn(_PAIR, KK, bracket_abstract0(parse("\\k. K")))
+
+# TLOOK trie name -> maybeVal — fold the name's nibble cells descending
+# node = pair(mv, childfn): childfn nib -> child node.
+_TLOOK = ("(\\tr. \\nm. (" + _FOLDL + " (\\nd. \\nb. nd (\\v. \\cf. cf nb))"
+          " nm tr) (\\v. \\cf. v))")
+
+# field-tag / pred-tag encoding ---------------------------------------------
+_IMM_N = {"i8": 1, "i32": 4, "i64": 8}
+
+
+def _npred(c) -> NExpr:
+    name, i = c[0], c[1]
+    tag = {"i8": 0, "i32": 1, "acc": 2}[name]
+    return _nlist([NComb(_SELECTORS[tag]), NComb(church(i))])
+
+
+def _nrole(r: str) -> NExpr:
+    if r == "w":
+        return _nlist([NComb(_SELECTORS[0])])
+    kind = 1 if r[0] == "R" else 2
+    return _nlist([NComb(_SELECTORS[kind]), NComb(church(int(r[1:])))])
+
+
+def _nfield(f) -> NExpr:
+    tag = {"rex": 0, "op": 1, "oprd": 2, "modrm": 3,
+           "disp": 4, "imm": 5, "rel": 6}[f[0]]
+    out = [NComb(_SELECTORS[tag])]
+    if f[0] == "rex":
+        out.append(_nlist([_nrole(r) for r in f[1:]]))
+    elif f[0] == "op" and len(f) > 1:
+        out.append(NComb(byte_term(f[1])))
+    elif f[0] == "modrm":
+        reg, rm = f[1], f[2]
+        if isinstance(reg, int):
+            rs = _nlist([NComb(_SELECTORS[0]),
+                         NComb(_SELECTORS[reg & 15])])
+        elif reg == "ext":
+            rs = _nlist([NComb(_SELECTORS[1])])
+        else:
+            rs = _nlist([NComb(_SELECTORS[2]),
+                         NComb(church(int(reg[3:])))])
+        if rm == "rip":
+            ms = _nlist([NComb(_SELECTORS[2])])
+        elif rm.startswith("rm"):
+            ms = _nlist([NComb(_SELECTORS[0]),
+                         NComb(church(int(rm[2:])))])
+        else:
+            ms = _nlist([NComb(_SELECTORS[1]),
+                         NComb(church(int(rm[3:])))])
+        out += [rs, ms]
+    elif f[0] == "imm":
+        out += [NComb(church(_IMM_N[f[1]])), NComb(church(f[2]))]
+    elif f[0] == "rel":
+        out.append(NComb(church(f[1])))
+    return _nlist(out)
+
+
+def _encs_entry(form: str) -> T:
+    """ENCS[form] + FORMS[form] -> pair(row, alts) term."""
+    import isa_x86_64 as isa
+    _, op, w, ext, _ = isa.FORMS[form]
+    # ext: '+' marks oprd rows (modrm never reads it), else the fixed
+    # modrm reg-field code 0-7; None for rows with no group field.
+    row = _appn(_PAIR, bytelist_term(isa._opbytes(op)),
+                _appn(_PAIR, KK if w else _KI,
+                      _SELECTORS[ext if isinstance(ext, int) else 0]))
+    alts = _NIL
+    for conds, tmpl in reversed(isa.ENCS[form]):
+        alts = _appn(_CONS,
+                     _appn(_PAIR, bracket(_nlist([_npred(c)
+                                                for c in conds])),
+                           bracket(_nlist([_nfield(f) for f in tmpl]))),
+                     alts)
+    return _appn(_PAIR, row, alts)
+
+
+_ENCS_TRIE = _trie({form: _encs_entry(form) for form in
+                    __import__("isa_x86_64").ENCS})
+
+
+def _reg_entries() -> Dict[str, T]:
+    import isa_x86_64 as isa
+    out = {}
+    for name, code in isa.REG64.items():
+        out[name] = _appn(_PAIR, _SELECTORS[code], _KI)
+    for name, code in isa.REG32.items():
+        out[name] = _appn(_PAIR, _SELECTORS[code], _KI)
+    for name, code in isa.REG8.items():
+        out[name] = _appn(_PAIR, _SELECTORS[code],
+                          KK if code >= 4 else _KI)
+    return out
+
+
+_REG_TRIE = _trie(_reg_entries())
+_OPTAG_TRIE = _trie({"r": _SELECTORS[0], "m": _SELECTORS[1],
+                     "p": _SELECTORS[2], "l": _SELECTORS[3]})
+
+
+
+# --- the encoder ------------------------------------------------------------
+# ENCODE et rt ott item resv -> pair(byte_list, len_nib)
+#   item = ["i", form, op…];  resv = \\name. bytes4
+# Tables arrive bound as et/rt/ott (ENCS/REG/op-tag tries); `ops` is the
+# item's operand list.  Every fold is _FOLDL — structural on the data.
+
+
+def _fits8() -> str:
+    cells = [f"b{i}" for i in range(8)]
+    cond = _EQB + " b1 fl"
+    for i in range(2, 8):
+        cond = "(" + _AND + " (" + cond + ") (" + _EQB + f" b{i} fl))"
+    inner = ("b0 (\\l0. \\h0. (\\fl. " + cond + ") ((" + _NIBGE8
+             + " h0) (" + _PAIR_SRC + " " + _SELS[15] + " " + _SELS[15]
+             + ") (" + _PAIR_SRC + " " + _SELS[0] + " " + _SELS[0] + ")))")
+    return "(\\b8. " + _peel("b8", cells, inner) + ")"
+
+
+def _fits32() -> str:
+    cells = [f"b{i}" for i in range(8)]
+    cond = _EQB + " b4 fl"
+    for i in range(5, 8):
+        cond = "(" + _AND + " (" + cond + ") (" + _EQB + f" b{i} fl))"
+    inner = ("b3 (\\l3. \\h3. (\\fl. " + cond + ") ((" + _NIBGE8
+             + " h3) (" + _PAIR_SRC + " " + _SELS[15] + " " + _SELS[15]
+             + ") (" + _PAIR_SRC + " " + _SELS[0] + " " + _SELS[0] + ")))")
+    return "(\\b8. " + _peel("b8", cells, inner) + ")"
+
+
+def _isz8() -> str:
+    cells = [f"b{i}" for i in range(8)]
+    z = _prs(_SELS[0], _SELS[0])
+    cond = _EQB + " b0 " + z
+    for i in range(1, 8):
+        cond = "(" + _AND + " (" + cond + ") (" + _EQB + f" b{i} " + z + "))"
+    return "(\\b8. " + _peel("b8", cells, cond) + ")"
+
+
+def _encode_src() -> str:
+    """The ENCS-walking encoder as one λ-source.  Bound names:
+    et rt ott item resv; derived: form ops row alts opb w ext;
+    helpers REGC EMIT SETD EVALF; field impls F0..F6."""
+    S = _SELS
+
+    # operand -> pair(code_nib, need_rex_bool);  op = cons(tag, rest).
+    # "r" looks the name up in rt (REG8 entries already carry the
+    # needs-REX flag in snd); non-register tags answer (0, false).
+    regc = (
+        "(\\o. o K (\\tg. \\rr. " + _maybe(
+            _TLOOK + " ott tg",
+            _sel16("k2", [
+                "(\\rr2. (" + _TLOOK + " rt (" + _HEAD + " rr2)) K I)",
+                # "m": the REX-relevant code is the BASE register's
+                "(\\rr2. (" + _TLOOK + " rt (" + _HEAD + " rr2)) K I)",
+                "(\\rr2. " + _prs(S[0], "(K I)") + ")",
+                "(\\rr2. " + _prs(S[0], "(K I)") + ")",
+            ], "rr"), "k2") + "))")
+
+    # emit chunk ch into acc=(disp,(out,ln))
+    emitcell = ("(\\a. \\b. a (\\dp. \\oo. oo (\\ou. \\ln. "
+                + _prs("dp", _prs(_conss("b", "ou"),
+                                  "(" + _NIBSUCC + " ln)")) + ")))")
+    emit = "(\\acc. \\ch. " + _FOLDL + " " + emitcell + " ch acc)"
+    setd = ("(\\acc. \\nd. acc (\\dp. \\oo. oo (\\ou. \\ln. "
+            + _prs("nd", _prs("ou", "ln")) + ")))")
+
+    # rex: fold roles over s=(vlo, need)
+    wstep = ("(\\rt2. \\st. st (\\v. \\nd. "
+             + _prs("(" + _NIBADD + " v (w " + S[8] + " " + S[0] + "))",
+                    "nd") + "))")
+    rstep = ("(\\rt2. \\st. (\\i. (REGC (" + _NTH
+             + " i ops)) (\\cd. \\ndd. st (\\v. \\nd. "
+             + _prs("(" + _NIBADD + " v ((" + _NIBGE8 + " cd) " + S[4]
+                    + " " + S[0] + "))",
+                    "(" + _OR + " nd ndd)") + "))) (" + _HEAD
+             + " rt2))")
+    bstep = ("(\\rt2. \\st. (\\i. (REGC (" + _NTH
+             + " i ops)) (\\cd. \\ndd. st (\\v. \\nd. "
+             + _prs("(" + _NIBADD + " v ((" + _NIBGE8 + " cd) " + S[1]
+                    + " " + S[0] + "))",
+                    "(" + _OR + " nd ndd)") + "))) (" + _HEAD
+             + " rt2))")
+    rolestep = ("(\\st. \\role. role K (\\k. \\rt2. "
+                + _sel16("k", [wstep, rstep, bstep], "rt2 st") + "))")
+    f_rex = _lets([("rl", _HEAD + " args"),
+                   ("vv", _FOLDL + " " + rolestep + " rl "
+                          + _prs(S[0], "(K I)")),
+                   ("v", _fst("vv")), ("nd", _snd("vv"))],
+                  "((" + _OR + " (" + _NOT + " (" + EQNIB + " v " + S[0]
+                  + ")) nd) (EMIT acc " + _conss(_prs("v", S[4]), "K")
+                  + ") acc)")
+    f_rex = "(\\acc. \\args. " + f_rex + ")"
+
+    # op / oprd
+    f_op = ("(\\acc. \\args. args (EMIT acc opb) (\\h. \\t. "
+            "EMIT acc " + _conss("h", "K") + "))")
+    f_oprd = ("(\\acc. \\args. opb K (\\b0. \\tt. b0 (\\bl. \\bh. "
+              "(REGC (" + _NTH + " " + _church_src(0) + " ops)) "
+              "(\\cd. \\nx. EMIT acc "
+              + _conss(_prs("(" + _NIBADD + " bl (" + _NIBMOD8
+                            + " cd))", "bh"), "K")
+              + "))))")
+
+    # modrm — spec = cons(kind_sel, payload_cell); impls take the
+    # payload cell directly (NIL-safe: ext/rip ignore it, lit/rmN/memN
+    # HEAD it for their payload).
+    rlit = "(\\pl. " + _HEAD + " pl)"
+    rext = "(\\pl. ext)"
+    rreg = ("(\\pl. (REGC (" + _NTH + " (" + _HEAD + " pl) ops)) "
+            "(\\cd. \\nx. " + _NIBMOD8 + " cd))")
+    m_rm = ("(\\pl. (REGC (" + _NTH + " (" + _HEAD + " pl) ops)) "
+            "(\\cd. \\nx. EMIT acc " + _conss(
+                "(" + _MODRM3 + " " + S[3] + " r cd)", "K") + "))")
+    m_rip = ("(\\pl. EMIT acc " + _conss(
+        "(" + _MODRM3 + " " + S[0] + " r " + S[5] + ")", "K") + ")")
+    # mem: op = ["m", base_name, b8]; mod/disp by the _f_memi truth table
+    mem_body = _lets([
+        ("op", _NTH + " (" + _HEAD + " pl) ops"),
+        ("rr", _TAIL + " op"),
+        ("bs", _HEAD + " rr"),
+        ("d8", _HEAD + " (" + _TAIL + " rr)"),
+        ("bc", "(" + _TLOOK + " rt bs) K (\\c. c K)"),
+        ("lo", _NIBMOD8 + " bc"),
+        ("isz", _isz8() + " d8"),
+        ("isz5", "(" + _AND + " isz (" + _NOT + " (" + EQNIB
+                 + " lo " + S[5] + ")))"),
+        ("fts", _fits8() + " d8"),
+        ("mod", "isz5 " + S[0] + " (fts " + S[1] + " " + S[2] + ")"),
+        ("dp2", "isz5 K (fts (d8 K (\\h. \\t2. " + _conss("h", "K")
+                + ")) (" + _REV + " " + _fst(
+                    _TAKE + " " + _church_src(4) + " d8") + "))"),
+        ("sib", EQNIB + " lo " + S[4]),
+        ("rm", "sib " + S[4] + " lo"),
+        ("mb", _MODRM3 + " mod r rm"),
+        ("ch", _conss("mb", "(sib " + _conss(_prs(S[4], S[2]), "K")
+                      + " K)")),
+    ], "EMIT (SETD acc dp2) ch")
+    m_mem = "(\\pl. " + mem_body + ")"
+    f_modrm = _lets([
+        ("rs", _HEAD + " args"),
+        ("ms", _HEAD + " (" + _TAIL + " args)"),
+    ], "rs K (\\rk. \\rr. "
+       + "(\\r. ms K (\\mk. \\mr. "
+       + _sel16("mk", [m_rm, m_mem, m_rip], "mr") + ")) "
+       + "(" + _sel16("rk", [rlit, rext, rreg], "rr") + "))")
+    f_modrm = "(\\acc. \\args. " + f_modrm + ")"
+
+    # disp / imm / rel
+    f_disp = "(\\acc. \\args. acc (\\dp. \\oo. EMIT acc dp))"
+    f_imm = _lets([
+        ("cn", _HEAD + " args"),
+        ("i", _HEAD + " (" + _TAIL + " args)"),
+        ("op", _NTH + " i ops"),
+        ("pl", _TAIL + " op"),          # op = cons(tag, cons(b8,NIL))
+        ("b8", _HEAD + " pl"),
+    ], "EMIT acc (" + _REV + " " + _fst(_TAKE + " cn b8") + ")")
+    f_imm = "(\\acc. \\args. " + f_imm + ")"
+    f_rel = _lets([
+        ("i", _HEAD + " args"),
+        ("op", _NTH + " i ops"),
+        ("nm", _HEAD + " (" + _TAIL + " op)"),
+    ], "EMIT acc (resv nm)")
+    f_rel = "(\\acc. \\args. " + f_rel + ")"
+
+    fldstep = ("(\\acc. \\fld. fld K (\\tg. \\args. "
+               + _sel16("tg", ["F0", "F1", "F2", "F3", "F4", "F5", "F6"],
+                        "acc args") + "))")
+
+    # preds — acc = bool; `acc EV (K I)` = AND acc EV
+    payl = "(\\o. o K (\\tg. \\rr. " + _HEAD + " rr))"
+    p_i8 = "(\\i. " + _fits8() + " (" + payl + " (" + _NTH + " i ops)))"
+    p_i32 = "(\\i. " + _fits32() + " (" + payl + " (" + _NTH + " i ops)))"
+    p_acc = ("(\\i. (REGC (" + _NTH + " i ops)) (\\cd. \\nx. " + EQNIB
+             + " cd " + S[0] + "))")
+    predstep = ("(\\acc. \\pr. acc (pr K (\\pt. \\prr. prr K (\\pi. \\px. "
+                + _sel16("pt", [p_i8, p_i32, p_acc], "pi") + "))) (K I))")
+    allp = "(\\prs2. " + _FOLDL + " " + predstep + " prs2 K)"
+
+    # alt select + field fold; acc = pair(done, result)
+    acc0 = _prs("K", _prs("K", S[0]))
+    evalf = ("(\\fl. " + _FOLDL + " " + fldstep + " fl " + acc0 + " "
+             "(\\d. \\o. o (\\ou. \\ln. " + _prs(
+                 "(" + _REV + " ou)", "ln") + ")))")
+    altstep = ("(\\acc. \\alt. acc (\\dn. \\pv. dn acc ("
+               "alt (\\pr. \\fl. (" + allp + " pr) "
+               + _prs("K", "(EVALF fl)") + " acc))))")
+    ares = _FOLDL + " " + altstep + " alts " + _prs("(K I)", "K")
+
+    body = _lets([
+        ("ft", _TAIL + " item"),
+        ("form", _HEAD + " ft"),
+        ("ops", _TAIL + " ft"),
+        ("ent", "(" + _TLOOK + " et form) K I"),
+        ("row", _fst("ent")),
+        ("alts", _snd("ent")),
+        ("opb", _fst("row")),
+        ("we", _snd("row")),
+        ("w", _fst("we")),
+        ("ext", _snd("we")),
+        ("REGC", regc),
+        ("EMIT", emit),
+        ("SETD", setd),
+        # F0..F6 before EVALF: the impl sources are free-name references
+        # into fldstep's dispatch and must sit inside their binders.
+        ("F0", f_rex), ("F1", f_op), ("F2", f_oprd), ("F3", f_modrm),
+        ("F4", f_disp), ("F5", f_imm), ("F6", f_rel),
+        ("EVALF", evalf),
+    ], ares + " (\\dn. \\rs. rs)")
+    return "(\\et. \\rt. \\ott. \\item. \\resv. " + body + ")"
+
+
+# bytes4 zero resolver — pass-1 size encoding / the no-resolve gate
+_Z4 = bytelist_term(b"\x00\x00\x00\x00")
+_ZRESV = bracket(NAbs("nm", NComb(_Z4)))
+
+_ENCODE_OF = _appn(bracket_abstract0(parse(_encode_src())),
+                   _ENCS_TRIE, _REG_TRIE, _OPTAG_TRIE)
+
+
+def encode_query(item, resv: Optional[T] = None) -> T:
+    """`encodeOf item resv` — item = ("i", form, *ops) python tuple.
+    resv = λname. bytes4; the default is the zero resolver (pass-1 size
+    encoding: rel fields emit four zero bytes)."""
+    return _appn(_ENCODE_OF, bracket(_item_expr(item)),
+                 resv if resv is not None else _ZRESV)
+
+
+def decode_encode(nf: T) -> Optional[bytes]:
+    """NF pair(bytes, len) -> the emitted byte string."""
+    if nf.k == K.NORM:
+        return None
+    bt = _l0_nf(app(nf, KK), 100_000)
+    return _decode_bytecells(bt)
+
+
+# ---------------------------------------------------------------------------
+# assembleOf — isa.assemble's two passes at term level.
+#
+#   ASM prog sym base -> pair(code_bytes, local_map)
+#
+#   prog  = fragment list from programOf (list of item lists)
+#   sym   = assoc map name -> bytes4  — THE LINK SEAM: `symbols` is the
+#           external table (imports/data RVAs today, a real linker's
+#           merged object table in the later toolchain phase); it is
+#           injected data and SHADOWS local labels, mirroring
+#           `symbols[name] if name in symbols else local[name]`.
+#   base  = bytes4 load base (TEXT_RVA analogue).
+#
+#   pass 1 folds fragments -> (pos4, localmap, prepared_rev): labels
+#       record base+pos; insns record (item, off4, len4) where
+#       len4 = snd (ENC it ZRV) — the zero resolver gives the correct
+#       byte COUNT because rel fields are always four cells.
+#   pass 2 folds prepared records: end4 = base+off+len;
+#       resv nm = SUBB4 (sym nm | loc nm) end4 — two's-complement
+#       rel32 emitted as the 4 result cells.  A resolver miss yields
+#       -end (0 - end, the `.get(n,0)` analogue; the oracle raises
+#       KeyError — gate inputs always resolve).
+#
+# All arithmetic is bytes4 ripple ops — constant cost per value, no
+# Church-numeral PRED chains.  insn length is a NIBBLE lifted once via
+# NIB2B4 (x86 insns are <=15 bytes by ISA limit — the nibble is honest).
+# ---------------------------------------------------------------------------
+
+
+def _assemble_src() -> str:
+    lbl = _prefix_src("label", "K")          # nibble-string "label"
+    is_lbl = ("(" + EQSTR + " tg " + lbl + " (" + _LEN + " tg))")
+
+    # pass-1 acc = pair(pos4, pair(loc, prep_rev))
+    label_case = (
+        "acc (\\p0. \\r0. r0 (\\lc. \\pr. " + _prs("p0", _prs(
+            _conss(_prs("(" + _HEAD + " rr)",
+                        "(" + _B4ADD + " base p0)"), "lc"),
+            _conss(_prs("it", _prs("p0", "K")), "pr"))) + "))")
+    insn_case = _lets([
+        ("enc", "(ENC it ZRV)"),
+        ("ln4", "(" + _NIB2B4 + " " + _snd("enc") + ")"),
+    ], "acc (\\p0. \\r0. r0 (\\lc. \\pr. " + _prs(
+        "(" + _B4ADD + " p0 ln4)",
+        _prs("lc", _conss(_prs("it", _prs("p0", "ln4")), "pr"))) + "))")
+    # NB: both branch bodies are APPLICATIONS — they must sit parenthesized
+    # in the bool spine, else `is_lbl a b c` mis-groups (acc and the ENC
+    # call leak into the dispatch as extra args).
+    p1step = ("(\\acc. \\it. it K (\\tg. \\rr. " + is_lbl + " ("
+              + label_case + ") (" + insn_case + ")))")
+
+    # pass-2 resolver: symbols shadow locals (the link seam)
+    resv = ("(\\nm. (" + _ALOOK + " sym nm) ((" + _ALOOK + " loc nm) ("
+            + _B4SUB + " " + _b4_src(0) + " end4) (\\lv. " + _B4SUB
+            + " lv end4)) (\\sv. " + _B4SUB + " sv end4))")
+    insn_emit = _lets([
+        ("end4", "(" + _B4ADD + " (" + _B4ADD + " base of) ln)"),
+        ("rsv", resv),
+        ("enc2", "(ENC it rsv)"),
+    ], _FOLDL + " (\\o. \\c. " + _conss("c", "o") + ") "
+       + _fst("enc2") + " acc")
+    emitstep = ("(\\acc. \\rec. rec (\\it. \\ol. ol (\\of. \\ln. "
+                "it K (\\tg. \\rr. " + is_lbl + " acc ("
+                + insn_emit + ")))))")
+
+    body = _lets([
+        ("p1", _FOLDL + " (\\a. \\fr. " + _FOLDL + " " + p1step
+               + " fr a) prog " + _prs(_b4_src(0), _prs("K", "K"))),
+        ("loc", "(" + _snd("p1") + " K)"),
+        ("prep", "(" + _REV + " (" + _snd("p1") + " (K I)))"),
+        ("out", _FOLDL + " " + emitstep + " prep K"),
+    ], _prs("(" + _REV + " out)", "loc"))
+    return "(\\ENC. \\ZRV. \\prog. \\sym. \\base. " + body + ")"
+
+
+_ASSEMBLE = _appn(bracket_abstract0(parse(_assemble_src())),
+                  _ENCODE_OF, _ZRESV)
+
+
+def symtab_term(symbols: Dict[str, int]) -> T:
+    """{name: rva} -> assoc list of pair(nibble-string, bytes4)."""
+    t = _NIL
+    for name, addr in reversed(list(symbols.items())):
+        t = _appn(_CONS, _appn(_PAIR, str_term(name),
+                              bytelist_term(
+                                  addr.to_bytes(4, "little"))), t)
+    return t
+
+
+def fraglist_term(frags) -> T:
+    """[[item,…],…] -> programOf's fragment-list shape."""
+    t = _NIL
+    for frag in reversed(frags):
+        f = _NIL
+        for it in reversed(frag):
+            f = _appn(_CONS, bracket(_item_expr(it)), f)
+        t = _appn(_CONS, f, t)
+    return t
+
+
+def assemble_query(prog: T, symbols: Dict[str, int], base: int) -> T:
+    """`assembleOf prog symtab base`."""
+    return _appn(_ASSEMBLE, prog, symtab_term(symbols),
+                 bytelist_term(base.to_bytes(4, "little")))
+
+
+def decode_assemble(nf: T):
+    """NF pair(bytes, localmap) -> (bytes, {name: rva})."""
+    if nf.k == K.NORM:
+        return None
+    out = _decode_bytecells(_l0_nf(app(nf, KK), 200_000))
+    lc = _l0_nf(app(nf, _KI), 200_000)
+    local: Dict[str, int] = {}
+    while lc.k != K.KONST:
+        pr, lc = _cell_parts(lc)
+        key = _decode_str(_l0_nf(app(pr, KK), 50_000))
+        local[key] = int.from_bytes(
+            _decode_bytecells(_l0_nf(app(pr, _KI), 50_000)), "little")
+    return out, local
+
+
+def python_assemble(prog, symbols, base):
+    """isa.assemble on the same items — the independent oracle."""
+    import isa_x86_64 as isa
+    flat = [it for frag in prog for it in frag]
+    return isa.assemble(flat, dict(symbols), base)
+
+
+def isa_x86_64_gate_encode(insn) -> bytes:
+    """isa.encode on the raw ("i", form, *ops) item — oracle bytes."""
+    import isa_x86_64 as isa
+    return isa.encode(tuple(insn[1:]))
+
+
 def python_program(R) -> list:
     """rts.program(R) on the real module — the independent witness."""
     return list(routines_x86_64_win64.program(R))
@@ -951,6 +1738,62 @@ PROG_CASES = {
     "buf128k": seed.Realization(read_buf_bytes=128 << 10),
     "fuel+fuse": seed.Realization(fuse_s=True, fuel=64),
 }
+
+
+# G9f gate data — a fragment list exercising every item kind:
+# forward AND backward local rel32 (negative displacement via B4SUB),
+# rip-relative symbol refs, one name present in BOTH the local labels
+# and the symbol table (the oracle's resolver prefers `symbols` — the
+# link seam's shadowing rule), mem/disp forms, and base != 0.
+ASM_PROG = [
+    [("label", "start"),
+     ("i", "call_rel32", ("l", "mid")),               # forward local
+     ("i", "push_r64", "rbp"),
+     ("i", "mov_r64_r64", "rbp", "rsp")],
+    [("label", "mid"),
+     ("i", "mov_r64_rip", "rax", ("p", "scratch")),   # symbol via rip
+     ("i", "mov_r64_m64", "rbx", ("m", "rsp", 8)),
+     ("i", "call_rel32", ("l", "start")),            # backward local
+     ("i", "mov_r64_rip", "rcx", ("p", "mid")),      # shadowed: sym wins
+     ("i", "pop_r64", "rbp"),
+     ("i", "ret",)],
+]
+ASM_SYMS = {"scratch": 0x3248, "mid": 0x7777}
+# The suite gate splits the mini program's coverage into two tractable
+# cases — the monolithic mini is probe-verified (~1.22M lo steps,
+# ~28GB arena) but too heavy for the routine loop.  `link` covers
+# labels + fwd/bwd rel32 + multi-fragment; `shadow` covers rip-symbol
+# refs + mem disp + the symbols-shadow-local link rule (mid is in
+# both maps) + a nonzero base.
+ASM_LINK = [
+    [("label", "top"),
+     ("i", "call_rel32", ("l", "bot")),               # forward local
+     ("i", "ret")],
+    [("label", "bot"),
+     ("i", "call_rel32", ("l", "top")),               # backward local
+     ("i", "ret")],
+]
+ASM_SHADOW = [
+    [("label", "mid"),
+     ("i", "mov_r64_rip", "rcx", ("p", "mid")),       # shadowed: sym wins
+     ("i", "mov_r64_rip", "rax", ("p", "scratch")),   # symbol via rip
+     ("i", "mov_r64_m64", "rbx", ("m", "rsp", 8)),    # mem disp8
+     ("i", "ret")],
+]
+ASM_MINI = (ASM_PROG, ASM_SYMS, 0x1000)   # extended case — probe-verified
+ASM_CASES = {"link": (ASM_LINK, {}, 0x1000),
+             "shadow": (ASM_SHADOW, ASM_SYMS, 0x2000)}
+
+# encode spot-checks — one form per field-shape class not covered by
+# the mini program (full 26-instance sweep: _probe_g9f_enc.py).
+ENC_CASES = [
+    ("i", "mov_r64_imm", "rax", 0x1122334455),       # oprd + imm64
+    ("i", "add_r64_imm", "rcx", 300),                # ext + i32 alt
+    ("i", "mov_m8_imm8", ("m", "rbx", 4), 9),        # ext + mem + i8
+    ("i", "mov_r64_m64", "rax", ("m", "r12", 16)),   # SIB + disp8
+    ("i", "xor_r32_r32", "eax", "eax"),              # 32-bit modrm
+    ("i", "lea_r64_rip", "rbx", ("p", "data")),      # rip-rel
+]
 
 
 # ---------------------------------------------------------------------------
@@ -994,7 +1837,6 @@ def decode_result(nf: T) -> Optional[str]:
 # is already normal — probes only fire the cell/selector λs).
 # ---------------------------------------------------------------------------
 
-_KI = app(KK, I)
 _MARKS = tuple(T(K.VAR, n=i) for i in range(16))
 
 
@@ -1087,48 +1929,27 @@ def decode_resolve(nf: T) -> Optional[List[str]]:
 
 
 # ---------------------------------------------------------------------------
-# symbols output map: Scott list of `\\f. f key addr` pairs — an assoc
-# map of nibble-string -> Church numeral.  A numeral is probed with
-# `addr VF VX` (fresh vars): the numeral unfolds inertly into a left spine
-# `app(VF, app(VF, … VX))` and the count is an O(n) pointer walk — no
-# marker atoms (no closed base survives n applications; B dies at 3,
-# K at 2, I at 1) and no per-cell reduction (cons-cell probes cost
-# ~10^5 allocs/cell on MUL-composed literals — O(n^2)).
+# symbols output map: Scott list of pair cells — an assoc
+# map of nibble-string -> bytes4 (the arithmetic rep — assemble's
+# resolver subtracts them; see decision 024 for the probe folklore the
+# numeral repr previously needed).
 # ---------------------------------------------------------------------------
 
-_VF = T(K.VAR, n=17)
-_VX = T(K.VAR, n=18)
 
-
-def _decode_num(n: T) -> int:
-    # `n VF VX` -> `app(VF, app(VF, … VX))` — a right spine of n var-headed
-    # applications.  VAR arguments let the numeral's own machinery unfold
-    # inertly (no rule fires on a var-headed app, so no marker cells and no
-    # per-cell reduction); the count is an O(n) pointer walk.  Reduced on
-    # graph.cd: lo re-descends the growing spine (~quadratic allocs on
-    # MUL-composed literals), cd unfolds at ~24 allocs/VF.
-    # Marker-cell probes (`n (cons M) z`) cost ~10^5 allocs/cell — O(n^2) —
-    # and no closed base survives n applications on an app-spine probe
-    # (B dies at 3, K at 2, I at 1).
-    spine = reduce_tree_cd(app(app(n, _VF), _VX), LO_FUEL)[0]
-    k = 0
-    while spine != _VX:
-        if spine.k != K.APP or spine.l != _VF:
-            raise ValueError(f"numeral probe spine {spine}, not f^n x")
-        k += 1
-        spine = spine.r
-    return k
 
 
 def decode_symbols(nf: T) -> Optional[Dict[str, int]]:
-    """NF -> None (bare I) or {symbol: rva} from the assoc-map cells."""
+    """NF -> None (bare I) or {symbol: rva} from the assoc-map cells.
+    Values are bytes4 — structural byte-cell decode, no numeral probe."""
     if nf.k == K.NORM:
         return None
     out: Dict[str, int] = {}
     while nf.k != K.KONST:
         pair, nf = _cell_parts(nf)
         key = _decode_str(reduce_tree_lo(app(pair, KK), 1_000_000)[0])
-        out[key] = _decode_num(reduce_tree_lo(app(pair, _KI), 1_000_000)[0])
+        addr = _decode_bytecells(
+            reduce_tree_lo(app(pair, _KI), 1_000_000)[0])
+        out[key] = int.from_bytes(addr, "little")
     return out
 
 
@@ -1146,19 +1967,46 @@ def _decode_i64(b: bytes) -> int:
     return int.from_bytes(b, "little", signed=True)
 
 
+def _decode_sel(t: T) -> int:
+    """16-way selector -> index (shared leaf, else VAR-marker probe)."""
+    k = _SEL_IDX.get(t)
+    if k is not None:
+        return k
+    probe = _l0_nf(_appn(t, *_MARKS))
+    if probe.k != K.VAR:
+        raise ValueError(f"nibble probe returned {probe}")
+    return probe.n
+
+
+def _decode_bytecell(b: T) -> int:
+    """`\\f. f lo hi` -> int.  `b K` = lo, `b (K I)` = hi."""
+    lo = _decode_sel(_l0_nf(app(b, KK), 10_000))
+    hi = _decode_sel(_l0_nf(app(b, _KI), 10_000))
+    return (hi << 4) | lo
+
+
+def _decode_bytecells(s: T) -> bytes:
+    out = bytearray()
+    while s.k != K.KONST:
+        cell, s = _cell_parts(s)
+        out.append(_decode_bytecell(cell))
+    return bytes(out)
+
+
 def _decode_op(op: T):
     tag_t, rest = _cell_parts(op)
     tag = _decode_str(tag_t)
     if tag == "r":
         return _decode_str(_cell_parts(rest)[0])
     if tag == "imm":
-        return _decode_i64(_decode_bytes(_cell_parts(rest)[0]))
+        return _decode_i64(_decode_bytecells(_cell_parts(rest)[0]))
     if tag in ("l", "p"):
         return (tag, _decode_str(_cell_parts(rest)[0]))
     if tag == "m":
         base_t, rest2 = _cell_parts(rest)
         disp_t = _cell_parts(rest2)[0]
-        return ("m", _decode_str(base_t), _decode_i64(_decode_bytes(disp_t)))
+        return ("m", _decode_str(base_t),
+                _decode_i64(_decode_bytecells(disp_t)))
     raise ValueError(f"bad operand tag {tag!r}")
 
 
@@ -1291,9 +2139,15 @@ def main() -> int:
     # ------------------------------------------------------------------
     # G9d: symbolsOf — target.symbols (IAT + .data RVAs) at term level.
     # Two structurally-bounded folds build the assoc map; addresses are
-    # Church numerals (the "is it ever added/subtracted" boundary).
-    # Oracle is the real target_pe64.symbols on the same inputs; all
-    # three witnesses run on both cases (the terms are small).
+    # bytes4 — the rep assemble's resolver subtracts (the "is it ever
+    # added/subtracted" boundary, applied now that the ripple
+    # vocabulary exists — see decision 026).
+    # Oracle is the real target_pe64.symbols on the same inputs.  lo +
+    # cd + oracle run on both cases.  Native is gated on `mini` only:
+    # win64.lo is ~95k lo steps, which exceeds the fixed-fuel exe's 600s
+    # subprocess cap — the same throughput ceiling G9e documents, not a
+    # correctness gap.  nf_lo == nf_nat is pinned by the `mini` leg and
+    # the resolveOf legs, which exercise the same reduction machinery.
     # ------------------------------------------------------------------
     for cname, (imports, slots) in SYMS_CASES.items():
         expected = python_symbols(imports, slots)
@@ -1303,18 +2157,20 @@ def main() -> int:
         nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
         val_lo = decode_symbols(nf_lo)
 
-        nf_nat, steps_nat, _ = seed.reduce_native(t, 0)
-        val_nat = decode_symbols(nf_nat)
-
         nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
         val_cd = decode_symbols(nf_cd)
 
-        line = (f"{'OK ' if val_lo == expected else 'FAIL'} "
+        steps_nat = "-"
+        good = (val_lo == expected and val_cd == expected)
+        if cname == "mini":
+            nf_nat, steps_nat, _ = seed.reduce_native(t, 0)
+            val_nat = decode_symbols(nf_nat)
+            good = good and val_nat == expected and nf_lo == nf_nat
+
+        line = (f"{'OK ' if good else 'FAIL'} "
                 f"{cname:18s} symbols -> {len(val_lo or {})} entries "
                 f"[lo {steps_lo} | native {steps_nat} | "
                 f"cd {rounds_cd} rounds]")
-        good = (val_lo == expected and val_nat == expected
-                and val_cd == expected and nf_lo == nf_nat)
         if not good:
             nfail += 1
             line = "FAIL " + line[4:] + f"  expected {expected}"
@@ -1355,6 +2211,55 @@ def main() -> int:
         if not good:
             nfail += 1
             line = "FAIL " + line[4:] + f"  expected {expected}"
+        print(line)
+
+    # ------------------------------------------------------------------
+    # G9f: encodeOf + assembleOf — emit stage 4 at term level.
+    #   ENC spot-checks cover one form per field-shape class the mini
+    #   program misses (the 26-instance sweep lives in
+    #   _probe_g9f_enc.py — each encode is ~3.5k steps / ~70s, so the
+    #   full sweep does not belong in the suite loop).  cd only — the
+    #   same term witnesses lo equality inside assembleOf below.
+    #   assembleOf runs the two-pass fold end-to-end on the mini
+    #   program: pass-1 label map, pass-2 resolver with symbol shadowing
+    #   and a negative rel32.  Witnesses: lo + cd + the isa.assemble
+    #   oracle; native is not gated (same exe throughput ceiling as
+    #   programOf — ~80k+ steps is past the subprocess cap).
+    # ------------------------------------------------------------------
+    for insn in ENC_CASES:
+        want = isa_x86_64_gate_encode(insn)
+        n_q += 1
+        t = encode_query(insn)
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+        got = decode_encode(nf_cd)
+        line = (f"{'OK ' if got == want else 'FAIL'} "
+                f"{insn[1]:16s} encode -> {got.hex() if got else None} "
+                f"[cd {rounds_cd} rounds]")
+        if got != want:
+            nfail += 1
+            line += f"  expected {want.hex()}"
+        print(line)
+
+    for cname, (prog, syms, base) in ASM_CASES.items():
+        expected_b, expected_l = python_assemble(prog, syms, base)
+        n_q += 1
+        t = assemble_query(fraglist_term(prog), syms, base)
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_assemble(nf_lo)
+
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+        val_cd = decode_assemble(nf_cd)
+
+        ok = (val_lo == (expected_b, expected_l)
+              and val_cd == (expected_b, expected_l))
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} assemble -> "
+                f"{len(val_lo[0]) if val_lo else 0}B "
+                f"{len(val_lo[1]) if val_lo else 0} labels "
+                f"[lo {steps_lo} | cd {rounds_cd} rounds]")
+        if not ok:
+            nfail += 1
+            line += f"  expected {expected_b.hex()}/{expected_l}"
         print(line)
 
     # ------------------------------------------------------------------
@@ -1403,6 +2308,7 @@ def main() -> int:
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
           f"({len(NAMES) + 1} pathOf + {len(NAMES) + 1} resolveOf + "
           f"{len(SYMS_CASES)} symbolsOf + {len(PROG_CASES)} programOf + "
+          f"{len(ENC_CASES)} encodeOf + {len(ASM_CASES)} assembleOf + "
           f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0
