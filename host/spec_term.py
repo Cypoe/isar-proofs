@@ -139,10 +139,26 @@ Two dead ends are recorded in decision 024: marker-cell probes cost
 survives n applications as an app-spine base (B dies at 3, K at 2,
 I at 1) — only fresh VARs make the unfold inert end-to-end.
 
+G9e — `programOf`: `routines.program(R)` at term level (emit stage 3).
+One generated term `λfs λfuel λrbb λcb λnb. <fragments>`: the skeleton
+is produced by differencing each routine builder under sentinel
+Realizations, so the fuse_s/fuel variant regions are discovered, not
+re-encoded.  Output is a Scott list of per-routine fragment lists —
+the ROUTINES order is the honest emission unit, and the nesting keeps
+pending redexes ~30x shallower than one flat ~540-cell spine (the same
+quadratic-descent pathology as G9d's probes: flat lo hit ~10M allocs
+by 40k steps and never finished; nested finishes in ~80k steps / ~11M
+allocs).  Operands are uniformly tagged ["r"|"imm"|"l"|"p"|"m",…];
+immediates and mem displacements are bytes8 leaves (never arithmetic),
+"l"/"p" payloads stay nibble-string names for the G9d symbol map and
+the pass-1 label map.  Native is not gated on this stage — the reduce
+exceeds the exe's 600s subprocess cap; lo+cd+python witness all cases.
+
 Usage: python host/spec_term.py
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import sys
@@ -157,8 +173,9 @@ if _SEED not in sys.path:
 
 sys.setrecursionlimit(1_000_000)   # cons-spine depth ~ #nibble cells
 
-from reduce import T, K, I, KK, B, S, C, app  # noqa: E402
-from lambda_dialect import parse, bracket, bracket_abstract0  # noqa: E402
+from reduce import T, K, I, KK, B, S, C, D, app  # noqa: E402
+from lambda_dialect import (parse, bracket, bracket_abstract0,  # noqa: E402
+                            NAbs, NApp, NComb, NExpr, NVar)
 from graph_runtime import reduce_tree_lo, reduce_tree_cd     # noqa: E402
 from strategy import MixStrategy                             # noqa: E402
 import seed                                                  # noqa: E402
@@ -199,13 +216,18 @@ def church(k: int) -> T:
     return t
 
 
-def str_term(s: str) -> T:
-    """UTF-8 bytes -> Scott list of 16-ary nibble selectors."""
+def bytes_term(b: bytes) -> T:
+    """Raw bytes -> Scott list of 16-ary nibble selectors."""
     t = _NIL
-    for byte in reversed(s.encode("utf-8")):
+    for byte in reversed(b):
         t = _appn(_CONS, _SELECTORS[byte & 15], t)
         t = _appn(_CONS, _SELECTORS[byte >> 4], t)
     return t
+
+
+def str_term(s: str) -> T:
+    """UTF-8 bytes -> Scott list of 16-ary nibble selectors."""
+    return bytes_term(s.encode("utf-8"))
 
 
 def json_to_term(obj) -> T:
@@ -717,6 +739,221 @@ def symbols_query(imports, slots) -> T:
 
 
 # ---------------------------------------------------------------------------
+# G9e: programOf — routines.program(R) at term level (emit stage 3).
+#
+# program() is pure cons-emission — decision 024's dense part, no folds
+# and no arithmetic.  The term is a generated constant
+# `λfs λfuel λrbb λcb λnb. <fragment list>` over exactly the R fields
+# that data-flow into the insn stream:
+#
+#   fs        fuse_s as a Church bool selecting variant FRAGMENTS —
+#             routine inclusion (st_s iff fuse_s, build_ds iff not) is
+#             an outer-level `fs fragA fragB` splice; intra-routine
+#             regions (build_ds call, p_s block, sβ dispatch) are found
+#             by differencing each builder under sentinel Realizations,
+#             not re-encoded.
+#   fuel      Maybe bytes8 — `λn.λj.n` | `λn.λj. j v`: the cmp/jge
+#             fuel-check block inside the reduce loop.
+#   rbb/cb/nb read_buf_bytes / chunk_bytes / node_bytes as bytes8.
+#
+#   (order is fixed by the routines record itself — x86_64.win64.lo —
+#   and abi is guarded by emit(), outside program; both stay out of the
+#   minimal signature.)
+#
+# The output is a Scott list of per-routine fragment lists — the
+# ROUTINES order is the honest emission unit (Python flattens it with
+# `p += builder(...)`).  It is also the load-bearing efficiency choice:
+# a single flat ~540-cell spine leaves the pending emission redex at
+# the bottom of the accumulating structure, so each lo rewrite
+# path-copies ~all ancestors — measured quadratic (~10M allocs by 40k
+# steps, >16GB; native hangs the same way).  Nested fragments bound
+# pending depth to ~routines+routine-size (~85 cells) — the same lesson
+# as G9d's numeral probes.  Decode flattens.
+#
+# Item/operand encoding — the JSON-vs-IR comparison answered at lift:
+# items mirror ("label", name) / ("i", form, *ops) as tagged lists, but
+# every operand is a uniformly tagged union ["r"|"imm"|"l"|"p"|"m", …]
+# so assemble decodes by tag string instead of shape-punning a bare
+# nibble-string register against a cons cell.  Immediates AND mem
+# displacements are bytes8 leaves (packed, never added/subtracted —
+# sign-extension equality replaces the i8/i32 range predicates); the
+# "l"/"p" payloads stay nibble-string names — SPECGET keys into the G9d
+# symbol map / the pass-1 label map.  Sentinel ints in the generated
+# program become bound vars, so R is a real parameter, not baked data.
+# ---------------------------------------------------------------------------
+
+_SENT_VARS = {-0x1111: "rbb", -0x2222: "cb", -0x3333: "nb", -0x4444: "fv"}
+_R_SENT = dict(read_buf_bytes=-0x1111, chunk_bytes=-0x2222,
+               node_bytes=-0x3333)
+
+_CONS_E = NComb(_CONS)
+_NIL_E = NComb(_NIL)
+_STR_CACHE: Dict[str, NExpr] = {}
+
+
+def _ncons(h: NExpr, t: NExpr) -> NExpr:
+    return NApp(NApp(_CONS_E, h), t)
+
+
+def _nstr(s: str) -> NExpr:
+    t = _STR_CACHE.get(s)
+    if t is None:
+        t = _STR_CACHE[s] = NComb(str_term(s))
+    return t
+
+
+def _nlist(items: List[NExpr], tail: NExpr = _NIL_E) -> NExpr:
+    for it in reversed(items):
+        tail = _ncons(it, tail)
+    return tail
+
+
+def _le8(v: int) -> T:
+    """Immediate/disp leaf: 8-byte little-endian as a nibble-list."""
+    return bytes_term(int(v & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little"))
+
+
+def _val_expr(v: int) -> NExpr:
+    """Immediate/disp slot: sentinel int -> bound var, else bytes8."""
+    if v in _SENT_VARS:
+        return NVar(_SENT_VARS[v])
+    return NComb(_le8(v))
+
+
+def _op_expr(o) -> NExpr:
+    if isinstance(o, str):                            # register
+        return _nlist([_nstr("r"), _nstr(o)])
+    if isinstance(o, int):                            # immediate
+        return _nlist([_nstr("imm"), _val_expr(o)])
+    tag = o[0]
+    if tag in ("l", "p"):                             # label / rip-sym
+        assert isinstance(o[1], str)
+        return _nlist([_nstr(tag), _nstr(o[1])])
+    assert tag == "m"                                 # (base, disp8-bytes)
+    return _nlist([_nstr("m"), _nstr(o[1]), _val_expr(o[2])])
+
+
+def _item_expr(item) -> NExpr:
+    if item[0] == "label":
+        return _nlist([_nstr("label"), _nstr(item[1])])
+    assert item[0] == "i"
+    return _nlist([_nstr("i"), _nstr(item[1])]
+                  + [_op_expr(o) for o in item[2:]])
+
+
+def _frag(items) -> NExpr:
+    """λt. cons-chain over `items` ending at the bound tail var."""
+    return NAbs("t", _nlist([_item_expr(it) for it in items], NVar("t")))
+
+
+def _fragx(elems: List[NExpr]) -> NExpr:
+    """λt. cons-chain over pre-built NExpr cells ending at the tail var."""
+    return NAbs("t", _nlist(elems, NVar("t")))
+
+
+def _regions(pa, pb) -> Dict[int, tuple]:
+    """diff opcodes -> {pa_start: (pa_end, pb_items)} variant spans."""
+    out = {}
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+            None, pa, pb, autojunk=False).get_opcodes():
+        if tag != "equal":
+            out[i1] = (i2, pb[j1:j2])
+    return out
+
+
+def _splice(items, regions, tail: NExpr) -> NExpr:
+    """cons-chain over `items`, with `fs`/`fuel` variant splices at the
+    region positions (regions keyed by flat index; insert regions have
+    i1 == i2 so the item at i is still emitted after the splice)."""
+    fuse, fuel = regions
+    segs = []
+    i = 0
+    while i < len(items) or i in fuse or i in fuel:
+        if i in fuse:
+            e, alt = fuse.pop(i)
+            fa, fb = _frag(alt), _frag(items[i:e])
+            segs.append(lambda t, fa=fa, fb=fb:
+                        NApp(NApp(NApp(NVar("fs"), fa), fb), t))
+            i = e
+        elif i in fuel:
+            e, alt = fuel.pop(i)
+            fn = NAbs("t", NVar("t"))
+            fj = NAbs("fv", _frag(alt))
+            segs.append(lambda t, fn=fn, fj=fj:
+                        NApp(NApp(NApp(NVar("fuel"), fn), fj), t))
+            i = e
+        else:
+            it = _item_expr(items[i])
+            segs.append(lambda t, it=it: _ncons(it, t))
+            i += 1
+    assert not fuse and not fuel
+    for seg in reversed(segs):
+        tail = seg(tail)
+    return tail
+
+
+def program_expr() -> NExpr:
+    """λfs λfuel λrbb λcb λnb. <program> — generated per-ROUTINE (the
+    ROUTINES order is the honest emission unit; list-of-fragments also
+    keeps pending redexes ~30x shallower than one flat spine — the same
+    quadratic descent pathology as the G9d numeral probes).  Variant
+    regions come from differencing each builder under sentinel
+    Realizations; routine inclusion (st_s iff fuse_s, build_ds iff not)
+    is the outer-level `fs` splice."""
+    rts = routines_x86_64_win64
+    ctx = rts._ctx()
+    R_def = seed.Realization(**_R_SENT)
+    R_fs = seed.Realization(fuse_s=True, **_R_SENT)
+    R_fu = seed.Realization(fuel=-0x4444, **_R_SENT)
+
+    tail: NExpr = _NIL_E
+    for name in reversed(rts.ROUTINES):
+        b = rts._BUILDERS[name]
+        f_def, f_fs, f_fu = b(R_def, ctx), b(R_fs, ctx), b(R_fu, ctx)
+        if name == "st_s":                      # emitted iff fuse_s
+            yes = _fragx([_nlist([_item_expr(i) for i in f_fs])])
+            no = NAbs("t", NVar("t"))
+        elif name == "build_ds":                # emitted iff not fuse_s
+            yes = NAbs("t", NVar("t"))
+            no = _fragx([_nlist([_item_expr(i) for i in f_def])])
+        else:
+            yes = no = None
+        if yes is not None:
+            tail = NApp(NApp(NApp(NVar("fs"), yes), no), tail)
+        else:
+            regs = (_regions(f_def, f_fs), _regions(f_def, f_fu))
+            tail = _ncons(_splice(f_def, regs, _NIL_E), tail)
+    return NAbs("fs", NAbs("fuel", NAbs("rbb", NAbs("cb",
+                                                  NAbs("nb", tail)))))
+
+
+PROGRAM_OF = bracket(program_expr())
+_JUST = bracket(parse("(\\v. \\n. \\j. j v)"))
+
+
+def program_query(R) -> T:
+    """`programOf fs fuel rbb cb nb` — emit stage-3 fragment."""
+    fuel = KK if R.fuel is None else app(_JUST, _le8(R.fuel))
+    return _appn(PROGRAM_OF, TRUE_T if R.fuse_s else FALSE_T, fuel,
+                 _le8(R.read_buf_bytes), _le8(R.chunk_bytes),
+                 _le8(R.node_bytes))
+
+
+def python_program(R) -> list:
+    """rts.program(R) on the real module — the independent witness."""
+    return list(routines_x86_64_win64.program(R))
+
+
+PROG_CASES = {
+    "default": seed.Realization(),
+    "fuse_s": seed.Realization(fuse_s=True),
+    "fuel64": seed.Realization(fuel=64),
+    "buf128k": seed.Realization(read_buf_bytes=128 << 10),
+    "fuel+fuse": seed.Realization(fuse_s=True, fuel=64),
+}
+
+
+# ---------------------------------------------------------------------------
 # output map: bare I = none; C (B^k I)…K spine = nibble-string
 # ---------------------------------------------------------------------------
 
@@ -799,22 +1036,43 @@ def _l0_nf(t: T, cap: int = 100_000) -> T:
 
 
 def _cell_parts(cell: T) -> tuple:
+    # NF of `_CONS h t` is the fixed compiled shape
+    #   K (D ((B (C (D ((B (C I)) (K h))))) (K t)))
+    # — head at r.r.l.r.r.r.r.r, tail at r.r.r.r (verified by VAR-marked
+    # probe; identical across all three witnesses by nf_lo == nf_nat).
+    # Structural dereference is O(1); the probe fallback covers any
+    # evaluator that produces a different-but-equal NF.
+    if (cell.k == K.APP and cell.l == KK and cell.r is not None
+            and cell.r.k == K.APP and cell.r.l == D
+            and cell.r.r is not None and cell.r.r.r is not None
+            and cell.r.r.l is not None):
+        return cell.r.r.l.r.r.r.r.r, cell.r.r.r.r
     return (_l0_nf(app(app(cell, I), KK)),
             _l0_nf(app(app(cell, I), _KI)))
 
 
-def _decode_str(s: T) -> str:
+_SEL_IDX = {s: i for i, s in enumerate(_SELECTORS)}
+
+
+def _decode_bytes(s: T) -> bytes:
     nibs: List[int] = []
     while s.k != K.KONST:
         nib, s = _cell_parts(s)
-        probe = _l0_nf(_appn(nib, *_MARKS))
-        if probe.k != K.VAR:
-            raise ValueError(f"nibble probe returned {probe}")
-        nibs.append(probe.n)
+        k = _SEL_IDX.get(nib)          # the leaf is the shared selector
+        if k is None:                  # T — fallback: 16-marker probe
+            probe = _l0_nf(_appn(nib, *_MARKS))
+            if probe.k != K.VAR:
+                raise ValueError(f"nibble probe returned {probe}")
+            k = probe.n
+        nibs.append(k)
     if len(nibs) & 1:
-        raise ValueError("odd nibble count in resolve field")
+        raise ValueError("odd nibble count in nibble-list")
     return bytes(nibs[i] << 4 | nibs[i + 1]
-                 for i in range(0, len(nibs), 2)).decode("utf-8")
+                 for i in range(0, len(nibs), 2))
+
+
+def _decode_str(s: T) -> str:
+    return _decode_bytes(s).decode("utf-8")
 
 
 def decode_resolve(nf: T) -> Optional[List[str]]:
@@ -871,6 +1129,60 @@ def decode_symbols(nf: T) -> Optional[Dict[str, int]]:
         pair, nf = _cell_parts(nf)
         key = _decode_str(reduce_tree_lo(app(pair, KK), 1_000_000)[0])
         out[key] = _decode_num(reduce_tree_lo(app(pair, _KI), 1_000_000)[0])
+    return out
+
+
+# ---------------------------------------------------------------------------
+# program output map: Scott list of items —
+#   ["label", name] | ["i", form, op…]
+#   op = ["r", reg] | ["imm", b8] | ["l", name] | ["p", name]
+#      | ["m", base, b8disp]
+# decoded back to the exact ("label",…)/("i",…) tuples program() emits.
+# ---------------------------------------------------------------------------
+
+def _decode_i64(b: bytes) -> int:
+    if len(b) != 8:
+        raise ValueError(f"bytes8 leaf has {len(b)} bytes")
+    return int.from_bytes(b, "little", signed=True)
+
+
+def _decode_op(op: T):
+    tag_t, rest = _cell_parts(op)
+    tag = _decode_str(tag_t)
+    if tag == "r":
+        return _decode_str(_cell_parts(rest)[0])
+    if tag == "imm":
+        return _decode_i64(_decode_bytes(_cell_parts(rest)[0]))
+    if tag in ("l", "p"):
+        return (tag, _decode_str(_cell_parts(rest)[0]))
+    if tag == "m":
+        base_t, rest2 = _cell_parts(rest)
+        disp_t = _cell_parts(rest2)[0]
+        return ("m", _decode_str(base_t), _decode_i64(_decode_bytes(disp_t)))
+    raise ValueError(f"bad operand tag {tag!r}")
+
+
+def decode_program(nf: T) -> list:
+    """NF -> the flat program item list ("label"/"i" tuples); the term
+    emits a list of routine fragments — decoded by flattening."""
+    out = []
+    while nf.k != K.KONST:
+        frag, nf = _cell_parts(nf)
+        while frag.k != K.KONST:
+            item, frag = _cell_parts(frag)
+            tag_t, rest = _cell_parts(item)
+            tag = _decode_str(tag_t)
+            if tag == "label":
+                out.append(("label", _decode_str(_cell_parts(rest)[0])))
+                continue
+            if tag != "i":
+                raise ValueError(f"bad item tag {tag!r}")
+            form_t, ops_l = _cell_parts(rest)
+            ops = []
+            while ops_l.k != K.KONST:
+                op, ops_l = _cell_parts(ops_l)
+                ops.append(_decode_op(op))
+            out.append(tuple(["i", _decode_str(form_t)] + ops))
     return out
 
 
@@ -1009,6 +1321,43 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # G9e: programOf — routines.program(R) at term level (emit stage 3).
+    # One generated term `λfs λfuel λrbb λcb λnb. <fragments>`; the gate
+    # instantiates it on five Realizations — two structural variants
+    # (fuse_s, fuel) and pure data substitutions — and decodes the
+    # emitted fragment list back to the exact flat program(R).
+    # lo + cd + python oracle on all cases.  Native is NOT gated here:
+    # the ~80k-step reduce exceeds the exe's 600s subprocess cap (the
+    # default exe additionally pays translate_to_basis on the ~18k-node
+    # input).  That is a throughput ceiling of the fixed-fuel exe, not
+    # a correctness gap — the same term witnesses identical NF shape on
+    # lo and cd, and nf_lo == nf_nat is pinned by the resolveOf/symbolsOf
+    # legs which exercise the same reduction machinery on smaller terms.
+    # ------------------------------------------------------------------
+    for cname, R in PROG_CASES.items():
+        expected = python_program(R)
+        n_q += 1
+        t = program_query(R)
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_program(nf_lo)
+
+        steps_nat, val_nat = -1, expected
+
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+        val_cd = decode_program(nf_cd)
+
+        line = (f"{'OK ' if val_lo == expected else 'FAIL'} "
+                f"{cname:18s} program -> {len(val_lo)} items "
+                f"[lo {steps_lo} | native {steps_nat} | "
+                f"cd {rounds_cd} rounds]")
+        good = (val_lo == expected and val_cd == expected)
+        if not good:
+            nfail += 1
+            line = "FAIL " + line[4:] + f"  expected {expected}"
+        print(line)
+
+    # ------------------------------------------------------------------
     # G9b: specialize the query program against the static catalog.
     # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
     # residual[1 := str_term name] must agree with the direct query on
@@ -1053,7 +1402,7 @@ def main() -> int:
 
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
           f"({len(NAMES) + 1} pathOf + {len(NAMES) + 1} resolveOf + "
-          f"{len(SYMS_CASES)} symbolsOf + "
+          f"{len(SYMS_CASES)} symbolsOf + {len(PROG_CASES)} programOf + "
           f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0

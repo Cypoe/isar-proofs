@@ -19,6 +19,7 @@
 | G9b | spec_term | specialize pathOf against the static catalog (P1 shape); residual instances agree with direct queries | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9c | spec_term | resolveOf: emit stage 1 (toolchain.resolve) at term level — entry -> field names -> sections -> {module,record}; result = Scott list of 8 field strings ('!' = NotRealized shadow) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
 | G9d | spec_term | symbolsOf: target.symbols at term level — imports/data-slots folds -> Scott assoc map name -> Church-numeral RVA ('iat_' prefix by literal cons; i*8 and cumulative offsets as real term arithmetic) | graph.lo, graph.cd, native.x86_64.pe, python.walk | ✓ |
+| G9e | spec_term | programOf: routines.program(R) at term level — generated λfs λfuel λrbb λcb λnb skeleton, per-routine fragment list, variant regions diffed from real builder outputs; immediates as bytes8 leaves; native deferred (exceeds exe 600s cap) | graph.lo, graph.cd, python.walk | ✓ |
 
 live column: `✓` suite ok, `✗` suite failed, `·` no battery record
 (battery_last.json: battery_last.json)
