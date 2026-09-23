@@ -167,6 +167,9 @@
      "witnesses": ["graph.lo", "graph.cd", "python.walk"]},
     {"id": "G9f", "suite": "spec_term",
      "what": "encodeOf + assembleOf: isa.encode (ENCS nibble-trie + field interpreter) and isa.assemble's two-pass fold at term level — pass-1 label map (bytes4 pos = base+off), pass-2 resolver (symbols shadow locals = the link seam) emitting rel32 via B4SUB; gate on the mini program (fwd/bwd rel32, rip-sym, mem disp, shadowing, nonzero base); native deferred (same exe throughput ceiling)",
+     "witnesses": ["graph.lo", "graph.cd", "python.walk"]},
+    {"id": "G9g", "suite": "spec_term",
+     "what": "dataOf + idataOf + packOf: target_pe64's container writer at term level — build_data/build_idata folds (zero-fill + IAT records, lengths measured by LENB4) and the 448B PE64 header as literal chunks spliced with computed bytes4 fields; pads via PADLIST (rem=len&511 nibble-mask, rem TAIL z512) and JOIN right-assoc concat (linear emission); dataOf/idataOf gated lo+cd, packOf byte-for-byte vs target_pe64.pack on lo only (cd deferred: persistent-NF sweeps on image-sized NFs exceed routine-gate budget, >5k CPU s measured); native deferred",
      "witnesses": ["graph.lo", "graph.cd", "python.walk"]}
   ],
   "witnesses": ["tree.surface", "graph.lo", "graph.cd", "native.x86_64.pe",

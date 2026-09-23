@@ -165,6 +165,22 @@ shadowing, multi-fragment and a nonzero base on lo+cd vs the
 isa.assemble oracle; the full 26-form encode sweep lives in
 _probe_g9f_enc.py.  Native is deferred (same exe throughput ceiling).
 
+G9g — `dataOf`/`idataOf`/`packOf`: `target_pe64`'s container writer at
+term level (emit stage 5, the last of the chain).  `dataOf` folds the
+slot 3-lists [name, sz-numeral, sz-bytes4] into pair(zero bytes,
+symmap) — the numeral emits zeros (iteration bound), the bytes4
+advances the RVA (arithmetic value).  `idataOf` folds the imports into
+IDT/ILT/IAT + hint-name records + kernel32.dll, measuring each record
+with LENB4 for the honest `off += len(hn)` and checking parity off the
+measured bytes4.  `packOf` emits the 448-byte fixed header as literal
+chunks spliced with computed bytes4 fields (sizes, raw pointers,
+size_image), then JOINs section bodies behind PADLIST pads — pad count
+is extracted as `len & 511` off the length's low nibbles and dropped
+from a 512-zero literal via `rem TAIL z512` (never a subtraction).
+JOIN is the load-bearing emission shape: a left-fold of APPENDs would
+re-walk the prefix (quadratic); right-assoc keeps it linear in the
+image size.  Oracle is target_pe64.pack byte-for-byte.
+
 Usage: python host/spec_term.py
 """
 from __future__ import annotations
@@ -172,7 +188,9 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import struct
 import sys
+from types import SimpleNamespace
 from typing import Dict, List, Optional
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
@@ -735,6 +753,102 @@ _JUST_SRC = "(\\v. \\n. \\j. j v)"
 _ALOOK = ("(\\map. \\key. (" + _FOLDL
           + " (\\acc. \\e. e (\\k2. \\v2. (" + EQSTR + " key k2 ("
           + _LEN + " key)) (" + _JUST_SRC + " v2) acc)) map K))")
+
+# ---------------------------------------------------------------------------
+# G9g byte/nibble ops — the pack stage's machinery.
+#
+# The representation rule (decision 026) is extended here with a cost
+# observation: B4ADD/B4SUB are general ripple ops (~thousands of steps
+# each), so they are used ONLY where a real add/subtract is needed.  The
+# pack layout's dominant quantity is *length* — measured, incremented,
+# compared — and that runs on B4INC, a byte4 increment whose carry is a
+# nibble chain that almost never propagates (~tens of steps).  Lengths
+# stay bytes4 (LENB4, PADTO); a numeral is added to a bytes4 as
+# `num B4INC acc` (cheap increments), never a per-unit B4ADD.
+# ---------------------------------------------------------------------------
+
+# nibble == 15 -> bool (the carry-out condition for a 4-bit increment)
+_NIBIS15 = ("(\\a. a " + " ".join([_BF] * 15 + [_BT]) + ")")
+# INC_BYTE: byte cell -> pair(byte', carry).  lo wraps iff lo==15, then
+# hi increments and carries iff hi==15.
+_INCB = (
+    "(\\b. b (\\lo. \\hi. (" + _NIBIS15 + " lo) "
+    "(" + _PAIR_SRC + " (" + _PAIR_SRC + " " + _SELS[0] + " ("
+    + _NIBSUCC + " hi)) (" + _NIBIS15 + " hi)) "
+    "(" + _PAIR_SRC + " (" + _PAIR_SRC + " (" + _NIBSUCC
+    + " lo) hi) " + _BF + ")))"
+)
+
+
+def _b4inc_body() -> str:
+    """bytes4 increment as an unrolled rare-carry chain over 4 cells."""
+    def emit(cells):
+        out = "K"
+        for x in reversed(cells):
+            out = _conss(x, out)
+        return out
+
+    def chain(i: int, prefix) -> str:
+        if i == 4:                       # carry past b3 discarded: mod 2^32
+            return emit(prefix)
+        nb, c = "nb" + str(i), "c" + str(i)
+        return ("(" + _INCB + " b" + str(i) + ") (\\" + nb + ". \\" + c
+                + ". " + c + " (" + chain(i + 1, prefix + [nb]) + ") ("
+                + emit(prefix + [nb] + ["b" + str(j) for j in
+                                        range(i + 1, 4)]) + "))")
+
+    return _peel("v", ["b0", "b1", "b2", "b3"], chain(0, []))
+
+
+_B4INC = "(\\v. " + _b4inc_body() + ")"
+# bytes4 length — a FOLDL of cheap increments (not per-element B4ADD)
+_LENB4 = ("(\\l. " + _FOLDL + " (\\a. \\x. " + _B4INC + " a) l "
+          + _b4_src(0) + ")")
+# bytes4 equality — AND of per-byte EQB (PADTO's stop condition)
+_EQB4 = (
+    "(\\x. \\y. " + _peel("x", ["x0", "x1", "x2", "x3"],
+                          _peel("y", ["y0", "y1", "y2", "y3"],
+                                _AND + " (" + _EQB + " x0 y0) (" + _AND
+                                + " (" + _EQB + " x1 y1) (" + _AND
+                                + " (" + _EQB + " x2 y2) (" + _EQB
+                                + " x3 y3)))")) + ")")
+# PADTO tgt pos -> zeros(tgt - pos): bounded B4INC+EQB4 loop.  Callers
+# APPEND the pad list (consing zeros onto acc would PREPEND them).
+_PADTO = (
+    "(\\tgt. (\\f. f f) (\\g. \\pos. (" + _EQB4
+    + " pos tgt) K " + _conss(_B0C, "(g g (" + _B4INC + " pos))")
+    + "))")
+# APPEND xs ys = xs ++ ys (byte-list concat)
+_APPEND = ("(\\xs. \\ys. " + _FOLDL + " (\\a. \\h. " + _conss("h", "a")
+           + ") (" + _REV + " xs) ys)")
+# nibble-string -> byte list: pair (hi,lo) cells into pair(lo,hi) bytes.
+_NIBS2BYTES = (
+    "(\\l. ((\\f. f f) (\\g. \\l2. l2 K (\\hi. \\t. t K (\\lo. \\t2. "
+    + _conss("(" + _PAIR_SRC + " lo hi)", "(g g t2)") + ")))) l)"
+)
+# ZEROFILL n -> n zero byte cells (n is a Church numeral bound)
+_ZEROFILL = ("(\\n. n (\\l. " + _conss(_B0C, "l") + ") K)")
+# U64: bytes4 -> 8 LE cells (zero-extend — computed fields fit u32)
+_U64 = ("(\\b. " + _APPEND + " b " + _conss(
+    _B0C, _conss(_B0C, _conss(_B0C, _conss(_B0C, "K")))) + ")")
+# alignment: power-of-2 align = (v + a-1) & ~(a-1), a nibble-level mask.
+# 0x200 clears low 9 bits: byte0 -> 0, byte1's low nibble &= 0xE.
+_NIBANDE = ("(\\a. a " + " ".join(_SELS[j & 0xE] for j in range(16)) + ")")
+_ALIGN512 = (
+    "(\\v. " + _let("w", "(" + _B4ADD + " v " + _b4_src(0x1FF) + ")",
+        _peel("w", ["b0", "b1", "b2", "b3"],
+              "b1 (\\lo. \\hi. " + _conss(_B0C, _conss(
+                  _prs("(" + _NIBANDE + " lo)", "hi"),
+                  _conss("b2", _conss("b3", "K")))) + ")"))
+    + ")")
+# 0x1000 clears low 12 bits: byte0 -> 0, byte1's low nibble -> 0.
+_ALIGN4096 = (
+    "(\\v. " + _let("w", "(" + _B4ADD + " v " + _b4_src(0xFFF) + ")",
+        _peel("w", ["b0", "b1", "b2", "b3"],
+              "b1 (\\lo. \\hi. " + _conss(_B0C, _conss(
+                  _prs(_SELS[0], "hi"),
+                  _conss("b2", _conss("b3", "K")))) + ")"))
+    + ")")
 
 # imports fold: state (l_in, addr, out); each step pops a name, conses
 # `pair ("iat_"++nm) addr` onto out and advances addr by 8.
@@ -1720,6 +1834,296 @@ def python_assemble(prog, symbols, base):
     return isa.assemble(flat, dict(symbols), base)
 
 
+# ---------------------------------------------------------------------------
+# G9g: dataOf / idataOf / packOf — target_pe64.pack at term level
+# (emit stage 5, the container writer).
+#
+# Oracle shape (target_pe64.py):
+#   build_data slots -> (zeros(total_sz), {name: DATA_RVA + off})
+#   build_idata imps -> (idt|ilt|iat|names|dll bytes, {iat_nm: rva})
+#   pack text labels imps slots R -> headers ++ text_raw ++ idata_raw
+#       ++ data_raw   (raw = section ++ pad to FILE_ALIGN)
+#
+# Rep boundary (unchanged from G9f): values that are added/subtracted —
+# RVAs, offsets, sizes — are bytes4; emission counts (zero fills, pads)
+# are Church numerals.  Section pad align512(len)-len is never computed
+# by subtraction: PADLIST extracts rem = len & 511 directly off len4's
+# low nibbles (pure masking), then `rem TAIL z512` drops rem cells off a
+# 512-zero literal — one cheap TAIL per pad cell, no B4INC+EQB4 loop and
+# no numeral SUB/PRED chain.
+# ---------------------------------------------------------------------------
+
+
+def _bytes_src(bs) -> str:
+    """Literal byte-cell list of any length — same rep as _b4_src."""
+    out = "K"
+    for b in reversed(list(bs)):
+        out = _conss("(" + _PAIR_SRC + " " + _SELS[b & 15] + " "
+                     + _SELS[b >> 4] + ")", out)
+    return out
+
+
+def _join_src(chunks) -> str:
+    """JOIN [c1 … ck] — right-assoc concat: each chunk traversed once."""
+    out = "K"
+    for c in reversed(chunks):
+        out = _conss("(" + c + ")", out)
+    return "(" + _JOIN + " " + out + ")"
+
+
+# JOIN l — flatten a list of byte lists; right-assoc so total work is
+# linear in the image size (left-fold APPEND would re-walk the prefix).
+_JOIN = (
+    "(\\l. (\\f. f f) (\\g. \\l2. l2 K (\\h. \\t. (" + _APPEND
+    + " h (g g t)))) l)"
+)
+# MAP f l — order-preserving map (self-application bounded by the spine)
+_MAP = (
+    "(\\f2. \\l2. (\\f. f f) (\\g. \\l3. l3 K (\\h. \\t3. "
+    + _conss("(f2 h)", "(g g t3)") + ")) l2)"
+)
+# nibble -> bool (K = odd) / nibble -> numeral / nibble -> parity numeral
+_NIBODD = ("(\\a. a " + " ".join(
+    "K" if i & 1 else "(K I)" for i in range(16)) + ")")
+_NIB2NUM = ("(\\a. a " + " ".join(
+    "(" + _num_src(i) + ")" for i in range(16)) + ")")
+_NIBPAR = ("(\\a. a " + " ".join(
+    "(" + _num_src(i & 1) + ")" for i in range(16)) + ")")
+# PADLIST len4 -> zeros(align512(len) - len) — rem = len & 511 read off
+# byte0 (lo+16*hi) and byte1's low-nibble bit0; pad = rem TAIL z512
+# (512 - rem zeros), guarded to zero at rem = 0.
+_PADLIST = (
+    "(\\v. " + _peel("v", ["b0", "b1"],
+        "b0 (\\l0. \\h0. b1 (\\l1. \\h1. "
+        + _let("rem",
+               "(" + _ADD_SRC + " (" + _ADD_SRC + " (" + _NIB2NUM
+               + " l0) (" + _MUL_SRC + " " + _num_src(16) + " ("
+               + _NIB2NUM + " h0))) (" + _MUL_SRC + " " + _num_src(256)
+               + " (" + _NIBPAR + " l1)))",
+               "(rem (\\x. (K I)) K) K (rem " + _TAIL + " ("
+               + _ZEROFILL + " " + _num_src(512) + "))")
+        + "))") + ")"
+)
+
+# dataOf ------------------------------------------------------------------
+# slots fold: state (l, off, syms, zeros); each element is the 3-list
+# [name, sz-numeral, sz-bytes4] — the numeral emits zeros (iteration
+# bound), the bytes4 advances the RVA (arithmetic value).  This is the
+# same slot payload as G9d's 2-list plus its numeral twin.
+_STEP_D = (
+    "\\acc. acc (\\l. \\o. \\u. \\z. l "
+    "(\\k2. k2 l o u z) "
+    "(\\p. \\t. p (\\k2. k2 t o u z) "
+    "(\\nm. \\r1. r1 (\\k2. k2 t o u z) "
+    "(\\szn. \\r2. r2 (\\k2. k2 t o u z) "
+    "(\\szb. \\r3. \\k2. k2 t (" + _B4ADD + " o szb) "
+    + _conss("(" + _PAIR_SRC + " nm o)", "u")
+    + " (szn (\\l2. " + _conss(_B0C, "l2") + ") z))))))"
+)
+DATA_OF = (
+    "(\\slots. (__NSLOTD__ (" + _STEP_D + ") "
+    "(\\k2. k2 slots " + _b4_src(0x3000) + " K K)) "
+    "(\\l. \\o. \\u. \\z. " + _prs("z", "u") + "))"
+)
+
+
+def data_src(n_slot: int) -> str:
+    src = DATA_OF.replace("__NSLOTD__", _church_src(n_slot))
+    assert "__" not in src, "uninstantiated placeholder"
+    return src
+
+
+# idataOf ------------------------------------------------------------------
+# imports fold: state (l, off, oiat, rvas, recs, syms).  off is the
+# section-relative cursor (oracle `off`); hn_rva = IDATA_RVA + off is
+# measured per record and the record length is measured by LENB4 — the
+# honest `off += len(hn)`.  oiat walks the IAT in +8 steps for the
+# symbol map (same as G9d's _STEP_I).
+_STEP_ID = (
+    "\\acc. acc (\\l. \\o. \\oi. \\rv. \\rc. \\sy. l "
+    "(\\k2. k2 l o oi rv rc sy) "
+    "(\\nm. \\t. " + _lets([
+        ("nmb", "(" + _NIBS2BYTES + " nm)"),
+        ("brec", _join_src([_bytes_src(b"\x00\x00"), "nmb",
+                            _bytes_src(b"\x00")])),
+        ("rln", "(" + _LENB4 + " brec)"),
+        ("odd", _peel("rln", ["b0"],
+                      "b0 (\\bl. \\bh. " + _NIBODD + " bl)")),
+        ("rec", "(odd (" + _APPEND + " brec " + _bytes_src(b"\x00")
+                + ") brec)"),
+        ("rl2", "(" + _LENB4 + " rec)"),
+        ("hrv", "(" + _B4ADD + " " + _b4_src(0x2000) + " o)"),
+    ], "\\k2. k2 t (" + _B4ADD + " o rl2) (" + _B4ADD + " oi "
+       + _b4_src(8) + ") " + _conss("hrv", "rv") + " "
+       + _conss("rec", "rc") + " "
+       + _conss("(" + _PAIR_SRC + " __IATPFX__ oi)", "sy"))
+    + "))"
+)
+_IDATA_FIN = _lets([
+    ("drva", "(" + _B4ADD + " " + _b4_src(0x2000) + " o)"),
+    ("ilt", "(" + _JOIN + " (" + _REV + " "
+            + _conss(_bytes_src(bytes(8)),
+                     "(" + _MAP + " " + _U64 + " rv)") + "))"),
+    ("idt", _join_src([
+        _b4_src(0x2000 + 40), _b4_src(0), _b4_src(0), "drva",
+        "__IATRVA4__",
+        "(" + _ZEROFILL + " " + _num_src(20) + ")"])),
+    ("nams", "(" + _JOIN + " (" + _REV + " rc))"),
+    ("body", _join_src(["idt", "ilt", "ilt", "nams",
+                        _bytes_src(b"kernel32.dll\x00")])),
+], _prs("body", "sy"))
+IDATA_OF = (
+    "(\\imports. (__NIMP__ (" + _STEP_ID + ") "
+    "(\\k2. k2 imports __NAMESOFF__ __IATB__ K K K)) "
+    "(\\l. \\o. \\oi. \\rv. \\rc. \\sy. " + _IDATA_FIN + "))"
+)
+
+
+def idata_src(n_imp: int) -> str:
+    ilt_sz = (n_imp + 1) * 8
+    iat_off = 40 + ilt_sz
+    src = IDATA_OF
+    for ph, val in (
+        ("__NIMP__", _church_src(n_imp)),
+        ("__IATPFX__", _prefix_src("iat_", "nm")),
+        ("__IATB__", _b4_src(0x2000 + iat_off)),
+        ("__NAMESOFF__", _b4_src(iat_off + ilt_sz)),
+        ("__IATRVA4__", _b4_src(0x2000 + iat_off)),
+    ):
+        src = src.replace(ph, val)
+    assert "__" not in src, "uninstantiated placeholder"
+    return src
+
+
+# packOf -------------------------------------------------------------------
+# `pack text imports slots stackres` — labels are diagnostics-only in
+# the oracle (dropped); R enters only through stack_reserve (a u64
+# field).  All format constants (magics, RVAs, aligns, versions, the
+# fixed 448-byte header pad) are literal chunks; every size/offset field
+# is computed at term level from LENB4 / ALIGN / B4ADD over the actual
+# section bytes.  JOIN keeps emission linear in the image size.
+def pack_src(n_imp: int, n_slot: int) -> str:
+    z12 = "(" + _ZEROFILL + " " + _num_src(12) + ")"
+    chunks = [
+        _bytes_src(b"MZ"), "(" + _ZEROFILL + " " + _num_src(58) + ")",
+        _bytes_src(struct.pack("<I", 0x40)),
+        _bytes_src(b"PE\x00\x00"),
+        _bytes_src(struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0,
+                               0x22)),
+        _bytes_src(struct.pack("<HBB", 0x20B, 0, 0)),
+        "traw", "iddr", _bytes_src(struct.pack("<I", 0)),
+        _bytes_src(struct.pack("<I", 0x1000)),
+        _bytes_src(struct.pack("<I", 0x1000)),
+        _bytes_src(struct.pack("<Q", 0x140000000)),
+        _bytes_src(struct.pack("<II", 0x1000, 0x200)),
+        _bytes_src(struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0)),
+        _bytes_src(struct.pack("<I", 0)), "img",
+        _bytes_src(struct.pack("<II", 0x200, 0)),
+        _bytes_src(struct.pack("<HH", 3, 0x8100)),
+        "(" + _U64 + " stackres)",
+        _bytes_src(struct.pack("<QQQ", 0x1000, 0x100000, 0x1000)),
+        _bytes_src(struct.pack("<II", 0, 16)),
+        _bytes_src(struct.pack("<II", 0, 0)),
+        _bytes_src(struct.pack("<I", 0x2000)), "li",
+        "(" + _ZEROFILL + " " + _num_src(14 * 8) + ")",
+        _bytes_src(b".text\x00\x00\x00"), "lt",
+        _bytes_src(struct.pack("<I", 0x1000)), "traw",
+        _bytes_src(struct.pack("<I", 0x200)), z12,
+        _bytes_src(struct.pack("<I", 0x60000020)),
+        _bytes_src(b".idata\x00\x00"), "li",
+        _bytes_src(struct.pack("<I", 0x2000)), "iraw", "iptr", z12,
+        _bytes_src(struct.pack("<I", 0x40000040)),
+        _bytes_src(b".data\x00\x00\x00"), "ld",
+        _bytes_src(struct.pack("<I", 0x3000)), "draw", "dptr", z12,
+        _bytes_src(struct.pack("<I", 0xC0000040)),
+        "(" + _ZEROFILL + " " + _num_src(0x200 - 448) + ")",
+        "text", "(" + _PADLIST + " lt)",
+        "idata", "(" + _PADLIST + " li)",
+        "datab", "(" + _PADLIST + " ld)",
+    ]
+    body = _lets([
+        ("idr", "(" + idata_src(n_imp) + " imports)"),
+        ("dat", "(" + data_src(n_slot) + " slots)"),
+        ("idata", "(idr K)"), ("datab", "(dat K)"),
+        ("lt", "(" + _LENB4 + " text)"),
+        ("li", "(" + _LENB4 + " idata)"),
+        ("ld", "(" + _LENB4 + " datab)"),
+        ("traw", "(" + _ALIGN512 + " lt)"),
+        ("iraw", "(" + _ALIGN512 + " li)"),
+        ("draw", "(" + _ALIGN512 + " ld)"),
+        ("iptr", "(" + _B4ADD + " " + _b4_src(0x200) + " traw)"),
+        ("dptr", "(" + _B4ADD + " iptr iraw)"),
+        ("iddr", "(" + _B4ADD + " iraw draw)"),
+        ("img", "(" + _ALIGN4096 + " (" + _B4ADD + " "
+                + _b4_src(0x3000) + " ld))"),
+    ], _join_src(chunks))
+    return "(\\text. \\imports. \\slots. \\stackres. " + body + ")"
+
+
+# --- G9g inputs / queries / decoders ---------------------------------------
+
+def _slots3_term(slots) -> T:
+    """[(name, size)] -> Scott list of [nibname, numeral, bytes4]."""
+    t = _NIL
+    for name, sz in reversed(list(slots)):
+        cell = _appn(_CONS, str_term(name),
+                     _appn(_CONS, church(int(sz)),
+                           _appn(_CONS, bytelist_term(
+                               int(sz).to_bytes(4, "little")), _NIL)))
+        t = _appn(_CONS, cell, t)
+    return t
+
+
+def data_query(slots) -> T:
+    """`dataOf SLOTS` — build_data at term level."""
+    return _appn(bracket(parse(data_src(len(slots)))), _slots3_term(slots))
+
+
+def idata_query(imports) -> T:
+    """`idataOf IMPORTS` — build_idata at term level."""
+    return _appn(bracket(parse(idata_src(len(imports)))),
+                 json_to_term(list(imports)))
+
+
+def pack_query(text: bytes, imports, slots, stackres: int) -> T:
+    """`packOf text imports slots stackres` — target_pe64.pack."""
+    return pack_query_t(bytelist_term(text), imports, slots, stackres)
+
+
+def pack_query_t(text_t: T, imports, slots, stackres: int) -> T:
+    """pack_query with `text` already a term — lets an upstream stage
+    feed packOf inside one graph (e.g. `(assembleOf …) K`), which is
+    the end-to-end composition probe."""
+    return _appn(bracket(parse(pack_src(len(imports), len(slots)))),
+                 text_t, json_to_term(list(imports)),
+                 _slots3_term(slots),
+                 bytelist_term(stackres.to_bytes(4, "little")))
+
+
+def decode_bytesyms(nf: T):
+    """NF pair(bytes, syms-alist) -> (bytes, {name: rva})."""
+    if nf.k == K.NORM:
+        return None
+    out = _decode_bytecells(_l0_nf(app(nf, KK), 500_000))
+    return out, decode_symbols(_l0_nf(app(nf, _KI), 500_000))
+
+
+def python_data(slots):
+    """tgt.build_data — the independent oracle."""
+    return target_pe64.build_data(slots)
+
+
+def python_idata(imports):
+    """tgt.build_idata — the independent oracle."""
+    return target_pe64.build_idata(imports)
+
+
+def python_pack(text, imports, slots, stackres) -> bytes:
+    """tgt.pack — the independent oracle (labels unused by it)."""
+    R = SimpleNamespace(stack_reserve=stackres)
+    return target_pe64.pack(text, {}, imports, slots, R)
+
+
 def isa_x86_64_gate_encode(insn) -> bytes:
     """isa.encode on the raw ("i", form, *ops) item — oracle bytes."""
     import isa_x86_64 as isa
@@ -1794,6 +2198,26 @@ ENC_CASES = [
     ("i", "xor_r32_r32", "eax", "eax"),              # 32-bit modrm
     ("i", "lea_r64_rip", "rbx", ("p", "data")),      # rip-rel
 ]
+
+# G9g gate data — pack stage.  dataOf/idataOf gate at both scales
+# (the folds are cheap); packOf gates on the PE64-self-check shape
+# (target_pe64.main's own probe: ret + one import + one slot) and an
+# aligned-edge case (len(text) ≡ 0 mod FILE_ALIGN exercises the
+# PADLIST rem=0 guard — no pad bytes emitted).  The real win64 pack
+# (1991B text -> 3584B image, ~2.1M lo steps) is probe-verified,
+# heavyweight-only — see _probe_g9g_pack.py.
+DATA_CASES = {
+    "mini": (("x", 8),),
+    "win64": routines_x86_64_win64.DATA_SLOTS,
+}
+IDATA_CASES = {
+    "mini": ("ExitProcess",),
+    "win64": routines_x86_64_win64.IMPORTS,
+}
+PACK_CASES = {
+    "mini": (b"\xc3", ("ExitProcess",), (("x", 8),), 64 << 20),
+    "aligned": (bytes(512), ("ExitProcess",), (("x", 8),), 64 << 20),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -2263,6 +2687,80 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # G9g: dataOf / idataOf / packOf — target_pe64.pack at term level
+    # (emit stage 5, the container writer).  dataOf/idataOf return
+    # pair(bytes, symmap) checked against build_data/build_idata at both
+    # scales on lo+cd; packOf emits the full PE64 image byte-for-byte
+    # vs target_pe64.pack on lo+oracle only (cd deferred — see the pack
+    # loop).  Native is not gated (the same fixed-fuel-exe throughput
+    # ceiling as programOf/assembleOf — the term graph is far past it).
+    # ------------------------------------------------------------------
+    for cname, slots in DATA_CASES.items():
+        want_b, want_s = python_data(slots)
+        n_q += 1
+        t = data_query(slots)
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_bytesyms(nf_lo)
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+        val_cd = decode_bytesyms(nf_cd)
+
+        ok = (val_lo == (want_b, want_s) and val_cd == (want_b, want_s))
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} data -> "
+                f"{len(val_lo[0]) if val_lo else 0}B "
+                f"{len(val_lo[1]) if val_lo else 0} syms "
+                f"[lo {steps_lo} | cd {rounds_cd} rounds]")
+        if not ok:
+            nfail += 1
+            line += f"  expected {len(want_b)}B/{want_s}"
+        print(line)
+
+    for cname, imports in IDATA_CASES.items():
+        want_b, want_s = python_idata(imports)
+        n_q += 1
+        t = idata_query(imports)
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_bytesyms(nf_lo)
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+        val_cd = decode_bytesyms(nf_cd)
+
+        ok = (val_lo == (want_b, want_s) and val_cd == (want_b, want_s))
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} idata -> "
+                f"{len(val_lo[0]) if val_lo else 0}B "
+                f"{len(val_lo[1]) if val_lo else 0} syms "
+                f"[lo {steps_lo} | cd {rounds_cd} rounds]")
+        if not ok:
+            nfail += 1
+            line += f"  expected {len(want_b)}B/{want_s}"
+        print(line)
+
+    for cname, (text, imports, slots, res) in PACK_CASES.items():
+        want = python_pack(text, imports, slots, res)
+        n_q += 1
+        t = pack_query(text, imports, slots, res)
+
+        # lo + oracle only.  cd is deferred here, not for correctness
+        # but throughput: reduce_cd runs full confluence sweeps to
+        # fixpoint, and on a term whose NF is a ~16k-cell byte list the
+        # persistent-memo bookkeeping measured >5000s CPU on one case —
+        # past routine-gate budget (same class of ceiling as the native
+        # exe).  cd's engine coverage stays comprehensive across every
+        # lighter stage; pack's unique emission content is pinned
+        # byte-exact by lo vs the oracle.
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = _decode_bytecells(nf_lo)
+
+        ok = val_lo == want
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} pack -> "
+                f"{len(val_lo)}B "
+                f"[lo {steps_lo} | cd deferred]")
+        if not ok:
+            nfail += 1
+            line += f"  expected {len(want)}B"
+        print(line)
+
+    # ------------------------------------------------------------------
     # G9b: specialize the query program against the static catalog.
     # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
     # residual[1 := str_term name] must agree with the direct query on
@@ -2309,6 +2807,8 @@ def main() -> int:
           f"({len(NAMES) + 1} pathOf + {len(NAMES) + 1} resolveOf + "
           f"{len(SYMS_CASES)} symbolsOf + {len(PROG_CASES)} programOf + "
           f"{len(ENC_CASES)} encodeOf + {len(ASM_CASES)} assembleOf + "
+          f"{len(DATA_CASES)} dataOf + {len(IDATA_CASES)} idataOf + "
+          f"{len(PACK_CASES)} packOf + "
           f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0
