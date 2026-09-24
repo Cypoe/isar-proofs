@@ -1131,6 +1131,100 @@ theorem closed_scottList {cs : List LTerm}
       exact closed_cellLit (h c List.mem_cons_self)
         (ih (fun e he => h e (List.mem_cons_of_mem c he)))
 
+/-- **Spine-bounded fixpoint**: `GGB st` over a Scott list of `cs`
+    cells unfolds exactly `cs.length` times, threading the
+    (unreduced) accumulator applications `st·acc·e`.  The `(\f. f f)`
+    fixpoint is bounded by the input spine — recursion depth = list
+    length, no undecidable branch.  Per-head termination then reduces
+    to: each `st·acc·e` application on well-formed arguments reaches
+    NF (the per-head obligation — bounded unfold for every
+    non-fold vocabulary head). -/
+theorem fold_run (st : LTerm) (hs : closed 0 st = true) :
+    ∀ (cs : List LTerm) (a : LTerm),
+      (∀ e ∈ cs, closed 0 e = true) → closed 0 a = true →
+      LRed (ggbA st (scottList cs) a)
+           (cs.foldl (fun acc e => .app (.app st acc) e) a) := by
+  intro cs
+  induction cs with
+  | nil =>
+    intro a _ ha
+    simp only [scottList, List.foldl_nil]
+    exact nil_unfold st a hs ha
+  | cons c cs' ih =>
+    intro a hcl ha
+    have hc : closed 0 c = true := hcl c List.mem_cons_self
+    have htail : ∀ e ∈ cs', closed 0 e = true :=
+      fun e he => hcl e (List.mem_cons_of_mem c he)
+    rw [show scottList (c :: cs') = cellLit c (scottList cs') from rfl]
+    refine (cell_unfold st c _ a hs hc (closed_scottList htail) ha).trans ?_
+    rw [List.foldl_cons]
+    exact ih _ htail (closed_app (closed_app hs ha) hc)
+
+/-- **Chain reduction**: if every step application `st·acc·e`
+    reduces to a semantic result `σ acc e` (closed when its inputs
+    are), then the whole `foldl` chain of unreduced applications
+    reduces to the semantic `foldl` of `σ`.  Generalized over the
+    syntactic/semantic accumulator pair `X`/`a` so the induction
+    threads `LRed X a` through the cons case. -/
+theorem foldl_red (st : LTerm) (σ : LTerm → LTerm → LTerm)
+    (hstep : ∀ acc e, closed 0 acc = true → closed 0 e = true →
+      LRed (.app (.app st acc) e) (σ acc e) ∧
+      closed 0 (σ acc e) = true) :
+    ∀ (cs : List LTerm) (X a : LTerm), LRed X a →
+      (∀ e ∈ cs, closed 0 e = true) → closed 0 a = true →
+      LRed (cs.foldl (fun acc e => .app (.app st acc) e) X)
+           (cs.foldl σ a) := by
+  intro cs
+  induction cs with
+  | nil => intro X a hXa _ _; exact hXa
+  | cons c cs' ih =>
+    intro X a hXa hcl ha
+    have hc : closed 0 c = true := hcl c List.mem_cons_self
+    have htail : ∀ e ∈ cs', closed 0 e = true :=
+      fun e he => hcl e (List.mem_cons_of_mem c he)
+    have hs' := hstep a c ha hc
+    rw [List.foldl_cons, List.foldl_cons]
+    exact ih _ _ ((LRed_app (LRed_app Relation.ReflTransGen.refl hXa)
+      Relation.ReflTransGen.refl).trans hs'.1) htail hs'.2
+
+/-- **FixSpine, composed**: a spine-bounded fold `GGB st` over the
+    Scott list `scottList cs` reduces to the semantic `foldl` of `σ`,
+    provided each step `st·acc·e` reduces to `σ acc e` on closed
+    inputs.  This is the shared termination core — recursion depth is
+    exactly `cs.length`, so any fold-family head is discharged by one
+    per-step lemma (`hstep`), a bounded unfold, not a termination
+    proof. -/
+theorem spine_eval (st : LTerm) (σ : LTerm → LTerm → LTerm)
+    (hs : closed 0 st = true)
+    (hstep : ∀ acc e, closed 0 acc = true → closed 0 e = true →
+      LRed (.app (.app st acc) e) (σ acc e) ∧
+      closed 0 (σ acc e) = true) :
+    ∀ (cs : List LTerm) (a : LTerm),
+      (∀ e ∈ cs, closed 0 e = true) → closed 0 a = true →
+      LRed (ggbA st (scottList cs) a) (cs.foldl σ a) :=
+  fun cs a hcl ha =>
+    (fold_run st hs cs a hcl ha).trans
+      (foldl_red st σ hstep cs a a Relation.ReflTransGen.refl hcl ha)
+
+/-- **Full fold head**: `foldlL·st·l·a →* cs.foldl σ a` whenever the
+    list argument reduces to `scottList cs`.  This is the shape every
+    fold-family head (`revL`, `appendT`, `b4add`, `_MAP`, `_JOIN`,
+    `_NIBS2BYTES`) plugs into — the per-head obligation collapses to
+    `hstep` plus `closed 0 st`. -/
+theorem fold_eval (st : LTerm) (σ : LTerm → LTerm → LTerm)
+    (hs : closed 0 st = true)
+    (hstep : ∀ acc e, closed 0 acc = true → closed 0 e = true →
+      LRed (.app (.app st acc) e) (σ acc e) ∧
+      closed 0 (σ acc e) = true) :
+    ∀ (l a : LTerm) (cs : List LTerm),
+      closed 0 l = true → closed 0 a = true →
+      LRed l (scottList cs) → (∀ e ∈ cs, closed 0 e = true) →
+      LRed (.app (.app (.app foldlL st) l) a) (cs.foldl σ a) :=
+  fun l a cs hl ha hlcs hcl =>
+    (foldl_to_ggb st l a hs hl ha).trans
+      ((LRed_app_left (LRed_app_right hlcs)).trans
+        (spine_eval st σ hs hstep cs a hcl ha))
+
 /-- `b4Lit` normalizes to the `cellLit`-chain Scott list. -/
 theorem b4Lit_nf : ∀ (xs : List (Fin 16 × Fin 16)),
     LRed (b4Lit xs)
@@ -1259,35 +1353,21 @@ theorem stepCons_cell (h a : LTerm) (hh : closed 0 h = true)
           shift_of_closed0 hh, shift_of_closed0 ha,
           subst_of_closed0 hh, subst_of_closed0 ha])
 
-/-- Fold readback for `stepConsL`: `GGB·(scott cs)·a →* rev-foldr cellLit`. -/
+/-- Fold readback for `stepConsL`: `GGB·(scott cs)·a →* rev-foldr cellLit`.
+    One line through `spine_eval` — the generic FixSpine core carries
+    the induction; the per-head obligation is only `stepCons_cell`. -/
 theorem fold_read : ∀ (cs : List LTerm) (a : LTerm),
     (∀ e ∈ cs, closed 0 e = true) → closed 0 a = true →
     LRed (ggbA stepConsL (scottList cs) a)
          (cs.reverse.foldr cellLit a) := by
-  intro cs
-  induction cs with
-  | nil =>
-    intro a _ ha
-    simp only [scottList, List.foldr_nil, List.reverse_nil]
-    exact nil_unfold stepConsL a closed_stepConsL ha
-  | cons c cs ih =>
-    intro a hcl ha
-    have hc : closed 0 c = true := hcl c List.mem_cons_self
-    have hcs : ∀ e ∈ cs, closed 0 e = true :=
-      fun e he => hcl e (List.mem_cons_of_mem c he)
-    have e1 : scottList (c :: cs) = cellLit c (scottList cs) := rfl
-    rw [e1]
-    have s2' : LRed
-        (ggbA stepConsL (scottList cs) (.app (.app stepConsL a) c))
-        (ggbA stepConsL (scottList cs) (cellLit c a)) :=
-      LRed_app_right (stepCons_cell c a hc ha)
-    have s3 := ih (cellLit c a) hcs (closed_cellLit hc ha)
-    have eq : (c :: cs).reverse.foldr cellLit a
-            = cs.reverse.foldr cellLit (cellLit c a) := by
-      simp [List.reverse_cons, List.foldr_append]
-    rw [eq]
-    exact (cell_unfold stepConsL c (scottList cs) a closed_stepConsL hc
-      (closed_scottList hcs) ha).trans (s2'.trans s3)
+  intro cs a hcl ha
+  have h := spine_eval stepConsL (fun acc e => cellLit e acc)
+    closed_stepConsL
+    (fun acc e hacc he =>
+      ⟨stepCons_cell e acc he hacc, closed_cellLit he hacc⟩)
+    cs a hcl ha
+  rw [List.foldr_reverse]
+  exact h
 
 /-- `revL·l →* scottList cs.reverse` when `l →* scottList cs`. -/
 theorem revL_eval (l : LTerm) (cs : List LTerm) (hl : closed 0 l = true)
@@ -1812,5 +1892,7 @@ theorem append_assoc_basis (as bs cs : List LTerm)
     translate_preserves_red (compile_simulates_red h2)⟩
 
 #print axioms append_assoc_basis
+#print axioms spine_eval
+#print axioms fold_eval
 
 end ISAR
