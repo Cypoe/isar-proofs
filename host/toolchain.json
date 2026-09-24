@@ -170,6 +170,9 @@
      "witnesses": ["graph.lo", "graph.cd", "python.walk"]},
     {"id": "G9g", "suite": "spec_term",
      "what": "dataOf + idataOf + packOf: target_pe64's container writer at term level — build_data/build_idata folds (zero-fill + IAT records, lengths measured by LENB4) and the 448B PE64 header as literal chunks spliced with computed bytes4 fields; pads via PADLIST (rem=len&511 nibble-mask, rem TAIL z512) and JOIN right-assoc concat (linear emission); dataOf/idataOf gated lo+cd, packOf byte-for-byte vs target_pe64.pack on lo only (cd deferred: persistent-NF sweeps on image-sized NFs exceed routine-gate budget, >5k CPU s measured); native deferred",
+     "witnesses": ["graph.lo", "graph.cd", "python.walk"]},
+    {"id": "G9h", "suite": "spec_term",
+     "what": "linkOf + pack2Of + linkasm: the linker stage — section builders run once and export their symtabs; linkOf merges them into the global table assemble's resolver consumes (APPEND iat data = ALOOK last-match / dict.update order); pack2Of takes linked sections as inputs (no rebuild); linkasm assembles against the link-derived symtab end-to-end.  linkOf gated lo+cd at both scales; pack2Of lo+oracle (same measured cd deferral as packOf — image-sized NF); linkasm lo+oracle (composed-stage cd deferred — >50GB measured, the 027/028 retention pathology)",
      "witnesses": ["graph.lo", "graph.cd", "python.walk"]}
   ],
   "witnesses": ["tree.surface", "graph.lo", "graph.cd", "native.x86_64.pe",

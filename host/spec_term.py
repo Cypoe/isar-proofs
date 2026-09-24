@@ -181,6 +181,25 @@ JOIN is the load-bearing emission shape: a left-fold of APPENDs would
 re-walk the prefix (quadratic); right-assoc keeps it linear in the
 image size.  Oracle is target_pe64.pack byte-for-byte.
 
+G9h — `linkOf`/`pack2Of`: the linker stage (emit stage 6, closing the
+link seam).  `linkOf` runs the section builders ONCE and merges their
+exported symtabs — `APPEND iat_syms data_syms`, ALOOK's last-match
+mirroring `dict.update` — into the global table assemble's resolver
+consumes; the symbol table is now derived from the emitted sections,
+not injected.  `pack2Of` is packOf with the sections as inputs — no
+internal rebuild — so the same emitted sections feed both the symtab
+and the image: `L = linkOf IMPORTS SLOTS`, `assembleOf PROG (L (K I))`
+reads the linked symtab, `pack2Of text (L K K) (L K (K I))` packs the
+linked sections.  linkOf gates lo+cd at both scales; pack2Of gates
+lo+oracle (same measured cd deferral as packOf — image-sized NF);
+linkasm gates the resolver seam fed by the link's merged symtab
+end-to-end on lo+oracle (composed-stage cd deferred — the link
+stage's sequential emission inside the same fixpoint measured >50GB,
+the 027/028 retention pathology, not a correctness question).  The win64-scale link→assemble→pack chain is
+arena-bound in one graph like G9g's — the staged probe
+(_probe_g9g_e2e_staged.py) is the honest model: serialize the NF at
+each stage boundary, fresh arena per stage.
+
 Usage: python host/spec_term.py
 """
 from __future__ import annotations
@@ -2002,7 +2021,10 @@ def idata_src(n_imp: int) -> str:
 # fixed 448-byte header pad) are literal chunks; every size/offset field
 # is computed at term level from LENB4 / ALIGN / B4ADD over the actual
 # section bytes.  JOIN keeps emission linear in the image size.
-def pack_src(n_imp: int, n_slot: int) -> str:
+def _pack_body() -> str:
+    """The shared pack emission.  `text`, `idata`, `datab`, `stackres`
+    are free — bound by the enclosing λ (packOf's params, or pack2Of's
+    post-link signature)."""
     z12 = "(" + _ZEROFILL + " " + _num_src(12) + ")"
     chunks = [
         _bytes_src(b"MZ"), "(" + _ZEROFILL + " " + _num_src(58) + ")",
@@ -2041,10 +2063,7 @@ def pack_src(n_imp: int, n_slot: int) -> str:
         "idata", "(" + _PADLIST + " li)",
         "datab", "(" + _PADLIST + " ld)",
     ]
-    body = _lets([
-        ("idr", "(" + idata_src(n_imp) + " imports)"),
-        ("dat", "(" + data_src(n_slot) + " slots)"),
-        ("idata", "(idr K)"), ("datab", "(dat K)"),
+    return _lets([
         ("lt", "(" + _LENB4 + " text)"),
         ("li", "(" + _LENB4 + " idata)"),
         ("ld", "(" + _LENB4 + " datab)"),
@@ -2057,7 +2076,21 @@ def pack_src(n_imp: int, n_slot: int) -> str:
         ("img", "(" + _ALIGN4096 + " (" + _B4ADD + " "
                 + _b4_src(0x3000) + " ld))"),
     ], _join_src(chunks))
+
+
+def pack_src(n_imp: int, n_slot: int) -> str:
+    body = _lets([
+        ("idr", "(" + idata_src(n_imp) + " imports)"),
+        ("dat", "(" + data_src(n_slot) + " slots)"),
+        ("idata", "(idr K)"), ("datab", "(dat K)"),
+    ], _pack_body())
     return "(\\text. \\imports. \\slots. \\stackres. " + body + ")"
+
+
+def pack2_src() -> str:
+    """packOf post-link: `\\text. \\idata. \\datab. \\stackres` — the
+    sections arrive already built (by linkOf); nothing is recomputed."""
+    return "(\\text. \\idata. \\datab. \\stackres. " + _pack_body() + ")"
 
 
 # --- G9g inputs / queries / decoders ---------------------------------------
@@ -2122,6 +2155,79 @@ def python_pack(text, imports, slots, stackres) -> bytes:
     """tgt.pack — the independent oracle (labels unused by it)."""
     R = SimpleNamespace(stack_reserve=stackres)
     return target_pe64.pack(text, {}, imports, slots, R)
+
+
+# ---------------------------------------------------------------------------
+# G9h: linkOf — the linker stage.  The section builders run ONCE and
+# export their symtabs; linkOf merges them into the global table that
+# assemble's resolver consumes, and hands the emitted sections to
+# pack2Of.  The link seam closes: symbols are derived from the actual
+# emitted sections, not injected by hand and not recomputed from counts.
+#
+#   L = linkOf IMPORTS SLOTS          -> pair(pair(idata, datab), syms)
+#   A = assembleOf PROG (L (K I)) base               -- symtab from link
+#   P = pack2Of (A K) (L K K) (L K (K I)) stackres   -- sections from link
+#
+# Merge order: ALOOK is FOLDL last-match, so APPEND iat_syms data_syms
+# puts data last — mirrors `out = dict(iat); out.update(ds)` in
+# target.symbols.  Namespaces never collide in practice (the iat_
+# prefix), but the order is the honest mirror anyway.
+# ---------------------------------------------------------------------------
+
+
+def link_src(n_imp: int, n_slot: int) -> str:
+    """λ-source of `\\imports. \\slots. linkOf` — bounds instantiated."""
+    return ("(\\imports. \\slots. "
+            + _lets([
+                ("idr", "(" + idata_src(n_imp) + " imports)"),
+                ("dat", "(" + data_src(n_slot) + " slots)"),
+            ], _prs(_prs("(idr K)", "(dat K)"),
+                    "(" + _APPEND + " (idr (K I)) (dat (K I)))"))
+            + ")")
+
+
+def link_query(imports, slots) -> T:
+    """`linkOf IMPORTS SLOTS` — sections + merged symtab at term level."""
+    return _appn(bracket(parse(link_src(len(imports), len(slots)))),
+                 json_to_term(list(imports)), _slots3_term(slots))
+
+
+def pack2_query(text: bytes, idata: bytes, datab: bytes,
+                stackres: int) -> T:
+    """`pack2Of text idata datab stackres` — pack over linked sections."""
+    return _appn(bracket(parse(pack2_src())), bytelist_term(text),
+                 bytelist_term(idata), bytelist_term(datab),
+                 bytelist_term(stackres.to_bytes(4, "little")))
+
+
+def linkasm_query(prog: T, imports, slots, base: int) -> T:
+    """`assembleOf PROG (linkOf … (K I)) base` — the resolver seam fed
+    by the link stage's merged symtab instead of an injected table."""
+    link_t = _appn(bracket(parse(link_src(len(imports), len(slots)))),
+                   json_to_term(list(imports)), _slots3_term(slots))
+    return _appn(_ASSEMBLE, prog, app(link_t, _KI),
+                 bytelist_term(base.to_bytes(4, "little")))
+
+
+def decode_link(nf: T):
+    """NF pair(pair(idata, datab), syms) -> (idata, datab, {name: rva})."""
+    if nf.k == K.NORM:
+        return None
+    sects = _l0_nf(app(nf, KK), 500_000)
+    ib = _decode_bytecells(_l0_nf(app(sects, KK), 300_000))
+    db = _decode_bytecells(_l0_nf(app(sects, _KI), 300_000))
+    syms = decode_symbols(_l0_nf(app(nf, _KI), 500_000))
+    return ib, db, syms
+
+
+def python_link(imports, slots):
+    """linkOf oracle: build_idata + build_data + the merged table —
+    `update` order mirrors ALOOK's last-match."""
+    ib, isyms = target_pe64.build_idata(imports)
+    db, dsyms = target_pe64.build_data(slots)
+    syms = dict(isyms)
+    syms.update(dsyms)
+    return ib, db, syms
 
 
 def isa_x86_64_gate_encode(insn) -> bytes:
@@ -2217,6 +2323,31 @@ IDATA_CASES = {
 PACK_CASES = {
     "mini": (b"\xc3", ("ExitProcess",), (("x", 8),), 64 << 20),
     "aligned": (bytes(512), ("ExitProcess",), (("x", 8),), 64 << 20),
+}
+
+# G9h gate data — the linker stage.  linkOf gates at both scales (the
+# folds are cheap); pack2Of gates the mini shape (same cd deferral as
+# packOf — the NF is image-sized); linkasm gates the resolver seam fed
+# by the link's merged symtab — real iat_/data addresses derived from
+# the emitted sections, not injected.
+LINK_CASES = {
+    "mini": (("ExitProcess",), (("x", 8),)),
+    "win64": (routines_x86_64_win64.IMPORTS,
+              routines_x86_64_win64.DATA_SLOTS),
+}
+PACK2_CASES = {
+    "mini": (b"\xc3", ("ExitProcess",), (("x", 8),), 64 << 20),
+}
+LINKASM_PROG = [
+    [("label", "top"),
+     ("i", "call_rel32", ("l", "bot")),                        # local fwd
+     ("i", "mov_r64_rip", "rax", ("p", "x")),                  # data sym
+     ("i", "mov_r64_rip", "rcx", ("p", "iat_ExitProcess")),    # iat sym
+     ("label", "bot"),
+     ("i", "ret",)],
+]
+LINKASM_CASES = {
+    "mini": (LINKASM_PROG, ("ExitProcess",), (("x", 8),), 0x1000),
 }
 
 
@@ -2761,6 +2892,80 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # G9h: linkOf — the linker stage.  Section builders run once,
+    # export their symtabs, and linkOf merges them into the table
+    # assemble's resolver consumes; pack2Of takes the linked sections
+    # with no rebuild.  linkOf gates lo+cd at both scales; pack2Of and
+    # linkasm gate lo+oracle — pack2Of for the image-sized NF (same as
+    # packOf), linkasm because the COMPOSED link+assemble term under
+    # cd's fixpoint is the arena-resident composition quadratic
+    # (>50GB/~1100s CPU measured on mini before deferral — the link
+    # stage's sequential section emission inside the same sweep, the
+    # 027/028 retention pathology, not a correctness question).  The
+    # resolver seam keeps its own lo+cd coverage on ASM_CASES.
+    # ------------------------------------------------------------------
+    for cname, (imports, slots) in LINK_CASES.items():
+        want = python_link(imports, slots)
+        n_q += 1
+        t = link_query(imports, slots)
+
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_link(nf_lo)
+        nf_cd, rounds_cd, _ = reduce_tree_cd(t, CD_FUEL)
+        val_cd = decode_link(nf_cd)
+
+        ok = val_lo == want and val_cd == want
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} link -> "
+                f"{len(val_lo[0]) if val_lo else 0}B+"
+                f"{len(val_lo[1]) if val_lo else 0}B "
+                f"{len(val_lo[2]) if val_lo else 0} syms "
+                f"[lo {steps_lo} | cd {rounds_cd} rounds]")
+        if not ok:
+            nfail += 1
+            line += (f"  expected {len(want[0])}B+{len(want[1])}B/"
+                     f"{want[2]}")
+        print(line)
+
+    for cname, (text, imports, slots, res) in PACK2_CASES.items():
+        want = python_pack(text, imports, slots, res)
+        ib, db, _ = python_link(imports, slots)
+        n_q += 1
+        t = pack2_query(text, ib, db, res)
+
+        # lo + oracle only — same measured cd deferral as packOf.
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = _decode_bytecells(nf_lo)
+
+        ok = val_lo == want
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} pack2 -> "
+                f"{len(val_lo)}B "
+                f"[lo {steps_lo} | cd deferred]")
+        if not ok:
+            nfail += 1
+            line += f"  expected {len(want)}B"
+        print(line)
+
+    for cname, (prog, imports, slots, base) in LINKASM_CASES.items():
+        _, _, lsyms = python_link(imports, slots)
+        want_b, want_l = python_assemble(prog, lsyms, base)
+        n_q += 1
+        t = linkasm_query(fraglist_term(prog), imports, slots, base)
+
+        # lo + oracle only — composed-stage cd deferred (measured).
+        nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
+        val_lo = decode_assemble(nf_lo)
+
+        ok = val_lo == (want_b, want_l)
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} linkasm -> "
+                f"{len(val_lo[0]) if val_lo else 0}B "
+                f"{len(val_lo[1]) if val_lo else 0} labels "
+                f"[lo {steps_lo} | cd deferred]")
+        if not ok:
+            nfail += 1
+            line += f"  expected {want_b.hex()}/{want_l}"
+        print(line)
+
+    # ------------------------------------------------------------------
     # G9b: specialize the query program against the static catalog.
     # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
     # residual[1 := str_term name] must agree with the direct query on
@@ -2808,7 +3013,8 @@ def main() -> int:
           f"{len(SYMS_CASES)} symbolsOf + {len(PROG_CASES)} programOf + "
           f"{len(ENC_CASES)} encodeOf + {len(ASM_CASES)} assembleOf + "
           f"{len(DATA_CASES)} dataOf + {len(IDATA_CASES)} idataOf + "
-          f"{len(PACK_CASES)} packOf + "
+          f"{len(PACK_CASES)} packOf + {len(LINK_CASES)} linkOf + "
+          f"{len(PACK2_CASES)} pack2Of + {len(LINKASM_CASES)} linkasm + "
           f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0
