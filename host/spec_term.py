@@ -756,6 +756,55 @@ _B4SUB = (
     + " a " + _prs("b", _prs(_SELS[1], "K")) + ") "
     "(\\bl. \\cs. cs (\\cy. \\ou. " + _REV + " ou)))"
 )
+# carry-lookahead twin of _B4ADD ----------------------------------------------
+# The FOLDL carry chain is the residual-chain critical path: byte i's
+# ADDBC waits on byte i-1's carry.  Splitting ADDBC into carry-only and
+# sum-only halves lets the four byte-carries be a bool tree instead —
+# cout(cin) = g | (p & cin) with g = cout(0), p = cout(1) (byte carry-out
+# is monotone in carry-in) — and the four byte sums are independent
+# cones once the carries are terms.  More total nibble work (~2x), much
+# shorter dependency chain — the same-observation trade the spec layer
+# is for.  Correctness target: Join (B4ADD a b) (B4CLA a b).
+_B4BC = (   # byte carry-out: x y cnib -> bool (ADDBC's carry half)
+    "(\\x. \\y. \\cn. x (\\xl. \\xh. y (\\yl. \\yh. "
+    + _lets([
+        ("t",   "(" + _NIBADD + " xl yl)"),
+        ("clo", "(" + _OR + " (" + _NIBCARRY + " xl yl) ("
+                + _NIBCARRY + " t cn))"),
+        ("cn2", "(" + _B2N + " clo)"),
+        ("hh",  "(" + _NIBADD + " xh yh)")],
+        "(" + _OR + " (" + _NIBCARRY + " xh yh) (" + _NIBCARRY
+        + " hh cn2))") + ")))")
+_B4BS = (   # byte sum: x y cnib -> byte cell (ADDBC's sum half)
+    "(\\x. \\y. \\cn. x (\\xl. \\xh. y (\\yl. \\yh. "
+    + _lets([
+        ("t",   "(" + _NIBADD + " xl yl)"),
+        ("clo", "(" + _OR + " (" + _NIBCARRY + " xl yl) ("
+                + _NIBCARRY + " t cn))"),
+        ("lo",  "(" + _NIBADD + " t cn)"),
+        ("cn2", "(" + _B2N + " clo)"),
+        ("hh",  "(" + _NIBADD + " xh yh)")],
+        _prs("lo", "(" + _NIBADD + " hh cn2)")) + ")))")
+# _B4CLA a b -> bytes4: lookahead carries, parallel byte sums.
+# cb1 = g0 ; cb2 = g1 | p1&cb1 ; cb3 = g2 | p2&cb2  (cb0 = 0 statically)
+_B4CLA = (
+    "(\\a. \\b. " + _peel("a", ["a0", "a1", "a2", "a3"],
+        _peel("b", ["b0", "b1", "b2", "b3"],
+            _lets([
+                ("g0", "(" + _B4BC + " a0 b0 " + _SELS[0] + ")"),
+                ("p0", "(" + _B4BC + " a0 b0 " + _SELS[1] + ")"),
+                ("g1", "(" + _B4BC + " a1 b1 " + _SELS[0] + ")"),
+                ("p1", "(" + _B4BC + " a1 b1 " + _SELS[1] + ")"),
+                ("g2", "(" + _B4BC + " a2 b2 " + _SELS[0] + ")"),
+                ("p2", "(" + _B4BC + " a2 b2 " + _SELS[1] + ")"),
+                ("c2", "(" + _OR + " g1 (" + _AND + " p1 g0))"),
+                ("c3", "(" + _OR + " g2 (" + _AND + " p2 (" + _OR
+                       + " g1 (" + _AND + " p1 g0))))")],
+                _conss("(" + _B4BS + " a0 b0 " + _SELS[0] + ")",
+                _conss("(" + _B4BS + " a1 b1 (" + _B2N + " g0))",
+                _conss("(" + _B4BS + " a2 b2 (" + _B2N + " c2))",
+                _conss("(" + _B4BS + " a3 b3 (" + _B2N + " c3))",
+                       "K"))))))) + ")")
 # nibble -> bytes4 (a nibble is the only honest width to lift: x86 insns
 # are <=15 bytes, so insn length fits one nibble).  There is deliberately
 # NO Church-numeral -> bytes4 coercion: numeral->bytes4 by n increments
