@@ -2407,6 +2407,16 @@ CLA_CASES = {
     "wrap": (0x00000001, 0xFFFFFFFF),
     "mixed": (0x01020304, 0x0F0E0D0C),
 }
+# Re-association congruence — (a++b)++c ≡ a++(b++c) on every closed
+# Scott list (Lean: append_assoc_basis, all inputs).  This is the
+# license to pick emission shape by strategy: sequential right-assoc
+# spine (linear lo work) vs balanced tree (independent cones — cd
+# develops both halves per round; the "max parallelism" payoff).
+ASSOC_CASES = {
+    "l234": (b"\x01\x02", b"\x03\x04\x05", b"\x06\x07\x08\x09"),
+    "skewL": (b"\x0a\x0b\x0c\x0d\x0e", b"\x0f", b"\x10"),
+    "nilR": (b"\x11\x12\x13", b"\x14\x15", b""),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -3051,6 +3061,41 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # Re-association congruence: APPEND (APPEND a b) c must Join
+    # APPEND a (APPEND b c) — the formal license for choosing emission
+    # shape per strategy (Lean: append_assoc_basis covers all closed
+    # lists; here the host encoding is gated incl. the empty edge).
+    # Both parenthesizations are compared against the literal concat.
+    # ------------------------------------------------------------------
+    for cname, (a, b, c) in ASSOC_CASES.items():
+        n_q += 1
+        # all terms through bracket(parse(_bytes_src)) — NF equality is
+        # only meaningful inside one compilation convention (Turner
+        # bracket vs bracket_abstract0 land β-equal cells in different
+        # normal forms; the Lean Join is about the compiled encoding).
+        at = bracket(parse(_bytes_src(a)))
+        bt = bracket(parse(_bytes_src(b)))
+        ct = bracket(parse(_bytes_src(c)))
+        t_left = _appn(bracket(parse(_APPEND)),
+                       _appn(bracket(parse(_APPEND)), at, bt), ct)
+        t_right = _appn(bracket(parse(_APPEND)), at,
+                        _appn(bracket(parse(_APPEND)), bt, ct))
+        t_lit = bracket(parse(_bytes_src(a + b + c)))
+
+        nf_left, s_left, _ = reduce_tree_lo(t_left, LO_FUEL)
+        nf_right, s_right, _ = reduce_tree_lo(t_right, LO_FUEL)
+        nf_lit2, _, _ = reduce_tree_lo(t_lit, LO_FUEL)
+        _, r_left, _ = reduce_tree_cd(t_left, CD_FUEL)
+        _, r_right, _ = reduce_tree_cd(t_right, CD_FUEL)
+
+        ok = nf_left == nf_right == nf_lit2
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} assoc -> "
+                f"[lo {s_left}/{s_right} | cd {r_left}/{r_right} rounds]")
+        if not ok:
+            nfail += 1
+        print(line)
+
+    # ------------------------------------------------------------------
     # G9b: specialize the query program against the static catalog.
     # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
     # residual[1 := str_term name] must agree with the direct query on
@@ -3100,7 +3145,7 @@ def main() -> int:
           f"{len(DATA_CASES)} dataOf + {len(IDATA_CASES)} idataOf + "
           f"{len(PACK_CASES)} packOf + {len(LINK_CASES)} linkOf + "
           f"{len(PACK2_CASES)} pack2Of + {len(LINKASM_CASES)} linkasm + "
-          f"{len(CLA_CASES)} cla≡rip + "
+          f"{len(CLA_CASES)} cla≡rip + {len(ASSOC_CASES)} assoc + "
           f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0
