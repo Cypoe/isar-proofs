@@ -2398,6 +2398,15 @@ LINKASM_PROG = [
 LINKASM_CASES = {
     "mini": (LINKASM_PROG, ("ExitProcess",), (("x", 8),), 0x1000),
 }
+# Vocabulary congruence — the CLA twin must Join the ripple on the
+# critical carry shapes (full wraparound cascade; mixed carries).
+# Lean proves b4add_b4cla_basis for ALL inputs (SpecVocabulary); this
+# gates the host encoding against the literal.  cd rounds printed —
+# the lookahead's independent carry cones show as fewer rounds.
+CLA_CASES = {
+    "wrap": (0x00000001, 0xFFFFFFFF),
+    "mixed": (0x01020304, 0x0F0E0D0C),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -3015,6 +3024,33 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # Vocabulary congruence: _B4CLA must Join _B4ADD — both reduce to
+    # the b4_src literal of (a+b) mod 2^32.  Lean proves the Join for
+    # all inputs (ISAR.b4add_b4cla_basis); here the host encoding is
+    # gated on the critical carry shapes.  cd rounds reported: the
+    # lookahead collapses the ripple's sequential carry chain into
+    # independent cones (~270 vs ~424 rounds, ~30% more allocs).
+    # ------------------------------------------------------------------
+    for cname, (a, b) in CLA_CASES.items():
+        n_q += 1
+        t_rip = bracket(parse(f"({_B4ADD} {_b4_src(a)} {_b4_src(b)})"))
+        t_cla = bracket(parse(f"({_B4CLA} {_b4_src(a)} {_b4_src(b)})"))
+        t_lit = bracket(parse(_b4_src((a + b) & 0xFFFFFFFF)))
+
+        nf_rip, s_rip, _ = reduce_tree_lo(t_rip, LO_FUEL)
+        nf_cla, s_cla, _ = reduce_tree_lo(t_cla, LO_FUEL)
+        nf_lit, _, _ = reduce_tree_lo(t_lit, LO_FUEL)
+        _, r_rip, _ = reduce_tree_cd(t_rip, CD_FUEL)
+        _, r_cla, _ = reduce_tree_cd(t_cla, CD_FUEL)
+
+        ok = nf_rip == nf_cla == nf_lit
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} cla≡rip -> "
+                f"[lo {s_rip}/{s_cla} | cd {r_rip}/{r_cla} rounds]")
+        if not ok:
+            nfail += 1
+        print(line)
+
+    # ------------------------------------------------------------------
     # G9b: specialize the query program against the static catalog.
     # prog = QUERY v0 v1; residual = nf_lo(prog[0 := SPEC]); per name,
     # residual[1 := str_term name] must agree with the direct query on
@@ -3064,6 +3100,7 @@ def main() -> int:
           f"{len(DATA_CASES)} dataOf + {len(IDATA_CASES)} idataOf + "
           f"{len(PACK_CASES)} packOf + {len(LINK_CASES)} linkOf + "
           f"{len(PACK2_CASES)} pack2Of + {len(LINKASM_CASES)} linkasm + "
+          f"{len(CLA_CASES)} cla≡rip + "
           f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0
