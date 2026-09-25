@@ -5138,4 +5138,701 @@ theorem beta_app (B V : LTerm) :
 #print axioms conssChain_map_red
 #print axioms bytesChunk_nf
 
+-- ============================================================
+-- Batch H: pack2Of — the PE image writer (post-link pack stage).
+--   λtext. λidata. λdatab. λstackres. LETS + JOIN over 53 chunks.
+-- ============================================================
+
+/-- `_bytes_src` chunk — conss-chain of UNREDUCED `PAIR sel sel`
+    cells (faithful: `_prs`-apps, one step above `byteLit`). -/
+def bytesChunk (bs : List (Fin 16 × Fin 16)) : LTerm :=
+  bs.foldr (fun p t => aps conssL
+    [aps pairSrcL [nibLit p.1, nibLit p.2], t]) nilL
+
+theorem closed_bytesChunk (bs : List (Fin 16 × Fin 16)) :
+    closed 0 (bytesChunk bs) = true := by
+  induction bs with
+  | nil => exact closed_nilL
+  | cons p bs' ih =>
+      simp only [bytesChunk, List.foldr_cons]
+      exact closed_app (closed_app closed_conssL
+        (closed_app (closed_app closed_pairSrcL (closed_nibLit _))
+          (closed_nibLit _))) ih
+
+theorem closed_bytesChunk_any (c : Nat)
+    (bs : List (Fin 16 × Fin 16)) :
+    closed c (bytesChunk bs) = true :=
+  closed_mono (closed_bytesChunk bs) (Nat.zero_le c)
+
+-- PE byte constants (nibble pairs, little-endian) -----------------
+
+def bMZ : List (Fin 16 × Fin 16) := [(13, 4), (10, 5)]
+def b40 : List (Fin 16 × Fin 16) := [(0, 4), (0, 0), (0, 0), (0, 0)]
+def bPE : List (Fin 16 × Fin 16) := [(0, 5), (5, 4), (0, 0), (0, 0)]
+/-- `<HHIIIHH 0x8664,3,0,0,0,0xF0,0x22>` — COFF header, 20 bytes. -/
+def bCOFF : List (Fin 16 × Fin 16) :=
+  [(4,6),(6,8),(3,0),(0,0),(0,0),(0,0),(0,0),(0,0),
+   (0,0),(0,0),(0,0),(0,0),(0,15),(0,0),(2,2),(0,0)]
+/-- `<HBB 0x20B,0,0>` — optional-header magic + linker version. -/
+def b20B : List (Fin 16 × Fin 16) := [(11,0),(2,0),(0,0),(0,0)]
+def bZero4 : List (Fin 16 × Fin 16) := [(0,0),(0,0),(0,0),(0,0)]
+/-- `<I 0x1000>` — 0x00 0x10 0x00 0x00. -/
+def b1000 : List (Fin 16 × Fin 16) := [(0,0),(0,1),(0,0),(0,0)]
+/-- `<Q 0x140000000>` — image base. -/
+def bQ14 : List (Fin 16 × Fin 16) :=
+  [(0,0),(0,0),(0,0),(0,4),(1,0),(0,0),(0,0),(0,0)]
+/-- `<II 0x1000,0x200>` — section/file alignment. -/
+def bAlign : List (Fin 16 × Fin 16) :=
+  [(0,0),(0,1),(0,0),(0,0),(0,0),(2,0),(0,0),(0,0)]
+/-- `<HHHHHH 6,0,0,0,6,0>` — OS/image/subsys versions. -/
+def bVers : List (Fin 16 × Fin 16) :=
+  [(6,0),(0,0),(0,0),(0,0),(0,0),(0,0),
+   (0,0),(0,0),(6,0),(0,0),(0,0),(0,0)]
+/-- `<II 0x200,0>` — checksum field pair (SizeOfImage follows). -/
+def bII20 : List (Fin 16 × Fin 16) :=
+  [(0,0),(2,0),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0)]
+/-- `<HH 3,0x8100>` — subsystem 3, DLL characteristics 0x8100. -/
+def bSub : List (Fin 16 × Fin 16) := [(3,0),(0,0),(0,0),(1,8)]
+/-- `<QQQ 0x1000,0x100000,0x1000>` — stack reserve/commit/heap. -/
+def bStack : List (Fin 16 × Fin 16) :=
+  [(0,0),(0,1),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0),
+   (0,0),(0,0),(0,1),(0,0),(0,0),(0,0),(0,0),(0,0),
+   (0,0),(0,1),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0)]
+/-- `<II 0,16>` — loader flags, number of directories. -/
+def bDirs : List (Fin 16 × Fin 16) :=
+  [(0,0),(0,0),(0,0),(0,0),(0,1),(0,0),(0,0),(0,0)]
+def bZero8 : List (Fin 16 × Fin 16) :=
+  [(0,0),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0)]
+/-- `<I 0x2000>` — idata RVA. -/
+def b2000 : List (Fin 16 × Fin 16) := [(0,0),(0,2),(0,0),(0,0)]
+/-- `.text\0\0\0` section name. -/
+def bText : List (Fin 16 × Fin 16) :=
+  [(14,2),(4,7),(5,6),(8,7),(4,7),(0,0),(0,0),(0,0)]
+/-- `<I 0x200>` — raw data offset/size base. -/
+def b200 : List (Fin 16 × Fin 16) := [(0,0),(2,0),(0,0),(0,0)]
+/-- `<I 0x60000020>` — .text characteristics. -/
+def bTextFl : List (Fin 16 × Fin 16) := [(0,2),(0,0),(0,0),(0,6)]
+/-- `.idata\0\0` section name. -/
+def bIdata : List (Fin 16 × Fin 16) :=
+  [(14,2),(9,6),(4,6),(1,6),(4,7),(1,6),(0,0),(0,0)]
+/-- `<I 0x40000040>` — .idata characteristics. -/
+def bIdataFl : List (Fin 16 × Fin 16) := [(0,4),(0,0),(0,0),(0,4)]
+/-- `.data\0\0\0` section name. -/
+def bData : List (Fin 16 × Fin 16) :=
+  [(14,2),(4,6),(1,6),(4,7),(1,6),(0,0),(0,0),(0,0)]
+/-- `<I 0x3000>` — .data RVA. -/
+def b3000 : List (Fin 16 × Fin 16) := [(0,0),(0,3),(0,0),(0,0)]
+/-- `<I 0xC0000040>` — .data characteristics. -/
+def bDataFl : List (Fin 16 × Fin 16) := [(0,4),(0,0),(0,0),(0,12)]
+
+-- let-binding values, in their binder contexts -------------------
+
+/-- `LENB4 text` — under [sr,d,i,t]: text = var 3. -/
+def ltV : LTerm := .app lenb4L (.var 3)
+/-- `LENB4 idata` — under [lt,sr,d,i,t]: idata = var 3. -/
+def liV : LTerm := .app lenb4L (.var 3)
+/-- `LENB4 datab` — under [li,lt,sr,d,i,t]: datab = var 3. -/
+def ldV : LTerm := .app lenb4L (.var 3)
+/-- `ALIGN512 lt` — under [ld,li,lt,…]: lt = var 2. -/
+def trawV : LTerm := .app align512L (.var 2)
+/-- `ALIGN512 li` — under [traw,ld,li,lt,…]: li = var 2. -/
+def irawV : LTerm := .app align512L (.var 2)
+/-- `ALIGN512 ld` — under [iraw,traw,ld,li,lt,…]: ld = var 2. -/
+def drawV : LTerm := .app align512L (.var 2)
+/-- `B4ADD (b4 0x200) traw` — under [draw,iraw,traw,…]: traw = var 2. -/
+def iptrV : LTerm := aps b4addL [bytesChunk b200, .var 2]
+/-- `B4ADD iptr iraw` — under [iptr,draw,iraw,…]: iptr=0, iraw=2. -/
+def dptrV : LTerm := aps b4addL [.var 0, .var 2]
+/-- `B4ADD iraw draw` — under [dptr,iptr,draw,iraw,…]:
+    iraw=3, draw=2. -/
+def iddrV : LTerm := aps b4addL [.var 3, .var 2]
+/-- `ALIGN4096 (B4ADD (b4 0x3000) ld)` — under
+    [iddr,dptr,iptr,draw,iraw,traw,ld,…]: ld = var 6. -/
+def imgV : LTerm := .app align4096L (aps b4addL [bytesChunk b3000, .var 6])
+
+/-- the 53 JOIN chunks — context
+    [img,iddr,dptr,iptr,draw,iraw,traw,ld,li,lt,sr,d,i,t]:
+    img=0,iddr=1,dptr=2,iptr=3,draw=4,iraw=5,traw=6,ld=7,li=8,
+    lt=9,sr=10,d=11,i=12,t=13. -/
+def packChunks : List LTerm := [
+  bytesChunk bMZ,                                   -- "MZ"
+  .app zerofillL nz58,                              -- pad to 0x40
+  bytesChunk b40,                                   -- PE header offset
+  bytesChunk bPE,                                   -- "PE\0\0"
+  bytesChunk bCOFF,                                 -- COFF header
+  bytesChunk b20B,                                  -- opt magic+linkver
+  .var 6,                                           -- traw (SizeOfCode)
+  .var 1,                                           -- iddr (SizeOfInitData)
+  bytesChunk bZero4,                                -- SizeOfUninitData
+  bytesChunk b1000,                                 -- EntryPoint
+  bytesChunk b1000,                                 -- BaseOfCode
+  bytesChunk bQ14,                                  -- ImageBase
+  bytesChunk bAlign,                                -- Section/FileAlign
+  bytesChunk bVers,                                 -- versions
+  bytesChunk bZero4,                                -- Win32Version
+  .var 0,                                           -- img (SizeOfImage)
+  bytesChunk bII20,                                 -- SizeOfHeaders+cksum
+  bytesChunk bSub,                                  -- subsystem+DLLchar
+  .app u64L (.var 10),                              -- stackres
+  bytesChunk bStack,                                -- stack/heap
+  bytesChunk bDirs,                                 -- loader flags, ndirs
+  bytesChunk bZero8,                                -- export dir (empty)
+  bytesChunk b2000,                                 -- import dir RVA
+  .var 8,                                           -- li (import dir size)
+  .app zerofillL nz112,                             -- rest of dirs
+  bytesChunk bText,                                 -- ".text"
+  .var 9,                                           -- lt
+  bytesChunk b1000,                                 -- .text RVA
+  .var 6,                                           -- traw
+  bytesChunk b200,                                  -- .text raw ptr
+  .app zerofillL (churchL 12),                      -- section rest
+  bytesChunk bTextFl,                               -- .text flags
+  bytesChunk bIdata,                                -- ".idata"
+  .var 8,                                           -- li
+  bytesChunk b2000,                                 -- .idata RVA
+  .var 5,                                           -- iraw
+  .var 3,                                           -- iptr
+  .app zerofillL (churchL 12),
+  bytesChunk bIdataFl,
+  bytesChunk bData,                                 -- ".data"
+  .var 7,                                           -- ld
+  bytesChunk b3000,
+  .var 4,                                           -- draw
+  .var 2,                                           -- dptr
+  .app zerofillL (churchL 12),
+  bytesChunk bDataFl,
+  .app zerofillL nz64,                              -- pad to 0x200
+  .var 13,                                          -- text
+  .app padlistL (.var 9),                           -- PADLIST lt
+  .var 12,                                          -- idata
+  .app padlistL (.var 8),                           -- PADLIST li
+  .var 11,                                          -- datab
+  .app padlistL (.var 7)]                           -- PADLIST ld
+
+/-- `JOIN (conss-chain chunks)`. -/
+def packBody : LTerm :=
+  .app joinL (packChunks.foldr (fun c t => aps conssL [c, t]) nilL)
+
+-- the let chain, innermost-last: each `app (abs NEXT) val` ----------
+def packL9 : LTerm := .app (.abs packBody) imgV
+def packL8 : LTerm := .app (.abs packL9) iddrV
+def packL7 : LTerm := .app (.abs packL8) dptrV
+def packL6 : LTerm := .app (.abs packL7) iptrV
+def packL5 : LTerm := .app (.abs packL6) drawV
+def packL4 : LTerm := .app (.abs packL5) irawV
+def packL3 : LTerm := .app (.abs packL4) trawV
+def packL2 : LTerm := .app (.abs packL3) ldV
+def packL1 : LTerm := .app (.abs packL2) liV
+def packLets : LTerm := .app (.abs packL1) ltV
+
+/-- `pack2Of = λtext. λidata. λdatab. λstackres. lets+JOIN`. -/
+def pack2L : LTerm := .abs (.abs (.abs (.abs packLets)))
+
+-- closedness ------------------------------------------------------
+
+theorem closed_joinL_any (c : Nat) : closed c joinL = true :=
+  closed_mono closed_joinL (Nat.zero_le c)
+theorem closed_conssL_any (c : Nat) : closed c conssL = true :=
+  closed_mono closed_conssL (Nat.zero_le c)
+theorem closed_pairSrcL_any (c : Nat) : closed c pairSrcL = true :=
+  closed_mono closed_pairSrcL (Nat.zero_le c)
+theorem closed_lenb4L_any (c : Nat) : closed c lenb4L = true :=
+  closed_mono closed_lenb4L (Nat.zero_le c)
+theorem closed_align512L_any (c : Nat) : closed c align512L = true :=
+  closed_mono closed_align512L (Nat.zero_le c)
+theorem closed_align4096L_any (c : Nat) : closed c align4096L = true :=
+  closed_mono closed_align4096L (Nat.zero_le c)
+theorem closed_b4addL_any (c : Nat) : closed c b4addL = true :=
+  closed_mono closed_b4addL (Nat.zero_le c)
+theorem closed_u64L_any (c : Nat) : closed c u64L = true :=
+  closed_mono closed_u64L (Nat.zero_le c)
+theorem closed_padlistL_any (c : Nat) : closed c padlistL = true :=
+  closed_mono closed_padlistL (Nat.zero_le c)
+theorem closed_nz58_any (c : Nat) : closed c nz58 = true :=
+  closed_mono closed_nz58 (Nat.zero_le c)
+theorem closed_nz64_any (c : Nat) : closed c nz64 = true :=
+  closed_mono closed_nz64 (Nat.zero_le c)
+theorem closed_nz112_any (c : Nat) : closed c nz112 = true :=
+  closed_mono closed_nz112 (Nat.zero_le c)
+
+theorem closed_pack2L : closed 0 pack2L = true := by
+  simp [pack2L, packLets, packL1, packL2, packL3, packL4, packL5,
+        packL6, packL7, packL8, packL9, packBody, packChunks,
+        ltV, liV, ldV, trawV, irawV, drawV, iptrV, dptrV, iddrV, imgV,
+        bytesChunk, bMZ, b40, bPE, bCOFF, b20B, bZero4, b1000, bQ14,
+        bAlign, bVers, bII20, bSub, bStack, bDirs, bZero8, b2000,
+        bText, b200, bTextFl, bIdata, bIdataFl, bData, b3000, bDataFl,
+        nz58, nz64, nz112,
+        closed, List.foldr, List.foldl, aps,
+        closed_lenb4L_any, closed_align512L_any, closed_align4096L_any,
+        closed_b4addL_any, closed_u64L_any, closed_padlistL_any,
+        closed_zerofillL_any, closed_joinL_any, closed_conssL_any,
+        closed_pairSrcL_any, closed_nibLit_any,
+        closed_churchL_any, closed_churchMulL_any, closed_churchAddL_any,
+        closed_nz58_any, closed_nz64_any, closed_nz112_any,
+        closed_nilL_any]
+
+-- the instantiated chunk list: let-values substituted -------------
+
+/-- `packChunks` after all 14 betas — each var resolved to its
+    (instantiated) let-value; `T I D S` the section inputs. -/
+def packChunksInst (T I D S : LTerm) : List LTerm := [
+  bytesChunk bMZ,                                   -- "MZ"
+  .app zerofillL nz58,                              -- pad to 0x40
+  bytesChunk b40,                                   -- PE header offset
+  bytesChunk bPE,                                   -- "PE\0\0"
+  bytesChunk bCOFF,                                 -- COFF header
+  bytesChunk b20B,                                  -- opt magic+linkver
+  .app align512L (.app lenb4L T),                   -- traw
+  aps b4addL [.app align512L (.app lenb4L I),
+              .app align512L (.app lenb4L D)],      -- iddr
+  bytesChunk bZero4,                                -- SizeOfUninitData
+  bytesChunk b1000,                                 -- EntryPoint
+  bytesChunk b1000,                                 -- BaseOfCode
+  bytesChunk bQ14,                                  -- ImageBase
+  bytesChunk bAlign,                                -- Section/FileAlign
+  bytesChunk bVers,                                 -- versions
+  bytesChunk bZero4,                                -- Win32Version
+  .app align4096L (aps b4addL [bytesChunk b3000,
+    .app lenb4L D]),                                -- img
+  bytesChunk bII20,                                 -- SizeOfHeaders+cksum
+  bytesChunk bSub,                                  -- subsystem+DLLchar
+  .app u64L S,                                      -- stackres
+  bytesChunk bStack,                                -- stack/heap
+  bytesChunk bDirs,                                 -- loader flags, ndirs
+  bytesChunk bZero8,                                -- export dir (empty)
+  bytesChunk b2000,                                 -- import dir RVA
+  .app lenb4L I,                                    -- li
+  .app zerofillL nz112,                             -- rest of dirs
+  bytesChunk bText,                                 -- ".text"
+  .app lenb4L T,                                    -- lt
+  bytesChunk b1000,                                 -- .text RVA
+  .app align512L (.app lenb4L T),                   -- traw
+  bytesChunk b200,                                  -- .text raw ptr
+  .app zerofillL (churchL 12),                      -- section rest
+  bytesChunk bTextFl,                               -- .text flags
+  bytesChunk bIdata,                                -- ".idata"
+  .app lenb4L I,                                    -- li
+  bytesChunk b2000,                                 -- .idata RVA
+  .app align512L (.app lenb4L I),                   -- iraw
+  aps b4addL [bytesChunk b200,
+    .app align512L (.app lenb4L T)],                -- iptr
+  .app zerofillL (churchL 12),
+  bytesChunk bIdataFl,
+  bytesChunk bData,                                 -- ".data"
+  .app lenb4L D,                                    -- ld
+  bytesChunk b3000,
+  .app align512L (.app lenb4L D),                   -- draw
+  aps b4addL [aps b4addL [bytesChunk b200,
+                .app align512L (.app lenb4L T)],
+              .app align512L (.app lenb4L I)],      -- dptr
+  .app zerofillL (churchL 12),
+  bytesChunk bDataFl,
+  .app zerofillL nz64,                              -- pad to 0x200
+  T,                                                -- text
+  .app padlistL (.app lenb4L T),                    -- PADLIST lt
+  I,                                                -- idata
+  .app padlistL (.app lenb4L I),                    -- PADLIST li
+  D,                                                -- datab
+  .app padlistL (.app lenb4L D)]                    -- PADLIST ld
+
+/-- `conss`-chain over a chunk list — the JOIN argument's shape. -/
+def chunkChain (cs : List LTerm) : LTerm :=
+  cs.foldr (fun c t => aps conssL [c, t]) nilL
+
+-- semantic image ----------------------------------------------------
+
+/-- byte-list → cell-list. -/
+def bm (xs : List (Fin 16 × Fin 16)) : List LTerm :=
+  xs.map (fun p => byteLit p.1 p.2)
+
+/-- `_LENB4`'s semantic count — bytes4 incremented once per cell. -/
+def len4 (xs : List (Fin 16 × Fin 16)) : List (Fin 16 × Fin 16) :=
+  xs.foldl (fun a _ => incBytes a true) b4zeroBytes
+
+theorem len4_length (xs : List (Fin 16 × Fin 16)) :
+    (len4 xs).length = 4 := by
+  have h : ∀ (xs acc : List (Fin 16 × Fin 16)),
+      (xs.foldl (fun a _ => incBytes a true) acc).length
+      = acc.length := by
+    intro xs; induction xs with
+    | nil => intro acc; rfl
+    | cons x xs ih =>
+        intro acc
+        simp only [List.foldl_cons]
+        rw [ih, incBytes_length]
+  rw [len4, h]; rfl
+
+/-- `ALIGN512`'s semantic output bytes: `resList` destructured, byte0
+    := 0, byte1.lo `& 0xE`. -/
+def align512Bytes (xs : List (Fin 16 × Fin 16)) :
+    List (Fin 16 × Fin 16) :=
+  match resList xs b4_1FF 0 with
+  | [_, w1, w2, w3] => [(0, 0), (nibMaskE w1.1, w1.2), w2, w3]
+  | _ => []
+
+/-- `ALIGN4096`'s semantic output bytes: byte1 := `PAIR sel0 hi`. -/
+def align4096Bytes (xs : List (Fin 16 × Fin 16)) :
+    List (Fin 16 × Fin 16) :=
+  match resList xs b4_FFF 0 with
+  | [_, w1, w2, w3] => [(0, 0), (0, w1.2), w2, w3]
+  | _ => []
+
+theorem align512Bytes_length (xs : List (Fin 16 × Fin 16))
+    (h : xs.length = 4) : (align512Bytes xs).length = 4 := by
+  have hl : (resList xs b4_1FF 0).length = 4 := by
+    rw [resList_length _ _ _ (by simp [b4_1FF]; exact h), h]
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hl
+  simp [align512Bytes, hws]
+
+theorem align4096Bytes_length (xs : List (Fin 16 × Fin 16))
+    (h : xs.length = 4) : (align4096Bytes xs).length = 4 := by
+  have hl : (resList xs b4_FFF 0).length = 4 := by
+    rw [resList_length _ _ _ (by simp [b4_FFF]; exact h), h]
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hl
+  simp [align4096Bytes, hws]
+
+/-- `PADLIST`'s remainder from a length-list (`0` on short input —
+    unreachable on `len4` outputs). -/
+def padRemOf (xs : List (Fin 16 × Fin 16)) : Nat :=
+  match xs with
+  | x0 :: x1 :: _ => padRemN x0 x1
+  | _ => 0
+
+/-- the 53 chunk cell-lists — the PE image's byte payload by section. -/
+def pack2Cells (tb ib db sb : List (Fin 16 × Fin 16)) : List (List LTerm) :=
+  let ltB := len4 tb
+  let liB := len4 ib
+  let ldB := len4 db
+  let trawB := align512Bytes ltB
+  let irawB := align512Bytes liB
+  let drawB := align512Bytes ldB
+  let iptrB := resList b200 trawB 0
+  let dptrB := resList iptrB irawB 0
+  let iddrB := resList irawB drawB 0
+  let imgB := align4096Bytes (resList b3000 ldB 0)
+  [ bm bMZ, List.replicate 58 b0cT, bm b40, bm bPE, bm bCOFF, bm b20B,
+    bm trawB, bm iddrB,
+    bm bZero4, bm b1000, bm b1000, bm bQ14, bm bAlign, bm bVers,
+    bm bZero4, bm imgB, bm bII20, bm bSub,
+    bm sb ++ List.replicate 4 b0cT,
+    bm bStack, bm bDirs, bm bZero8, bm b2000,
+    bm liB, List.replicate 112 b0cT, bm bText, bm ltB, bm b1000,
+    bm trawB, bm b200, List.replicate 12 b0cT, bm bTextFl,
+    bm bIdata, bm liB, bm b2000, bm irawB, bm iptrB,
+    List.replicate 12 b0cT, bm bIdataFl, bm bData, bm ldB, bm b3000,
+    bm drawB, bm dptrB, List.replicate 12 b0cT, bm bDataFl,
+    List.replicate 64 b0cT,
+    bm tb, padCells (padRemOf ltB), bm ib, padCells (padRemOf liB),
+    bm db, padCells (padRemOf ldB) ]
+
+-- the 14-beta milestone ------------------------------------------------
+
+set_option maxHeartbeats 8000000 in
+theorem pack2_open (T I D S : LTerm)
+    (hT : closed 0 T = true) (hI : closed 0 I = true)
+    (hD : closed 0 D = true) (hS : closed 0 S = true) :
+    LRed (aps pack2L [T, I, D, S])
+         (.app joinL (chunkChain (packChunksInst T I D S))) :=
+  LRed_of_hsteps (k := 14) (by
+    simp [pack2L, packLets, packL1, packL2, packL3, packL4, packL5,
+          packL6, packL7, packL8, packL9, packBody, packChunks,
+          packChunksInst, chunkChain,
+          ltV, liV, ldV, trawV, irawV, drawV, iptrV, dptrV, iddrV, imgV,
+          bytesChunk, bMZ, b40, bPE, bCOFF, b20B, bZero4, b1000, bQ14,
+          bAlign, bVers, bII20, bSub, bStack, bDirs, bZero8, b2000,
+          bText, b200, bTextFl, bIdata, bIdataFl, bData, b3000, bDataFl,
+          nz58, nz64, nz112,
+          aps, List.foldl, List.foldr,
+          hsteps, hstep, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, subst_of_closed,
+          shift_of_closed0, shift_of_closed,
+          closed, closed_app, closed_mono,
+          hT, hI, hD, hS,
+          closed_lenb4L_any, closed_align512L_any, closed_align4096L_any,
+          closed_b4addL_any, closed_u64L_any, closed_padlistL_any,
+          closed_zerofillL_any, closed_joinL_any, closed_conssL_any,
+          closed_pairSrcL_any, closed_nibLit_any, closed_churchL_any,
+          closed_churchMulL_any, closed_churchAddL_any,
+          closed_nz58_any, closed_nz64_any, closed_nz112_any,
+          closed_klL_any, closed_nilL_any, closed_bytesChunk_any])
+
+-- closedness of packCells elements --------------------------------------
+
+theorem closed_bm {e : LTerm} {xs : List (Fin 16 × Fin 16)}
+    (he : e ∈ bm xs) : closed 0 e = true := by
+  obtain ⟨q, _, rfl⟩ := List.mem_map.mp he
+  exact closed_byteLit _ _
+
+theorem closed_padCells {e : LTerm} {r : Nat}
+    (he : e ∈ padCells r) : closed 0 e = true := by
+  simp only [padCells] at he
+  split at he
+  · simp at he
+  · exact closed_rep_b0c
+      (List.Sublist.mem he (List.drop_sublist _ _))
+
+-- bridge: fold over mapped cells = fold over the bytes -------------------
+
+theorem foldl_const_step_map {α β γ : Type} (l : List α) (g : α → β)
+    (f : γ → γ) (acc : γ) :
+    (l.map g).foldl (fun a _ => f a) acc
+      = l.foldl (fun a _ => f a) acc := by
+  induction l generalizing acc with
+  | nil => rfl
+  | cons x xs ih =>
+      simp only [List.map_cons, List.foldl_cons]
+      exact ih _
+
+-- closedness of every cell the image produces ----------------------------
+
+theorem closed_bm_app_rep {e : LTerm} {xs : List (Fin 16 × Fin 16)}
+    {n : Nat} (he : e ∈ bm xs ++ List.replicate n b0cT) :
+    closed 0 e = true := by
+  rcases List.mem_append.mp he with h|h <;>
+    first | exact closed_bm h | exact closed_rep_b0c h
+
+theorem closed_pack2Cells_flat {e : LTerm} {tb ib db sb}
+    (he : e ∈ (pack2Cells tb ib db sb).flatten) :
+    closed 0 e = true := by
+  obtain ⟨cs, hcs, he⟩ := List.mem_flatten.mp he
+  simp only [pack2Cells, List.mem_cons, List.not_mem_nil,
+             or_false] at hcs
+  rcases hcs with rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|
+    rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|
+    rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|rfl|
+    rfl|rfl|rfl|rfl|rfl|rfl|rfl
+  all_goals first
+    | exact closed_bm he
+    | exact closed_padCells he
+    | exact closed_rep_b0c he
+    | exact closed_bm_app_rep he
+
+-- the assembly ------------------------------------------------------------
+
+set_option maxHeartbeats 8000000 in
+theorem pack2_eval (tb ib db sb : List (Fin 16 × Fin 16)) :
+    LRed (aps pack2L [scottList (bm tb), scottList (bm ib),
+                      scottList (bm db), scottList (bm sb)])
+         (scottList (pack2Cells tb ib db sb).flatten) := by
+  -- input closedness
+  have hclT : ∀ e ∈ bm tb, closed 0 e = true := fun _ h => closed_bm h
+  have hclI : ∀ e ∈ bm ib, closed 0 e = true := fun _ h => closed_bm h
+  have hclD : ∀ e ∈ bm db, closed 0 e = true := fun _ h => closed_bm h
+  have hclS : ∀ e ∈ bm sb, closed 0 e = true := fun _ h => closed_bm h
+  have hscT : closed 0 (scottList (bm tb)) = true := closed_scottList hclT
+  have hscI : closed 0 (scottList (bm ib)) = true := closed_scottList hclI
+  have hscD : closed 0 (scottList (bm db)) = true := closed_scottList hclD
+  have hscS : closed 0 (scottList (bm sb)) = true := closed_scottList hclS
+  -- LENB4 legs
+  have hlt : LRed (.app lenb4L (scottList (bm tb)))
+      (scottList (bm (len4 tb))) := by
+    have h := lenb4_eval (bm tb) hclT
+    simp only [bm] at h
+    rw [foldl_const_step_map] at h
+    exact h
+  have hli : LRed (.app lenb4L (scottList (bm ib)))
+      (scottList (bm (len4 ib))) := by
+    have h := lenb4_eval (bm ib) hclI
+    simp only [bm] at h
+    rw [foldl_const_step_map] at h
+    exact h
+  have hld : LRed (.app lenb4L (scottList (bm db)))
+      (scottList (bm (len4 db))) := by
+    have h := lenb4_eval (bm db) hclD
+    simp only [bm] at h
+    rw [foldl_const_step_map] at h
+    exact h
+  -- lengths
+  have hlt4 : (len4 tb).length = 4 := len4_length tb
+  have hli4 : (len4 ib).length = 4 := len4_length ib
+  have hld4 : (len4 db).length = 4 := len4_length db
+  have htraw4 : (align512Bytes (len4 tb)).length = 4 :=
+    align512Bytes_length _ hlt4
+  have hiraw4 : (align512Bytes (len4 ib)).length = 4 :=
+    align512Bytes_length _ hli4
+  have hdraw4 : (align512Bytes (len4 db)).length = 4 :=
+    align512Bytes_length _ hld4
+  have hiptr4 : (resList b200 (align512Bytes (len4 tb)) 0).length = 4 := by
+    rw [resList_length _ _ _ (by rw [htraw4]; rfl), show b200.length = 4 from rfl]
+  -- ALIGN legs (existential destructures)
+  have htraw : LRed (.app align512L (scottList (bm (len4 tb))))
+      (scottList (bm (align512Bytes (len4 tb)))) := by
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align512_eval_scott (len4 tb) hlt4
+    have heq : bm (align512Bytes (len4 tb)) =
+        [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+         byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+      simp [align512Bytes, hws, bm]
+    rw [heq]; exact hred
+  have hiraw : LRed (.app align512L (scottList (bm (len4 ib))))
+      (scottList (bm (align512Bytes (len4 ib)))) := by
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align512_eval_scott (len4 ib) hli4
+    have heq : bm (align512Bytes (len4 ib)) =
+        [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+         byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+      simp [align512Bytes, hws, bm]
+    rw [heq]; exact hred
+  have hdraw : LRed (.app align512L (scottList (bm (len4 db))))
+      (scottList (bm (align512Bytes (len4 db)))) := by
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align512_eval_scott (len4 db) hld4
+    have heq : bm (align512Bytes (len4 db)) =
+        [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+         byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+      simp [align512Bytes, hws, bm]
+    rw [heq]; exact hred
+  -- B4ADD congruence helper
+  have hb4add : ∀ {A B : LTerm} {as bs : List (Fin 16 × Fin 16)},
+      LRed A (scottList (bm as)) → LRed B (scottList (bm bs)) →
+      as.length = bs.length →
+      LRed (aps b4addL [A, B]) (scottList (bm (resList as bs 0))) := by
+    intro A B as bs hA hB hl
+    exact ((LRed_app_left (LRed_app_right hA)).trans
+      (LRed_app_right hB)).trans (b4add_eval_scott as bs hl)
+  -- composed let-value legs
+  have htrawT : LRed (.app align512L (.app lenb4L (scottList (bm tb))))
+      (scottList (bm (align512Bytes (len4 tb)))) :=
+    (LRed_app_right hlt).trans htraw
+  have hirawT : LRed (.app align512L (.app lenb4L (scottList (bm ib))))
+      (scottList (bm (align512Bytes (len4 ib)))) :=
+    (LRed_app_right hli).trans hiraw
+  have hdrawT : LRed (.app align512L (.app lenb4L (scottList (bm db))))
+      (scottList (bm (align512Bytes (len4 db)))) :=
+    (LRed_app_right hld).trans hdraw
+  have hiptrT : LRed (aps b4addL [bytesChunk b200,
+        .app align512L (.app lenb4L (scottList (bm tb)))])
+      (scottList (bm (resList b200 (align512Bytes (len4 tb)) 0))) :=
+    hb4add (bytesChunk_nf b200) htrawT (by rw [htraw4]; rfl)
+  have hdptrT : LRed (aps b4addL [aps b4addL [bytesChunk b200,
+        .app align512L (.app lenb4L (scottList (bm tb)))],
+        .app align512L (.app lenb4L (scottList (bm ib)))])
+      (scottList (bm (resList (resList b200 (align512Bytes (len4 tb)) 0)
+        (align512Bytes (len4 ib)) 0))) :=
+    hb4add hiptrT hirawT (by rw [hiptr4, hiraw4])
+  have hiddrT : LRed (aps b4addL
+        [.app align512L (.app lenb4L (scottList (bm ib))),
+         .app align512L (.app lenb4L (scottList (bm db)))])
+      (scottList (bm (resList (align512Bytes (len4 ib))
+        (align512Bytes (len4 db)) 0))) :=
+    hb4add hirawT hdrawT (by rw [hiraw4, hdraw4])
+  have himgT : LRed (.app align4096L (aps b4addL [bytesChunk b3000,
+        .app lenb4L (scottList (bm db))]))
+      (scottList (bm (align4096Bytes (resList b3000 (len4 db) 0)))) := by
+    have hpre : LRed (aps b4addL [bytesChunk b3000,
+          .app lenb4L (scottList (bm db))])
+        (scottList (bm (resList b3000 (len4 db) 0))) :=
+      hb4add (bytesChunk_nf b3000) hld (by rw [hld4]; rfl)
+    have hlen4' : (resList b3000 (len4 db) 0).length = 4 := by
+      rw [resList_length _ _ _ (by rw [hld4]; rfl)]
+      rfl
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align4096_eval_scott (resList b3000 (len4 db) 0) hlen4'
+    have h2 : LRed (.app align4096L (scottList (bm (resList b3000
+          (len4 db) 0))))
+        (scottList (bm (align4096Bytes (resList b3000 (len4 db) 0)))) := by
+      have heq : bm (align4096Bytes (resList b3000 (len4 db) 0)) =
+          [byteLit 0 0, byteLit 0 w1.2,
+           byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+        simp [align4096Bytes, hws, bm]
+      rw [heq]; exact hred
+    exact (LRed_app_right hpre).trans h2
+  -- PADLIST legs
+  have hpadT : LRed (.app padlistL (.app lenb4L (scottList (bm tb))))
+      (scottList (padCells (padRemOf (len4 tb)))) := by
+    obtain ⟨x0, x1, x2, x3, hx⟩ := exists_eq_of_length4 hlt4
+    have h2 : LRed (.app padlistL (scottList (bm (len4 tb))))
+        (scottList (padCells (padRemOf (len4 tb)))) := by
+      have heq : bm (len4 tb) =
+          [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+           byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+        rw [hx]; rfl
+      have heq2 : padCells (padRemOf (len4 tb)) =
+          padCells (padRemN x0 x1) := by
+        rw [hx]; rfl
+      rw [heq, heq2]; exact padlist_eval_scott x0 x1 x2 x3
+    exact (LRed_app_right hlt).trans h2
+  have hpadI : LRed (.app padlistL (.app lenb4L (scottList (bm ib))))
+      (scottList (padCells (padRemOf (len4 ib)))) := by
+    obtain ⟨x0, x1, x2, x3, hx⟩ := exists_eq_of_length4 hli4
+    have h2 : LRed (.app padlistL (scottList (bm (len4 ib))))
+        (scottList (padCells (padRemOf (len4 ib)))) := by
+      have heq : bm (len4 ib) =
+          [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+           byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+        rw [hx]; rfl
+      have heq2 : padCells (padRemOf (len4 ib)) =
+          padCells (padRemN x0 x1) := by
+        rw [hx]; rfl
+      rw [heq, heq2]; exact padlist_eval_scott x0 x1 x2 x3
+    exact (LRed_app_right hli).trans h2
+  have hpadD : LRed (.app padlistL (.app lenb4L (scottList (bm db))))
+      (scottList (padCells (padRemOf (len4 db)))) := by
+    obtain ⟨x0, x1, x2, x3, hx⟩ := exists_eq_of_length4 hld4
+    have h2 : LRed (.app padlistL (scottList (bm (len4 db))))
+        (scottList (padCells (padRemOf (len4 db)))) := by
+      have heq : bm (len4 db) =
+          [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+           byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+        rw [hx]; rfl
+      have heq2 : padCells (padRemOf (len4 db)) =
+          padCells (padRemN x0 x1) := by
+        rw [hx]; rfl
+      rw [heq, heq2]; exact padlist_eval_scott x0 x1 x2 x3
+    exact (LRed_app_right hld).trans h2
+  -- ZEROFILL chunks
+  have hZF58 : LRed (.app zerofillL nz58)
+      (scottList (List.replicate 58 b0cT)) :=
+    zerofill_num 58 nz58 nz58_num closed_nz58
+  have hZF64 : LRed (.app zerofillL nz64)
+      (scottList (List.replicate 64 b0cT)) :=
+    zerofill_num 64 nz64 nz64_num closed_nz64
+  have hZF112 : LRed (.app zerofillL nz112)
+      (scottList (List.replicate 112 b0cT)) :=
+    zerofill_num 112 nz112 nz112_num closed_nz112
+  have hZF12 : LRed (.app zerofillL (churchL 12))
+      (scottList (List.replicate 12 b0cT)) :=
+    zerofill_num 12 (churchL 12) (churchL_num 12) (closed_churchL 12)
+  -- the 53-chunk Forall₂
+  have hForall : List.Forall₂ LRed
+      (packChunksInst (scottList (bm tb)) (scottList (bm ib))
+        (scottList (bm db)) (scottList (bm sb)))
+      ((pack2Cells tb ib db sb).map scottList) := by
+    simp only [packChunksInst, pack2Cells, List.map_cons, List.map_nil]
+    repeat' (first | apply List.Forall₂.nil | apply List.Forall₂.cons)
+    all_goals first
+      | exact hZF58 | exact hZF64 | exact hZF112 | exact hZF12
+      | exact hlt | exact hli | exact hld
+      | exact htrawT | exact hirawT | exact hdrawT
+      | exact hiptrT | exact hdptrT | exact hiddrT | exact himgT
+      | exact hpadT | exact hpadI | exact hpadD
+      | exact u64_eval_scott _
+      | exact bytesChunk_nf _
+      | exact Relation.ReflTransGen.refl
+  -- chain collapse + join
+  have hflat : ∀ e ∈ (pack2Cells tb ib db sb).flatten,
+      closed 0 e = true := fun _ h => closed_pack2Cells_flat h
+  have hcells : ∀ e ∈ (pack2Cells tb ib db sb).map scottList,
+      closed 0 e = true := by
+    intro e he
+    obtain ⟨bs, hbs, rfl⟩ := List.mem_map.mp he
+    exact closed_scottList (fun x hx =>
+      hflat x (List.mem_flatten.mpr ⟨bs, hbs, hx⟩))
+  have hchain : LRed (chunkChain (packChunksInst (scottList (bm tb))
+        (scottList (bm ib)) (scottList (bm db)) (scottList (bm sb))))
+      (scottList ((pack2Cells tb ib db sb).map scottList)) :=
+    (conssChain_map_red hForall).trans (conssChain_nf _ hcells)
+  exact ((pack2_open _ _ _ _ hscT hscI hscD hscS).trans
+    (LRed_app_right hchain)).trans (join_eval _ hflat)
+
+#print axioms pack2_open
+#print axioms len4_length
+#print axioms align512Bytes_length
+#print axioms align4096Bytes_length
+#print axioms foldl_const_step_map
+#print axioms closed_pack2Cells_flat
+#print axioms pack2_eval
+
+
 end ISAR
