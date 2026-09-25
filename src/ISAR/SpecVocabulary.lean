@@ -2316,4 +2316,918 @@ theorem zerofill_eval (n : Nat) :
 #print axioms join_eval
 #print axioms zerofill_eval
 
+-- ============================================================
+-- _B4INC: bytes4 increment — peel + early-exit INCB carry chain.
+-- ============================================================
+
+-- nibble successor table ---------------------------------------
+
+/-- `_NIBSUCC = (\a. a sel_1 sel_2 … sel_15 sel_0)` — picks succ. -/
+def nibsuccL : LTerm :=
+  .abs (aps (.var 0) (List.ofFn fun j : Fin 16 =>
+    nibLit ⟨(j.val + 1) % 16, by omega⟩))
+
+theorem closed_nibsuccL : closed 0 nibsuccL = true := by decide
+
+/-- `_NIBIS15 = (\a. a BF×15 BT)` — picks BT iff a = 15. -/
+def nibis15L : LTerm :=
+  .abs (aps (.var 0) (List.ofFn fun j : Fin 16 =>
+    boolLit (decide (j.val = 15))))
+
+theorem closed_nibis15L : closed 0 nibis15L = true := by decide
+
+theorem nibsucc_table : ∀ i : Fin 16,
+    hsteps 24 (aps nibsuccL [nibLit i])
+      = nibLit ⟨(i.val + 1) % 16, by omega⟩ := by
+  decide
+
+theorem nibis15_table : ∀ i : Fin 16,
+    hsteps 24 (aps nibis15L [nibLit i])
+      = boolLit (decide (i.val = 15)) := by
+  decide
+
+theorem nibsucc_correct (i : Fin 16) :
+    LRed (aps nibsuccL [nibLit i])
+         (nibLit ⟨(i.val + 1) % 16, by omega⟩) :=
+  LRed_of_hsteps (nibsucc_table i)
+
+theorem nibis15_correct (i : Fin 16) :
+    LRed (aps nibis15L [nibLit i]) (boolLit (decide (i.val = 15))) :=
+  LRed_of_hsteps (nibis15_table i)
+
+-- bool dispatch ------------------------------------------------
+
+/-- `boolLit b·x·y →* x`/`y` — Church-boolean if-then-else. -/
+theorem boolLit_branch (b : Bool) (x y : LTerm)
+    (hx : closed 0 x = true) (hy : closed 0 y = true) :
+    LRed (aps (boolLit b) [x, y]) (if b then x else y) := by
+  cases b <;>
+    simp only [boolLit, aps, List.foldl, ite_true, ite_false] <;>
+    exact LRed_of_hsteps (k := 2) (by
+      simp [klL, kilL, hsteps, hstep, subst, shift,
+            shift_of_closed0 hx, subst_of_closed0 hx,
+            shift_of_closed0 hy, subst_of_closed0 hy])
+
+-- INCB: byte increment → (byte', carry) -------------------------
+--
+-- `_INCB = \b. b (\lo.\hi. (NIBIS15 lo)
+--   (PAIR (PAIR sel0 (NIBSUCC hi)) (NIBIS15 hi))
+--   (PAIR (PAIR (NIBSUCC lo) hi) BF))`
+-- b = byteLit lo hi = pairLit loN hiN — applied to the continuation
+-- peels lo,hi into head position.
+
+/-- `_INCB`'s continuation body, lo = var 1, hi = var 0. -/
+def incbCont : LTerm :=
+  .abs (.abs
+    (aps (aps nibis15L [.var 1])
+      [ aps pairSrcL
+          [ aps pairSrcL [nibLit 0, aps nibsuccL [.var 0]],
+            aps nibis15L [.var 0]],
+        aps pairSrcL
+          [ aps pairSrcL [aps nibsuccL [.var 1], .var 0],
+            kilL ] ]))
+
+/-- `_INCB = \b. b incbCont`. -/
+def incbL : LTerm := .abs (.app (.var 0) incbCont)
+
+theorem closed_incbCont : closed 2 incbCont = true := by decide
+
+theorem closed_incbL : closed 0 incbL = true := by decide
+
+/-- Byte-level semantic increment: (byte', carry-out). -/
+def incByteN (lo hi : Fin 16) : (Fin 16 × Fin 16) × Bool :=
+  if lo.val = 15 then
+    (⟨0, ⟨(hi.val + 1) % 16, by omega⟩⟩, hi.val = 15)
+  else
+    ((⟨(lo.val + 1) % 16, by omega⟩, hi), false)
+
+/-- `INCB·(byteLit lo hi)` — milestone: peel `b`, run `incbCont` — the
+    `nibis15` dispatch over the two PAIR branches (raw apps inside). -/
+theorem incb_unfold (lo hi : Fin 16) :
+    LRed (.app incbL (byteLit lo hi))
+         (aps (aps nibis15L [nibLit lo])
+           [ aps pairSrcL
+               [ aps pairSrcL [nibLit 0, aps nibsuccL [nibLit hi]],
+                 aps nibis15L [nibLit hi]],
+             aps pairSrcL
+               [ aps pairSrcL [aps nibsuccL [nibLit lo], nibLit hi],
+                 kilL ] ]) :=
+  LRed_of_hsteps (k := 4) (by
+    simp [incbL, incbCont, byteLit, pairLit, aps, List.foldl,
+          hsteps, hstep, subst, shift,
+          shift_of_closed0, subst_of_closed0,
+          closed_nibLit, closed_nibsuccL, closed_nibis15L,
+          closed_pairSrcL, closed_kilL])
+
+/-- Inner: normalize `pairSrcL·(nibsucc·hiN)·x` → `pairLit (nibLit hi') x`-
+    shaped milestones — the ordering discipline: nibsucc normalizes in
+    argument position before the pairSrc head collapses. -/
+private theorem incb_branchA (hi : Fin 16) :
+    LRed (aps pairSrcL
+           [ aps pairSrcL [nibLit 0, aps nibsuccL [nibLit hi]],
+             aps nibis15L [nibLit hi]])
+         (pairLit (byteLit 0 ⟨(hi.val + 1) % 16, by omega⟩)
+                  (boolLit (decide (hi.val = 15)))) := by
+  have hs : LRed (aps nibsuccL [nibLit hi])
+      (nibLit ⟨(hi.val + 1) % 16, by omega⟩) := nibsucc_correct hi
+  have hc : LRed (aps nibis15L [nibLit hi])
+      (boolLit (decide (hi.val = 15))) := nibis15_correct hi
+  -- normalize inside the byte-pair: nibsucc in arg position, then
+  -- pairSrc collapses to the byteLit.
+  have hb : LRed (aps pairSrcL [nibLit 0, aps nibsuccL [nibLit hi]])
+      (byteLit 0 ⟨(hi.val + 1) % 16, by omega⟩) :=
+    (LRed_app_right hs).trans
+      (pairSrc_nf _ _ (closed_nibLit _) (closed_nibLit _))
+  -- lift both normalizations into the outer pairSrc's arguments.
+  exact ((LRed_app_left (LRed_app_right hb)).trans
+    (LRed_app_right hc)).trans
+    (pairSrc_nf _ _ (closed_byteLit _ _) (closed_boolLit _))
+
+private theorem incb_branchB (lo hi : Fin 16) :
+    LRed (aps pairSrcL
+           [ aps pairSrcL [aps nibsuccL [nibLit lo], nibLit hi],
+             kilL ])
+         (pairLit (byteLit ⟨(lo.val + 1) % 16, by omega⟩ hi)
+                  (boolLit false)) := by
+  have hs : LRed (aps nibsuccL [nibLit lo])
+      (nibLit ⟨(lo.val + 1) % 16, by omega⟩) := nibsucc_correct lo
+  have hb : LRed (aps pairSrcL [aps nibsuccL [nibLit lo], nibLit hi])
+      (byteLit ⟨(lo.val + 1) % 16, by omega⟩ hi) :=
+    -- nibsucc sits in the FIRST argument: lift through app-left.
+    (LRed_app_left (LRed_app_right hs)).trans
+      (pairSrc_nf _ _ (closed_nibLit _) (closed_nibLit _))
+  exact ((LRed_app_left (LRed_app_right hb))).trans
+    (pairSrc_nf _ _ (closed_byteLit _ _) closed_kilL)
+
+/-- **`INCB` eval**: byte increment computes `incByteN` — (byte', carry)
+    as a normalized pair.  All components reduce in argument position
+    before the pairLit heads close over them. -/
+theorem incb_eval (lo hi : Fin 16) :
+    LRed (.app incbL (byteLit lo hi))
+         (pairLit (Function.uncurry byteLit (incByteN lo hi).1)
+                  (boolLit (incByteN lo hi).2)) := by
+  have hA := incb_branchA hi
+  have hB := incb_branchB lo hi
+  -- lift both branch normalizations into the dispatch's arguments.
+  have hdisp : LRed (aps (aps nibis15L [nibLit lo])
+        [ aps pairSrcL
+            [ aps pairSrcL [nibLit 0, aps nibsuccL [nibLit hi]],
+              aps nibis15L [nibLit hi]],
+          aps pairSrcL
+            [ aps pairSrcL [aps nibsuccL [nibLit lo], nibLit hi],
+              kilL ] ])
+      (aps (boolLit (decide (lo.val = 15)))
+        [ pairLit (byteLit 0 ⟨(hi.val + 1) % 16, by omega⟩)
+                  (boolLit (decide (hi.val = 15))),
+          pairLit (byteLit ⟨(lo.val + 1) % 16, by omega⟩ hi)
+                  (boolLit false) ]) :=
+    (LRed_app_left (LRed_app_left (nibis15_correct lo))).trans
+      ((LRed_app_left (LRed_app_right hA)).trans
+        (LRed_app_right hB))
+  have hclosedA : closed 0 (pairLit (byteLit 0
+      ⟨(hi.val + 1) % 16, by omega⟩)
+      (boolLit (decide (hi.val = 15)))) = true :=
+    closed_pairLit (closed_mono (closed_byteLit _ _) (Nat.zero_le 1))
+      (closed_mono (closed_boolLit _) (Nat.zero_le 1))
+  have hclosedB : closed 0 (pairLit (byteLit
+      ⟨(lo.val + 1) % 16, by omega⟩ hi) (boolLit false)) = true :=
+    closed_pairLit (closed_mono (closed_byteLit _ _) (Nat.zero_le 1))
+      (closed_mono (closed_boolLit _) (Nat.zero_le 1))
+  have hbr : LRed (aps (boolLit (decide (lo.val = 15)))
+        [ pairLit (byteLit 0 ⟨(hi.val + 1) % 16, by omega⟩)
+                  (boolLit (decide (hi.val = 15))),
+          pairLit (byteLit ⟨(lo.val + 1) % 16, by omega⟩ hi)
+                  (boolLit false) ])
+      (if decide (lo.val = 15)
+        then pairLit (byteLit 0 ⟨(hi.val + 1) % 16, by omega⟩)
+                     (boolLit (decide (hi.val = 15)))
+        else pairLit (byteLit ⟨(lo.val + 1) % 16, by omega⟩ hi)
+                     (boolLit false)) :=
+    boolLit_branch _ _ _ hclosedA hclosedB
+  refine (incb_unfold lo hi).trans (hdisp.trans (hbr.trans ?_))
+  by_cases h : lo.val = 15 <;>
+    simp only [incByteN, h, decide_true, decide_false, ite_true,
+               ite_false, Function.uncurry, List.map] <;>
+    rfl
+
+-- generic pair application ----------------------------------------
+
+/-- `shift 0` is the identity on any term. -/
+theorem shift_zero (c : Nat) (t : LTerm) : shift 0 c t = t := by
+  induction t generalizing c with
+  | var n => simp [shift]
+  | abs b ih => simp [shift, ih]
+  | app f x ihf ihx => simp [shift, ihf, ihx]
+
+/-- β-hole cancellation: `shift 1 c` opens a hole at index `c`;
+    `subst s c` fills it — net identity. -/
+theorem subst_shift_succ (s : LTerm) (c : Nat) (t : LTerm) :
+    subst s c (shift 1 c t) = t := by
+  induction t generalizing c with
+  | var n =>
+      show subst s c (if n < c then .var n else .var (n + 1)) = .var n
+      split
+      · rename_i h
+        show subst s c (.var n) = .var n
+        simp [subst, h]
+      · rename_i h
+        show subst s c (.var (n + 1)) = .var n
+        show (if n + 1 < c then .var (n + 1)
+              else if n + 1 = c then shift c 0 s else .var n) = .var n
+        rw [if_neg (by omega), if_neg (by omega)]
+  | abs b ih =>
+      show subst s c (LTerm.abs (shift 1 (c + 1) b)) = LTerm.abs b
+      show LTerm.abs (subst s (c + 1) (shift 1 (c + 1) b)) = LTerm.abs b
+      rw [ih]
+  | app f x ihf ihx =>
+      show subst s c (LTerm.app (shift 1 c f) (shift 1 c x)) = LTerm.app f x
+      show LTerm.app (subst s c (shift 1 c f)) (subst s c (shift 1 c x)) =
+        LTerm.app f x
+      rw [ihf, ihx]
+
+/-- `pairLit a b · k →* k·a·b` — the Church pair consumed by a
+    two-argument continuation. -/
+theorem pairLit_apply (a b k : LTerm) (ha : closed 0 a = true)
+    (hb : closed 0 b = true) :
+    LRed (.app (pairLit a b) k) (.app (.app k a) b) :=
+  LRed_of_hsteps (k := 1) (by
+    simp [pairLit, hsteps, hstep, subst, shift, shift_zero,
+          shift_of_closed0 ha, subst_of_closed0 ha,
+          shift_of_closed0 hb, subst_of_closed0 hb])
+
+-- emit-tail normalization ------------------------------------------
+--
+-- `emit cells` = conss-fold into K=nilL.  Cells normalize inside-out:
+-- the tail reduces in argument position before the outer conss
+-- collapses — the only ordering that reaches `scottList` under a
+-- no-under-binder LStep.
+
+/-- emit tail: `_conss`-fold of cell terms into `nilL`. -/
+def emitCells : List LTerm → LTerm := fun cs =>
+  cs.foldr (fun c t => aps conssL [c, t]) nilL
+
+theorem closed_emitCells {cs : List LTerm}
+    (hcl : ∀ c ∈ cs, closed 0 c = true) :
+    closed 0 (emitCells cs) = true := by
+  induction cs with
+  | nil => exact closed_nilL
+  | cons c cs ih =>
+    simp only [emitCells, List.foldr_cons]
+    exact closed_app (closed_app closed_conssL
+      (hcl c List.mem_cons_self))
+      (ih (fun e he => hcl e (List.mem_cons_of_mem c he)))
+
+/-- **`emit` NF**: the conss-fold normalizes to the `cellLit`-chain
+    `scottList` — induction inside-out through `LRed_app_right`. -/
+theorem emitCells_nf : ∀ (cs : List LTerm),
+    (∀ c ∈ cs, closed 0 c = true) →
+    LRed (emitCells cs) (scottList cs) := by
+  intro cs hcl
+  induction cs with
+  | nil => exact Relation.ReflTransGen.refl
+  | cons c cs ih =>
+    have hcc : closed 0 c = true := hcl c List.mem_cons_self
+    have hrest : closed 0 (scottList cs) = true :=
+      closed_scottList (fun e he => hcl e (List.mem_cons_of_mem c he))
+    simp only [emitCells, List.foldr_cons, scottList]
+    exact (LRed_app_right
+      (ih (fun e he => hcl e (List.mem_cons_of_mem c he)))).trans
+      (conss_nf c _ hcc hrest)
+
+-- the b4inc term ----------------------------------------------------
+--
+-- `_b4inc_body` = peel 4 byte cells, then the INCB early-exit chain.
+-- de Bruijn tables (proved by construction):
+--   at chain(i) — inside K2_{i-1}'s body, depth 8+2i:
+--     b_i = var 7   (each level adds 2 binders; b_i moves down 2)
+--   inside K2_i's λnb.λc body (depth 10+2i):
+--     c_i = var 0,  nb_i = var 1,
+--     nb_j (j<i) = 2(i-j)+1,
+--     b_k        = 2i+9-2k   (b3=2i+3 … b0=2i+9)
+
+/-- `emit(prefix ++ [nb_i] ++ [b_{i+1}..b_3])` inside K2_i's body.
+    Literal cells (the `List.range` computation leaves opaque meta-terms
+    that `subst` cannot descend into — keep it concrete). -/
+def b4incEmit : Nat → LTerm
+  | 0 => emitCells [.var 1, .var 7, .var 5, .var 3]
+  | 1 => emitCells [.var 3, .var 1, .var 7, .var 5]
+  | 2 => emitCells [.var 5, .var 3, .var 1, .var 7]
+  | _ => emitCells [.var 7, .var 5, .var 3, .var 1]
+
+/-- `λnb_i.λc_i. c_i·NEXT·EMIT` — level-i continuation. -/
+def b4incK2 (i : Nat) (next : LTerm) : LTerm :=
+  .abs (.abs (aps (.var 0) [next, b4incEmit i]))
+
+/-- chain(4): emit all four accumulated nb cells. -/
+def b4incNext3 : LTerm := b4incEmit 3
+
+def b4incChain3 : LTerm :=
+  .app (.app incbL (.var 7)) (b4incK2 3 b4incNext3)
+def b4incChain2 : LTerm :=
+  .app (.app incbL (.var 7)) (b4incK2 2 b4incChain3)
+def b4incChain1 : LTerm :=
+  .app (.app incbL (.var 7)) (b4incK2 1 b4incChain2)
+def b4incChain0 : LTerm :=
+  .app (.app incbL (.var 7)) (b4incK2 0 b4incChain1)
+
+/-- `_B4INC = \v. v K (λb0.λt0. t0 K (λb1.λt1. t1 K (λb2.λt2. t2 K
+    (λb3.λt3. chain0))))`. -/
+def b4incL : LTerm :=
+  .abs (aps (.var 0)
+    [klL, .abs (.abs (aps (.var 0)
+    [klL, .abs (.abs (aps (.var 0)
+    [klL, .abs (.abs (aps (.var 0)
+    [klL, .abs (.abs b4incChain0)]))]))]))])
+
+theorem closed_b4incL : closed 0 b4incL = true := by
+  decide
+
+-- value-parameterized chain (peel substitution applied) --------------
+--
+-- After the peel substitutes B_i := byteLit_i into the b-vars, each
+-- level's emit-list is `[nb_0..nb_i]` (bound vars) ++ the remaining byte
+-- suffix `[B_{i+1}..B_3]` (substituted literals, closed → unshifted).
+-- nb_j sits at var (2(i-j)+1) inside K2_i's λnb.λc body.
+
+/-- `λnb.λc. c·next·emit`. -/
+def b4incK2V (next emit : LTerm) : LTerm :=
+  .abs (.abs (aps (.var 0) [next, emit]))
+
+/-- `(INCB·bi)·K2_i`. -/
+def b4incChainV (bi next : LTerm) : LTerm :=
+  .app (.app incbL bi) next
+
+/-- the milestone after the 4-cell peel: the INCB carry chain over the
+    substituted cells, emit-lists literal. -/
+def b4incMilestone (B0 B1 B2 B3 : LTerm) : LTerm :=
+  let e3 := emitCells [.var 7, .var 5, .var 3, .var 1]
+  let e2 := emitCells [.var 5, .var 3, .var 1, B3]
+  let e1 := emitCells [.var 3, .var 1, B2, B3]
+  let e0 := emitCells [.var 1, B1, B2, B3]
+  let ch3 := b4incChainV B3 (b4incK2V e3 e3)
+  let ch2 := b4incChainV B2 (b4incK2V ch3 e2)
+  let ch1 := b4incChainV B1 (b4incK2V ch2 e1)
+  b4incChainV B0 (b4incK2V ch1 e0)
+
+/-- peel discharge: 4 cellLit destructures at 4 hsteps each. -/
+theorem b4inc_peel (B0 B1 B2 B3 : LTerm)
+    (h0 : closed 0 B0 = true) (h1 : closed 0 B1 = true)
+    (h2 : closed 0 B2 = true) (h3 : closed 0 B3 = true)
+    (hT3 : closed 0 (cellLit B3 nilL) = true)
+    (hT2 : closed 0 (cellLit B2 (cellLit B3 nilL)) = true)
+    (hT1 : closed 0 (cellLit B1 (cellLit B2 (cellLit B3 nilL))) = true) :
+    LRed (.app b4incL (scottList [B0, B1, B2, B3]))
+         (b4incMilestone B0 B1 B2 B3) :=
+  LRed_of_hsteps (k := 17) (by
+    simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV,
+          b4incK2V, b4incChain0, b4incChain1, b4incChain2, b4incChain3,
+          b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+          List.foldl, List.foldr, List.map, List.range, List.range',
+          hsteps, hstep, subst, shift, shift_zero,
+          shift_of_closed0, subst_of_closed0, closed, closed_app,
+          closed_mono, closed_nilL, closed_klL, closed_conssL,
+          closed_incbL, closed_pairSrcL, closed_nibsuccL,
+          closed_nibis15L, h0, h1, h2, h3])
+
+-- sanity: peel the emit result and decode cell lo nibbles.
+--   input 0+1      → byte0 = (1,0): expect nibLit 1 = absN 16 (var 14)
+--   input 0xFF…+1  → byte0 = (0,0), byte1 = (1,0)
+
+-- bool dispatch + K2 application ---------------------------------------
+
+/-- `boolLit b·a·e →* if b then a else e` — Church-bool selection. -/
+theorem boolLit_sel (b : Bool) (a e : LTerm) :
+    LRed (aps (boolLit b) [a, e]) (if b then a else e) := by
+  cases b <;>
+    · simp only [Bool.cond_true, Bool.cond_false, boolLit]
+      exact LRed_of_hsteps (k := 2) (by
+        simp [klL, kilL, aps, List.foldl, hsteps, hstep, subst, shift,
+              shift_zero, subst_shift_succ])
+
+/-- `K2·nb·c →* c·(subst nb-result of next)·(emit)` — the two betas.
+    Substituted arguments are written as their evaluated substs. -/
+theorem b4incK2_apply (nb c next emit : LTerm) :
+    LRed (aps (b4incK2V next emit) [nb, c])
+         (aps c [subst c 0 (subst nb 1 next),
+                 subst c 0 (subst nb 1 emit)]) :=
+  LRed_of_hsteps (k := 2) (by
+    simp [b4incK2V, aps, List.foldl, hsteps, hstep, subst, shift,
+          shift_zero, subst_shift_succ])
+
+-- semantic carry chain ------------------------------------------------
+
+/-- `incByteN` threaded over a byte list, little-endian: increment until
+    the first byte that does not carry out. -/
+def incBytes : List (Fin 16 × Fin 16) → Bool → List (Fin 16 × Fin 16)
+  | [], _ => []
+  | x :: xs, c =>
+      if c then
+        let r := incByteN x.1 x.2
+        r.1 :: incBytes xs r.2
+      else x :: xs
+
+/-- One carry-chain level: `(INCB·B)·(λnb.λc. c·next·emit)` reduces to
+    the carry-bool applied to the substituted continuations. -/
+theorem b4inc_level_run (lo hi : Fin 16) (next emit : LTerm) :
+    LRed (.app (.app incbL (byteLit lo hi)) (b4incK2V next emit))
+         (aps (boolLit (incByteN lo hi).2)
+           [ subst (boolLit (incByteN lo hi).2) 0
+              (subst (Function.uncurry byteLit (incByteN lo hi).1) 1 next),
+             subst (boolLit (incByteN lo hi).2) 0
+              (subst (Function.uncurry byteLit (incByteN lo hi).1) 1 emit) ]) := by
+  exact ((LRed_app_left (incb_eval lo hi)).trans
+    (pairLit_apply _ _ _ (closed_byteLit _ _) (closed_boolLit _))).trans
+    (b4incK2_apply _ _ _ _)
+
+/-- **b4inc_eval**: the four-byte increment evaluates to the semantic
+    carry chain `incBytes`, as a normalized Scott list. -/
+theorem b4inc_eval_scott (x0 x1 x2 x3 : Fin 16 × Fin 16) :
+    LRed (.app b4incL
+           (scottList [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+                       byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+         (scottList ((incBytes [x0, x1, x2, x3] true).map
+                      fun p => byteLit p.1 p.2)) := by
+  -- peel: 4 cells → carry chain
+  refine (b4inc_peel _ _ _ _
+    (closed_byteLit _ _) (closed_byteLit _ _) (closed_byteLit _ _)
+    (closed_byteLit _ _)
+    (closed_cellLit (closed_byteLit _ _) closed_nilL)
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _) closed_nilL))
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _) closed_nilL)))).trans ?_
+  -- level 0
+  refine (b4inc_level_run x0.1 x0.2 _ _).trans ?_
+  -- evaluate the substituted continuations (concrete-syntax substs)
+  have hN0 :
+      subst (boolLit (incByteN x0.1 x0.2).2) 0
+        (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+          (b4incChainV (byteLit x1.1 x1.2)
+            (b4incK2V
+              (b4incChainV (byteLit x2.1 x2.2)
+                (b4incK2V
+                  (b4incChainV (byteLit x3.1 x3.2)
+                    (b4incK2V
+                      (emitCells [.var 7, .var 5, .var 3, .var 1])
+                      (emitCells [.var 7, .var 5, .var 3, .var 1])))
+                  (emitCells [.var 5, .var 3, .var 1, byteLit x3.1 x3.2])))
+              (emitCells [.var 3, .var 1, byteLit x2.1 x2.2,
+                          byteLit x3.1 x3.2]))))
+      = b4incChainV (byteLit x1.1 x1.2)
+          (b4incK2V
+            (b4incChainV (byteLit x2.1 x2.2)
+              (b4incK2V
+                (b4incChainV (byteLit x3.1 x3.2)
+                  (b4incK2V
+                    (emitCells
+                      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                       .var 5, .var 3, .var 1])
+                    (emitCells
+                      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                       .var 5, .var 3, .var 1])))
+                (emitCells
+                  [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                   .var 3, .var 1, byteLit x3.1 x3.2])))
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+               .var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) := by
+    simp [b4incChainV, b4incK2V, emitCells, aps,
+          List.foldr, List.foldl, Function.uncurry,
+          subst, shift, shift_zero, subst_shift_succ,
+          shift_of_closed0, subst_of_closed0, closed, closed_app,
+          closed_mono, closed_byteLit, closed_boolLit, closed_incbL,
+          closed_conssL, closed_nilL]
+  have hE0 :
+      subst (boolLit (incByteN x0.1 x0.2).2) 0
+        (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+          (emitCells [.var 1, byteLit x1.1 x1.2, byteLit x2.1 x2.2,
+                      byteLit x3.1 x3.2]))
+      = emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+           byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+    simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+          subst, shift, shift_zero, subst_shift_succ,
+          shift_of_closed0, subst_of_closed0, closed, closed_app,
+          closed_mono, closed_byteLit, closed_boolLit, closed_incbL,
+          closed_conssL, closed_nilL]
+  rw [hN0, hE0]
+  -- carry dispatch at level 0
+  refine (boolLit_sel _ _ _).trans ?_
+  split_ifs with h0
+  · -- carry out of byte0 → continue to level 1
+      refine (b4inc_level_run x1.1 x1.2 _ _).trans ?_
+      have hN1 :
+          subst (boolLit (incByteN x1.1 x1.2).2) 0
+            (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+              (b4incChainV (byteLit x2.1 x2.2)
+                (b4incK2V
+                  (b4incChainV (byteLit x3.1 x3.2)
+                    (b4incK2V
+                      (emitCells
+                        [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                         .var 5, .var 3, .var 1])
+                      (emitCells
+                        [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                         .var 5, .var 3, .var 1])))
+                  (emitCells
+                    [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                     .var 3, .var 1, byteLit x3.1 x3.2]))))
+          = b4incChainV (byteLit x2.1 x2.2)
+              (b4incK2V
+                (b4incChainV (byteLit x3.1 x3.2)
+                  (b4incK2V
+                    (emitCells
+                      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                       Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                       .var 3, .var 1])
+                    (emitCells
+                      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                       Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                       .var 3, .var 1])))
+                (emitCells
+                  [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                   Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                   .var 1, byteLit x3.1 x3.2])) := by
+        simp [b4incChainV, b4incK2V, emitCells, aps,
+              List.foldr, List.foldl, Function.uncurry,
+              subst, shift, shift_zero, subst_shift_succ,
+              shift_of_closed0, subst_of_closed0, closed, closed_app,
+              closed_mono, closed_byteLit, closed_boolLit, closed_incbL,
+              closed_conssL, closed_nilL]
+      have hE1 :
+          subst (boolLit (incByteN x1.1 x1.2).2) 0
+            (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+              (emitCells
+                [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                 .var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+          = emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+               Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+               byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+        simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+              subst, shift, shift_zero, subst_shift_succ,
+              shift_of_closed0, subst_of_closed0, closed, closed_app,
+              closed_mono, closed_byteLit, closed_boolLit, closed_incbL,
+              closed_conssL, closed_nilL]
+      rw [hN1, hE1]
+      refine (boolLit_sel _ _ _).trans ?_
+      split_ifs with h1
+      · -- continue to level 2
+          refine (b4inc_level_run x2.1 x2.2 _ _).trans ?_
+          have hN2 :
+              subst (boolLit (incByteN x2.1 x2.2).2) 0
+                (subst (Function.uncurry byteLit
+                          (incByteN x2.1 x2.2).1) 1
+                  (b4incChainV (byteLit x3.1 x3.2)
+                    (b4incK2V
+                      (emitCells
+                        [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                         Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                         .var 3, .var 1])
+                      (emitCells
+                        [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                         Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                         .var 3, .var 1]))))
+              = b4incChainV (byteLit x3.1 x3.2)
+                  (b4incK2V
+                    (emitCells
+                      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                       Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                       Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                       .var 1])
+                    (emitCells
+                      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                       Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                       Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                       .var 1])) := by
+            simp [b4incChainV, b4incK2V, emitCells, aps,
+                  List.foldr, List.foldl, Function.uncurry,
+                  subst, shift, shift_zero, subst_shift_succ,
+                  shift_of_closed0, subst_of_closed0, closed, closed_app,
+                  closed_mono, closed_byteLit, closed_boolLit,
+                  closed_incbL, closed_conssL, closed_nilL]
+          have hE2 :
+              subst (boolLit (incByteN x2.1 x2.2).2) 0
+                (subst (Function.uncurry byteLit
+                          (incByteN x2.1 x2.2).1) 1
+                  (emitCells
+                    [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                     Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                     .var 1, byteLit x3.1 x3.2]))
+              = emitCells
+                  [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                   Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                   Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                   byteLit x3.1 x3.2] := by
+            simp [emitCells, aps, List.foldr, List.foldl,
+                  Function.uncurry,
+                  subst, shift, shift_zero, subst_shift_succ,
+                  shift_of_closed0, subst_of_closed0, closed, closed_app,
+                  closed_mono, closed_byteLit, closed_boolLit,
+                  closed_incbL, closed_conssL, closed_nilL]
+          rw [hN2, hE2]
+          refine (boolLit_sel _ _ _).trans ?_
+          split_ifs with h2
+          · -- continue to level 3 (next = emit, carry wraps mod 2^32)
+              refine (b4inc_level_run x3.1 x3.2 _ _).trans ?_
+              have hN3 :
+                  subst (boolLit (incByteN x3.1 x3.2).2) 0
+                    (subst (Function.uncurry byteLit
+                              (incByteN x3.1 x3.2).1) 1
+                      (emitCells
+                        [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                         Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                         Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                         .var 1]))
+                  = emitCells
+                      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                       Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                       Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                       Function.uncurry byteLit (incByteN x3.1 x3.2).1] := by
+                simp [emitCells, aps, List.foldr, List.foldl,
+                      Function.uncurry,
+                      subst, shift, shift_zero, subst_shift_succ,
+                      shift_of_closed0, subst_of_closed0, closed,
+                      closed_app, closed_mono, closed_byteLit,
+                      closed_boolLit, closed_incbL, closed_conssL,
+                      closed_nilL]
+              rw [hN3]
+              refine (boolLit_sel _ _ _).trans ?_
+              simp only [ite_self]
+              have hnf3 := emitCells_nf
+                [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                 Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                 Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                 Function.uncurry byteLit (incByteN x3.1 x3.2).1]
+                (by
+                  intro c hc
+                  simp at hc
+                  rcases hc with rfl | rfl | rfl | rfl <;>
+                    exact closed_byteLit _ _)
+              have heq3 : scottList
+                  [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                   Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                   Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                   Function.uncurry byteLit (incByteN x3.1 x3.2).1]
+                  = scottList (List.map (fun p => byteLit p.1 p.2)
+                      (incBytes [x0, x1, x2, x3] true)) := by
+                simp only [incBytes, h0, h1, h2, ite_true, ite_false,
+                           ↓reduceIte, List.map_cons, List.map_nil,
+                           Function.uncurry]
+              rw [← heq3]
+              assumption
+          · -- byte2 carries no further → emit
+            have hnf2 := emitCells_nf
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+               Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+               Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+               byteLit x3.1 x3.2]
+              (by
+                intro c hc
+                simp at hc
+                rcases hc with rfl | rfl | rfl | rfl <;>
+                  exact closed_byteLit _ _)
+            have heq2 : scottList
+                [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+                 Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                 Function.uncurry byteLit (incByteN x2.1 x2.2).1,
+                 byteLit x3.1 x3.2]
+                = scottList (List.map (fun p => byteLit p.1 p.2)
+                    (incBytes [x0, x1, x2, x3] true)) := by
+              simp only [incBytes, h0, h1, eq_false (h2), ite_true,
+                         ite_false, ↓reduceIte, List.map_cons,
+                         List.map_nil, Function.uncurry]
+            rw [← heq2]
+            assumption
+      · -- byte1 emits [nb0, nb1, B2, B3]
+        have hnf1 := emitCells_nf
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+           Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+           byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+          (by
+            intro c hc
+            simp at hc
+            rcases hc with rfl | rfl | rfl | rfl <;>
+              first
+              | exact closed_byteLit _ _
+              | (simp [Function.uncurry]; exact closed_byteLit _ _))
+        have heq1 : scottList
+            [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+             Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+             byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+            = scottList (List.map (fun p => byteLit p.1 p.2)
+                (incBytes [x0, x1, x2, x3] true)) := by
+          simp only [incBytes, h0, eq_false (h1), ite_true, ite_false,
+                     ↓reduceIte, List.map_cons, List.map_nil,
+                     Function.uncurry]
+        rw [← heq1]
+        assumption
+  · -- byte0 emits [nb0, B1, B2, B3]
+    have hnf0 := emitCells_nf
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+       byteLit x1.1 x1.2, byteLit x2.1 x2.2,
+       byteLit x3.1 x3.2]
+      (by
+        intro c hc
+        simp at hc
+        rcases hc with rfl | rfl | rfl | rfl <;>
+          first
+          | exact closed_byteLit _ _
+          | (simp [Function.uncurry]; exact closed_byteLit _ _))
+    have heq0 : scottList
+        [Function.uncurry byteLit (incByteN x0.1 x0.2).1,
+         byteLit x1.1 x1.2, byteLit x2.1 x2.2,
+         byteLit x3.1 x3.2]
+        = scottList (List.map (fun p => byteLit p.1 p.2)
+            (incBytes [x0, x1, x2, x3] true)) := by
+      simp only [incBytes, eq_false (h0), ite_true, ite_false,
+                 ↓reduceIte, List.map_cons, List.map_nil,
+                 Function.uncurry]
+    rw [← heq0]
+    assumption
+
+/-- `b4inc` on the conss-fold literal — normalizes `b4Lit` to a
+    scottList first. -/
+theorem b4inc_eval (x0 x1 x2 x3 : Fin 16 × Fin 16) :
+    LRed (aps b4incL [b4Lit [x0, x1, x2, x3]])
+         (scottList ((incBytes [x0, x1, x2, x3] true).map
+                      fun p => byteLit p.1 p.2)) := by
+  refine (LRed_app_right (b4Lit_nf _)).trans ?_
+  simp only [List.map]
+  exact b4inc_eval_scott x0 x1 x2 x3
+
+/-- `incBytes` preserves the cell count (carry only rewrites cells). -/
+theorem incBytes_length :
+    ∀ (xs : List (Fin 16 × Fin 16)) (c : Bool),
+      (incBytes xs c).length = xs.length := by
+  intro xs; induction xs with
+  | nil => intro c; rfl
+  | cons x xs ih =>
+    intro c
+    simp only [incBytes]
+    cases c <;> simp [ih]
+
+/-- Fold chain with an *encoded* semantic accumulator — the
+    WF-closure form of `foldl_red`.  `enc : α → LTerm` encodes the
+    semantic state, so the per-step hypothesis only has to hold for
+    reachable (encoded) states: the shape-invariant lives in `α`,
+    not in a global normal-form predicate. -/
+theorem foldl_enc_red (st : LTerm) {α : Type} (enc : α → LTerm)
+    (σ : α → LTerm → α) (hs : closed 0 st = true)
+    (hstep : ∀ (a : α) (X e : LTerm), closed 0 X = true →
+      LRed X (enc a) → closed 0 e = true →
+      LRed (.app (.app st X) e) (enc (σ a e))) :
+    ∀ (cs : List LTerm) (X : LTerm) (a : α),
+      closed 0 X = true → LRed X (enc a) →
+      (∀ e ∈ cs, closed 0 e = true) →
+      LRed (cs.foldl (fun acc e => .app (.app st acc) e) X)
+           (enc (cs.foldl σ a)) := by
+  intro cs
+  induction cs with
+  | nil => intro X a _ hXa _; exact hXa
+  | cons c cs' ih =>
+    intro X a hX hXa hcl
+    have hc : closed 0 c = true := hcl c List.mem_cons_self
+    have htail : ∀ e ∈ cs', closed 0 e = true :=
+      fun e he => hcl e (List.mem_cons_of_mem c he)
+    have hs' := hstep a X c hX hXa hc
+    rw [List.foldl_cons, List.foldl_cons]
+    exact ih _ _ (closed_app (closed_app hs hX) hc) hs' htail
+
+/-- `_LENB4`'s step `λa.λx. B4INC a` — increments the bytes4
+    accumulator, ignoring the cell. -/
+def lenStepL : LTerm := .abs (.abs (.app b4incL (.var 1)))
+
+theorem closed_lenStepL : closed 0 lenStepL = true := by decide
+
+/-- `_b4_src 0` — the all-zero bytes4 accumulator seed. -/
+def b4zeroBytes : List (Fin 16 × Fin 16) := [(0, 0), (0, 0), (0, 0), (0, 0)]
+
+/-- `_LENB4 = λl. FOLDL lenStep l (b4Lit 0000)` — byte-list length as
+    a bytes4 counter. -/
+def lenb4L : LTerm :=
+  .abs (aps foldlL [lenStepL, .var 0, b4Lit b4zeroBytes])
+
+theorem closed_lenb4L : closed 0 lenb4L = true := by decide
+
+/-- Unwrap the length-4 subtype accumulator of the `incBytes` fold. -/
+theorem foldl_incBytes_val (cs : List LTerm)
+    (xs : {xs : List (Fin 16 × Fin 16) // xs.length = 4}) :
+    (cs.foldl (fun a _ => ⟨incBytes a.1 true,
+        by rw [incBytes_length]; exact a.2⟩) xs).val =
+      cs.foldl (fun a _ => incBytes a true) xs.val := by
+  induction cs generalizing xs with
+  | nil => rfl
+  | cons c cs ih =>
+    simp only [List.foldl_cons]
+    exact ih _
+
+/-- One FOLDL step of `lenStepL`: `lenStep·X·e →* enc (incBytes xs)`
+    whenever `X →* enc xs`. -/
+theorem lenStep_cell {xs : List (Fin 16 × Fin 16)} (hxs : xs.length = 4)
+    (X e : LTerm) (hX : closed 0 X = true)
+    (hXa : LRed X (scottList (xs.map (fun p => byteLit p.1 p.2))))
+    (he : closed 0 e = true) :
+    LRed (.app (.app lenStepL X) e)
+         (scottList ((incBytes xs true).map
+                      (fun p => byteLit p.1 p.2))) := by
+  cases xs with
+  | nil => simp_all
+  | cons p0 t0 =>
+    cases t0 with
+    | nil => simp_all
+    | cons p1 t1 =>
+      cases t1 with
+      | nil => simp_all
+      | cons p2 t2 =>
+        cases t2 with
+        | nil => simp_all
+        | cons p3 t3 =>
+          cases t3 with
+          | nil =>
+            -- two betas: (λa.λx. incbL·a)·X·e →* incbL·X
+            have hX1 : closed 1 X = true := closed_mono hX (Nat.zero_le 1)
+            have hi1 : closed 1 b4incL = true :=
+              closed_mono closed_b4incL (Nat.zero_le 1)
+            have hbeta : LRed (.app (.app lenStepL X) e)
+                (.app b4incL X) :=
+              LRed_of_hsteps (k := 2) (by
+                simp [lenStepL, hsteps, hstep, subst, shift,
+                      subst_of_closed hi1, shift_of_closed hX,
+                      subst_of_closed0 hX, subst_of_closed0 closed_b4incL])
+            exact hbeta.trans ((LRed_app_right hXa).trans
+              (b4inc_eval_scott p0 p1 p2 p3))
+          | cons p4 t4 =>
+            simp only [List.length_cons] at hxs; omega
+
+/-- `LENB4` evaluates a byte list's length as a bytes4 counter: each
+    cell increments the accumulator (carry chain, mod 2³²). -/
+theorem lenb4_eval (cs : List LTerm)
+    (hcl : ∀ e ∈ cs, closed 0 e = true) :
+    LRed (.app lenb4L (scottList cs))
+         (scottList ((cs.foldl (fun xs _ => incBytes xs true)
+                        b4zeroBytes).map (fun p => byteLit p.1 p.2))) := by
+  -- β-open: lenb4L·l → FOLDL·lenStep·l·b4zero
+  have hopen : LRed (.app lenb4L (scottList cs))
+      (aps foldlL [lenStepL, scottList cs, b4Lit b4zeroBytes]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [lenb4L, aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_zero, subst_shift_succ, closed, closed_app,
+            closed_mono, closed_foldlL, closed_lenStepL,
+            closed_scottList, closed_b4Lit, closed_nilL,
+            subst_of_closed, shift_of_closed, subst_of_closed0,
+            shift_of_closed0])
+  refine hopen.trans ?_
+  -- unfold fixpoint → foldl application chain
+  refine (foldl_to_ggb lenStepL (scottList cs) (b4Lit b4zeroBytes)
+    closed_lenStepL (closed_scottList hcl) (closed_b4Lit _)).trans ?_
+  refine (fold_run lenStepL closed_lenStepL cs (b4Lit b4zeroBytes) hcl
+    (closed_b4Lit _)).trans ?_
+  -- semantic fold over the encoded (length-4) accumulator
+  refine (foldl_enc_red lenStepL
+    (fun xs : {xs : List (Fin 16 × Fin 16) // xs.length = 4} =>
+      scottList (xs.val.map (fun p => byteLit p.1 p.2)))
+    (fun xs _ => ⟨incBytes xs.val true,
+                  by rw [incBytes_length]; exact xs.prop⟩)
+    closed_lenStepL
+    (fun xs X e hX hXa he => lenStep_cell xs.prop X e hX hXa he)
+    cs (b4Lit b4zeroBytes) ⟨b4zeroBytes, rfl⟩
+    (closed_b4Lit _) (b4Lit_nf _) hcl).trans ?_
+  -- unwrap the subtype accumulator
+  rw [foldl_incBytes_val]
+
+/-- `r·K·(λh.λt. h)·(λlo.λhi. lo)` — first cell's lo nibble. -/
+def peelLo (r : LTerm) : LTerm :=
+  .app (.app (.app r klL) (.abs (.abs (.var 1))))
+    (.abs (.abs (.var 1)))
+
+/-- second cell's lo nibble. -/
+def peelLo2 (r : LTerm) : LTerm :=
+  .app (.app (.app (.app (.app r klL) (.abs (.abs (.var 0))))
+    klL) (.abs (.abs (.var 1)))) (.abs (.abs (.var 1)))
+
+#eval hsteps 600 (peelLo
+  (hsteps 400 (aps b4incL [b4Lit [(0, 0), (0, 0), (0, 0), (0, 0)]])))
+-- 0xFF + 1: byte0 wraps, byte1 increments → second cell lo = nibLit 1
+#eval hsteps 900 (peelLo2
+  (hsteps 600 (aps b4incL
+    [b4Lit [(15, 15), (0, 0), (0, 0), (0, 0)]])))
+
+-- axiom audits ---------------------------------------------------------------
+#print axioms emitCells_nf
+#print axioms pairLit_apply
+#print axioms boolLit_sel
+#print axioms b4incK2_apply
+#print axioms b4inc_level_run
+#print axioms b4inc_peel
+#print axioms b4inc_eval_scott
+#print axioms b4inc_eval
+#print axioms incBytes_length
+#print axioms foldl_enc_red
+#print axioms lenStep_cell
+#print axioms foldl_incBytes_val
+#print axioms lenb4_eval
+
+
 end ISAR
