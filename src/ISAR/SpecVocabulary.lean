@@ -5834,5 +5834,403 @@ theorem pack2_eval (tb ib db sb : List (Fin 16 × Fin 16)) :
 #print axioms closed_pack2Cells_flat
 #print axioms pack2_eval
 
+-- ============================================================
+-- Batch I: tuple-state iterate + MAP/NIBODD/NIBS2BYTES — the
+-- leaves behind dataOf / idataOf (the packOf section builders).
+-- ============================================================
+
+/-- `subst` distributes over the `aps` spine. -/
+theorem subst_aps (s : LTerm) : ∀ (xs : List LTerm) (e : LTerm),
+    subst s 0 (aps e xs)
+      = aps (subst s 0 e) (xs.map (subst s 0)) := by
+  intro xs; induction xs with
+  | nil => intro e; rfl
+  | cons x xs ih =>
+      intro e
+      show subst s 0 (aps (.app e x) xs)
+        = aps (subst s 0 e) ((subst s 0 x) :: xs.map (subst s 0))
+      rw [ih]
+      rfl
+
+/-- `closed c` lifts over `app`. -/
+theorem closed_app_c {c : Nat} {f x : LTerm}
+    (hf : closed c f = true) (hx : closed c x = true) :
+    closed c (.app f x) = true := by
+  simp only [closed, Bool.and_eq_true]; exact ⟨hf, hx⟩
+
+/-- `closed c` over an `aps` spine. -/
+theorem closed_aps {c : Nat} : ∀ {f : LTerm} {xs : List LTerm},
+    closed c f = true → (∀ e ∈ xs, closed c e = true) →
+    closed c (aps f xs) = true := by
+  intro f xs; induction xs generalizing f with
+  | nil => intro hf _; exact hf
+  | cons x xs ih =>
+      intro hf hx
+      show closed c (aps (.app f x) xs) = true
+      exact ih (closed_app_c hf (hx x List.mem_cons_self))
+        (fun e he => hx e (List.mem_cons_of_mem _ he))
+
+/-- `_prs`/n-ary record: `λk. k x0 … xₙ₋₁` — the `_STEP` tuple
+    encoding (`(λk2. k2 a b c …)`). -/
+def tupleL (xs : List LTerm) : LTerm :=
+  .abs (aps (.var 0) (xs.map (shift 1 0)))
+
+/-- `tupleL xs · k →* k x0 … xₙ₋₁` — record destructure.  The
+    `shift 1 0` hole is exactly cancelled by the beta `subst` —
+    no closedness side-conditions. -/
+theorem tupleL_apply (xs : List LTerm) (k : LTerm) :
+    LRed (.app (tupleL xs) k) (aps k xs) := by
+  apply LRed_of_hsteps (k := 1)
+  show subst k 0 (aps (.var 0) (xs.map (shift 1 0))) = aps k xs
+  rw [subst_aps]
+  simp only [subst, shift, List.map_map]
+  show aps (shift 0 0 k) (xs.map (subst k 0 ∘ shift 1 0)) = aps k xs
+  rw [shift_zero]
+  have hmap : xs.map (subst k 0 ∘ shift 1 0) = xs := by
+    simp only [Function.comp_def, subst_shift_succ]
+    induction xs with
+    | nil => rfl
+    | cons x xs ih => simp only [List.map_cons, ih]
+  rw [hmap]
+
+/-- `tupleL xs` is closed when all entries are. -/
+theorem closed_tupleL {xs : List LTerm}
+    (h : ∀ e ∈ xs, closed 0 e = true) : closed 0 (tupleL xs) = true := by
+  show closed 1 (aps (.var 0) (xs.map (shift 1 0))) = true
+  apply closed_aps
+  · rfl
+  · intro e he
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp he
+    rw [shift_of_closed0 (h x hx)]
+    exact closed_mono (h x hx) (Nat.zero_le 1)
+
+/-- `iterT` — semantic tuple-state iterate (metalevel). -/
+def iterT (F : List LTerm → List LTerm) (s : List LTerm)
+    : Nat → List LTerm
+  | 0 => s
+  | n + 1 => F (iterT F s n)
+
+/-- iterate over a tuple-state: `iterL step (tupleL s) n →* tupleL
+    (iterT F s n)` when `step·(tupleL s) →* tupleL (F s)` preserves
+    the encoding invariant. -/
+theorem iterTuple_red (step : LTerm) (F : List LTerm → List LTerm)
+    (hstep : ∀ s, (∀ e ∈ s, closed 0 e = true) →
+      LRed (.app step (tupleL s)) (tupleL (F s)) ∧
+      (∀ e ∈ F s, closed 0 e = true)) :
+    ∀ (n : Nat) (s : List LTerm), (∀ e ∈ s, closed 0 e = true) →
+      LRed (iterL step (tupleL s) n) (tupleL (iterT F s n)) := by
+  intro n; induction n with
+  | zero => intro s _; exact Relation.ReflTransGen.refl
+  | succ n ih =>
+      intro s hs
+      have hclF : ∀ (m : Nat), ∀ e ∈ iterT F s m,
+          closed 0 e = true := by
+        intro m; induction m with
+        | zero => exact hs
+        | succ m ihm =>
+            simp only [iterT]
+            exact (hstep _ ihm).2
+      show LRed (.app step (iterL step (tupleL s) n))
+        (tupleL (iterT F s (n + 1)))
+      have hmid : LRed (.app step (iterL step (tupleL s) n))
+          (.app step (tupleL (iterT F s n))) :=
+        LRed_app_right (ih s hs)
+      exact hmid.trans (hstep _ (hclF n)).1
+
+-- _NIBODD: nibble → bool (K at odd positions) --------------------------
+
+/-- `_NIBODD = \a. a K (KI) K (KI) …` — 16-table, BT iff odd. -/
+def niboddL : LTerm :=
+  .abs (aps (.var 0) (List.ofFn fun j : Fin 16 =>
+    boolLit (decide (j.val % 2 = 1))))
+
+theorem closed_niboddL : closed 0 niboddL = true := by decide
+
+theorem nibodd_table : ∀ i : Fin 16,
+    hsteps 24 (aps niboddL [nibLit i])
+      = boolLit (decide (i.val % 2 = 1)) := by
+  decide
+
+theorem nibodd_eval (i : Fin 16) :
+    LRed (aps niboddL [nibLit i]) (boolLit (decide (i.val % 2 = 1))) :=
+  LRed_of_hsteps (nibodd_table i)
+
+-- _MAP: lazy per-element map (self-application fixpoint) ---------------
+
+/-- `MAP`'s step: `\h.\t. CONSS (f·h) t` — `f` kept at var-depth 2
+    under the two binders. -/
+def mapStepL (f : LTerm) : LTerm :=
+  .abs (.abs (aps conssL [.app (shift 2 0 f) (.var 1), .var 0]))
+
+/-- `_MAP = \f2. \l2. W·(fixrG (mapStep f2) nil)·l2`. -/
+def mapL : LTerm :=
+  .abs (.abs (fixrA (mapStepL (.var 1)) nilL (.var 0)))
+
+theorem closed_mapStepL {f : LTerm} (hf : closed 0 f = true) :
+    closed 0 (mapStepL f) = true := by
+  show closed 2 (aps conssL
+      [.app (shift 2 0 f) (.var 1), .var 0]) = true
+  apply closed_aps
+  · exact closed_mono closed_conssL (Nat.zero_le 2)
+  · intro e he
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at he
+    rcases he with rfl|rfl <;>
+      first
+      | (exact closed_app_c (by
+            rw [shift_of_closed0 hf]
+            exact closed_mono hf (Nat.zero_le 2)) rfl)
+      | rfl
+
+theorem closed_mapL : closed 0 mapL = true := by decide
+
+theorem closed_wl : closed 0 wl = true := by decide
+
+/-- `fixrG` is closed when its step and nil-value are. -/
+theorem closed_fixrG {st z : LTerm}
+    (hs : closed 0 st = true) (hz : closed 0 z = true) :
+    closed 0 (fixrG st z) = true := by
+  show closed 2 (.app (.app (.var 0) (shift 2 0 z)) _) = true
+  refine closed_app_c (closed_app_c rfl ?_) ?_
+  · rw [shift_of_closed0 hz]; exact closed_mono hz (Nat.zero_le 2)
+  · show closed 4 _ = true
+    refine closed_app_c (closed_app_c ?_ rfl)
+        (closed_app_c (closed_app_c rfl rfl) rfl)
+    rw [shift_of_closed0 hs]; exact closed_mono hs (Nat.zero_le 4)
+
+/-- `_MAP` on a Scott list: lazy per-element `f`-application,
+    cells stay `f·c`-shaped (unreduced). -/
+theorem map_eval (f l : LTerm) (cs : List LTerm)
+    (hf : closed 0 f = true) (hl : closed 0 l = true)
+    (hcl : ∀ e ∈ cs, closed 0 e = true)
+    (hlcs : LRed l (scottList cs)) :
+    LRed (aps mapL [f, l])
+        (scottList (cs.map (fun c => .app f c))) := by
+  have hst : ∀ e r, closed 0 e = true → closed 0 r = true →
+      LRed (.app (.app (mapStepL f) e) r)
+          (cellLit (.app f e) r) ∧
+      closed 0 (cellLit (.app f e) r) = true := by
+    intro e r he hr
+    have hfe : closed 0 (.app f e) = true := closed_app hf he
+    have hbeta : LRed (.app (.app (mapStepL f) e) r)
+        (aps conssL [.app f e, r]) :=
+      LRed_of_hsteps (k := 2) (by
+        simp [mapStepL, aps, List.foldl, hsteps, hstep, subst, shift,
+              shift_zero, subst_shift_succ,
+              subst_of_closed0, shift_of_closed0, closed, closed_app,
+              hf, he, hfe, closed_conssL])
+    exact ⟨hbeta.trans (conss_nf _ _ hfe hr),
+      closed_cellLit hfe hr⟩
+  have hopen : LRed (aps mapL [f, l])
+      (fixrA (mapStepL f) nilL l) :=
+    LRed_of_hsteps (k := 2) (by
+      unfold mapL fixrA fixrG wl mapStepL
+      simp [aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_zero, subst_shift_succ,
+            subst_of_closed0 hf, shift_of_closed0 hf,
+            subst_of_closed0 closed_conssL, shift_of_closed0 closed_conssL,
+            subst_of_closed0 closed_nilL, shift_of_closed0 closed_nilL,
+            subst_of_closed0 closed_wl, shift_of_closed0 closed_wl])
+  have hmain := fixr_eval (mapStepL f) nilL _ (closed_mapStepL hf)
+    closed_nilL hst l cs hl hlcs hcl
+  have hconv : cs.foldr (fun e r => cellLit (.app f e) r) nilL
+      = scottList (cs.map (fun c => .app f c)) := by
+    simp only [scottList, List.foldr_map]
+  exact hopen.trans (hconv ▸ hmain)
+
+-- _NIBS2BYTES: pairwise fold over nibble list ---------------------------
+
+/-- Worker `\g.\l2. l2 K (\hi.\t. t K (\lo.\t2.
+    conss (PAIR lo hi) (g g t2)))` — pops `hi` first, then `lo` off the
+    tail, emits `PAIR lo hi`.  Odd trailing nibble hits `t = nil` and
+    is dropped. -/
+def nibs2G : LTerm :=
+  .abs (.abs (.app (.app (.var 0) nilL)
+    (.abs (.abs (.app (.app (.var 0) nilL)
+      (.abs (.abs (.app
+        (.app conssL (.app (.app pairSrcL (.var 1)) (.var 3)))
+        (.app (.app (.var 5) (.var 5)) (.var 0))))))))))
+
+/-- `_NIBS2BYTES = \l. ((\f. f f) nibs2G) l`. -/
+def nibs2bytesL : LTerm := .abs (.app (.app wl nibs2G) (.var 0))
+
+theorem closed_nibs2G : closed 0 nibs2G = true := by decide
+
+theorem closed_nibs2bytesL : closed 0 nibs2bytesL = true := by decide
+
+/-- `(G·G)·cellLit hi (cellLit lo t)` consumes the pair and re-arms.
+    Count verified on closed literals below. -/
+example :
+    hsteps 10 (.app (.app nibs2G nibs2G)
+        (cellLit (nibLit 0) (cellLit (nibLit 1) nilL)))
+      = .app (.app conssL
+          (.app (.app pairSrcL (nibLit 1)) (nibLit 0)))
+          (.app (.app nibs2G nibs2G) nilL) := by decide
+
+/-- `(G·G)·nilL →* nilL`: empty input. -/
+theorem nibs2_nil : hsteps 5 (.app (.app nibs2G nibs2G) nilL) = nilL := by
+  decide
+
+/-- `(G·G)·cellLit a nil →* nilL`: odd trailing nibble dropped. -/
+theorem nibs2_single (a : LTerm) :
+    hsteps 8 (.app (.app nibs2G nibs2G) (cellLit a nilL)) = nilL := by
+  unfold nibs2G cellLit nilL
+  simp [hsteps, hstep, subst, shift, shift_zero]
+
+/-- General pair-step with closedness erasure for symbolic payloads. -/
+theorem nibs2_step (hi lo t : LTerm)
+    (hhi : closed 0 hi = true) (hlo : closed 0 lo = true)
+    (ht : closed 0 t = true) :
+    LRed (.app (.app nibs2G nibs2G)
+        (cellLit hi (cellLit lo t)))
+      (.app (.app conssL (.app (.app pairSrcL lo) hi))
+        (.app (.app nibs2G nibs2G) t)) :=
+  LRed_of_hsteps (k := 10) (by
+    unfold nibs2G cellLit nilL
+    simp [hsteps, hstep, subst, shift, shift_zero,
+          subst_of_closed0 hhi, shift_of_closed0 hhi,
+          subst_of_closed0 hlo, shift_of_closed0 hlo,
+          subst_of_closed0 ht, shift_of_closed0 ht,
+          subst_of_closed0 closed_pairSrcL,
+          shift_of_closed0 closed_pairSrcL,
+          subst_of_closed0 closed_conssL,
+          shift_of_closed0 closed_conssL])
+
+/-- Two-element fold over a list (pairs consumed left-to-right). -/
+def foldr2 (σ : LTerm → LTerm → LTerm → LTerm) (z : LTerm) :
+    List LTerm → LTerm
+  | [] => z
+  | [_] => z
+  | hi :: lo :: t => σ hi lo (foldr2 σ z t)
+
+/-- Phase 1: the worker spine unpacks pairs into `conss`-applications;
+    the `(G·G)·scott t` tail sits at app-argument depth so
+    `LRed_app_right` congruence folds in the induction hypothesis. -/
+theorem nibs2_run : ∀ (cs : List LTerm),
+    (∀ e ∈ cs, closed 0 e = true) →
+    LRed (.app (.app nibs2G nibs2G) (scottList cs))
+        (foldr2 (fun hi lo r =>
+          .app (.app conssL (.app (.app pairSrcL lo) hi)) r)
+          nilL cs) := by
+  intro cs; induction cs using foldr2.induct with
+  | case1 =>
+      intro _; exact LRed_of_hsteps nibs2_nil
+  | case2 a =>
+      intro _
+      simp only [foldr2]
+      simp only [scottList, List.foldr_cons, List.foldr_nil]
+      exact LRed_of_hsteps (nibs2_single a)
+  | case3 hi lo t ih =>
+      intro hcl
+      have hhi : closed 0 hi = true := hcl hi List.mem_cons_self
+      have hlo : closed 0 lo = true :=
+        hcl lo (List.mem_cons_of_mem hi List.mem_cons_self)
+      have htail : ∀ e ∈ t, closed 0 e = true :=
+        fun e he => hcl e
+          (List.mem_cons_of_mem hi (List.mem_cons_of_mem lo he))
+      have hstep : LRed
+          (.app (.app nibs2G nibs2G)
+            (cellLit hi (cellLit lo (scottList t))))
+          (.app (.app conssL (.app (.app pairSrcL lo) hi))
+            (.app (.app nibs2G nibs2G) (scottList t))) :=
+        nibs2_step hi lo (scottList t) hhi hlo (closed_scottList htail)
+      simp only [scottList, List.foldr_cons, foldr2]
+      exact hstep.trans (LRed_app_right (ih htail))
+
+/-- Pair-wise semantic cell list: `hi::lo::t ↦ PAIR lo hi`. -/
+def nibPairUp : List LTerm → List LTerm
+  | [] => []
+  | [_] => []
+  | hi :: lo :: t => .app (.app pairSrcL lo) hi :: nibPairUp t
+
+/-- `foldr2` preserves closedness. -/
+theorem closed_foldr2 (σ : LTerm → LTerm → LTerm → LTerm) (z : LTerm)
+    (hz : closed 0 z = true)
+    (hσ : ∀ a b r, closed 0 a = true → closed 0 b = true →
+      closed 0 r = true → closed 0 (σ a b r) = true) :
+    ∀ (cs : List LTerm), (∀ e ∈ cs, closed 0 e = true) →
+      closed 0 (foldr2 σ z cs) = true := by
+  intro cs; induction cs using foldr2.induct with
+  | case1 | case2 => intro _; exact hz
+  | case3 a b t ih =>
+      intro hcl
+      simp only [foldr2]
+      exact hσ a b _ (hcl a List.mem_cons_self)
+        (hcl b (List.mem_cons_of_mem a List.mem_cons_self))
+        (ih (fun e he => hcl e
+          (List.mem_cons_of_mem a (List.mem_cons_of_mem b he))))
+
+/-- Phase 2: pointwise `conss`-normalization — each `conss·p·r`
+    collapses to `cellLit p r`. -/
+theorem nibs2_foldr_red : ∀ (cs : List LTerm),
+    (∀ e ∈ cs, closed 0 e = true) →
+    LRed (foldr2 (fun hi lo r =>
+            .app (.app conssL (.app (.app pairSrcL lo) hi)) r)
+          nilL cs)
+        (foldr2 (fun hi lo r =>
+          cellLit (.app (.app pairSrcL lo) hi) r) nilL cs) := by
+  intro cs; induction cs using foldr2.induct with
+  | case1 | case2 => intro _; exact Relation.ReflTransGen.refl
+  | case3 hi lo t ih =>
+      intro hcl
+      have hhi : closed 0 hi = true := hcl hi List.mem_cons_self
+      have hlo : closed 0 lo = true :=
+        hcl lo (List.mem_cons_of_mem hi List.mem_cons_self)
+      have htail : ∀ e ∈ t, closed 0 e = true :=
+        fun e he => hcl e
+          (List.mem_cons_of_mem hi (List.mem_cons_of_mem lo he))
+      have hpair : closed 0 (.app (.app pairSrcL lo) hi) = true :=
+        closed_app (closed_app closed_pairSrcL hlo) hhi
+      have hfold : closed 0 (foldr2 (fun hi lo r =>
+            cellLit (.app (.app pairSrcL lo) hi) r) nilL t) = true :=
+        closed_foldr2 _ _ closed_nilL (fun a b r ha hb hr =>
+          closed_cellLit (closed_app (closed_app closed_pairSrcL hb)
+            ha) hr) t htail
+      simp only [foldr2]
+      exact (LRed_app_right (ih htail)).trans
+        (conss_nf _ _ hpair hfold)
+
+/-- `foldr2` of `cellLit`-cells is the `scottList` of `nibPairUp`. -/
+theorem nibPairUp_scott : ∀ (cs : List LTerm),
+    foldr2 (fun hi lo r =>
+        cellLit (.app (.app pairSrcL lo) hi) r) nilL cs
+      = scottList (nibPairUp cs) := by
+  intro cs; induction cs using nibPairUp.induct with
+  | case1 => rfl
+  | case2 a => rfl
+  | case3 hi lo t ih =>
+      simp only [foldr2, nibPairUp, scottList, List.foldr_cons]
+      exact congrArg (cellLit _) ih
+
+/-- `_NIBS2BYTES·scott(cs) →* scottList (nibPairUp cs)`. -/
+theorem nibs2bytes_eval (cs : List LTerm)
+    (hcl : ∀ e ∈ cs, closed 0 e = true) :
+    LRed (.app nibs2bytesL (scottList cs))
+        (scottList (nibPairUp cs)) := by
+  have hGG : closed 0 (.app nibs2G nibs2G) = true :=
+    closed_app closed_nibs2G closed_nibs2G
+  have hopen : LRed (.app nibs2bytesL (scottList cs))
+      (.app (.app nibs2G nibs2G) (scottList cs)) :=
+    LRed_of_hsteps (k := 2) (by
+      unfold nibs2bytesL nibs2G wl
+      simp [hsteps, hstep, subst, shift, shift_zero,
+            subst_of_closed0 closed_conssL,
+            shift_of_closed0 closed_conssL,
+            subst_of_closed0 closed_pairSrcL,
+            shift_of_closed0 closed_pairSrcL,
+            subst_of_closed0 closed_nilL,
+            shift_of_closed0 closed_nilL])
+  rw [← nibPairUp_scott cs]
+  exact hopen.trans ((nibs2_run cs hcl).trans
+    (nibs2_foldr_red cs hcl))
+
+-- batch I axiom audit ---------------------------------------------------
+
+#print axioms tupleL_apply
+#print axioms iterTuple_red
+#print axioms nibodd_eval
+#print axioms map_eval
+#print axioms nibs2_step
+#print axioms nibs2_run
+#print axioms nibs2bytes_eval
 
 end ISAR
