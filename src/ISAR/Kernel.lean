@@ -15,10 +15,6 @@ inductive SK : Type where
   | app : SK → SK → SK
 deriving DecidableEq, Repr
 
-namespace SK
-infixl:70 " · " => SK.app
-end SK
-
 /- =========================================================
    2. Symbolic ISAR core
 
@@ -43,10 +39,6 @@ inductive ITerm : Type where
   | sₛ    : ITerm
   | app   : ITerm → ITerm → ITerm
 deriving DecidableEq, Repr
-
-namespace ITerm
-infixl:70 " · " => ITerm.app
-end ITerm
 
 /- =========================================================
    3. One-step SKI reduction
