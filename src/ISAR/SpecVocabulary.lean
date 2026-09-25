@@ -2145,11 +2145,175 @@ theorem append_assoc_basis (as bs cs : List LTerm)
     translate_preserves_red (compile_simulates_red h1),
     translate_preserves_red (compile_simulates_red h2)⟩
 
+-- Church numerals + iteration (_ZEROFILL, _num_src args) --------------
+--
+-- Third bounded pattern alongside the two spine fixpoints: Church
+-- numerals unfold `n` applications of a step — measure = the numeral
+-- itself.  `church_eval` is the unfold, `iter_red` the chain lemma
+-- (sibling of `foldl_red`/`foldr_red`).
+
+/-- `f^n·x` as a λ-body (var 1 = f, var 0 = x). -/
+def churchBody : Nat → LTerm
+  | 0 => .var 0
+  | n + 1 => .app (.var 1) (churchBody n)
+
+/-- Church numeral `\f.\x. f^n x` — `_church_src`. -/
+def churchL (n : Nat) : LTerm := .abs (.abs (churchBody n))
+
+/-- `f` applied `n` times to `z` — the iteration chain. -/
+def iterL (f z : LTerm) : Nat → LTerm
+  | 0 => z
+  | n + 1 => .app f (iterL f z n)
+
+/-- `σ` applied `n` times to `z` — the semantic iterate (metalevel). -/
+def iterS (σ : LTerm → LTerm) (z : LTerm) : Nat → LTerm
+  | 0 => z
+  | n + 1 => σ (iterS σ z n)
+
+theorem closed_churchBody (n : Nat) :
+    closed 2 (churchBody n) = true := by
+  induction n with
+  | zero => rfl
+  | succ n ih => simp only [churchBody, closed]; exact ih
+
+theorem closed_churchL (n : Nat) : closed 0 (churchL n) = true :=
+  closed_churchBody n
+
+theorem closed_iterL (f z : LTerm) (hf : closed 0 f = true)
+    (hz : closed 0 z = true) (n : Nat) :
+    closed 0 (iterL f z n) = true := by
+  induction n with
+  | zero => exact hz
+  | succ n ih => exact closed_app hf ih
+
+theorem closed_iterS (σ : LTerm → LTerm)
+    (hσ : ∀ x, closed 0 x = true → closed 0 (σ x) = true)
+    (z : LTerm) (hz : closed 0 z = true) (n : Nat) :
+    closed 0 (iterS σ z n) = true := by
+  induction n with
+  | zero => exact hz
+  | succ n ih => exact hσ _ ih
+
+/-- `subst f 1` turns the Church body into the iteration chain on
+    `var 0`. -/
+theorem subst_churchBody (n : Nat) (f : LTerm)
+    (hf : closed 0 f = true) :
+    subst f 1 (churchBody n) = iterL f (.var 0) n := by
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+    simp [churchBody, subst, iterL, ih, shift_of_closed0 hf]
+
+/-- `subst z 0` on the chain instantiates the base variable. -/
+theorem subst_iterL (n : Nat) (f z : LTerm)
+    (hf : closed 0 f = true) (hz : closed 0 z = true) :
+    subst z 0 (iterL f (.var 0) n) = iterL f z n := by
+  induction n with
+  | zero =>
+    simp only [iterL, subst]
+    exact shift_of_closed0 hz 0 0
+  | succ n ih =>
+    simp only [iterL, subst]
+    rw [subst_of_closed0 hf, ih]
+
+/-- **Numeral unfold**: `churchL n·f·z →* f^n·z` — the third bounded
+    form: Church iteration, measure = the numeral itself. -/
+theorem church_eval (n : Nat) (f z : LTerm)
+    (hf : closed 0 f = true) (hz : closed 0 z = true) :
+    LRed (.app (.app (churchL n) f) z) (iterL f z n) :=
+  LRed_of_hsteps (k := 2) (by
+    simp only [churchL, hsteps, hstep, subst]
+    rw [subst_churchBody n f hf, subst_iterL n f z hf hz])
+
+/-- **Iter chain reduction**: if each `st·x →* σ x` on closed `x`,
+    an `n`-fold application chain reduces to the `n`-fold semantic
+    iterate.  Sibling of `foldl_red`/`foldr_red` for the numeral
+    pattern. -/
+theorem iter_red (st : LTerm) (σ : LTerm → LTerm)
+    (hstep : ∀ x, closed 0 x = true →
+      LRed (.app st x) (σ x) ∧ closed 0 (σ x) = true) :
+    ∀ (n : Nat) (z : LTerm), closed 0 z = true →
+      LRed (iterL st z n) (iterS σ z n) := by
+  intro n z hz
+  induction n generalizing z with
+  | zero => exact Relation.ReflTransGen.refl
+  | succ n ih =>
+    simp only [iterL, iterS]
+    have hcl : closed 0 (iterS σ z n) = true :=
+      closed_iterS σ (fun e he => (hstep e he).2) z hz n
+    exact (LRed_app_right (ih z hz)).trans (hstep _ hcl).1
+
+-- _ZEROFILL: n zero-byte cells via Church iteration --------------------
+
+/-- `_B0C` — the unreduced `PAIR sel0 sel0` byte literal. -/
+def b0cT : LTerm := aps pairSrcL [nibLit 0, nibLit 0]
+
+theorem closed_b0cT : closed 0 b0cT = true := by decide
+
+/-- `_ZEROFILL`'s cons-step: `\l. CONSS B0C l`. -/
+def zerostepL : LTerm := .abs (aps conssL [b0cT, .var 0])
+
+theorem closed_zerostepL : closed 0 zerostepL = true := by decide
+
+/-- `_ZEROFILL = \n. n·zerostep·K`. -/
+def zerofillL : LTerm := .abs (aps (.var 0) [zerostepL, klL])
+
+theorem closed_zerofillL : closed 0 zerofillL = true := by decide
+
+/-- `zerostepL·x →* cellLit b0cT x` — the per-step lemma. -/
+theorem zerostep_cell (x : LTerm) (hx : closed 0 x = true) :
+    LRed (.app zerostepL x) (cellLit b0cT x) :=
+  (LRed_of_hsteps (k := 1) (by
+    simp [zerostepL, aps, List.foldl, hsteps, hstep, subst, shift,
+          shift_of_closed0 hx, subst_of_closed0 hx,
+          shift_of_closed0 closed_b0cT, subst_of_closed0 closed_b0cT,
+          shift_of_closed0 closed_conssL,
+          subst_of_closed0 closed_conssL])).trans
+    (conss_nf b0cT x closed_b0cT hx)
+
+/-- `iterS (cellLit b) z n` IS `replicate n b` folded into `z`. -/
+theorem iterS_scott (b z : LTerm) :
+    ∀ n : Nat, iterS (fun x => cellLit b x) z n
+             = (List.replicate n b).foldr cellLit z := by
+  intro n; induction n with
+  | zero => rfl
+  | succ n ih =>
+    simp only [iterS, List.replicate_succ, List.foldr_cons, ih]
+
+/-- **`_ZEROFILL` eval**: `ZEROFILL·(churchL n)` reduces to `n`
+    zero-byte cells — numeral-unfold + iter_red.  The element NF is
+    the unreduced `PAIR sel0 sel0` — weak-head normalization reaches
+    the spine; element interiors normalize on consumption. -/
+theorem zerofill_eval (n : Nat) :
+    LRed (.app zerofillL (churchL n))
+         (scottList (List.replicate n b0cT)) := by
+  have e1 : LRed (.app zerofillL (churchL n))
+      (iterL zerostepL klL n) :=
+    (LRed_of_hsteps (k := 1) (by
+      simp [zerofillL, aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_of_closed0 (closed_churchL n),
+            subst_of_closed0 (closed_churchL n),
+            shift_of_closed0 closed_zerostepL,
+            subst_of_closed0 closed_zerostepL,
+            shift_of_closed0 closed_klL,
+            subst_of_closed0 closed_klL])).trans
+      (church_eval n zerostepL klL closed_zerostepL closed_klL)
+  have hs' : ∀ x, closed 0 x = true →
+      LRed (.app zerostepL x) (cellLit b0cT x) ∧
+      closed 0 (cellLit b0cT x) = true :=
+    fun x hx => ⟨zerostep_cell x hx, closed_cellLit closed_b0cT hx⟩
+  have hsc : iterS (fun x => cellLit b0cT x) klL n
+      = scottList (List.replicate n b0cT) := by
+    rw [iterS_scott]; rfl
+  exact e1.trans ((iter_red zerostepL (fun x => cellLit b0cT x) hs'
+    n klL closed_klL).trans (hsc ▸ Relation.ReflTransGen.refl))
+
 #print axioms append_assoc_basis
 #print axioms spine_eval
 #print axioms fold_eval
 #print axioms spine_eval_r
 #print axioms fixr_eval
 #print axioms join_eval
+#print axioms zerofill_eval
 
 end ISAR
