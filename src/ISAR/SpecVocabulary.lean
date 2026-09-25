@@ -1225,6 +1225,176 @@ theorem fold_eval (st : LTerm) (σ : LTerm → LTerm → LTerm)
       ((LRed_app_left (LRed_app_right hlcs)).trans
         (spine_eval st σ hs hstep cs a hcl ha))
 
+-- Right-spine fixpoint (`_JOIN`, `_MAP`, `_PADTO`) --------------------
+--
+-- Mirror of the left-spine GGB machinery: the worker recurses on the
+-- tail INSIDE the step (`st·h·(g·g·t)`), so `hstep` never reaches the
+-- recursive self-application (it sits in argument position).  The
+-- chain therefore carries `gsRA` raw and closes each step by one
+-- `LRed_app_right` congruence — the structural difference from
+-- `foldG`, where `g·g·t·(…)` keeps the recursion in spine position.
+
+/-- `RG st z = \g.\l2. l2 z (\h.\t. st·h·(g·g·t))` — right-spine worker:
+    the `(\f. f f)` fixpoint that recurses on the tail inside the step
+    (`_JOIN`, `_MAP`, `_PADTO`).  Mirror of `foldG`: `st`/`z` must be
+    closed so their shifts under the binders are no-ops. -/
+def fixrG (st z : LTerm) : LTerm :=
+  .abs (.abs (.app (.app (.var 0) (shift 2 0 z))
+    (.abs (.abs (.app (.app (shift 4 0 st) (.var 1))
+      (.app (.app (.var 3) (.var 3)) (.var 0)))))))
+
+/-- once-unfolded right worker — computed reduct of `fixrG·fixrG`. -/
+def RGR (st z : LTerm) : LTerm :=
+  hsteps 1 (.app (fixrG st z) (fixrG st z))
+
+/-- `(fixrG·fixrG)·l` — the running right-fold state. -/
+def gsRA (st z l : LTerm) : LTerm :=
+  .app (.app (fixrG st z) (fixrG st z)) l
+
+/-- `RGR st z · l` -/
+def rgrA (st z l : LTerm) : LTerm := .app (RGR st z) l
+
+/-- `(W·(fixrG st z))·l` — the `(\f. f f)` entry applied to the spine. -/
+def fixrA (st z l : LTerm) : LTerm :=
+  .app (.app wl (fixrG st z)) l
+
+theorem gsRA_to_rgrA (st z l : LTerm) :
+    LRed (gsRA st z l) (rgrA st z l) :=
+  LRed_of_hsteps (k := 1) rfl
+
+/-- `W·(fixrG st z)·l →* RGR st z·l` — entry unfold through W·RG. -/
+theorem fixr_to_rgr (st z l : LTerm) (hs : closed 0 st = true)
+    (hz : closed 0 z = true) (hl : closed 0 l = true) :
+    LRed (fixrA st z l) (rgrA st z l) :=
+  LRed_of_hsteps (k := 2) (by
+    simp [gsRA, rgrA, fixrA, RGR, fixrG, wl, nilL, cellLit, conssL,
+          hsteps, hstep, subst, shift,
+          shift_of_closed0 hs, shift_of_closed0 hz,
+          subst_of_closed0 hs, subst_of_closed0 hz])
+
+/-- nil unfold for ANY closed step/nil-value —
+    `RGR st z·nil →* z`. -/
+theorem rnil_unfold (st z : LTerm) (hs : closed 0 st = true)
+    (hz : closed 0 z = true) :
+    LRed (rgrA st z nilL) z :=
+  LRed_of_hsteps (k := 3) (by
+    simp [gsRA, rgrA, RGR, fixrG, wl, nilL, cellLit, conssL,
+          hsteps, hstep, subst, shift,
+          shift_of_closed0 hs, shift_of_closed0 hz,
+          subst_of_closed0 hs, subst_of_closed0 hz])
+
+/-- cell unfold for ANY closed step/nil-value —
+    `RGR st z·(cell h t) →* st·h·(RGR st z·t)`.  `hstep` never descends
+    into arguments, so the recursion `fixrG·fixrG·t` stays unreduced
+    inside the step argument — one `LRed_app_right` congruence step
+    (`gsRA_to_rgrA`) folds it into `RGR` form. -/
+theorem rcell_unfold (st z h t : LTerm) (hs : closed 0 st = true)
+    (hz : closed 0 z = true) (hh : closed 0 h = true)
+    (ht : closed 0 t = true) :
+    LRed (rgrA st z (cellLit h t))
+         (.app (.app st h) (rgrA st z t)) :=
+  (LRed_of_hsteps (k := 5) (by
+    simp [gsRA, rgrA, RGR, fixrG, wl, nilL, cellLit, conssL,
+          hsteps, hstep, subst, shift,
+          shift_of_closed0 hs, shift_of_closed0 hz, shift_of_closed0 hh,
+          shift_of_closed0 ht,
+          subst_of_closed0 hs, subst_of_closed0 hz, subst_of_closed0 hh,
+          subst_of_closed0 ht])).trans
+    (LRed_app_right (gsRA_to_rgrA st z t))
+
+/-- Right-spine unfold: `RGR st z` over `scottList cs` unfolds exactly
+    `cs.length` times into the unreduced `foldr` chain
+    `st·c·(st·c'·(…·z))`. -/
+theorem spine_run_r (st z : LTerm) (hs : closed 0 st = true)
+    (hz : closed 0 z = true) :
+    ∀ (cs : List LTerm), (∀ e ∈ cs, closed 0 e = true) →
+      LRed (rgrA st z (scottList cs))
+           (cs.foldr (fun e r => .app (.app st e) r) z) := by
+  intro cs; induction cs with
+  | nil =>
+    intro _
+    simp only [scottList, List.foldr_nil]
+    exact rnil_unfold st z hs hz
+  | cons c cs' ih =>
+    intro hcl
+    have hc : closed 0 c = true := hcl c List.mem_cons_self
+    have htail : ∀ e ∈ cs', closed 0 e = true :=
+      fun e he => hcl e (List.mem_cons_of_mem c he)
+    rw [show scottList (c :: cs') = cellLit c (scottList cs') from rfl,
+        List.foldr_cons]
+    exact (rcell_unfold st z c (scottList cs') hs hz hc
+      (closed_scottList htail)).trans (LRed_app_right (ih htail))
+
+/-- Closedness is preserved through a semantic `foldr`. -/
+theorem closed_foldr (σ : LTerm → LTerm → LTerm) (z : LTerm)
+    (hz : closed 0 z = true)
+    (hσ : ∀ e r, closed 0 e = true → closed 0 r = true →
+      closed 0 (σ e r) = true) :
+    ∀ (cs : List LTerm), (∀ e ∈ cs, closed 0 e = true) →
+      closed 0 (cs.foldr σ z) = true := by
+  intro cs; induction cs with
+  | nil => intro _; exact hz
+  | cons c cs' ih =>
+    intro hcl
+    have hc : closed 0 c = true := hcl c List.mem_cons_self
+    rw [List.foldr_cons]
+    exact hσ c _ hc (ih (fun e he => hcl e (List.mem_cons_of_mem c he)))
+
+/-- Right chain reduction: a `foldr` chain of unreduced step
+    applications reduces to the semantic `foldr` of `σ`, given the
+    per-step lemma `st·e·r →* σ e r` on closed inputs.  Mirror of
+    `foldl_red` — simpler here: the unreduced recursion sits in the
+    step's argument, so congruence composes directly without an
+    accumulator-pair invariant. -/
+theorem foldr_red (st z : LTerm) (σ : LTerm → LTerm → LTerm)
+    (hz : closed 0 z = true)
+    (hstep : ∀ e r, closed 0 e = true → closed 0 r = true →
+      LRed (.app (.app st e) r) (σ e r) ∧
+      closed 0 (σ e r) = true) :
+    ∀ (cs : List LTerm), (∀ e ∈ cs, closed 0 e = true) →
+      LRed (cs.foldr (fun e r => .app (.app st e) r) z)
+           (cs.foldr σ z) := by
+  intro cs; induction cs with
+  | nil => intro _; exact Relation.ReflTransGen.refl
+  | cons c cs' ih =>
+    intro hcl
+    have hc : closed 0 c = true := hcl c List.mem_cons_self
+    have htail : ∀ e ∈ cs', closed 0 e = true :=
+      fun e he => hcl e (List.mem_cons_of_mem c he)
+    rw [List.foldr_cons, List.foldr_cons]
+    refine (LRed_app_right (ih htail)).trans ?_
+    exact (hstep c _ hc (closed_foldr σ z hz
+      (fun e r he hr => (hstep e r he hr).2) cs' htail)).1
+
+/-- **Right FixSpine, composed**: `RGR st z` over `scottList cs`
+    reduces to the semantic `foldr` of `σ`.  Mirror of `spine_eval`. -/
+theorem spine_eval_r (st z : LTerm) (σ : LTerm → LTerm → LTerm)
+    (hs : closed 0 st = true) (hz : closed 0 z = true)
+    (hstep : ∀ e r, closed 0 e = true → closed 0 r = true →
+      LRed (.app (.app st e) r) (σ e r) ∧
+      closed 0 (σ e r) = true) :
+    ∀ (cs : List LTerm), (∀ e ∈ cs, closed 0 e = true) →
+      LRed (rgrA st z (scottList cs)) (cs.foldr σ z) :=
+  fun cs hcl => (spine_run_r st z hs hz cs hcl).trans
+    (foldr_red st z σ hz hstep cs hcl)
+
+/-- Right head form: `(W·fixrG)·l →* cs.foldr σ z` whenever
+    `l →* scottList cs`.  The recipe for `_JOIN`, `_MAP`, and every
+    right-spine fold head. -/
+theorem fixr_eval (st z : LTerm) (σ : LTerm → LTerm → LTerm)
+    (hs : closed 0 st = true) (hz : closed 0 z = true)
+    (hstep : ∀ e r, closed 0 e = true → closed 0 r = true →
+      LRed (.app (.app st e) r) (σ e r) ∧
+      closed 0 (σ e r) = true) :
+    ∀ (l : LTerm) (cs : List LTerm),
+      closed 0 l = true → LRed l (scottList cs) →
+      (∀ e ∈ cs, closed 0 e = true) →
+      LRed (fixrA st z l) (cs.foldr σ z) :=
+  fun l cs hl hlcs hcl =>
+    (fixr_to_rgr st z l hs hz hl).trans
+      ((LRed_app_right hlcs).trans
+        (spine_eval_r st z σ hs hz hstep cs hcl))
+
 /-- `b4Lit` normalizes to the `cellLit`-chain Scott list. -/
 theorem b4Lit_nf : ∀ (xs : List (Fin 16 × Fin 16)),
     LRed (b4Lit xs)
@@ -1836,6 +2006,90 @@ theorem append_eval (xs ys : LTerm) (as bs : List LTerm)
     rw [scottList, scottList, ← List.foldr_append]
   exact c1.trans (c2.trans (c3.trans (e ▸ c4)))
 
+-- _JOIN: the right-spine concat every stage's chunk emission uses ----
+
+/-- `_APPEND` as a head: `\xs.\ys. FOLDL·stepCons·(REV xs)·ys`. -/
+def appendL : LTerm :=
+  .abs (.abs (aps foldlL [stepConsL, revT (.var 1), .var 0]))
+
+theorem closed_appendL : closed 0 appendL = true := by decide
+
+/-- `_JOIN = \l. W·(RG appendL nil)·l` — right-spine list concat. -/
+def joinL : LTerm := .abs (fixrA appendL nilL (.var 0))
+
+theorem closed_joinL : closed 0 joinL = true := by decide
+
+/-- `appendL·xs·ys` β-unfolds to the `appendT xs ys` applied form. -/
+theorem appendL_to_appendT (xs ys : LTerm) (hx : closed 0 xs = true)
+    (hy : closed 0 ys = true) :
+    LRed (.app (.app appendL xs) ys) (appendT xs ys) :=
+  LRed_of_hsteps (k := 2) (by
+    simp [appendL, appendT, revT, aps, List.foldl, hsteps, hstep, subst,
+          shift, shift_of_closed0 hx, shift_of_closed0 hy,
+          subst_of_closed0 hx, subst_of_closed0 hy,
+          shift_of_closed0 closed_foldlL,
+          subst_of_closed0 closed_foldlL,
+          shift_of_closed0 closed_stepConsL,
+          subst_of_closed0 closed_stepConsL,
+          shift_of_closed0 closed_nilL,
+          subst_of_closed0 closed_nilL])
+
+/-- `joinL·l` β-unfolds to the generic right-fixpoint applied form.
+    `appendL` stays folded — the embedded `shift 4 0 appendL` in
+    `fixrG` rewrites atomically via `shift_of_closed0`. -/
+theorem joinL_to_fixr (l : LTerm) (hl : closed 0 l = true) :
+    LRed (.app joinL l) (fixrA appendL nilL l) :=
+  LRed_of_hsteps (k := 1) (by
+    simp [joinL, fixrA, fixrG, wl, nilL, hsteps, hstep, subst,
+          shift, shift_of_closed0 hl, subst_of_closed0 hl,
+          shift_of_closed0 closed_appendL,
+          subst_of_closed0 closed_appendL,
+          shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL])
+
+/-- foldr of `appendT` over Scott-list cells flattens the lists. -/
+theorem appendT_foldr_scott : ∀ (bss : List (List LTerm)),
+    (∀ e ∈ bss.flatten, closed 0 e = true) →
+    LRed ((bss.map scottList).foldr appendT nilL)
+         (scottList bss.flatten) := by
+  intro bss; induction bss with
+  | nil => intro _; exact Relation.ReflTransGen.refl
+  | cons bs bss' ih =>
+    intro hcl
+    rw [List.map_cons, List.foldr_cons, List.flatten_cons]
+    have hbs : ∀ e ∈ bs, closed 0 e = true :=
+      fun e he => hcl e (List.mem_append_left _ he)
+    have htail : ∀ e ∈ bss'.flatten, closed 0 e = true :=
+      fun e he => hcl e (List.mem_append_right _ he)
+    refine (LRed_app_right (ih htail)).trans ?_
+    exact append_eval _ _ _ _ Relation.ReflTransGen.refl
+      Relation.ReflTransGen.refl hbs htail
+      (closed_scottList hbs) (closed_scottList htail)
+
+/-- **`_JOIN` eval**: `JOIN` over a Scott list of Scott lists reduces
+    to the Scott list of the flattened elements — the concat every
+    stage's chunk emission is built on.  First head discharged purely
+    by `fixr_eval` — the per-head obligation is the two-step
+    `appendL→appendT` unfold. -/
+theorem join_eval (bss : List (List LTerm))
+    (h : ∀ e ∈ bss.flatten, closed 0 e = true) :
+    LRed (.app joinL (scottList (bss.map scottList)))
+         (scottList bss.flatten) := by
+  have hcells : ∀ e ∈ bss.map scottList, closed 0 e = true := by
+    intro e he
+    simp only [List.mem_map] at he
+    obtain ⟨bs, hbs, rfl⟩ := he
+    exact closed_scottList
+      (fun x hx => h x (List.mem_flatten.mpr ⟨bs, hbs, hx⟩))
+  have hs' : ∀ e r, closed 0 e = true → closed 0 r = true →
+      LRed (.app (.app appendL e) r) (appendT e r) ∧
+      closed 0 (appendT e r) = true :=
+    fun e r he hr =>
+      ⟨appendL_to_appendT e r he hr, closed_appendT he hr⟩
+  have e1 := fixr_eval appendL nilL appendT closed_appendL closed_nilL
+    hs' _ _ (closed_scottList hcells) Relation.ReflTransGen.refl hcells
+  exact (joinL_to_fixr _ (closed_scottList hcells)).trans
+    (e1.trans (appendT_foldr_scott bss h))
+
 /-- **append_assoc on the λ-encoding**: left- and right-nested appends
     join to the same Scott list — the observational equality the
     balanced-emission question needed. -/
@@ -1894,5 +2148,8 @@ theorem append_assoc_basis (as bs cs : List LTerm)
 #print axioms append_assoc_basis
 #print axioms spine_eval
 #print axioms fold_eval
+#print axioms spine_eval_r
+#print axioms fixr_eval
+#print axioms join_eval
 
 end ISAR
