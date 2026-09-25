@@ -7333,4 +7333,442 @@ theorem idataOf_eval (es : List LTerm)
 #print axioms idFin_eval
 #print axioms idataOf_eval
 
+-- ============================================================
+-- Batch K: packOf — section normalization + pack_src assembly.
+-- ============================================================
+
+-- K0 foundations ----------------------------------------------------
+
+/-- `(incByteN lo hi)` new lo-nibble flips parity. -/
+theorem incByteN_parity (lo hi : Fin 16) :
+    (incByteN lo hi).1.1.val % 2 = (lo.val + 1) % 2 := by
+  unfold incByteN
+  by_cases h : lo.val = 15
+  · simp [h]
+  · simp only [h, ite_false]
+    omega
+
+/-- `incBytes` under carry-in: the head cell is `incByteN`-updated. -/
+theorem incBytes_head (x : Fin 16 × Fin 16)
+    (xs : List (Fin 16 × Fin 16)) :
+    (incBytes (x :: xs) true).head? =
+      some (incByteN x.1 x.2).1 := by
+  simp [incBytes]
+
+/-- The incBytes-fold byte0.lo parity is the cell-count parity. -/
+theorem lenFold_parity : ∀ (cs : List LTerm) (x : Fin 16 × Fin 16)
+    (xs : List (Fin 16 × Fin 16)),
+    ∃ p, (cs.foldl (fun a _ => incBytes a true) (x :: xs)).head?
+        = some p
+      ∧ p.1.val % 2 = (x.1.val + cs.length) % 2 := by
+  intro cs; induction cs with
+  | nil =>
+    intro x xs
+    exact ⟨x, rfl, by simp⟩
+  | cons c cs ih =>
+    intro x xs
+    rw [List.foldl_cons]
+    obtain ⟨p, hp1, hp2⟩ := ih (incByteN x.1 x.2).1
+      (incBytes xs (incByteN x.1 x.2).2)
+    refine ⟨p, ?_, ?_⟩
+    · rw [← hp1]
+      simp [incBytes]
+    · rw [hp2]
+      have hpar := incByteN_parity x.1 x.2
+      have hstep : ((incByteN x.1 x.2).1.1.val + cs.length) % 2
+          = (x.1.val + (cs.length + 1)) % 2 := by
+        have h1 := Nat.add_mod (incByteN x.1 x.2).1.1.val cs.length 2
+        rw [hpar] at h1
+        rw [h1]
+        rw [show x.1.val + (cs.length + 1) = (x.1.val + 1) + cs.length
+            from by omega]
+        rw [Nat.add_mod]
+        omega
+      simpa [List.length_cons] using hstep
+
+/-- The `lenb4` output fold preserves length 4. -/
+theorem lenFold_len4 {α : Type} (cs : List α)
+    (acc : List (Fin 16 × Fin 16)) (hacc : acc.length = 4) :
+    (cs.foldl (fun a _ => incBytes a true) acc).length = 4 := by
+  induction cs generalizing acc with
+  | nil => exact hacc
+  | cons c cs ih =>
+    rw [List.foldl_cons]
+    exact ih _ (by rw [incBytes_length]; exact hacc)
+
+-- nibs2bytes semantic bytes -----------------------------------------
+
+/-- Semantic `_NIBS2BYTES`: pairs `(h,l)` to byte `(l,h)` — the lo
+    nibble is the second list element (LE nibble order). -/
+def nibs2bytesB : List (Fin 16) → List (Fin 16 × Fin 16)
+  | [] => []
+  | [_] => []
+  | hi :: lo :: t => (lo, hi) :: nibs2bytesB t
+
+/-- `nibPairUp` on nibble literals is `nibs2bytesB` at the cell level
+    (pairSrc thunks, thawed by consumers at spine position). -/
+theorem nibPairUp_nibLit : ∀ (ns : List (Fin 16)),
+    nibPairUp (ns.map nibLit) =
+      (nibs2bytesB ns).map
+        (fun p => .app (.app pairSrcL (nibLit p.1)) (nibLit p.2)) := by
+  intro ns; induction ns using nibs2bytesB.induct with
+  | case1 => rfl
+  | case2 a => rfl
+  | case3 hi lo t ih =>
+    simp [List.map_cons, nibPairUp, nibs2bytesB, ih]
+
+theorem nibs2bytesB_length : ∀ (ns : List (Fin 16)),
+    (nibs2bytesB ns).length = ns.length / 2 := by
+  intro ns; induction ns using nibs2bytesB.induct with
+  | case1 => rfl
+  | case2 a => simp [nibs2bytesB]
+  | case3 hi lo t ih =>
+    simp [nibs2bytesB, ih, List.length_cons]
+    omega
+
+-- thunk-fold machinery -----------------------------------------------
+
+/-- `foldr appendT` over closed terms is closed. -/
+theorem closed_appendT_foldr : ∀ (us : List LTerm),
+    (∀ u ∈ us, closed 0 u = true) →
+    closed 0 (us.foldr appendT nilL) = true := by
+  intro us
+  induction us with
+  | nil => intro _; exact closed_nilL
+  | cons u us ih2 =>
+    intro hu
+    simp only [List.foldr_cons]
+    exact closed_appendT (hu u List.mem_cons_self)
+      (ih2 (fun v hv => hu v (List.mem_cons_of_mem u hv)))
+
+/-- `foldr appendT` over thunk elements: each `t` reduces to a
+    `scottList` before its append consumes it. -/
+theorem appendT_foldr_thunks : ∀ (ts : List LTerm)
+    (bss : List (List LTerm)),
+    List.Forall₂ (fun t bs => LRed t (scottList bs)) ts bss →
+    (∀ e ∈ bss.flatten, closed 0 e = true) →
+    (∀ t ∈ ts, closed 0 t = true) →
+    LRed (ts.foldr appendT nilL) (scottList bss.flatten) := by
+  intro ts
+  induction ts with
+  | nil =>
+    intro bss h _ _
+    cases h
+    exact Relation.ReflTransGen.refl
+  | cons t ts' ih =>
+    intro bss h hcl htcl
+    cases bss with
+    | nil => cases h
+    | cons b bss' =>
+      cases h with
+      | cons hth htail =>
+      simp only [List.foldr_cons, List.flatten_cons]
+      have hrev : LRed (revT t) (revT (scottList b)) :=
+        LRed_app_left (LRed_app_right hth)
+      have hap : LRed (appendT t (ts'.foldr appendT nilL))
+          (appendT (scottList b) (ts'.foldr appendT nilL)) :=
+        LRed_app_left (LRed_app_right hrev)
+      have hrest : IsList (ts'.foldr appendT nilL) bss'.flatten :=
+        ih bss' htail
+          (fun e he => by
+            obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+            exact hcl e (List.mem_flatten.mpr
+              ⟨w, List.mem_cons_of_mem b hw, hew⟩))
+          (fun u hu => htcl u (List.mem_cons_of_mem t hu))
+      have hbcl : ∀ e ∈ b, closed 0 e = true :=
+        fun e he => hcl e (List.mem_flatten.mpr
+          ⟨b, List.mem_cons_self, he⟩)
+      have hrestcl : ∀ e ∈ bss'.flatten, closed 0 e = true :=
+        fun e he => by
+          obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+          exact hcl e (List.mem_flatten.mpr
+            ⟨w, List.mem_cons_of_mem b hw, hew⟩)
+      have hrestT : closed 0 (ts'.foldr appendT nilL) = true :=
+        closed_appendT_foldr ts'
+          (fun u hu => htcl u (List.mem_cons_of_mem t hu))
+      exact hap.trans (append_eval _ _ _ _
+        Relation.ReflTransGen.refl hrest hbcl hrestcl
+        (closed_scottList hbcl) hrestT)
+
+/-- `JOIN` over a Scott list of thunk elements: each thunk reduces to
+    its `scottList` before append consumes it. -/
+theorem join_thunks_eval (ts : List LTerm) (bss : List (List LTerm))
+    (h : List.Forall₂ (fun t bs => LRed t (scottList bs)) ts bss)
+    (hcl : ∀ e ∈ bss.flatten, closed 0 e = true)
+    (htcl : ∀ t ∈ ts, closed 0 t = true) :
+    LRed (.app joinL (scottList ts)) (scottList bss.flatten) := by
+  have hs'' : ∀ e r, closed 0 e = true → closed 0 r = true →
+      LRed (.app (.app appendL e) r) (appendT e r) ∧
+      closed 0 (appendT e r) = true :=
+    fun e r he hr =>
+      ⟨appendL_to_appendT e r he hr, closed_appendT he hr⟩
+  have e1 := fixr_eval appendL nilL appendT closed_appendL closed_nilL
+    hs'' _ _ (closed_scottList htcl) Relation.ReflTransGen.refl htcl
+  exact (joinL_to_fixr _ (closed_scottList htcl)).trans
+    (e1.trans (appendT_foldr_thunks _ _ h hcl htcl))
+
+-- per-record evals ---------------------------------------------------
+
+/-- `brec` cells: `[00,00] ++ nibs2bytes-cells ++ [00]` —
+    `nibPairUp` cells stay pairSrc-thunks. -/
+def brecCells (ns : List (Fin 16)) : List LTerm :=
+  bm bz2 ++ nibPairUp (ns.map nibLit) ++ bm bz1
+
+theorem closed_brecCells (ns : List (Fin 16)) :
+    ∀ e ∈ brecCells ns, closed 0 e = true := by
+  intro e he
+  rw [brecCells] at he
+  rcases List.mem_append.mp he with h | h
+  · rcases List.mem_append.mp h with h2 | h2
+    · obtain ⟨p, _, rfl⟩ := List.mem_map.mp h2
+      exact closed_byteLit _ _
+    · rw [nibPairUp_nibLit] at h2
+      obtain ⟨p, _, rfl⟩ := List.mem_map.mp h2
+      exact closed_app (closed_app closed_pairSrcL
+        (closed_nibLit _)) (closed_nibLit _)
+  · obtain ⟨p, _, rfl⟩ := List.mem_map.mp h
+    exact closed_byteLit _ _
+
+/-- `brec` thunk → its cell list.  `JOIN` on a 3-thunk Scott list. -/
+theorem idBrec_eval (ns : List (Fin 16)) :
+    LRed (idBrec (scottList (ns.map nibLit)))
+      (scottList (brecCells ns)) := by
+  simp only [idBrec, idNmb]
+  have hcl : ∀ t ∈ [bytesChunk bz2,
+      .app nibs2bytesL (scottList (ns.map nibLit)),
+      bytesChunk bz1], closed 0 t = true := by
+    intro t ht
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ht
+    rcases ht with rfl | rfl | rfl
+    · exact closed_bytesChunk bz2
+    · exact closed_app closed_nibs2bytesL
+        (closed_scottList (fun e he => by
+          obtain ⟨i, _, rfl⟩ := List.mem_map.mp he
+          exact closed_nibLit i))
+    · exact closed_bytesChunk bz1
+  have hf := join_thunks_eval
+    [bytesChunk bz2, .app nibs2bytesL (scottList (ns.map nibLit)),
+     bytesChunk bz1]
+    [bm bz2, nibPairUp (ns.map nibLit), bm bz1]
+    (List.Forall₂.cons (bytesChunk_nf bz2)
+      (List.Forall₂.cons
+        (nibs2bytes_eval _ (fun e he => by
+          obtain ⟨i, _, rfl⟩ := List.mem_map.mp he
+          exact closed_nibLit i))
+        (List.Forall₂.cons (bytesChunk_nf bz1) List.Forall₂.nil)))
+    (closed_brecCells ns) hcl
+  have hflat : [bm bz2, nibPairUp (ns.map nibLit), bm bz1].flatten
+      = brecCells ns := by
+    simp [List.flatten, brecCells]
+  rwa [hflat] at hf
+
+/-- term-list version of `len4`: the incBytes fold over cells. -/
+def lenFoldT (cs : List LTerm) : List (Fin 16 × Fin 16) :=
+  cs.foldl (fun a _ => incBytes a true) b4zeroBytes
+
+/-- `LENB4·brec` — count of the record cells as bytes4. -/
+theorem idRln_eval (ns : List (Fin 16)) :
+    LRed (idRln (scottList (ns.map nibLit)))
+      (scottList (bm (lenFoldT (brecCells ns)))) := by
+  simp only [idRln]
+  exact (LRed_app_right (idBrec_eval ns)).trans
+    (lenb4_eval _ (closed_brecCells ns))
+
+/-- `rln K (λb0.λt0. b0 (λbl.λbh. NIBODD bl))` on a len4 scottList
+    reduces to `NIBODD·(nibLit b0.lo)`. -/
+theorem idOdd_peel (w0 w1 w2 w3 : Fin 16 × Fin 16) :
+    LRed (.app (.app (scottList
+        [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+         byteLit w2.1 w2.2, byteLit w3.1 w3.2]) nilL) idOddK)
+      (.app niboddL (nibLit w0.1)) :=
+  LRed_of_hsteps (k := 7) (by
+    simp [scottList, cellLit, idOddK, byteLit, pairLit,
+          List.foldr, hsteps, hstep, subst, shift,
+          subst_of_closed0, shift_of_closed0,
+          closed_nibLit, closed_niboddL, closed_nilL])
+
+/-- `odd` = parity of the brec cell count. -/
+theorem idOdd_eval (ns : List (Fin 16)) :
+    LRed (idOdd (scottList (ns.map nibLit)))
+      (boolLit (decide ((brecCells ns).length % 2 = 1))) := by
+  simp only [idOdd]
+  have hln : (lenFoldT (brecCells ns)).length = 4 :=
+    lenFold_len4 _ _ (by decide)
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hln
+  have hrln : LRed
+      (.app (.app (idRln (scottList (ns.map nibLit))) nilL) idOddK)
+      (.app (.app (scottList (bm (lenFoldT (brecCells ns)))) nilL)
+        idOddK) :=
+    LRed_app_left (LRed_app_left (idRln_eval ns))
+  have hbm : bm (lenFoldT (brecCells ns)) =
+      [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+       byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+    rw [hws]; rfl
+  have hpeel := idOdd_peel w0 w1 w2 w3
+  rw [hbm] at hrln
+  have hodd := (hrln.trans hpeel).trans (nibodd_eval w0.1)
+  -- parity bridge: w0.lo % 2 = cell count % 2
+  have hdef : ((0, 0) :: [(0, 0), (0, 0), (0, 0)] :
+      List (Fin 16 × Fin 16)) = b4zeroBytes := rfl
+  obtain ⟨p, hp1, hp2⟩ := lenFold_parity (brecCells ns)
+    (0, 0) [(0, 0), (0, 0), (0, 0)]
+  rw [hdef] at hp1
+  have hp1' : (lenFoldT (brecCells ns)).head? = some p := hp1
+  rw [hws] at hp1'
+  have hp0 : p = w0 := (Option.some.inj hp1').symm
+  have hpar : w0.1.val % 2 = (brecCells ns).length % 2 := by
+    rw [hp0] at hp2
+    simpa using hp2
+  rw [← hpar]
+  exact hodd
+
+-- idRec / idRl2 / idHrv / zChain ---------------------------------------
+
+/-- `rec` cells: `brec` padded by `[00]` when the count is odd —
+    `odd (APPEND brec 00) brec` at cell level. -/
+def recCells (ns : List (Fin 16)) : List LTerm :=
+  if (brecCells ns).length % 2 = 1
+  then brecCells ns ++ bm bz1 else brecCells ns
+
+theorem closed_recCells (ns : List (Fin 16)) :
+    ∀ e ∈ recCells ns, closed 0 e = true := by
+  intro e he
+  by_cases hp : (brecCells ns).length % 2 = 1
+  · simp only [recCells, if_pos hp] at he
+    rcases List.mem_append.mp he with h | h
+    · exact closed_brecCells ns e h
+    · obtain ⟨p, _, rfl⟩ := List.mem_map.mp h
+      exact closed_byteLit _ _
+  · simp only [recCells, if_neg hp] at he
+    exact closed_brecCells ns e he
+
+/-- closedness of the `idBrec` term on a nibble-literal name list. -/
+theorem closed_idBrec_scott (ns : List (Fin 16)) :
+    closed 0 (idBrec (scottList (ns.map nibLit))) = true := by
+  have hsc : closed 0 (scottList (ns.map nibLit)) = true :=
+    closed_scottList (fun e he => by
+      obtain ⟨i, _, rfl⟩ := List.mem_map.mp he
+      exact closed_nibLit i)
+  show closed 0 (.app joinL (scottList
+    [bytesChunk bz2, idNmb (scottList (ns.map nibLit)),
+     bytesChunk bz1])) = true
+  refine closed_app closed_joinL
+    (closed_scottList (fun e he => ?_))
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at he
+  rcases he with rfl | rfl | rfl
+  · exact closed_bytesChunk bz2
+  · exact closed_app closed_nibs2bytesL hsc
+  · exact closed_bytesChunk bz1
+
+/-- `odd (APPEND brec 00) brec` — the import record with parity pad. -/
+theorem idRec_eval (ns : List (Fin 16)) :
+    LRed (idRec (scottList (ns.map nibLit)))
+      (scottList (recCells ns)) := by
+  simp only [idRec]
+  have hb := closed_idBrec_scott ns
+  have hA : LRed
+      (.app (.app appendL (idBrec (scottList (ns.map nibLit))))
+        (bytesChunk bz1))
+      (scottList (brecCells ns ++ bm bz1)) :=
+    (appendL_to_appendT _ _ hb (closed_bytesChunk bz1)).trans
+      (append_eval _ _ _ _ (idBrec_eval ns)
+        (bytesChunk_nf bz1) (closed_brecCells ns)
+        (fun e he => by
+          obtain ⟨p, _, rfl⟩ := List.mem_map.mp he
+          exact closed_byteLit _ _)
+        hb (closed_bytesChunk bz1))
+  have hsel : LRed
+      (.app (.app (idOdd (scottList (ns.map nibLit)))
+        (.app (.app appendL (idBrec (scottList (ns.map nibLit))))
+          (bytesChunk bz1)))
+        (idBrec (scottList (ns.map nibLit))))
+      (if decide ((brecCells ns).length % 2 = 1) = true
+        then .app (.app appendL (idBrec (scottList (ns.map nibLit))))
+          (bytesChunk bz1)
+        else idBrec (scottList (ns.map nibLit))) :=
+    (LRed_app_left (LRed_app_left (idOdd_eval ns))).trans
+      (boolLit_sel _ _ _)
+  by_cases hp : (brecCells ns).length % 2 = 1
+  · have hd : decide ((brecCells ns).length % 2 = 1) = true := by
+      simp [hp]
+    rw [hd] at hsel
+    simp at hsel
+    have hrc : recCells ns = brecCells ns ++ bm bz1 := by
+      simp only [recCells]; exact if_pos hp
+    rw [hrc]
+    exact hsel.trans hA
+  · have hd : decide ((brecCells ns).length % 2 = 1) = false := by
+      simp [hp]
+    rw [hd] at hsel
+    simp at hsel
+    have hrc : recCells ns = brecCells ns := by
+      simp only [recCells]; exact if_neg hp
+    rw [hrc]
+    exact hsel.trans (idBrec_eval ns)
+
+/-- `LENB4·rec` — the padded record's byte count. -/
+theorem idRl2_eval (ns : List (Fin 16)) :
+    LRed (idRl2 (scottList (ns.map nibLit)))
+      (scottList (bm (lenFoldT (recCells ns)))) := by
+  simp only [idRl2]
+  exact (LRed_app_right (idRec_eval ns)).trans
+    (lenb4_eval _ (closed_recCells ns))
+
+/-- `B4ADD <B 0x2000>·o` — hint/name RVA = offset + .idata base. -/
+theorem idHrv_eval (o : LTerm) (bs : List (Fin 16 × Fin 16))
+    (ho : LRed o (scottList (bs.map (fun p => byteLit p.1 p.2))))
+    (hlen : b2000.length = bs.length) :
+    LRed (idHrv o)
+      (scottList ((resList b2000 bs 0).map
+        (fun p => byteLit p.1 p.2))) := by
+  simp only [idHrv]
+  have h1 : LRed
+      (.app (.app b4addL (bytesChunk b2000)) o)
+      (aps b4addL [scottList (bm b2000),
+                   scottList (bs.map (fun p => byteLit p.1 p.2))]) :=
+    (LRed_app_left (LRed_app_right (bytesChunk_nf b2000))).trans
+      (LRed_app_right ho)
+  exact h1.trans (b4add_eval_scott _ _ hlen)
+
+/-- `szn consB0 z` — Church-iterated `CONSS B0C` prepends `n`
+    `b0cT`-thunks onto the zero-list.  `consB0L` is `zerostepL`. -/
+theorem zChain_eval (n : Nat) (zs : List LTerm)
+    (hzs : ∀ e ∈ zs, closed 0 e = true) :
+    LRed (.app (.app (churchL n) consB0L) (scottList zs))
+      (scottList (List.replicate n b0cT ++ zs)) := by
+  have hstep : ∀ x, closed 0 x = true →
+      LRed (.app consB0L x) (cellLit b0cT x) ∧
+      closed 0 (cellLit b0cT x) = true :=
+    fun x hx => ⟨zerostep_cell x hx,
+      closed_cellLit closed_b0cT hx⟩
+  have h3 : ∀ n : Nat,
+      iterS (fun z => cellLit b0cT z) (scottList zs) n
+      = scottList (List.replicate n b0cT ++ zs) := by
+    intro n; induction n with
+    | zero => rfl
+    | succ n ih =>
+      show cellLit b0cT
+          (iterS (fun z => cellLit b0cT z) (scottList zs) n)
+        = scottList (List.replicate (n + 1) b0cT ++ zs)
+      rw [ih]
+      rfl
+  have h1 := church_eval n consB0L (scottList zs)
+    closed_consB0L (closed_scottList hzs)
+  have h2 := iter_red consB0L (fun z => cellLit b0cT z) hstep n
+    (scottList zs) (closed_scottList hzs)
+  exact h1.trans ((h3 n) ▸ h2)
+
+#print axioms incByteN_parity
+#print axioms lenFold_parity
+#print axioms nibPairUp_nibLit
+#print axioms nibs2bytesB_length
+#print axioms join_thunks_eval
+#print axioms idBrec_eval
+#print axioms idRln_eval
+#print axioms idOdd_eval
+#print axioms idRec_eval
+#print axioms idRl2_eval
+#print axioms idHrv_eval
+#print axioms zChain_eval
+
 end ISAR
