@@ -8132,4 +8132,1305 @@ theorem idBody_eval (o rv rc : LTerm)
 #print axioms idIdt_eval
 #print axioms idBody_eval
 
+
+-- ============================================================
+-- Batch K layer 3: packL port + pack_eval assembly.
+-- pack_src = λt.λi.λs.λr. LETS[idr, dat, idata=idr·K, datab=dat·K]
+--   (pack_body) — the idata/datab lets are pre-composed into a
+--   direct pack2L application spine (β-equivalent: pack2L already
+--   binds idata/datab/stackres around the same packLets body).
+-- ============================================================
+
+-- K projection --------------------------------------------------
+
+/-- `K a b → a` — unconditional (subst_shift_succ is exact
+    hole-cancellation; no closedness needed). -/
+theorem klL_apply2 (a b : LTerm) :
+    LRed (aps klL [a, b]) a := by
+  show LRed (.app (.app klL a) b) a
+  exact LRed_of_hsteps (k := 2) (by
+    simp [klL, hsteps, hstep, subst, subst_shift_succ])
+
+/-- `PAIR a b · K →* a` — first projection. -/
+theorem pairLit_fst (a b : LTerm) (ha : closed 0 a = true)
+    (hb : closed 0 b = true) :
+    LRed (.app (pairLit a b) klL) a :=
+  (pairLit_apply a b klL ha hb).trans (klL_apply2 a b)
+
+-- dataOf's z-component ------------------------------------------
+
+/-- The z-component of a `dataStepSem` fold is a standalone fold:
+    `z ↦ (szn·CONSB0)·z` per slot. -/
+theorem dataStepSem_z : ∀ (es : List (LTerm × LTerm × LTerm))
+    (st : LTerm × LTerm × LTerm),
+    (es.foldl dataStepSem st).2.2 =
+      es.foldl (fun z e => .app (.app e.2.1 consB0L) z) st.2.2 := by
+  intro es; induction es with
+  | nil => intro st; rfl
+  | cons e es ih =>
+    intro st
+    simp only [List.foldl_cons]
+    rw [ih (dataStepSem st e)]
+    rfl
+
+/-- z-cell semantics: sizes reversed, each contributing `n` zero
+    cells.  (The foldl emits the LAST slot's padding first.) -/
+def zCellsN (szs : List Nat) : List LTerm :=
+  szs.reverse.flatMap (fun n => List.replicate n b0cT)
+
+theorem closed_zCellsN (szs : List Nat) :
+    ∀ e ∈ zCellsN szs, closed 0 e = true := by
+  intro e he
+  simp only [zCellsN, List.mem_flatMap, List.mem_reverse] at he
+  obtain ⟨n, _, hn⟩ := he
+  exact closed_rep_b0c hn
+
+/-- The accumulated zero-chain normalizes: each `(churchL n)·CONSB0`
+    prefix contributes `replicate n b0cT` cells. -/
+theorem zFold_eval : ∀ (es : List (LTerm × LTerm × LTerm))
+    (szs : List Nat) (init : LTerm) (ics : List LTerm),
+    es.map (fun e => e.2.1) = szs.map churchL →
+    LRed init (scottList ics) →
+    (∀ e ∈ ics, closed 0 e = true) →
+    (∀ e ∈ es, closed 0 e.2.1 = true) →
+    LRed (es.foldl (fun z e => .app (.app e.2.1 consB0L) z) init)
+         (scottList ((szs.reverse.flatMap
+           (fun n => List.replicate n b0cT)) ++ ics)) := by
+  intro es; induction es with
+  | nil =>
+    intro szs init ics hmap hinit hics _
+    simp only [List.map_nil] at hmap
+    have hszs : szs = [] := List.map_eq_nil_iff.mp hmap.symm
+    subst hszs
+    simp only [List.reverse_nil, List.flatMap_nil, List.nil_append,
+               List.foldl_nil]
+    exact hinit
+  | cons e es' ih =>
+    intro szs init ics hmap hinit hics hcl
+    cases szs with
+    | nil => simp at hmap
+    | cons sz szs' =>
+      simp only [List.map_cons, List.cons.injEq] at hmap
+      obtain ⟨hsz, hrest⟩ := hmap
+      rw [List.foldl_cons]
+      have hstep : LRed (.app (.app e.2.1 consB0L) init)
+          (scottList (List.replicate sz b0cT ++ ics)) := by
+        rw [hsz]
+        exact (LRed_app_right hinit).trans
+          (zChain_eval sz ics hics)
+      have hcells : (sz :: szs').reverse.flatMap
+          (fun n => List.replicate n b0cT) ++ ics
+          = szs'.reverse.flatMap (fun n => List.replicate n b0cT)
+            ++ (List.replicate sz b0cT ++ ics) := by
+        simp only [List.reverse_cons, List.flatMap_append,
+                   List.flatMap_cons, List.flatMap_nil,
+                   List.append_nil]
+        exact List.append_assoc _ _ _
+      rw [hcells]
+      exact ih szs' _ _ hrest hstep
+        (fun x hx => by
+          rcases List.mem_append.mp hx with h | h
+          · exact closed_rep_b0c h
+          · exact hics x h)
+        (fun e' he' => hcl e' (List.mem_cons_of_mem _ he'))
+
+/-- closedness of the whole `dataStepSem` fold. -/
+theorem closed_dataFold : ∀ (es : List (LTerm × LTerm × LTerm))
+    (st : LTerm × LTerm × LTerm),
+    closed 0 st.1 = true → closed 0 st.2.1 = true →
+    closed 0 st.2.2 = true →
+    (∀ e ∈ es, closed 0 e.1 = true ∧ closed 0 e.2.1 = true ∧
+      closed 0 e.2.2 = true) →
+    closed 0 (es.foldl dataStepSem st).1 = true ∧
+    closed 0 (es.foldl dataStepSem st).2.1 = true ∧
+    closed 0 (es.foldl dataStepSem st).2.2 = true := by
+  intro es; induction es with
+  | nil => intro st h1 h2 h3 _; exact ⟨h1, h2, h3⟩
+  | cons e es ih =>
+    intro st h1 h2 h3 hcl
+    simp only [List.foldl_cons]
+    exact ih (dataStepSem st e)
+      (closed_dataStepSem h1 h2 h3
+        (hcl e List.mem_cons_self).1
+        (hcl e List.mem_cons_self).2.1
+        (hcl e List.mem_cons_self).2.2).1
+      (closed_dataStepSem h1 h2 h3
+        (hcl e List.mem_cons_self).1
+        (hcl e List.mem_cons_self).2.1
+        (hcl e List.mem_cons_self).2.2).2.1
+      (closed_dataStepSem h1 h2 h3
+        (hcl e List.mem_cons_self).1
+        (hcl e List.mem_cons_self).2.1
+        (hcl e List.mem_cons_self).2.2).2.2
+      (fun e' he' => hcl e' (List.mem_cons_of_mem _ he'))
+
+theorem closed_dataFinal (es : List (LTerm × LTerm × LTerm))
+    (hcl : ∀ e ∈ es, closed 0 e.1 = true ∧ closed 0 e.2.1 = true ∧
+      closed 0 e.2.2 = true) :
+    closed 0 (dataFinal es).1 = true ∧
+    closed 0 (dataFinal es).2.1 = true ∧
+    closed 0 (dataFinal es).2.2 = true := by
+  unfold dataFinal
+  exact closed_dataFold es _
+    (closed_bytesChunk b3000) closed_nilL closed_nilL hcl
+
+/-- `dat·K` — the datab section: `dataOf`'s pair's first component,
+    the accumulated zero-run. -/
+theorem datK_eval (es : List (LTerm × LTerm × LTerm))
+    (szs : List Nat)
+    (hmap : es.map (fun e => e.2.1) = szs.map churchL)
+    (hcl : ∀ e ∈ es, closed 0 e.1 = true ∧ closed 0 e.2.1 = true ∧
+      closed 0 e.2.2 = true) :
+    LRed (.app (.app (dataOfL es.length)
+          (scottList (es.map slotEnc))) klL)
+         (scottList (zCellsN szs)) := by
+  have hf := closed_dataFinal es hcl
+  have hz0 : LRed
+      (.app (.app (dataOfL es.length) (scottList (es.map slotEnc)))
+        klL)
+      ((dataFinal es).2.2) := by
+    have h1 := dataOf_eval es hcl
+    exact (LRed_app_left h1).trans
+      (pairLit_fst _ _ hf.2.2 hf.2.1)
+  have hz1 : (dataFinal es).2.2 =
+      es.foldl (fun z e => .app (.app e.2.1 consB0L) z) nilL := by
+    unfold dataFinal
+    exact dataStepSem_z es _
+  have hz2 : LRed
+      (es.foldl (fun z e => .app (.app e.2.1 consB0L) z) nilL)
+      (scottList ((szs.reverse.flatMap
+        (fun n => List.replicate n b0cT)) ++ [])) :=
+    zFold_eval es szs nilL [] hmap
+      Relation.ReflTransGen.refl
+      (fun e he => by simp at he)
+      (fun e he => (hcl e he).2.1)
+  rw [List.append_nil] at hz2
+  rw [hz1] at hz0
+  show LRed (.app (.app (dataOfL es.length)
+        (scottList (es.map slotEnc))) klL)
+      (scottList (zCellsN szs))
+  simp only [zCellsN]
+  exact hz0.trans hz2
+
+-- idataFinal components -----------------------------------------
+
+-- nm-generic evals: the leaf evals are stated for literal
+-- `scottList (ns.map nibLit)` inputs; the fold carries thunk terms
+-- `nm` with `LRed nm (scottList …)`.  Each `_of` replays the leaf
+-- proof with the input reduction fed at the thunk position.
+
+/-- `NIBS2BYTES·nm` on a reducible name. -/
+theorem idNmb_of {nm : LTerm} {ns : List (Fin 16)}
+    (hnm : LRed nm (scottList (ns.map nibLit)))
+    (_hc : closed 0 nm = true) :
+    LRed (idNmb nm) (scottList (nibPairUp (ns.map nibLit))) := by
+  simp only [idNmb]
+  exact (LRed_app_right hnm).trans (nibs2bytes_eval _
+    (fun e he => by
+      obtain ⟨i, _, rfl⟩ := List.mem_map.mp he
+      exact closed_nibLit i))
+
+/-- `idBrec` on a reducible name. -/
+theorem idBrec_of {nm : LTerm} {ns : List (Fin 16)}
+    (hnm : LRed nm (scottList (ns.map nibLit)))
+    (hc : closed 0 nm = true) :
+    LRed (idBrec nm) (scottList (brecCells ns)) := by
+  simp only [idBrec, idNmb]
+  have hcl : ∀ t ∈ [bytesChunk bz2,
+      .app nibs2bytesL nm, bytesChunk bz1], closed 0 t = true := by
+    intro t ht
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ht
+    rcases ht with rfl | rfl | rfl
+    · exact closed_bytesChunk bz2
+    · exact closed_app closed_nibs2bytesL hc
+    · exact closed_bytesChunk bz1
+  have hf := join_thunks_eval
+    [bytesChunk bz2, .app nibs2bytesL nm, bytesChunk bz1]
+    [bm bz2, nibPairUp (ns.map nibLit), bm bz1]
+    (List.Forall₂.cons (bytesChunk_nf bz2)
+      (List.Forall₂.cons (idNmb_of hnm hc)
+        (List.Forall₂.cons (bytesChunk_nf bz1) List.Forall₂.nil)))
+    (closed_brecCells ns) hcl
+  have hflat : [bm bz2, nibPairUp (ns.map nibLit), bm bz1].flatten
+      = brecCells ns := by simp [List.flatten, brecCells]
+  rwa [hflat] at hf
+
+/-- `idRln` on a reducible name. -/
+theorem idRln_of {nm : LTerm} {ns : List (Fin 16)}
+    (hnm : LRed nm (scottList (ns.map nibLit)))
+    (hc : closed 0 nm = true) :
+    LRed (idRln nm) (scottList (bm (lenFoldT (brecCells ns)))) := by
+  simp only [idRln]
+  have h := (LRed_app_right (idBrec_of hnm hc)).trans
+    (lenb4_eval _ (closed_brecCells ns))
+  simpa only [lenFoldT, bm] using h
+
+/-- `idOdd` on a reducible name. -/
+theorem idOdd_of {nm : LTerm} {ns : List (Fin 16)}
+    (hnm : LRed nm (scottList (ns.map nibLit)))
+    (hc : closed 0 nm = true) :
+    LRed (idOdd nm)
+      (boolLit (decide ((brecCells ns).length % 2 = 1))) := by
+  simp only [idOdd]
+  have hln : (lenFoldT (brecCells ns)).length = 4 :=
+    lenFold_len4 _ _ (by decide)
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hln
+  have hrln : LRed
+      (.app (.app (idRln nm) nilL) idOddK)
+      (.app (.app (scottList (bm (lenFoldT (brecCells ns)))) nilL)
+        idOddK) :=
+    LRed_app_left (LRed_app_left (idRln_of hnm hc))
+  have hbm : bm (lenFoldT (brecCells ns)) =
+      [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+       byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+    rw [hws]; rfl
+  have hpeel := idOdd_peel w0 w1 w2 w3
+  rw [hbm] at hrln
+  have hodd := (hrln.trans hpeel).trans (nibodd_eval w0.1)
+  have hdef : ((0, 0) :: [(0, 0), (0, 0), (0, 0)] :
+      List (Fin 16 × Fin 16)) = b4zeroBytes := rfl
+  obtain ⟨p, hp1, hp2⟩ := lenFold_parity (brecCells ns)
+    (0, 0) [(0, 0), (0, 0), (0, 0)]
+  rw [hdef] at hp1
+  have hp1' : (lenFoldT (brecCells ns)).head? = some p := hp1
+  rw [hws] at hp1'
+  have hp0 : p = w0 := (Option.some.inj hp1').symm
+  have hpar : w0.1.val % 2 = (brecCells ns).length % 2 := by
+    rw [hp0] at hp2
+    simpa using hp2
+  rw [← hpar]
+  exact hodd
+
+/-- `idRec` on a reducible name. -/
+theorem idRec_of {nm : LTerm} {ns : List (Fin 16)}
+    (hnm : LRed nm (scottList (ns.map nibLit)))
+    (hc : closed 0 nm = true) :
+    LRed (idRec nm) (scottList (recCells ns)) := by
+  simp only [idRec]
+  have hb := closed_idBrec hc
+  have hA : LRed
+      (.app (.app appendL (idBrec nm)) (bytesChunk bz1))
+      (scottList (brecCells ns ++ bm bz1)) :=
+    (appendL_to_appendT _ _ hb (closed_bytesChunk bz1)).trans
+      (append_eval _ _ _ _ (idBrec_of hnm hc)
+        (bytesChunk_nf bz1) (closed_brecCells ns)
+        (fun e he => by
+          obtain ⟨p, _, rfl⟩ := List.mem_map.mp he
+          exact closed_byteLit _ _)
+        hb (closed_bytesChunk bz1))
+  have hsel : LRed
+      (.app (.app (idOdd nm)
+        (.app (.app appendL (idBrec nm)) (bytesChunk bz1)))
+        (idBrec nm))
+      (if decide ((brecCells ns).length % 2 = 1) = true
+        then .app (.app appendL (idBrec nm)) (bytesChunk bz1)
+        else idBrec nm) :=
+    (LRed_app_left (LRed_app_left (idOdd_of hnm hc))).trans
+      (boolLit_sel _ _ _)
+  by_cases hp : (brecCells ns).length % 2 = 1
+  · have hd : decide ((brecCells ns).length % 2 = 1) = true := by
+      simp [hp]
+    rw [hd] at hsel
+    simp at hsel
+    have hrc : recCells ns = brecCells ns ++ bm bz1 := by
+      simp only [recCells]; exact if_pos hp
+    rw [hrc]
+    exact hsel.trans hA
+  · have hd : decide ((brecCells ns).length % 2 = 1) = false := by
+      simp [hp]
+    rw [hd] at hsel
+    simp at hsel
+    have hrc : recCells ns = brecCells ns := by
+      simp only [recCells]; exact if_neg hp
+    rw [hrc]
+    exact hsel.trans (idBrec_of hnm hc)
+
+/-- `idRl2` on a reducible name — the o-fold's addend. -/
+theorem idRl2_of {nm : LTerm} {ns : List (Fin 16)}
+    (hnm : LRed nm (scottList (ns.map nibLit)))
+    (hc : closed 0 nm = true) :
+    LRed (idRl2 nm)
+      (scottList (bm (lenFoldT (recCells ns)))) := by
+  simp only [idRl2]
+  have h := (LRed_app_right (idRec_of hnm hc)).trans
+    (lenb4_eval _ (closed_recCells ns))
+  simpa only [lenFoldT, bm] using h
+
+-- relations carried through the idata fold ---------------------
+
+/-- rv thunk ↔ its byte image: `idHrv oT` with `oT →* <oB>` and
+    `xs = resList b2000 oB`. -/
+def rvRel (t : LTerm) (xs : List (Fin 16 × Fin 16)) : Prop :=
+  ∃ oT oBs, t = idHrv oT ∧ xs = resList b2000 oBs 0 ∧
+    LRed oT (scottList (bm oBs)) ∧ oBs.length = 4 ∧
+    closed 0 oT = true
+
+/-- rc thunk ↔ its cell image: `idRec nm` with `nm →* <ns>`. -/
+def rcRel (t : LTerm) (bs : List LTerm) : Prop :=
+  ∃ nm ns, t = idRec nm ∧ bs = recCells ns ∧
+    LRed nm (scottList (ns.map nibLit)) ∧ closed 0 nm = true
+
+/-- Flatten rvRel to the plain eval relation `idIlt_eval` needs. -/
+theorem rvRel_eval {t : LTerm} {xs : List (Fin 16 × Fin 16)}
+    (h : rvRel t xs) : LRed t (scottList (bm xs)) := by
+  obtain ⟨oT, oBs, rfl, rfl, ho, hlen, _⟩ := h
+  exact idHrv_eval oT oBs ho (by rw [hlen]; rfl)
+
+theorem rvRel_closed {t : LTerm} {xs : List (Fin 16 × Fin 16)}
+    (h : rvRel t xs) : closed 0 t = true := by
+  obtain ⟨oT, _, rfl, _, _, _, hc⟩ := h
+  exact closed_idHrv hc
+
+/-- Flatten rcRel to the plain eval relation `idNams_eval` needs. -/
+theorem rcRel_eval {t : LTerm} {bs : List LTerm} (h : rcRel t bs) :
+    LRed t (scottList bs) := by
+  obtain ⟨nm, ns, rfl, rfl, hnm, hc⟩ := h
+  exact idRec_of hnm hc
+
+theorem rcRel_closed {t : LTerm} {bs : List LTerm} (h : rcRel t bs) :
+    closed 0 t = true := by
+  obtain ⟨nm, _, rfl, _, _, hc⟩ := h
+  exact closed_idRec hc
+
+theorem rcRel_cells_closed {bs : List LTerm} {t : LTerm}
+    (h : rcRel t bs) : ∀ e ∈ bs, closed 0 e = true := by
+  obtain ⟨nm, ns, _, rfl, _, _⟩ := h
+  exact closed_recCells ns
+
+-- the joint fold -------------------------------------------------
+
+/-- Semantic o-component: fold of `resList` over the per-import
+    record lengths. -/
+def oBytesOf (nsl : List (List (Fin 16)))
+    (oB : List (Fin 16 × Fin 16)) : List (Fin 16 × Fin 16) :=
+  nsl.foldl (fun a ns => resList a (lenFoldT (recCells ns)) 0) oB
+
+/-- Semantic oi-component: `b8`-stride fold. -/
+def oiBytesOf (nsl : List (List (Fin 16)))
+    (oiB : List (Fin 16 × Fin 16)) : List (Fin 16 × Fin 16) :=
+  nsl.foldl (fun a _ => resList a b8 0) oiB
+
+/-- o-state terms at each step (scanl, length n+1). -/
+def oScanT (es : List LTerm) (o : LTerm) : List LTerm :=
+  es.scanl (fun a nm => aps b4addL [a, idRl2 nm]) o
+
+/-- oi-state terms at each step. -/
+def oiScanT (es : List LTerm) (oi : LTerm) : List LTerm :=
+  es.scanl (fun a _ => aps b4addL [a, bytesChunk b8]) oi
+
+/-- Semantic o-bytes at each step. -/
+def oScanB (nsl : List (List (Fin 16))) (oB : List (Fin 16 × Fin 16))
+    : List (List (Fin 16 × Fin 16)) :=
+  nsl.scanl (fun a ns => resList a (lenFoldT (recCells ns)) 0) oB
+
+/-- rv thunk cells added by the fold (newest-first): `idHrv` of the
+    pre-step o-state. -/
+def rvNew (es : List LTerm) (o : LTerm) : List LTerm :=
+  ((es.zip (oScanT es o).dropLast).reverse).map
+    (fun p => idHrv p.2)
+
+/-- xv cells added — the rv thunks' byte images. -/
+def xvNew (nsl : List (List (Fin 16))) (oB : List (Fin 16 × Fin 16))
+    : List (List (Fin 16 × Fin 16)) :=
+  ((nsl.zip (oScanB nsl oB).dropLast).reverse).map
+    (fun p => resList b2000 p.2 0)
+
+/-- rc thunk cells added (newest-first). -/
+def rcNew (es : List LTerm) : List LTerm := es.reverse.map idRec
+
+/-- rc semantic cells added. -/
+def rbsNew (nsl : List (List (Fin 16))) : List (List LTerm) :=
+  nsl.reverse.map recCells
+
+/-- sy thunk cells added: `PAIR (prefix nm) oi` per import. -/
+def syNew (es : List LTerm) (oi : LTerm) : List LTerm :=
+  ((es.zip (oiScanT es oi).dropLast).reverse).map
+    (fun p => aps pairSrcL [iatPrefix p.1, p.2])
+
+-- list plumbing for the concrete cons-steps ---------------------
+
+theorem dropLast_cons_ne {α : Type} (a : α) (l : List α)
+    (h : l ≠ []) : (a :: l).dropLast = a :: l.dropLast := by
+  cases l with
+  | nil => exact absurd rfl h
+  | cons b t => rfl
+
+theorem scanl_ne_nil {α β : Type} (f : α → β → α) (es : List β)
+    (a : α) : es.scanl f a ≠ [] := by
+  cases es with
+  | nil => simp [List.scanl]
+  | cons b t => rw [List.scanl_cons]; simp
+
+/-- cons-step for the zip-with-prestate-scan pattern:
+    `(e::es)` zipped against its own scan keeps the pre-update
+    accumulator `a` for `e`, so the newest cell is `g e a` LAST
+    before reversal — i.e. first in the emitted order. -/
+theorem zipScan_cons {α β γ : Type}
+    (step : α → β → α) (g : β → α → γ)
+    (e : β) (es : List β) (a : α) :
+    (((e :: es).zip ((e :: es).scanl step a).dropLast).reverse).map
+      (fun p => g p.1 p.2)
+    = (((es.zip (es.scanl step (step a e)).dropLast).reverse).map
+       (fun p => g p.1 p.2)) ++ [g e a] := by
+  rw [List.scanl_cons,
+      dropLast_cons_ne _ _ (scanl_ne_nil _ _ _),
+      List.zip_cons_cons, List.reverse_cons, List.map_append]
+  rfl
+
+theorem rvNew_cons (e : LTerm) (es : List LTerm) (o : LTerm) :
+    rvNew (e :: es) o
+    = rvNew es (aps b4addL [o, idRl2 e]) ++ [idHrv o] := by
+  simp only [rvNew, oScanT]
+  exact zipScan_cons _ (fun _ a => idHrv a) _ _ _
+
+theorem xvNew_cons (ns : List (Fin 16)) (nsl : List (List (Fin 16)))
+    (oB : List (Fin 16 × Fin 16)) :
+    xvNew (ns :: nsl) oB
+    = xvNew nsl (resList oB (lenFoldT (recCells ns)) 0)
+      ++ [resList b2000 oB 0] := by
+  simp only [xvNew, oScanB]
+  exact zipScan_cons _ (fun _ a => resList b2000 a 0) _ _ _
+
+theorem syNew_cons (e : LTerm) (es : List LTerm) (oi : LTerm) :
+    syNew (e :: es) oi
+    = syNew es (aps b4addL [oi, bytesChunk b8])
+      ++ [aps pairSrcL [iatPrefix e, oi]] := by
+  simp only [syNew, oiScanT]
+  exact zipScan_cons _ (fun nm a => aps pairSrcL [iatPrefix nm, a])
+    _ _ _
+
+theorem rcNew_cons (e : LTerm) (es : List LTerm) :
+    rcNew (e :: es) = rcNew es ++ [idRec e] := by
+  simp only [rcNew, List.reverse_cons, List.map_append,
+             List.map_cons, List.map_nil]
+
+theorem rbsNew_cons (ns : List (Fin 16)) (nsl : List (List (Fin 16))) :
+    rbsNew (ns :: nsl) = rbsNew nsl ++ [recCells ns] := by
+  simp only [rbsNew, List.reverse_cons, List.map_append,
+             List.map_cons, List.map_nil]
+
+theorem oBytesOf_cons (ns : List (Fin 16)) (nsl : List (List (Fin 16)))
+    (oB : List (Fin 16 × Fin 16)) :
+    oBytesOf (ns :: nsl) oB
+    = oBytesOf nsl (resList oB (lenFoldT (recCells ns)) 0) := by
+  simp only [oBytesOf, List.foldl_cons]
+
+theorem oiBytesOf_cons (ns : List (Fin 16)) (nsl : List (List (Fin 16)))
+    (oiB : List (Fin 16 × Fin 16)) :
+    oiBytesOf (ns :: nsl) oiB = oiBytesOf nsl (resList oiB b8 0) := by
+  simp only [oiBytesOf, List.foldl_cons]
+
+/-- One coupled `idataStepSem` step, all five components.  The
+    returned witnesses carry the prepended thunk cells (rv/rc/sy
+    grow at the list head — the fold prepends, so newest-first). -/
+theorem idataStep_eval
+    (o oi rv rc sy : LTerm) (oB oiB : List (Fin 16 × Fin 16))
+    (rvTs rcTs syTs : List LTerm)
+    (xv : List (List (Fin 16 × Fin 16))) (rbs : List (List LTerm))
+    (nm : LTerm) (ns : List (Fin 16))
+    (hnm : LRed nm (scottList (ns.map nibLit)))
+    (hclnm : closed 0 nm = true)
+    (ho : LRed o (scottList (bm oB))) (hob : oB.length = 4)
+    (hoi : LRed oi (scottList (bm oiB))) (hoib : oiB.length = 4)
+    (hrv : LRed rv (scottList rvTs)) (hrc : LRed rc (scottList rcTs))
+    (hsy : LRed sy (scottList syTs))
+    (hFrv : List.Forall₂ rvRel rvTs xv)
+    (hFrc : List.Forall₂ rcRel rcTs rbs)
+    (hclv : ∀ e ∈ rvTs, closed 0 e = true)
+    (hclr : ∀ e ∈ rcTs, closed 0 e = true)
+    (hcls : ∀ e ∈ syTs, closed 0 e = true)
+    (hoc : closed 0 o = true) (hoic : closed 0 oi = true)
+    (hrvc : closed 0 rv = true) (hrcc : closed 0 rc = true)
+    (hsyc : closed 0 sy = true) :
+    let st' := idataStepSem (o, oi, rv, rc, sy) nm
+    LRed st'.1
+      (scottList (bm (resList oB (lenFoldT (recCells ns)) 0))) ∧
+    (resList oB (lenFoldT (recCells ns)) 0).length = 4 ∧
+    LRed st'.2.1 (scottList (bm (resList oiB b8 0))) ∧
+    (resList oiB b8 0).length = 4 ∧
+    LRed st'.2.2.1 (scottList (idHrv o :: rvTs)) ∧
+    List.Forall₂ rvRel (idHrv o :: rvTs)
+      (resList b2000 oB 0 :: xv) ∧
+    LRed st'.2.2.2.1 (scottList (idRec nm :: rcTs)) ∧
+    List.Forall₂ rcRel (idRec nm :: rcTs) (recCells ns :: rbs) ∧
+    LRed st'.2.2.2.2
+      (scottList (aps pairSrcL [iatPrefix nm, oi] :: syTs)) ∧
+    closed 0 st'.1 = true ∧ closed 0 st'.2.1 = true ∧
+    closed 0 st'.2.2.1 = true ∧ closed 0 st'.2.2.2.1 = true ∧
+    closed 0 st'.2.2.2.2 = true := by
+  show LRed _ _ ∧ _ ∧ _
+  have hob' : (resList oB (lenFoldT (recCells ns)) 0).length = 4 := by
+    rw [resList_length _ _ _ (by
+      rw [hob]; exact (lenFold_len4 _ _ (by decide)).symm)]
+    exact hob
+  have hoib' : (resList oiB b8 0).length = 4 := by
+    rw [resList_length _ _ _ (by rw [hoib]; rfl)]; exact hoib
+  have hb4 : ∀ {A B : LTerm} {as bs : List (Fin 16 × Fin 16)},
+      LRed A (scottList (bm as)) → LRed B (scottList (bm bs)) →
+      as.length = bs.length →
+      LRed (aps b4addL [A, B]) (scottList (bm (resList as bs 0))) := by
+    intro A B as bs hA hB hl
+    exact ((LRed_app_left (LRed_app_right hA)).trans
+      (LRed_app_right hB)).trans (b4add_eval_scott as bs hl)
+  have hrl2 := idRl2_of hnm hclnm
+  refine ⟨?_, hob', ?_, hoib', ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · -- o' = b4add o (idRl2 nm)
+    exact hb4 ho hrl2 (by
+      rw [hob]; exact (lenFold_len4 _ _ (by decide)).symm)
+  · -- oi' = b4add oi <B8>
+    exact hb4 hoi (bytesChunk_nf b8) (by rw [hoib]; rfl)
+  · -- rv' = conss (idHrv o) rv
+    show LRed (.app (.app conssL (idHrv o)) rv) _
+    exact (LRed_app_right hrv).trans
+      (conss_nf _ _ (closed_idHrv hoc)
+        (closed_scottList hclv))
+  · exact List.Forall₂.cons ⟨o, oB, rfl, rfl, ho, hob, hoc⟩ hFrv
+  · -- rc' = conss (idRec nm) rc
+    show LRed (.app (.app conssL (idRec nm)) rc) _
+    exact (LRed_app_right hrc).trans
+      (conss_nf _ _ (closed_idRec hclnm)
+        (closed_scottList hclr))
+  · exact List.Forall₂.cons ⟨nm, ns, rfl, rfl, hnm, hclnm⟩ hFrc
+  · -- sy' = conss (pairSrc (prefix nm) oi) sy
+    show LRed (.app (.app conssL (aps pairSrcL [iatPrefix nm, oi])) sy) _
+    exact (LRed_app_right hsy).trans
+      (conss_nf _ _
+        (closed_app (closed_app closed_pairSrcL
+          (closed_iatPrefix hclnm)) hoic)
+        (closed_scottList hcls))
+  · exact closed_app (closed_app closed_b4addL hoc)
+      (closed_idRl2 hclnm)
+  · exact closed_app (closed_app closed_b4addL hoic)
+      (closed_bytesChunk b8)
+  · exact closed_app (closed_app closed_conssL
+      (closed_idHrv hoc)) hrvc
+  · exact closed_app (closed_app closed_conssL
+      (closed_idRec hclnm)) hrcc
+  · exact closed_app (closed_app closed_conssL
+      (closed_app (closed_app closed_pairSrcL
+        (closed_iatPrefix hclnm)) hoic)) hsyc
+
+/-- The full `idataStepSem` fold — all five component evals at once.
+    Existential witnesses: `rvN`/`rcN`/`syN` are the newly prepended
+    thunk cells (newest-first), `xvN`/`rbsN` their semantic images. -/
+theorem idataFold_eval :
+    ∀ (es : List LTerm) (nsl : List (List (Fin 16))),
+    List.Forall₂ (fun nm ns =>
+        LRed nm (scottList (ns.map nibLit))) es nsl →
+    (∀ e ∈ es, closed 0 e = true) →
+    ∀ (o oi rv rc sy : LTerm) (oB oiB : List (Fin 16 × Fin 16))
+      (rvTs rcTs syTs : List LTerm)
+      (xv : List (List (Fin 16 × Fin 16)))
+      (rbs : List (List LTerm)),
+    LRed o (scottList (bm oB)) → oB.length = 4 →
+    LRed oi (scottList (bm oiB)) → oiB.length = 4 →
+    LRed rv (scottList rvTs) → LRed rc (scottList rcTs) →
+    LRed sy (scottList syTs) →
+    List.Forall₂ rvRel rvTs xv → List.Forall₂ rcRel rcTs rbs →
+    (∀ e ∈ rvTs, closed 0 e = true) →
+    (∀ e ∈ rcTs, closed 0 e = true) →
+    (∀ e ∈ syTs, closed 0 e = true) →
+    closed 0 o = true → closed 0 oi = true →
+    closed 0 rv = true → closed 0 rc = true →
+    closed 0 sy = true →
+    LRed (es.foldl idataStepSem (o, oi, rv, rc, sy)).1
+      (scottList (bm (oBytesOf nsl oB))) ∧
+    (oBytesOf nsl oB).length = 4 ∧
+    LRed (es.foldl idataStepSem (o, oi, rv, rc, sy)).2.1
+      (scottList (bm (oiBytesOf nsl oiB))) ∧
+    (oiBytesOf nsl oiB).length = 4 ∧
+    LRed (es.foldl idataStepSem (o, oi, rv, rc, sy)).2.2.1
+      (scottList (rvNew es o ++ rvTs)) ∧
+    List.Forall₂ rvRel (rvNew es o ++ rvTs) (xvNew nsl oB ++ xv) ∧
+    LRed (es.foldl idataStepSem (o, oi, rv, rc, sy)).2.2.2.1
+      (scottList (rcNew es ++ rcTs)) ∧
+    List.Forall₂ rcRel (rcNew es ++ rcTs) (rbsNew nsl ++ rbs) ∧
+    LRed (es.foldl idataStepSem (o, oi, rv, rc, sy)).2.2.2.2
+      (scottList (syNew es oi ++ syTs)) ∧
+    (∀ e ∈ syNew es oi, closed 0 e = true) ∧
+    (∀ e ∈ rvNew es o, closed 0 e = true) ∧
+    (∀ e ∈ rcNew es, closed 0 e = true) ∧
+    (∀ e ∈ (rbsNew nsl).flatten, closed 0 e = true) := by
+  intro es nsl hF
+  induction hF with
+  | nil =>
+    intro _ o oi rv rc sy oB oiB rvTs rcTs syTs xv rbs
+      ho hob hoi hoib hrv hrc hsy hFrv hFrc hclv hclr hcls
+      hoc hoic hrvc hrcc hsyc
+    refine ⟨ho, ?_, hoi, ?_, hrv, hFrv, hrc, hFrc, hsy, ?_, ?_, ?_, ?_⟩
+    · exact hob
+    · exact hoib
+    · intro e he; simp [syNew, oiScanT, List.scanl] at he
+    · intro e he; simp [rvNew, oScanT, List.scanl] at he
+    · intro e he; simp [rcNew] at he
+    · intro e he; simp [rbsNew] at he
+  | cons hmnm hrest ih =>
+    rename_i nm ns es' nsl'
+    intro hclnm' o oi rv rc sy oB oiB rvTs rcTs syTs xv rbs
+      ho hob hoi hoib hrv hrc hsy hFrv hFrc hclv hclr hcls
+      hoc hoic hrvc hrcc hsyc
+    have hclnm : closed 0 nm = true := hclnm' nm List.mem_cons_self
+    have hstep := idataStep_eval o oi rv rc sy oB oiB rvTs rcTs syTs
+      xv rbs nm ns hmnm hclnm ho hob hoi hoib hrv hrc hsy hFrv hFrc
+      hclv hclr hcls hoc hoic hrvc hrcc hsyc
+    obtain ⟨h1o, h1ob, h1oi, h1oib, h1rv, h1Frv, h1rc, h1Frc, h1sy,
+            c1, c2, c3, c4, c5⟩ := hstep
+    rw [List.foldl_cons]
+    have ihh := ih (fun e he => hclnm' e (List.mem_cons_of_mem _ he))
+      _ _ _ _ _ _ _ _ _ _ _ _ h1o h1ob h1oi h1oib h1rv h1rc h1sy
+      h1Frv h1Frc
+      (fun e he => by
+        simp only [List.mem_cons] at he
+        rcases he with rfl | he
+        · exact closed_idHrv hoc
+        · exact hclv e he)
+      (fun e he => by
+        simp only [List.mem_cons] at he
+        rcases he with rfl | he
+        · exact closed_idRec hclnm
+        · exact hclr e he)
+      (fun e he => by
+        simp only [List.mem_cons] at he
+        rcases he with rfl | he
+        · exact closed_app (closed_app closed_pairSrcL
+            (closed_iatPrefix hclnm)) hoic
+        · exact hcls e he)
+      c1 c2 c3 c4 c5
+    obtain ⟨f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
+            f13⟩ := ihh
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · simp only [oBytesOf_cons]; exact f1
+    · simp only [oBytesOf_cons]; exact f2
+    · simp only [oiBytesOf_cons]; exact f3
+    · simp only [oiBytesOf_cons]; exact f4
+    · rw [rvNew_cons, List.append_assoc, List.singleton_append]
+      exact f5
+    · rw [rvNew_cons, xvNew_cons, List.append_assoc,
+          List.singleton_append, List.append_assoc,
+          List.singleton_append]
+      exact f6
+    · rw [rcNew_cons, List.append_assoc, List.singleton_append]
+      exact f7
+    · rw [rcNew_cons, rbsNew_cons, List.append_assoc,
+          List.singleton_append, List.append_assoc,
+          List.singleton_append]
+      exact f8
+    · rw [syNew_cons, List.append_assoc, List.singleton_append]
+      exact f9
+    · rw [syNew_cons]
+      intro e he
+      rcases List.mem_append.mp he with h | h
+      · exact f10 e h
+      · simp only [List.mem_singleton] at h
+        rw [h]
+        exact closed_app (closed_app closed_pairSrcL
+          (closed_iatPrefix hclnm)) hoic
+    · rw [rvNew_cons]
+      intro e he
+      rcases List.mem_append.mp he with h | h
+      · exact f11 e h
+      · simp only [List.mem_singleton] at h
+        rw [h]; exact closed_idHrv hoc
+    · rw [rcNew_cons]
+      intro e he
+      rcases List.mem_append.mp he with h | h
+      · exact f12 e h
+      · simp only [List.mem_singleton] at h
+        rw [h]; exact closed_idRec hclnm
+    · rw [rbsNew_cons]
+      intro e he
+      obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+      rcases List.mem_append.mp hw with h | h
+      · exact f13 e (List.mem_flatten.mpr ⟨w, h, hew⟩)
+      · simp only [List.mem_singleton] at h
+        rw [h] at hew
+        exact closed_recCells ns e hew
+
+/-- Forall₂ implication (parametric). -/
+theorem forall₂_imp {α β : Type} {R S : α → β → Prop}
+    {xs : List α} {ys : List β}
+    (h : ∀ a b, R a b → S a b) (hF : List.Forall₂ R xs ys) :
+    List.Forall₂ S xs ys := by
+  induction hF with
+  | nil => exact List.Forall₂.nil
+  | cons hhd htl ih => exact List.Forall₂.cons (h _ _ hhd) ih
+
+/-- `(idataOf·imports)·K →* scottList (idata section cells)` — the
+    `idr K` projection, folded state and `idBody` composed. -/
+theorem idrK_eval (es : List LTerm) (nsl : List (List (Fin 16)))
+    (namesOff iatB iat4 : List (Fin 16 × Fin 16))
+    (hF : List.Forall₂ (fun nm ns =>
+        LRed nm (scottList (ns.map nibLit))) es nsl)
+    (hcl : ∀ e ∈ es, closed 0 e = true)
+    (hn4 : namesOff.length = 4) (hi4 : iatB.length = 4) :
+    LRed (.app (.app (idataOfL es.length namesOff iatB iat4)
+          (scottList es)) klL)
+      (scottList ([idtCells (oBytesOf nsl namesOff) iat4,
+        iltCells (xvNew nsl namesOff), iltCells (xvNew nsl namesOff),
+        (rbsNew nsl).reverse.flatten, bm bKernel].flatten)) := by
+  have hf := idataFold_eval es nsl hF hcl
+    (bytesChunk namesOff) (bytesChunk iatB) nilL nilL nilL
+    namesOff iatB [] [] [] [] []
+    (bytesChunk_nf namesOff) hn4 (bytesChunk_nf iatB) hi4
+    Relation.ReflTransGen.refl Relation.ReflTransGen.refl
+    Relation.ReflTransGen.refl
+    List.Forall₂.nil List.Forall₂.nil
+    (fun e he => by simp at he) (fun e he => by simp at he)
+    (fun e he => by simp at he)
+    (closed_bytesChunk namesOff) (closed_bytesChunk iatB)
+    closed_nilL closed_nilL closed_nilL
+  obtain ⟨ho, holen, _hoi, _hoilen, hrv, hFrv, hrc, hFrc, _hsy,
+          _hsycl, hrvcl, hrccl, hrbcl⟩ := hf
+  rw [List.append_nil] at hrv hFrv hrc hFrc
+  rw [List.append_nil] at hFrv hFrc
+  have hcf := closed_idataAfterK (es := es) (k := es.length)
+    (o := bytesChunk namesOff) (oi := bytesChunk iatB)
+    (rv := nilL) (rc := nilL) (sy := nilL)
+    hcl (closed_bytesChunk namesOff) (closed_bytesChunk iatB)
+    closed_nilL closed_nilL closed_nilL
+  rw [List.take_length] at hcf
+  obtain ⟨c1, _c2, c3, c4, c5⟩ := hcf
+  have hId := idataOf_eval es namesOff iatB iat4 hcl
+  have hproj : LRed (.app (.app (idataOfL es.length namesOff iatB iat4)
+        (scottList es)) klL)
+      (idBody (idataFinal es namesOff iatB).1
+              (idataFinal es namesOff iatB).2.2.1
+              (idataFinal es namesOff iatB).2.2.2.1 iat4) :=
+    (LRed_app_left hId).trans
+      (pairLit_fst _ _ (closed_idBody c1 c3 c4 iat4) c5)
+  have hbody := idBody_eval _ _ _ (oBytesOf nsl namesOff) iat4
+    (xvNew nsl namesOff) (rvNew es (bytesChunk namesOff))
+    (rcNew es) (rbsNew nsl)
+    ho (by rw [holen]; rfl) hrv
+    (forall₂_imp (fun _ _ h => rvRel_eval h) hFrv) hrvcl
+    hrc (forall₂_imp (fun _ _ h => rcRel_eval h) hFrc)
+    hrbcl hrccl c1 c3 c4
+  exact hproj.trans hbody
+
+/-- The .idata section's cell image. -/
+def idataCells (nsl : List (List (Fin 16)))
+    (namesOff iat4 : List (Fin 16 × Fin 16)) : List LTerm :=
+  [idtCells (oBytesOf nsl namesOff) iat4,
+   iltCells (xvNew nsl namesOff), iltCells (xvNew nsl namesOff),
+   (rbsNew nsl).reverse.flatten, bm bKernel].flatten
+
+theorem closed_idataCells {nsl : List (List (Fin 16))}
+    {namesOff iat4 : List (Fin 16 × Fin 16)}
+    {e : LTerm} (he : e ∈ idataCells nsl namesOff iat4) :
+    closed 0 e = true := by
+  unfold idataCells at he
+  obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hw
+  rcases hw with rfl | rfl | rfl | rfl | rfl
+  · exact closed_idtCells _ _ _ hew
+  · exact closed_iltCells _ _ hew
+  · exact closed_iltCells _ _ hew
+  · obtain ⟨bs, hbs, hmem⟩ := List.mem_flatten.mp hew
+    rw [List.mem_reverse] at hbs
+    obtain ⟨ns, _, rfl⟩ := List.mem_map.mp hbs
+    exact closed_recCells ns _ hmem
+  · exact closed_bm hew
+
+/-- `lenb4`'s count over an arbitrary cell list (cells = bytes). -/
+def len4C (cs : List LTerm) : List (Fin 16 × Fin 16) :=
+  cs.foldl (fun xs _ => incBytes xs true) b4zeroBytes
+
+theorem len4C_length (cs : List LTerm) : (len4C cs).length = 4 := by
+  have h : ∀ (xs : List LTerm) (acc : List (Fin 16 × Fin 16)),
+      (xs.foldl (fun a _ => incBytes a true) acc).length
+        = acc.length := by
+    intro xs; induction xs with
+    | nil => intro acc; rfl
+    | cons x xs ih =>
+        intro acc
+        simp only [List.foldl_cons]
+        rw [ih, incBytes_length]
+  rw [len4C, h]; rfl
+
+/-- `pack2Cells` generalized to cell-list sections: `idata`/`datab`
+    arrive as thunk-cell lists (their length still counts bytes). -/
+def packCellsG (tb : List (Fin 16 × Fin 16)) (iC dC : List LTerm)
+    (sb : List (Fin 16 × Fin 16)) : List (List LTerm) :=
+  let ltB := len4 tb
+  let liB := len4C iC
+  let ldB := len4C dC
+  let trawB := align512Bytes ltB
+  let irawB := align512Bytes liB
+  let drawB := align512Bytes ldB
+  let iptrB := resList b200 trawB 0
+  let dptrB := resList iptrB irawB 0
+  let iddrB := resList irawB drawB 0
+  let imgB := align4096Bytes (resList b3000 ldB 0)
+  [ bm bMZ, List.replicate 58 b0cT, bm b40, bm bPE, bm bCOFF, bm b20B,
+    bm trawB, bm iddrB,
+    bm bZero4, bm b1000, bm b1000, bm bQ14, bm bAlign, bm bVers,
+    bm bZero4, bm imgB, bm bII20, bm bSub,
+    bm sb ++ List.replicate 4 b0cT,
+    bm bStack, bm bDirs, bm bZero8, bm b2000,
+    bm liB, List.replicate 112 b0cT, bm bText, bm ltB, bm b1000,
+    bm trawB, bm b200, List.replicate 12 b0cT, bm bTextFl,
+    bm bIdata, bm liB, bm b2000, bm irawB, bm iptrB,
+    List.replicate 12 b0cT, bm bIdataFl, bm bData, bm ldB, bm b3000,
+    bm drawB, bm dptrB, List.replicate 12 b0cT, bm bDataFl,
+    List.replicate 64 b0cT,
+    bm tb, padCells (padRemOf ltB), iC, padCells (padRemOf liB),
+    dC, padCells (padRemOf ldB) ]
+
+theorem closed_packCellsG_flat {e : LTerm} {tb iC dC sb}
+    (hiC : ∀ x ∈ iC, closed 0 x = true)
+    (hdC : ∀ x ∈ dC, closed 0 x = true)
+    (he : e ∈ (packCellsG tb iC dC sb).flatten) :
+    closed 0 e = true := by
+  obtain ⟨cs, hcs, hm⟩ := List.mem_flatten.mp he
+  simp only [packCellsG, List.mem_cons, List.not_mem_nil] at hcs
+  repeat' (first | subst hcs | (obtain rfl | hcs := hcs))
+  all_goals (first
+    | exact closed_bm hm
+    | exact closed_padCells hm
+    | exact closed_rep_b0c hm
+    | exact closed_bm_app_rep hm
+    | exact hiC _ hm
+    | exact hdC _ hm)
+
+-- the packL port -------------------------------------------------
+-- packOf's let chain: outer args at +4 under the 4 pre-lets.
+-- Context inside packLetsP: datab=0, idata=1, dat=2, idr=3,
+-- stackres=4, slots=5, imports=6, text=7.
+
+def pltV : LTerm := .app lenb4L (.var 7)    -- lt = LENB4 text
+def pliV : LTerm := .app lenb4L (.var 2)    -- li = LENB4 idata
+def pldV : LTerm := .app lenb4L (.var 2)    -- ld = LENB4 datab
+
+/-- `packChunks` at the deeper context: text→17, idata→11, datab→10,
+    stackres→14; let-vars 0–9 unchanged. -/
+def packChunksP : List LTerm := [
+  bytesChunk bMZ,
+  .app zerofillL nz58,
+  bytesChunk b40,
+  bytesChunk bPE,
+  bytesChunk bCOFF,
+  bytesChunk b20B,
+  .var 6,
+  .var 1,
+  bytesChunk bZero4,
+  bytesChunk b1000,
+  bytesChunk b1000,
+  bytesChunk bQ14,
+  bytesChunk bAlign,
+  bytesChunk bVers,
+  bytesChunk bZero4,
+  .var 0,
+  bytesChunk bII20,
+  bytesChunk bSub,
+  .app u64L (.var 14),                     -- stackres
+  bytesChunk bStack,
+  bytesChunk bDirs,
+  bytesChunk bZero8,
+  bytesChunk b2000,
+  .var 8,
+  .app zerofillL nz112,
+  bytesChunk bText,
+  .var 9,
+  bytesChunk b1000,
+  .var 6,
+  bytesChunk b200,
+  .app zerofillL (churchL 12),
+  bytesChunk bTextFl,
+  bytesChunk bIdata,
+  .var 8,
+  bytesChunk b2000,
+  .var 5,
+  .var 3,
+  .app zerofillL (churchL 12),
+  bytesChunk bIdataFl,
+  bytesChunk bData,
+  .var 7,
+  bytesChunk b3000,
+  .var 4,
+  .var 2,
+  .app zerofillL (churchL 12),
+  bytesChunk bDataFl,
+  .app zerofillL nz64,
+  .var 17,                                 -- text
+  .app padlistL (.var 9),
+  .var 11,                                 -- idata
+  .app padlistL (.var 8),
+  .var 10,                                 -- datab
+  .app padlistL (.var 7)]
+
+def packBodyP : LTerm :=
+  .app joinL (packChunksP.foldr (fun c t => aps conssL [c, t]) nilL)
+
+def packL9P : LTerm := .app (.abs packBodyP) imgV
+def packL8P : LTerm := .app (.abs packL9P) iddrV
+def packL7P : LTerm := .app (.abs packL8P) dptrV
+def packL6P : LTerm := .app (.abs packL7P) iptrV
+def packL5P : LTerm := .app (.abs packL6P) drawV
+def packL4P : LTerm := .app (.abs packL5P) irawV
+def packL3P : LTerm := .app (.abs packL4P) trawV
+def packL2P : LTerm := .app (.abs packL3P) pldV
+def packL1P : LTerm := .app (.abs packL2P) pliV
+def packLetsP : LTerm := .app (.abs packL1P) pltV
+
+/-- The 4 pre-lets of `packOf`, innermost-last (same idiom as
+    `packL1`–`packL9`): `datab = dat·K`, `idata = idr·K`,
+    `dat = dataOf slots`, `idr = idataOf imports`. -/
+def packP3 : LTerm :=
+  .app (.abs packLetsP) (.app (.var 1) klL)          -- datab = dat·K
+def packP2 : LTerm :=
+  .app (.abs packP3) (.app (.var 1) klL)             -- idata = idr·K
+def packP1 (nSlot : Nat) : LTerm :=
+  .app (.abs packP2) (.app (dataOfL nSlot) (.var 2)) -- dat = dataOf slots
+def packP0 (nImp nSlot : Nat)
+    (namesOff iatB iat4 : List (Fin 16 × Fin 16)) : LTerm :=
+  .app (.abs (packP1 nSlot))
+    (.app (idataOfL nImp namesOff iatB iat4) (.var 2))
+                                                   -- idr = idataOf imports
+/-- `packOf n_imp n_slot namesOff iatB iat4 =
+    λtext. λimports. λslots. λstackres. <pre-lets + pack body>`. -/
+def packL (nImp nSlot : Nat)
+    (namesOff iatB iat4 : List (Fin 16 × Fin 16)) : LTerm :=
+  .abs (.abs (.abs (.abs (packP0 nImp nSlot namesOff iatB iat4))))
+
+set_option maxHeartbeats 8000000 in
+/-- The 18-β milestone: `packL` applied to closed section inputs opens
+    to `JOIN` over the instantiated chunk chain, with `idata`/`datab`
+    the `·K` projections of the section builders. -/
+theorem pack_open (nImp nSlot : Nat)
+    (namesOff iatB iat4 : List (Fin 16 × Fin 16))
+    (T I D S : LTerm)
+    (hT : closed 0 T = true) (hI : closed 0 I = true)
+    (hD : closed 0 D = true) (hS : closed 0 S = true) :
+    LRed (aps (packL nImp nSlot namesOff iatB iat4) [T, I, D, S])
+      (.app joinL (chunkChain (packChunksInst T
+        (.app (.app (idataOfL nImp namesOff iatB iat4) I) klL)
+        (.app (.app (dataOfL nSlot) D) klL) S))) :=
+  LRed_of_hsteps (k := 18) (by
+    simp [packL, packP0, packP1, packP2, packP3, packLetsP,
+          packL1P, packL2P, packL3P, packL4P,
+          packL5P, packL6P, packL7P, packL8P, packL9P, packBodyP,
+          packChunksP, packChunksInst, chunkChain,
+          pltV, pliV, pldV, trawV, irawV, drawV, iptrV, dptrV,
+          iddrV, imgV,
+          bytesChunk, bMZ, b40, bPE, bCOFF, b20B, bZero4, b1000, bQ14,
+          bAlign, bVers, bII20, bSub, bStack, bDirs, bZero8, b2000,
+          bText, b200, bTextFl, bIdata, bIdataFl, bData, b3000,
+          bDataFl, nz58, nz64, nz112,
+          aps, List.foldl, List.foldr,
+          hsteps, hstep, subst, shift,
+          subst_of_closed0, shift_of_closed0,
+          closed_mono,
+          hT, hI, hD, hS,
+          closed_lenb4L_any, closed_align512L_any,
+          closed_align4096L_any, closed_b4addL_any, closed_u64L_any,
+          closed_padlistL_any, closed_zerofillL_any, closed_joinL_any,
+          closed_conssL_any, closed_pairSrcL_any, closed_nibLit_any,
+          closed_churchL_any, closed_churchMulL_any,
+          closed_churchAddL_any,
+          closed_klL_any, closed_nilL_any,
+          closed_idataOfL, closed_dataOfL])
+
+set_option maxHeartbeats 8000000 in
+/-- `pack_eval`: `packL` applied to raw section inputs produces the
+    full PE image — `idata`/`datab` are the `·K`-projected section
+    builders, normalized through `idrK_eval`/`datK_eval`. -/
+theorem pack_eval (tb : List (Fin 16 × Fin 16))
+    (es : List LTerm) (nsl : List (List (Fin 16)))
+    (slots : List (LTerm × LTerm × LTerm)) (szs : List Nat)
+    (sb namesOff iatB iat4 : List (Fin 16 × Fin 16))
+    (hF : List.Forall₂ (fun nm ns =>
+        LRed nm (scottList (ns.map nibLit))) es nsl)
+    (hcle : ∀ e ∈ es, closed 0 e = true)
+    (hmap : slots.map (fun e => e.2.1) = szs.map churchL)
+    (hcls : ∀ e ∈ slots, closed 0 e.1 = true ∧
+        closed 0 e.2.1 = true ∧ closed 0 e.2.2 = true)
+    (hn4 : namesOff.length = 4) (hi4 : iatB.length = 4) :
+    LRed (aps (packL es.length slots.length namesOff iatB iat4)
+          [scottList (bm tb), scottList es,
+           scottList (slots.map slotEnc), scottList (bm sb)])
+      (scottList (packCellsG tb (idataCells nsl namesOff iat4)
+        (zCellsN szs) sb).flatten) := by
+  have hclT : ∀ e ∈ bm tb, closed 0 e = true := fun _ h => closed_bm h
+  have hclI : ∀ e ∈ idataCells nsl namesOff iat4, closed 0 e = true :=
+    fun _ h => closed_idataCells h
+  have hclD : ∀ e ∈ zCellsN szs, closed 0 e = true :=
+    fun _ h => closed_zCellsN szs _ h
+  have hclS : ∀ e ∈ bm sb, closed 0 e = true := fun _ h => closed_bm h
+  have hscT : closed 0 (scottList (bm tb)) = true :=
+    closed_scottList hclT
+  have hscI : closed 0 (scottList es) = true := closed_scottList hcle
+  have hscD : closed 0 (scottList (slots.map slotEnc)) = true :=
+    closed_scottList (fun x hx => by
+      obtain ⟨e', he', rfl⟩ := List.mem_map.mp hx
+      obtain ⟨h1, h2, h3⟩ := hcls e' he'
+      exact closed_slotEnc h1 h2 h3)
+  have hscS : closed 0 (scottList (bm sb)) = true :=
+    closed_scottList hclS
+  -- the two `·K` projections normalize to their cell images
+  have hIV : LRed (.app (.app (idataOfL es.length namesOff iatB iat4)
+        (scottList es)) klL)
+      (scottList (idataCells nsl namesOff iat4)) := by
+    have h := idrK_eval es nsl namesOff iatB iat4 hF hcle hn4 hi4
+    simpa only [idataCells] using h
+  have hDV : LRed (.app (.app (dataOfL slots.length)
+        (scottList (slots.map slotEnc))) klL)
+      (scottList (zCellsN szs)) :=
+    datK_eval slots szs hmap hcls
+  -- LENB4 legs
+  have hlt : LRed (.app lenb4L (scottList (bm tb)))
+      (scottList (bm (len4 tb))) := by
+    have h := lenb4_eval (bm tb) hclT
+    simp only [bm] at h
+    rw [foldl_const_step_map] at h
+    exact h
+  have hli : LRed (.app lenb4L (.app (.app (idataOfL es.length
+        namesOff iatB iat4) (scottList es)) klL))
+      (scottList (bm (len4C (idataCells nsl namesOff iat4)))) := by
+    have h := (LRed_app_right hIV).trans
+      (lenb4_eval _ hclI)
+    simpa only [bm, len4C] using h
+  have hld : LRed (.app lenb4L (.app (.app (dataOfL slots.length)
+        (scottList (slots.map slotEnc))) klL))
+      (scottList (bm (len4C (zCellsN szs)))) := by
+    have h := (LRed_app_right hDV).trans (lenb4_eval _ hclD)
+    simpa only [bm, len4C] using h
+  -- lengths
+  have hlt4 : (len4 tb).length = 4 := len4_length tb
+  have hli4 : (len4C (idataCells nsl namesOff iat4)).length = 4 :=
+    len4C_length _
+  have hld4 : (len4C (zCellsN szs)).length = 4 := len4C_length _
+  have htraw4 : (align512Bytes (len4 tb)).length = 4 :=
+    align512Bytes_length _ hlt4
+  have hiraw4 :
+      (align512Bytes (len4C (idataCells nsl namesOff iat4))).length = 4
+      := align512Bytes_length _ hli4
+  have hdraw4 : (align512Bytes (len4C (zCellsN szs))).length = 4 :=
+    align512Bytes_length _ hld4
+  have hiptr4 : (resList b200 (align512Bytes (len4 tb)) 0).length = 4
+      := by
+    rw [resList_length _ _ _ (by rw [htraw4]; rfl),
+        show b200.length = 4 from rfl]
+  -- ALIGN legs
+  have htraw : LRed (.app align512L (scottList (bm (len4 tb))))
+      (scottList (bm (align512Bytes (len4 tb)))) := by
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align512_eval_scott (len4 tb) hlt4
+    have heq : bm (align512Bytes (len4 tb)) =
+        [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+         byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+      simp [align512Bytes, hws, bm]
+    rw [heq]; exact hred
+  have hiraw : LRed (.app align512L
+        (scottList (bm (len4C (idataCells nsl namesOff iat4)))))
+      (scottList (bm (align512Bytes
+        (len4C (idataCells nsl namesOff iat4))))) := by
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align512_eval_scott (len4C (idataCells nsl namesOff iat4)) hli4
+    have heq : bm (align512Bytes (len4C (idataCells nsl namesOff iat4)))
+        = [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+           byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+      simp [align512Bytes, hws, bm]
+    rw [heq]; exact hred
+  have hdraw : LRed (.app align512L
+        (scottList (bm (len4C (zCellsN szs)))))
+      (scottList (bm (align512Bytes (len4C (zCellsN szs))))) := by
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align512_eval_scott (len4C (zCellsN szs)) hld4
+    have heq : bm (align512Bytes (len4C (zCellsN szs))) =
+        [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+         byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+      simp [align512Bytes, hws, bm]
+    rw [heq]; exact hred
+  -- B4ADD congruence helper
+  have hb4add : ∀ {A B : LTerm} {as bs : List (Fin 16 × Fin 16)},
+      LRed A (scottList (bm as)) → LRed B (scottList (bm bs)) →
+      as.length = bs.length →
+      LRed (aps b4addL [A, B])
+        (scottList (bm (resList as bs 0))) := by
+    intro A B as bs hA hB hl
+    exact ((LRed_app_left (LRed_app_right hA)).trans
+      (LRed_app_right hB)).trans (b4add_eval_scott as bs hl)
+  -- composed let-value legs
+  have htrawT : LRed (.app align512L (.app lenb4L (scottList (bm tb))))
+      (scottList (bm (align512Bytes (len4 tb)))) :=
+    (LRed_app_right hlt).trans htraw
+  have hirawT : LRed (.app align512L (.app lenb4L
+        (.app (.app (idataOfL es.length namesOff iatB iat4)
+          (scottList es)) klL)))
+      (scottList (bm (align512Bytes
+        (len4C (idataCells nsl namesOff iat4))))) :=
+    (LRed_app_right hli).trans hiraw
+  have hdrawT : LRed (.app align512L (.app lenb4L
+        (.app (.app (dataOfL slots.length)
+          (scottList (slots.map slotEnc))) klL)))
+      (scottList (bm (align512Bytes (len4C (zCellsN szs))))) :=
+    (LRed_app_right hld).trans hdraw
+  have hiptrT : LRed (aps b4addL [bytesChunk b200,
+        .app align512L (.app lenb4L (scottList (bm tb)))])
+      (scottList (bm (resList b200 (align512Bytes (len4 tb)) 0))) :=
+    hb4add (bytesChunk_nf b200) htrawT (by rw [htraw4]; rfl)
+  have hdptrT : LRed (aps b4addL [aps b4addL [bytesChunk b200,
+        .app align512L (.app lenb4L (scottList (bm tb)))],
+        .app align512L (.app lenb4L
+          (.app (.app (idataOfL es.length namesOff iatB iat4)
+            (scottList es)) klL))])
+      (scottList (bm (resList (resList b200 (align512Bytes (len4 tb)) 0)
+        (align512Bytes (len4C (idataCells nsl namesOff iat4))) 0))) :=
+    hb4add hiptrT hirawT (by rw [hiptr4, hiraw4])
+  have hiddrT : LRed (aps b4addL
+        [.app align512L (.app lenb4L
+          (.app (.app (idataOfL es.length namesOff iatB iat4)
+            (scottList es)) klL)),
+         .app align512L (.app lenb4L
+          (.app (.app (dataOfL slots.length)
+            (scottList (slots.map slotEnc))) klL))])
+      (scottList (bm (resList
+        (align512Bytes (len4C (idataCells nsl namesOff iat4)))
+        (align512Bytes (len4C (zCellsN szs))) 0))) :=
+    hb4add hirawT hdrawT (by rw [hiraw4, hdraw4])
+  have himgT : LRed (.app align4096L (aps b4addL [bytesChunk b3000,
+        .app lenb4L (.app (.app (dataOfL slots.length)
+          (scottList (slots.map slotEnc))) klL)]))
+      (scottList (bm (align4096Bytes
+        (resList b3000 (len4C (zCellsN szs)) 0)))) := by
+    have hpre : LRed (aps b4addL [bytesChunk b3000,
+          .app lenb4L (.app (.app (dataOfL slots.length)
+            (scottList (slots.map slotEnc))) klL)])
+        (scottList (bm (resList b3000 (len4C (zCellsN szs)) 0))) :=
+      hb4add (bytesChunk_nf b3000) hld (by rw [hld4]; rfl)
+    have hlen4' : (resList b3000 (len4C (zCellsN szs)) 0).length = 4
+        := by
+      rw [resList_length _ _ _ (by rw [hld4]; rfl)]
+      rfl
+    obtain ⟨w0, w1, w2, w3, hws, hred⟩ :=
+      align4096_eval_scott (resList b3000 (len4C (zCellsN szs)) 0)
+        hlen4'
+    have h2 : LRed (.app align4096L (scottList (bm (resList b3000
+          (len4C (zCellsN szs)) 0))))
+        (scottList (bm (align4096Bytes
+          (resList b3000 (len4C (zCellsN szs)) 0)))) := by
+      have heq : bm (align4096Bytes (resList b3000
+            (len4C (zCellsN szs)) 0)) =
+          [byteLit 0 0, byteLit 0 w1.2,
+           byteLit w2.1 w2.2, byteLit w3.1 w3.2] := by
+        simp [align4096Bytes, hws, bm]
+      rw [heq]; exact hred
+    exact (LRed_app_right hpre).trans h2
+  -- PADLIST legs
+  have hpadT : LRed (.app padlistL (.app lenb4L (scottList (bm tb))))
+      (scottList (padCells (padRemOf (len4 tb)))) := by
+    obtain ⟨x0, x1, x2, x3, hx⟩ := exists_eq_of_length4 hlt4
+    have h2 : LRed (.app padlistL (scottList (bm (len4 tb))))
+        (scottList (padCells (padRemOf (len4 tb)))) := by
+      have heq : bm (len4 tb) =
+          [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+           byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+        rw [hx]; rfl
+      have heq2 : padCells (padRemOf (len4 tb)) =
+          padCells (padRemN x0 x1) := by
+        rw [hx]; rfl
+      rw [heq, heq2]; exact padlist_eval_scott x0 x1 x2 x3
+    exact (LRed_app_right hlt).trans h2
+  have hpadI : LRed (.app padlistL (.app lenb4L
+        (.app (.app (idataOfL es.length namesOff iatB iat4)
+          (scottList es)) klL)))
+      (scottList (padCells (padRemOf
+        (len4C (idataCells nsl namesOff iat4))))) := by
+    obtain ⟨x0, x1, x2, x3, hx⟩ := exists_eq_of_length4 hli4
+    have h2 : LRed (.app padlistL (scottList
+          (bm (len4C (idataCells nsl namesOff iat4)))))
+        (scottList (padCells (padRemOf
+          (len4C (idataCells nsl namesOff iat4))))) := by
+      have heq : bm (len4C (idataCells nsl namesOff iat4)) =
+          [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+           byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+        rw [hx]; rfl
+      have heq2 : padCells (padRemOf (len4C
+            (idataCells nsl namesOff iat4))) =
+          padCells (padRemN x0 x1) := by
+        rw [hx]; rfl
+      rw [heq, heq2]; exact padlist_eval_scott x0 x1 x2 x3
+    exact (LRed_app_right hli).trans h2
+  have hpadD : LRed (.app padlistL (.app lenb4L
+        (.app (.app (dataOfL slots.length)
+          (scottList (slots.map slotEnc))) klL)))
+      (scottList (padCells (padRemOf (len4C (zCellsN szs))))) := by
+    obtain ⟨x0, x1, x2, x3, hx⟩ := exists_eq_of_length4 hld4
+    have h2 : LRed (.app padlistL (scottList
+          (bm (len4C (zCellsN szs)))))
+        (scottList (padCells (padRemOf (len4C (zCellsN szs))))) := by
+      have heq : bm (len4C (zCellsN szs)) =
+          [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+           byteLit x2.1 x2.2, byteLit x3.1 x3.2] := by
+        rw [hx]; rfl
+      have heq2 : padCells (padRemOf (len4C (zCellsN szs))) =
+          padCells (padRemN x0 x1) := by
+        rw [hx]; rfl
+      rw [heq, heq2]; exact padlist_eval_scott x0 x1 x2 x3
+    exact (LRed_app_right hld).trans h2
+  -- ZEROFILL chunks
+  have hZF58 : LRed (.app zerofillL nz58)
+      (scottList (List.replicate 58 b0cT)) :=
+    zerofill_num 58 nz58 nz58_num closed_nz58
+  have hZF64 : LRed (.app zerofillL nz64)
+      (scottList (List.replicate 64 b0cT)) :=
+    zerofill_num 64 nz64 nz64_num closed_nz64
+  have hZF112 : LRed (.app zerofillL nz112)
+      (scottList (List.replicate 112 b0cT)) :=
+    zerofill_num 112 nz112 nz112_num closed_nz112
+  have hZF12 : LRed (.app zerofillL (churchL 12))
+      (scottList (List.replicate 12 b0cT)) :=
+    zerofill_num 12 (churchL 12) (churchL_num 12) (closed_churchL 12)
+  -- the 53-chunk Forall₂
+  have hForall : List.Forall₂ LRed
+      (packChunksInst (scottList (bm tb))
+        (.app (.app (idataOfL es.length namesOff iatB iat4)
+          (scottList es)) klL)
+        (.app (.app (dataOfL slots.length)
+          (scottList (slots.map slotEnc))) klL)
+        (scottList (bm sb)))
+      ((packCellsG tb (idataCells nsl namesOff iat4)
+        (zCellsN szs) sb).map scottList) := by
+    simp only [packChunksInst, packCellsG, idataCells,
+               List.map_cons, List.map_nil]
+    repeat' (first | apply List.Forall₂.nil | apply List.Forall₂.cons)
+    all_goals first
+      | exact hZF58 | exact hZF64 | exact hZF112 | exact hZF12
+      | exact hlt | exact hli | exact hld
+      | exact htrawT | exact hirawT | exact hdrawT
+      | exact hiptrT | exact hdptrT | exact hiddrT | exact himgT
+      | exact hpadT | exact hpadI | exact hpadD
+      | exact hIV | exact hDV
+      | exact u64_eval_scott _
+      | exact bytesChunk_nf _
+      | exact Relation.ReflTransGen.refl
+  -- chain collapse + join
+  have hflat : ∀ e ∈ (packCellsG tb (idataCells nsl namesOff iat4)
+        (zCellsN szs) sb).flatten, closed 0 e = true :=
+    fun _ h => closed_packCellsG_flat hclI hclD h
+  have hcells : ∀ e ∈ (packCellsG tb (idataCells nsl namesOff iat4)
+        (zCellsN szs) sb).map scottList, closed 0 e = true := by
+    intro e he
+    obtain ⟨bs, hbs, rfl⟩ := List.mem_map.mp he
+    exact closed_scottList (fun x hx =>
+      hflat x (List.mem_flatten.mpr ⟨bs, hbs, hx⟩))
+  have hchain : LRed (chunkChain (packChunksInst (scottList (bm tb))
+        (.app (.app (idataOfL es.length namesOff iatB iat4)
+          (scottList es)) klL)
+        (.app (.app (dataOfL slots.length)
+          (scottList (slots.map slotEnc))) klL)
+        (scottList (bm sb))))
+      (scottList ((packCellsG tb (idataCells nsl namesOff iat4)
+        (zCellsN szs) sb).map scottList)) :=
+    (conssChain_map_red hForall).trans (conssChain_nf _ hcells)
+  exact ((pack_open es.length slots.length namesOff iatB iat4
+        _ _ _ _ hscT hscI hscD hscS).trans
+    (LRed_app_right hchain)).trans (join_eval _ hflat)
+
+#print axioms idrK_eval
+#print axioms pack_open
+#print axioms pack_eval
+#print axioms idataFold_eval
+#print axioms idataStep_eval
+
 end ISAR
