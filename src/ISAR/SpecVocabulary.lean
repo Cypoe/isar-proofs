@@ -6233,4 +6233,1104 @@ theorem nibs2bytes_eval (cs : List LTerm)
 #print axioms nibs2_run
 #print axioms nibs2bytes_eval
 
+
+-- ============================================================
+-- Batch J: dataOf / idataOf — section builders over tuple-state
+--   iterates (STEP_D, STEP_ID), projections, NIBS2BYTES names.
+-- ============================================================
+-- _STEP_D / dataOf ------------------------------------------------------
+
+/-- `\l2. conss B0C l2` — the zero-grow step iterated by the slot's
+    size numeral. -/
+def consB0L : LTerm := .abs (.app (.app conssL b0cT) (.var 0))
+
+theorem closed_consB0L : closed 0 consB0L = true := by decide
+
+/-- `\k2. k2 t (B4ADD o szb) (conss (PAIR nm o) u) (szn consB0 z)` —
+    the STEP_D success continuation.  Binder ctx in the source:
+    `[k2, r3, szb, r2, szn, r1, nm, t, p, z, u, o, l, acc]`. -/
+def stepDK3 : LTerm :=
+  .abs (.abs (.abs (aps (.var 0)
+    [.var 7,
+     .app (.app b4addL (.var 11)) (.var 2),
+     .app (.app conssL
+       (.app (.app pairSrcL (.var 6)) (.var 11))) (.var 10),
+     .app (.app (.var 4) consB0L) (.var 9)])))
+
+/-- `\szn.\r2. r2 N3 K3`.  Binder ctx `[r2, szn, r1, nm, t, p, z, u, o, l,
+    acc]` — `N3 = tupleL [t,o,u,z]` at `[4,8,7,6]`. -/
+def stepDK2 : LTerm :=
+  .abs (.abs (.app (.app (.var 0)
+    (tupleL [.var 4, .var 8, .var 7, .var 6])) stepDK3))
+
+/-- `\nm.\r1. r1 N2 K2`.  Binder ctx `[r1, nm, t, p, z, u, o, l, acc]`. -/
+def stepDK1 : LTerm :=
+  .abs (.abs (.app (.app (.var 0)
+    (tupleL [.var 2, .var 6, .var 5, .var 4])) stepDK2))
+
+/-- `\p.\t. p N1 K1`.  Binder ctx `[t, p, z, u, o, l, acc]`. -/
+def stepDC : LTerm :=
+  .abs (.abs (.app (.app (.var 1)
+    (tupleL [.var 0, .var 4, .var 3, .var 2])) stepDK1))
+
+/-- `\l.\o.\u.\z. l N0 C`.  Binder ctx `[z, u, o, l, acc]`. -/
+def stepDSel : LTerm :=
+  .abs (.abs (.abs (.abs (.app (.app (.var 3)
+    (tupleL [.var 3, .var 2, .var 1, .var 0])) stepDC))))
+
+/-- `_STEP_D = \acc. acc SEL`. -/
+def dataStepL : LTerm := .abs (.app (.var 0) stepDSel)
+
+theorem closed_dataStepL : closed 0 dataStepL = true := by decide
+
+/-- empirical: pair-step count on closed literals -/
+example :
+    hsteps 22 (.app dataStepL
+        (tupleL [cellLit (cellLit nilL
+                  (cellLit nilL (cellLit nilL nilL)))
+                nilL,
+                 nilL, nilL, nilL]))
+      = tupleL [nilL,
+          .app (.app b4addL nilL) nilL,
+          .app (.app conssL
+            (.app (.app pairSrcL nilL) nilL)) nilL,
+          .app (.app nilL consB0L) nilL] := by decide
+/-- STEP_D on a cons-slot: `(E::T, o,u,z) ↦ (T, B4ADD o szb,
+    CONSS (PAIR nm o) u, szn consB0 z)` — 22-step milestone
+    (count verified empirically on closed literals above). -/
+theorem dataStep_cons (nm szn szb T o u z : LTerm)
+    (hnm : closed 0 nm = true) (hszn : closed 0 szn = true)
+    (hszb : closed 0 szb = true) (hT : closed 0 T = true)
+    (ho : closed 0 o = true) (hu : closed 0 u = true)
+    (hz : closed 0 z = true) :
+    LRed (.app dataStepL
+        (tupleL [cellLit
+            (cellLit nm (cellLit szn (cellLit szb nilL))) T,
+          o, u, z]))
+      (tupleL [T, .app (.app b4addL o) szb,
+        .app (.app conssL (.app (.app pairSrcL nm) o)) u,
+        .app (.app szn consB0L) z]) :=
+  LRed_of_hsteps (k := 22) (by
+    simp [dataStepL, stepDSel, stepDC, stepDK1, stepDK2, stepDK3,
+          tupleL, cellLit, aps, List.foldl, List.map,
+          hsteps, hstep, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          closed_cellLit, closed_tupleL,
+          closed_b4addL, closed_conssL, closed_pairSrcL,
+          closed_consB0L, closed_b0cT, closed_nilL,
+          hnm, hszn, hszb, hT, ho, hu, hz])
+
+/-- empirical: nil-step count on closed literals -/
+example :
+    hsteps 8 (.app dataStepL (tupleL [nilL, nilL, nilL, nilL]))
+      = tupleL [nilL, nilL, nilL, nilL] := by decide
+
+/-- STEP_D on the empty slot list is the identity on the tuple. -/
+theorem dataStep_nil (o u z : LTerm)
+    (ho : closed 0 o = true) (hu : closed 0 u = true)
+    (hz : closed 0 z = true) :
+    LRed (.app dataStepL (tupleL [nilL, o, u, z]))
+        (tupleL [nilL, o, u, z]) :=
+  LRed_of_hsteps (k := 8) (by
+    simp [dataStepL, stepDSel, stepDC, stepDK1, stepDK2, stepDK3,
+          consB0L, tupleL, cellLit, nilL, aps, List.foldl, List.map,
+          hsteps, hstep, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          closed_cellLit, closed_tupleL,
+          closed_b4addL, closed_conssL, closed_pairSrcL,
+          closed_consB0L, closed_nilL, ho, hu, hz])
+
+/-- Slot encoding: `[nm, szn, szb]` — a 3-element Scott list. -/
+def slotEnc (e : LTerm × LTerm × LTerm) : LTerm :=
+  scottList [e.1, e.2.1, e.2.2]
+
+theorem closed_slotEnc {e : LTerm × LTerm × LTerm}
+    (h1 : closed 0 e.1 = true) (h2 : closed 0 e.2.1 = true)
+    (h3 : closed 0 e.2.2 = true) :
+    closed 0 (slotEnc e) = true := by
+  unfold slotEnc scottList
+  simp only [List.foldr_cons, List.foldr_nil]
+  exact closed_cellLit h1 (closed_cellLit h2
+    (closed_cellLit h3 closed_nilL))
+
+/-- Semantic STEP_D on the `(off, syms, zeros)` triple. -/
+def dataStepSem (st : LTerm × LTerm × LTerm)
+    (e : LTerm × LTerm × LTerm) : LTerm × LTerm × LTerm :=
+  (.app (.app b4addL st.1) e.2.2,
+   .app (.app conssL (.app (.app pairSrcL e.1) st.1)) st.2.1,
+   .app (.app e.2.1 consB0L) st.2.2)
+
+/-- dataOf state after k steps: `l`-slot = remaining slots,
+    `(o,u,z)` = `dataStepSem`-fold over the consumed prefix. -/
+def dataAfterK (k : Nat) (es : List (LTerm × LTerm × LTerm))
+    (o u z : LTerm) : List LTerm :=
+  let st := (es.take k).foldl dataStepSem (o, u, z)
+  [scottList ((es.drop k).map slotEnc), st.1, st.2.1, st.2.2]
+
+/-- Semantic fixed point: full fold over the slot list. -/
+def dataFinal (es : List (LTerm × LTerm × LTerm))
+    : LTerm × LTerm × LTerm :=
+  es.foldl dataStepSem (bytesChunk b3000, nilL, nilL)
+
+/-- `dataStepSem` preserves component closedness. -/
+theorem closed_dataStepSem {st e : LTerm × LTerm × LTerm}
+    (ho : closed 0 st.1 = true) (hu : closed 0 st.2.1 = true)
+    (hz : closed 0 st.2.2 = true)
+    (h1 : closed 0 e.1 = true) (h2 : closed 0 e.2.1 = true)
+    (h3 : closed 0 e.2.2 = true) :
+    closed 0 (dataStepSem st e).1 = true ∧
+    closed 0 (dataStepSem st e).2.1 = true ∧
+    closed 0 (dataStepSem st e).2.2 = true := by
+  unfold dataStepSem
+  exact ⟨closed_app (closed_app closed_b4addL ho) h3,
+         closed_app (closed_app closed_conssL
+           (closed_app (closed_app closed_pairSrcL h1) ho)) hu,
+         closed_app (closed_app h2 closed_consB0L) hz⟩
+
+/-- `dataStepSem`-fold over a closed prefix stays closed. -/
+theorem closed_dataAfterK {k : Nat} {es : List (LTerm×LTerm×LTerm)}
+    {o u z : LTerm}
+    (hcl : ∀ e ∈ es, closed 0 e.1 = true ∧ closed 0 e.2.1 = true
+        ∧ closed 0 e.2.2 = true)
+    (ho : closed 0 o = true) (hu : closed 0 u = true)
+    (hz : closed 0 z = true) :
+    closed 0 ((es.take k).foldl dataStepSem (o,u,z)).1 = true ∧
+    closed 0 ((es.take k).foldl dataStepSem (o,u,z)).2.1 = true ∧
+    closed 0 ((es.take k).foldl dataStepSem (o,u,z)).2.2 = true := by
+  have hfold : ∀ (pref : List (LTerm×LTerm×LTerm)) (o u z : LTerm),
+      closed 0 o = true → closed 0 u = true → closed 0 z = true →
+      (∀ e ∈ pref, closed 0 e.1 = true ∧ closed 0 e.2.1 = true
+          ∧ closed 0 e.2.2 = true) →
+      closed 0 (pref.foldl dataStepSem (o,u,z)).1 = true ∧
+      closed 0 (pref.foldl dataStepSem (o,u,z)).2.1 = true ∧
+      closed 0 (pref.foldl dataStepSem (o,u,z)).2.2 = true := by
+    intro pref
+    induction pref with
+    | nil => intro _ _ _ ho' hu' hz' _; exact ⟨ho', hu', hz'⟩
+    | cons a t ihp =>
+        intro o u z ho' hu' hz' hp
+        have ha := hp a List.mem_cons_self
+        have hstep := closed_dataStepSem (st := (o, u, z)) (e := a)
+          ho' hu' hz' ha.1 ha.2.1 ha.2.2
+        simp only [List.foldl_cons]
+        exact ihp _ _ _ hstep.1 hstep.2.1 hstep.2.2
+          (fun e he => hp e (List.mem_cons_of_mem a he))
+  exact hfold (es.take k) o u z ho hu hz
+    (fun e he => hcl e (List.mem_of_mem_take he))
+
+/-- Tuple-state iterate for STEP_D: after k steps the state is
+    `dataAfterK k`.  Bespoke induction on the meta-level slot list —
+    `iterTuple_red`'s `F` cannot destructure the Scott-encoded
+    element at term level without an unshift oracle. -/
+theorem dataOf_iterK : ∀ (k : Nat)
+    (es : List (LTerm × LTerm × LTerm)) (o u z : LTerm),
+    k ≤ es.length →
+    (∀ e ∈ es, closed 0 e.1 = true ∧ closed 0 e.2.1 = true
+        ∧ closed 0 e.2.2 = true) →
+    closed 0 o = true → closed 0 u = true → closed 0 z = true →
+    LRed (iterL dataStepL (tupleL (dataAfterK 0 es o u z)) k)
+        (tupleL (dataAfterK k es o u z)) := by
+  intro k es o u z
+  induction k with
+  | zero => intro _ _ _ _ _; exact Relation.ReflTransGen.refl
+  | succ k ih =>
+      intro hk hcl ho hu hz
+      have hlt : k < es.length := hk
+      show LRed (.app dataStepL
+          (iterL dataStepL (tupleL (dataAfterK 0 es o u z)) k))
+        (tupleL (dataAfterK (k+1) es o u z))
+      have hmid := LRed_app_right (f := dataStepL)
+        (ih (Nat.le_of_succ_le hk) hcl ho hu hz)
+      -- unfold afterK k into the cons-cell shape dataStep_cons needs
+      have hdrop : es.drop k = es[k] :: es.drop (k+1) :=
+        (List.getElem_cons_drop (as := es) hlt).symm
+      have hstep1 : LRed
+          (.app dataStepL (tupleL (dataAfterK k es o u z)))
+          (tupleL (dataAfterK (k+1) es o u z)) := by
+        have hk1 : dataAfterK k es o u z =
+            [cellLit (cellLit es[k].1
+                (cellLit es[k].2.1 (cellLit es[k].2.2 nilL)))
+              (scottList ((es.drop (k+1)).map slotEnc)),
+             ((es.take k).foldl dataStepSem (o,u,z)).1,
+             ((es.take k).foldl dataStepSem (o,u,z)).2.1,
+             ((es.take k).foldl dataStepSem (o,u,z)).2.2] := by
+          unfold dataAfterK
+          simp only [hdrop, List.map_cons, scottList, slotEnc,
+            List.foldr_cons, List.foldr_nil]
+        have hk2 : dataAfterK (k+1) es o u z =
+            [scottList ((es.drop (k+1)).map slotEnc),
+             .app (.app b4addL
+               ((es.take k).foldl dataStepSem (o,u,z)).1) es[k].2.2,
+             .app (.app conssL
+               (.app (.app pairSrcL es[k].1)
+                 ((es.take k).foldl dataStepSem (o,u,z)).1))
+               ((es.take k).foldl dataStepSem (o,u,z)).2.1,
+             .app (.app es[k].2.1 consB0L)
+               ((es.take k).foldl dataStepSem (o,u,z)).2.2] := by
+          unfold dataAfterK
+          rw [List.take_add_one, List.getElem?_eq_getElem hlt]
+          simp only [Option.toList_some, List.foldl_append,
+            List.foldl_cons, List.foldl_nil, dataStepSem]
+        rw [hk1, hk2]
+        obtain ⟨h1, h2, h3⟩ := hcl es[k] (List.getElem_mem hlt)
+        have hT : closed 0 (scottList ((es.drop (k+1)).map slotEnc))
+            = true := by
+          apply closed_scottList
+          intro x hx
+          obtain ⟨e', he', rfl⟩ := List.mem_map.mp hx
+          obtain ⟨h1', h2', h3'⟩ := hcl e' (List.mem_of_mem_drop he')
+          exact closed_slotEnc h1' h2' h3'
+        obtain ⟨ho', hu', hz'⟩ := closed_dataAfterK
+          (k := k) (es := es) (o := o) (u := u) (z := z)
+          hcl ho hu hz
+        exact dataStep_cons es[k].1 es[k].2.1 es[k].2.2
+          (scottList ((es.drop (k+1)).map slotEnc))
+          ((es.take k).foldl dataStepSem (o,u,z)).1
+          ((es.take k).foldl dataStepSem (o,u,z)).2.1
+          ((es.take k).foldl dataStepSem (o,u,z)).2.2
+          h1 h2 h3 hT ho' hu' hz'
+      exact hmid.trans hstep1
+
+/-- `\l.\o.\u.\z.\f. f z u` — the `_prs z u` finalizer:
+    `PRS z u = \f6. f6 z u` under 4 state binders. -/
+def dataFinL : LTerm :=
+  .abs (.abs (.abs (.abs
+    (.abs (.app (.app (.var 0) (.var 1)) (.var 2))))))
+
+theorem closed_dataFinL : closed 0 dataFinL = true := by decide
+
+/-- `dataFinL·l·o·u·z →* pairLit z u` — the 4-beta projection. -/
+theorem dataFin_eval (l o u z : LTerm)
+    (ho : closed 0 o = true) (hu : closed 0 u = true)
+    (hz : closed 0 z = true) :
+    LRed (aps dataFinL [l, o, u, z]) (pairLit z u) :=
+  LRed_of_hsteps (k := 4) (by
+    simp [dataFinL, pairLit, aps, List.foldl,
+          hsteps, hstep, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          ho, hu, hz])
+
+/-- `data_src n = \slots. (church n · STEP_D · init) FIN`
+    with `init = tupleL [slots, b4 0x3000, K, K]`. -/
+def dataOfL (n : Nat) : LTerm :=
+  .abs (.app
+    (.app (.app (churchL n) dataStepL)
+      (tupleL [.var 0, bytesChunk b3000, nilL, nilL]))
+    dataFinL)
+
+theorem closed_dataOfL (n : Nat) : closed 0 (dataOfL n) = true := by
+  unfold dataOfL
+  simp only [closed, Bool.and_eq_true]
+  refine ⟨⟨⟨closed_mono (closed_churchL n) (Nat.zero_le 1),
+      closed_mono closed_dataStepL (Nat.zero_le 1)⟩, ?_⟩,
+    closed_mono closed_dataFinL (Nat.zero_le 1)⟩
+  show closed 2 (aps (.var 0)
+      ([.var 0, bytesChunk b3000, nilL, nilL].map
+        (shift 1 0))) = true
+  apply closed_aps
+  · rfl
+  · intro e he
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp he
+    simp only [List.mem_cons, List.mem_singleton,
+      List.not_mem_nil, or_false] at hx
+    rcases hx with rfl | rfl | rfl | rfl
+    · decide
+    · rw [shift_of_closed0 (closed_bytesChunk b3000)]
+      exact closed_mono (closed_bytesChunk b3000) (Nat.zero_le 2)
+    · rw [shift_of_closed0 closed_nilL]
+      exact closed_mono closed_nilL (Nat.zero_le 2)
+    · rw [shift_of_closed0 closed_nilL]
+      exact closed_mono closed_nilL (Nat.zero_le 2)
+
+/-- `dataOf` evaluation: iterate STEP_D over the slot list, then
+    project `(z, u)` — the zero-byte list and the `(nm, off)` symbol
+    table. -/
+theorem dataOf_eval (es : List (LTerm × LTerm × LTerm))
+    (hcl : ∀ e ∈ es, closed 0 e.1 = true ∧ closed 0 e.2.1 = true
+        ∧ closed 0 e.2.2 = true) :
+    LRed (.app (dataOfL es.length) (scottList (es.map slotEnc)))
+      (pairLit (dataFinal es).2.2 (dataFinal es).2.1) := by
+  have hclosedS : closed 0 (scottList (es.map slotEnc)) = true := by
+    apply closed_scottList
+    intro x hx
+    obtain ⟨e', he', rfl⟩ := List.mem_map.mp hx
+    obtain ⟨h1, h2, h3⟩ := hcl e' he'
+    exact closed_slotEnc h1 h2 h3
+  have hinit : closed 0 (tupleL [scottList (es.map slotEnc),
+      bytesChunk b3000, nilL, nilL]) = true :=
+    closed_tupleL (fun e he => by
+      simp only [List.mem_cons, List.mem_singleton,
+        List.not_mem_nil, or_false] at he
+      rcases he with rfl | rfl | rfl | rfl
+      · exact hclosedS
+      · exact closed_bytesChunk b3000
+      · exact closed_nilL
+      · exact closed_nilL)
+  -- 1 beta: open dataOfL, instantiating `slots`
+  have hopen : LRed
+      (.app (dataOfL es.length) (scottList (es.map slotEnc)))
+      (.app
+        (.app (.app (churchL es.length) dataStepL)
+          (tupleL [scottList (es.map slotEnc),
+                   bytesChunk b3000, nilL, nilL]))
+        dataFinL) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [dataOfL, tupleL, aps, List.foldl, List.map,
+            hsteps, hstep, subst, shift, shift_zero,
+            subst_shift_succ,
+            subst_of_closed0, shift_of_closed0, closed, closed_app,
+            closed_churchL, closed_dataStepL, closed_dataFinL,
+            closed_bytesChunk, closed_nilL, hclosedS])
+  -- Church iterate → tuple-state iterate → final tuple
+  have hiter : LRed
+      (.app (.app (churchL es.length) dataStepL)
+        (tupleL [scottList (es.map slotEnc),
+                 bytesChunk b3000, nilL, nilL]))
+      (iterL dataStepL
+        (tupleL [scottList (es.map slotEnc),
+                 bytesChunk b3000, nilL, nilL]) es.length) :=
+    church_eval es.length dataStepL _ closed_dataStepL hinit
+  have hrun : LRed
+      (iterL dataStepL
+        (tupleL [scottList (es.map slotEnc),
+                 bytesChunk b3000, nilL, nilL]) es.length)
+      (tupleL [nilL, (dataFinal es).1, (dataFinal es).2.1,
+               (dataFinal es).2.2]) := by
+    have h := dataOf_iterK es.length es
+      (bytesChunk b3000) nilL nilL (Nat.le_refl _) hcl
+      (closed_bytesChunk b3000) closed_nilL closed_nilL
+    have h0 : dataAfterK 0 es (bytesChunk b3000) nilL nilL =
+        [scottList (es.map slotEnc),
+         bytesChunk b3000, nilL, nilL] := by
+      simp only [dataAfterK, List.take_zero, List.drop_zero,
+        List.foldl_nil]
+    have hn : dataAfterK es.length es (bytesChunk b3000) nilL nilL =
+        [nilL, (dataFinal es).1, (dataFinal es).2.1,
+         (dataFinal es).2.2] := by
+      simp only [dataAfterK, dataFinal, List.take_length,
+        List.drop_length, List.map_nil, scottList, List.foldr_nil]
+    rwa [h0, hn] at h
+  -- finalizer: tupleL·FIN → aps → pairLit z u
+  have hfin : LRed
+      (.app (tupleL [nilL, (dataFinal es).1, (dataFinal es).2.1,
+                     (dataFinal es).2.2])
+        dataFinL)
+      (pairLit (dataFinal es).2.2 (dataFinal es).2.1) := by
+    have h := tupleL_apply [nilL, (dataFinal es).1,
+      (dataFinal es).2.1, (dataFinal es).2.2] dataFinL
+    have hf := closed_dataAfterK (k := es.length) (es := es)
+      (o := bytesChunk b3000) (u := nilL) (z := nilL) hcl
+      (closed_bytesChunk b3000) closed_nilL closed_nilL
+    have hf' : closed 0 (dataFinal es).1 = true ∧
+        closed 0 (dataFinal es).2.1 = true ∧
+        closed 0 (dataFinal es).2.2 = true := by
+      have heq : es.take es.length = es := List.take_length
+      rw [heq] at hf
+      exact hf
+    exact h.trans (dataFin_eval nilL _ _ _
+      hf'.1 hf'.2.1 hf'.2.2)
+  exact hopen.trans ((LRed_app_left
+      (hiter.trans hrun)).trans hfin)
+
+-- _STEP_ID / idataOf -------------------------------------------------------
+
+/-- "iat_" nibble prefix consed onto a name — 'i'=0x69, 'a'=0x61,
+    't'=0x74, '_'=0x5f, low nibble first per byte. -/
+def iatPrefix (nm : LTerm) : LTerm :=
+  .app (.app conssL (nibLit 9))
+    (.app (.app conssL (nibLit 6))
+      (.app (.app conssL (nibLit 1))
+        (.app (.app conssL (nibLit 6))
+          (.app (.app conssL (nibLit 4))
+            (.app (.app conssL (nibLit 7))
+              (.app (.app conssL (nibLit 15))
+                (.app (.app conssL (nibLit 5)) nm)))))))
+
+theorem closed_iatPrefix {nm : LTerm} (h : closed 0 nm = true) :
+    closed 0 (iatPrefix nm) = true := by
+  unfold iatPrefix
+  repeat (first | exact closed_app (closed_app closed_conssL
+    (closed_nibLit _)) h)
+
+/-- `<B 0x0008>` — the IAT stride. -/
+def b8 : List (Fin 16 × Fin 16) := [(8,0),(0,0),(0,0),(0,0)]
+
+/-- `<B 0x0000>` — record padding bytes. -/
+def bz1 : List (Fin 16 × Fin 16) := [(0,0)]
+
+/-- `<B 0x0000 0x0000>` — record head bytes. -/
+def bz2 : List (Fin 16 × Fin 16) := [(0,0),(0,0)]
+
+-- `<B 0x00×8>` — ILT/IAT null terminator: reuse `bZero8`.
+
+/-- "kernel32.dll\x00" bytes (lo,hi nibble pairs). -/
+def bKernel : List (Fin 16 × Fin 16) :=
+  [(11,6),(5,6),(2,7),(14,6),(5,6),(12,6),(3,3),(2,3),(14,2),
+   (4,6),(12,6),(12,6),(0,0)]
+
+/-- `<B 0x2028>` — IDT original-first-thunk field. -/
+def b2028 : List (Fin 16 × Fin 16) := [(8,2),(0,2),(0,0),(0,0)]
+
+-- semantic step constructors (the let-values, as app-terms) ---------------
+
+/-- `NIBS2BYTES·nm`. -/
+def idNmb (nm : LTerm) : LTerm := .app nibs2bytesL nm
+
+/-- `JOIN [bytes(00,00), nmb, bytes(00)]`. -/
+def idBrec (nm : LTerm) : LTerm :=
+  .app joinL (scottList
+    [bytesChunk bz2, idNmb nm, bytesChunk bz1])
+
+/-- `LENB4·brec`. -/
+def idRln (nm : LTerm) : LTerm := .app lenb4L (idBrec nm)
+
+/-- `λb0. λt0. b0 (λbl. λbh. NIBODD bl)` — the `_peel` continuation:
+    destructures LENB4's first byte, applies NIBODD to its lo nibble. -/
+def idOddK : LTerm :=
+  .abs (.abs (.app (.var 1)
+    (.abs (.abs (.app niboddL (.var 1))))))
+
+theorem closed_idOddK : closed 0 idOddK = true := by decide
+
+/-- `peel rln [b0] (b0·λbl.λbh. NIBODD·bl)`. -/
+def idOdd (nm : LTerm) : LTerm :=
+  .app (.app (idRln nm) nilL) idOddK
+
+/-- `odd (APPEND brec 00) brec` — conditional pad. -/
+def idRec (nm : LTerm) : LTerm :=
+  .app (.app (idOdd nm)
+    (.app (.app appendL (idBrec nm)) (bytesChunk bz1)))
+    (idBrec nm)
+
+/-- `LENB4·rec`. -/
+def idRl2 (nm : LTerm) : LTerm := .app lenb4L (idRec nm)
+
+/-- `B4ADD (b4 0x2000) o` — hint/name RVA. -/
+def idHrv (o : LTerm) : LTerm :=
+  .app (.app b4addL (bytesChunk b2000)) o
+
+-- _STEP_ID term -----------------------------------------------------------
+
+/-- `\k2. k2 t (B4ADD o rl2) (B4ADD oi 8) (conss hrv rv)
+    (conss rec rc) (conss (PAIR (iat_ nm) oi) sy)` —
+    binder ctx [k2,hrv,rl2,rec,odd,rln,brec,nmb,t,nm,sy,rc,rv,oi,o,l]. -/
+def idK2Body : LTerm :=
+  .abs (aps (.var 0)
+    [.var 8,
+     .app (.app b4addL (.var 14)) (.var 2),
+     .app (.app b4addL (.var 13)) (bytesChunk b8),
+     .app (.app conssL (.var 1)) (.var 12),
+     .app (.app conssL (.var 3)) (.var 11),
+     .app (.app conssL
+       (.app (.app pairSrcL (iatPrefix (.var 9))) (.var 13)))
+       (.var 10)])
+
+/-- `λnm. λt.` + the 7-let chain.  Binder ctx inside the lets:
+    `[nmb,t,nm,sy,rc,rv,oi,o,l]` growing per let. -/
+def idStepC : LTerm :=
+  .abs (.abs
+    (.app (.abs
+      (.app (.abs
+        (.app (.abs
+          (.app (.abs
+            (.app (.abs
+              (.app (.abs
+                (.app (.abs idK2Body)
+                  (.app (.app b4addL (bytesChunk b2000))
+                    (.var 12))))
+                (.app lenb4L (.var 0))))
+              (.app (.app (.var 0)
+                (.app (.app appendL (.var 2)) (bytesChunk bz1)))
+                (.var 2))))
+            (.app (.app (.var 0) nilL) idOddK)))
+          (.app lenb4L (.var 0))))
+        (.app joinL (scottList
+          [bytesChunk bz2, .var 0, bytesChunk bz1]))))
+      (.app nibs2bytesL (.var 1))))
+
+/-- `λl.λo.λoi.λrv.λrc.λsy. l N0 C` — ctx [sy,rc,rv,oi,o,l]:
+    l=5,o=4,oi=3,rv=2,rc=1,sy=0. -/
+def idStepSel : LTerm :=
+  .abs (.abs (.abs (.abs (.abs (.abs
+    (.app (.app (.var 5)
+      (tupleL [.var 5, .var 4, .var 3, .var 2, .var 1, .var 0]))
+      idStepC))))))
+
+/-- `_STEP_ID = λacc. acc SEL`. -/
+def idataStepL : LTerm := .abs (.app (.var 0) idStepSel)
+
+theorem closed_idataStepL : closed 0 idataStepL = true := by decide
+
+-- empirical: cons-step count on closed literals — the let-instances
+-- land on the `idNmb/idBrec/…` semantic forms.
+set_option maxHeartbeats 1600000 in
+example :
+    hsteps 19 (.app idataStepL
+        (tupleL [cellLit nilL nilL,
+                 nilL, nilL, nilL, nilL, nilL]))
+      = tupleL [nilL,
+          .app (.app b4addL nilL) (idRl2 nilL),
+          .app (.app b4addL nilL) (bytesChunk b8),
+          .app (.app conssL (idHrv nilL)) nilL,
+          .app (.app conssL (idRec nilL)) nilL,
+          .app (.app conssL
+            (.app (.app pairSrcL (iatPrefix nilL)) nilL)) nilL] := by
+  decide
+
+/-- STEP_ID on a cons-cell: `(nm::T, o,oi,rv,rc,sy) ↦
+    (T, o+rl2, oi+8, hrv::rv, rec::rc, (iat_nm,oi)::sy)` —
+    19-step milestone (count verified on literals above). -/
+theorem idataStep_cons (nm T o oi rv rc sy : LTerm)
+    (hnm : closed 0 nm = true) (hT : closed 0 T = true)
+    (ho : closed 0 o = true) (hoi : closed 0 oi = true)
+    (hrv : closed 0 rv = true) (hrc : closed 0 rc = true)
+    (hsy : closed 0 sy = true) :
+    LRed (.app idataStepL
+        (tupleL [cellLit nm T, o, oi, rv, rc, sy]))
+      (tupleL [T, .app (.app b4addL o) (idRl2 nm),
+        .app (.app b4addL oi) (bytesChunk b8),
+        .app (.app conssL (idHrv o)) rv,
+        .app (.app conssL (idRec nm)) rc,
+        .app (.app conssL
+          (.app (.app pairSrcL (iatPrefix nm)) oi)) sy]) :=
+  LRed_of_hsteps (k := 19) (by
+    simp [idataStepL, idStepSel, idStepC, idK2Body, idOddK,
+          idNmb, idBrec, idRln, idOdd, idRec, idRl2, idHrv,
+          iatPrefix, tupleL, cellLit, scottList,
+          aps, List.foldl, List.map, List.foldr,
+          hsteps, hstep, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          closed_cellLit, closed_tupleL, closed_scottList,
+          closed_nibs2bytesL, closed_joinL, closed_lenb4L,
+          closed_appendL, closed_niboddL, closed_idOddK,
+          closed_b4addL, closed_conssL, closed_pairSrcL,
+          closed_bytesChunk, closed_nibLit, closed_nilL,
+          hnm, hT, ho, hoi, hrv, hrc, hsy])
+
+/-- empirical: nil-step count on closed literals -/
+example :
+    hsteps 10 (.app idataStepL
+        (tupleL [nilL, nilL, nilL, nilL, nilL, nilL]))
+      = tupleL [nilL, nilL, nilL, nilL, nilL, nilL] := by decide
+
+/-- STEP_ID on the empty import list is the identity. -/
+theorem idataStep_nil (o oi rv rc sy : LTerm)
+    (ho : closed 0 o = true) (hoi : closed 0 oi = true)
+    (hrv : closed 0 rv = true) (hrc : closed 0 rc = true)
+    (hsy : closed 0 sy = true) :
+    LRed (.app idataStepL
+        (tupleL [nilL, o, oi, rv, rc, sy]))
+        (tupleL [nilL, o, oi, rv, rc, sy]) :=
+  LRed_of_hsteps (k := 10) (by
+    simp [idataStepL, idStepSel, idStepC, idK2Body, idOddK,
+          iatPrefix, tupleL, cellLit, scottList, nilL,
+          aps, List.foldl, List.map, List.foldr,
+          hsteps, hstep, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          closed_cellLit, closed_tupleL, closed_scottList,
+          closed_nibs2bytesL, closed_joinL, closed_lenb4L,
+          closed_appendL, closed_niboddL, closed_idOddK,
+          closed_b4addL, closed_conssL, closed_pairSrcL,
+          closed_bytesChunk, closed_nibLit, closed_nilL,
+          ho, hoi, hrv, hrc, hsy])
+
+-- idata semantic state -----------------------------------------------------
+
+/-- Semantic STEP_ID on the `(o, oi, rv, rc, sy)` 5-state. -/
+def idataStepSem (st : LTerm × LTerm × LTerm × LTerm × LTerm)
+    (nm : LTerm) : LTerm × LTerm × LTerm × LTerm × LTerm :=
+  (.app (.app b4addL st.1) (idRl2 nm),
+   .app (.app b4addL st.2.1) (bytesChunk b8),
+   .app (.app conssL (idHrv st.1)) st.2.2.1,
+   .app (.app conssL (idRec nm)) st.2.2.2.1,
+   .app (.app conssL
+     (.app (.app pairSrcL (iatPrefix nm)) st.2.1)) st.2.2.2.2)
+
+/-- idata state after k steps. -/
+def idataAfterK (k : Nat) (es : List LTerm)
+    (o oi rv rc sy : LTerm) : List LTerm :=
+  let st := (es.take k).foldl idataStepSem (o, oi, rv, rc, sy)
+  [scottList (es.drop k), st.1, st.2.1, st.2.2.1, st.2.2.2.1,
+   st.2.2.2.2]
+
+/-- Semantic fixed point over the import list. -/
+def idataFinal (es : List LTerm) (namesOff iatB : List (Fin 16 × Fin 16))
+    : LTerm × LTerm × LTerm × LTerm × LTerm :=
+  es.foldl idataStepSem
+    (bytesChunk namesOff, bytesChunk iatB, nilL, nilL, nilL)
+
+theorem closed_idNmb {nm : LTerm} (h : closed 0 nm = true) :
+    closed 0 (idNmb nm) = true :=
+  closed_app closed_nibs2bytesL h
+
+theorem closed_idBrec {nm : LTerm} (h : closed 0 nm = true) :
+    closed 0 (idBrec nm) = true := by
+  unfold idBrec
+  apply closed_app closed_joinL
+  apply closed_scottList
+  intro x hx
+  simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil,
+    or_false] at hx
+  rcases hx with rfl | rfl | rfl
+  · exact closed_bytesChunk bz2
+  · exact closed_idNmb h
+  · exact closed_bytesChunk bz1
+
+theorem closed_idRln {nm : LTerm} (h : closed 0 nm = true) :
+    closed 0 (idRln nm) = true :=
+  closed_app closed_lenb4L (closed_idBrec h)
+
+theorem closed_idOdd {nm : LTerm} (h : closed 0 nm = true) :
+    closed 0 (idOdd nm) = true :=
+  closed_app (closed_app (closed_idRln h) closed_nilL) closed_idOddK
+
+theorem closed_idRec {nm : LTerm} (h : closed 0 nm = true) :
+    closed 0 (idRec nm) = true := by
+  unfold idRec
+  exact closed_app (closed_app (closed_idOdd h)
+    (closed_app (closed_app closed_appendL (closed_idBrec h))
+      (closed_bytesChunk bz1))) (closed_idBrec h)
+
+theorem closed_idRl2 {nm : LTerm} (h : closed 0 nm = true) :
+    closed 0 (idRl2 nm) = true :=
+  closed_app closed_lenb4L (closed_idRec h)
+
+theorem closed_idHrv {o : LTerm} (h : closed 0 o = true) :
+    closed 0 (idHrv o) = true :=
+  closed_app (closed_app closed_b4addL (closed_bytesChunk b2000)) h
+
+/-- `idataStepSem` preserves component closedness. -/
+theorem closed_idataStepSem {st : LTerm×LTerm×LTerm×LTerm×LTerm}
+    {nm : LTerm}
+    (ho : closed 0 st.1 = true) (hoi : closed 0 st.2.1 = true)
+    (hrv : closed 0 st.2.2.1 = true)
+    (hrc : closed 0 st.2.2.2.1 = true)
+    (hsy : closed 0 st.2.2.2.2 = true)
+    (hnm : closed 0 nm = true) :
+    closed 0 (idataStepSem st nm).1 = true ∧
+    closed 0 (idataStepSem st nm).2.1 = true ∧
+    closed 0 (idataStepSem st nm).2.2.1 = true ∧
+    closed 0 (idataStepSem st nm).2.2.2.1 = true ∧
+    closed 0 (idataStepSem st nm).2.2.2.2 = true := by
+  unfold idataStepSem
+  exact ⟨closed_app (closed_app closed_b4addL ho)
+           (closed_idRl2 hnm),
+         closed_app (closed_app closed_b4addL hoi)
+           (closed_bytesChunk b8),
+         closed_app (closed_app closed_conssL (closed_idHrv ho)) hrv,
+         closed_app (closed_app closed_conssL (closed_idRec hnm)) hrc,
+         closed_app (closed_app closed_conssL
+           (closed_app (closed_app closed_pairSrcL
+             (closed_iatPrefix hnm)) hoi)) hsy⟩
+
+/-- `idataStepSem`-fold over a closed prefix stays closed. -/
+theorem closed_idataAfterK {k : Nat} {es : List LTerm}
+    {o oi rv rc sy : LTerm}
+    (hcl : ∀ e ∈ es, closed 0 e = true)
+    (ho : closed 0 o = true) (hoi : closed 0 oi = true)
+    (hrv : closed 0 rv = true) (hrc : closed 0 rc = true)
+    (hsy : closed 0 sy = true) :
+    closed 0 ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).1
+        = true ∧
+    closed 0 ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.1
+        = true ∧
+    closed 0 ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.1
+        = true ∧
+    closed 0 ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.1
+        = true ∧
+    closed 0 ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.2
+        = true := by
+  have hfold : ∀ (pref : List LTerm)
+      (o oi rv rc sy : LTerm),
+      closed 0 o = true → closed 0 oi = true →
+      closed 0 rv = true → closed 0 rc = true →
+      closed 0 sy = true →
+      (∀ e ∈ pref, closed 0 e = true) →
+      closed 0 (pref.foldl idataStepSem (o,oi,rv,rc,sy)).1 = true ∧
+      closed 0 (pref.foldl idataStepSem (o,oi,rv,rc,sy)).2.1 = true ∧
+      closed 0 (pref.foldl idataStepSem (o,oi,rv,rc,sy)).2.2.1
+          = true ∧
+      closed 0 (pref.foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.1
+          = true ∧
+      closed 0 (pref.foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.2
+          = true := by
+    intro pref
+    induction pref with
+    | nil =>
+        intro _ _ _ _ _ ho' hoi' hrv' hrc' hsy' _
+        exact ⟨ho', hoi', hrv', hrc', hsy'⟩
+    | cons a t ihp =>
+        intro o oi rv rc sy ho' hoi' hrv' hrc' hsy' hp
+        have ha := hp a List.mem_cons_self
+        have hstep := closed_idataStepSem
+          (st := (o, oi, rv, rc, sy)) (nm := a)
+          ho' hoi' hrv' hrc' hsy' ha
+        simp only [List.foldl_cons]
+        exact ihp _ _ _ _ _ hstep.1 hstep.2.1 hstep.2.2.1
+          hstep.2.2.2.1 hstep.2.2.2.2
+          (fun e he => hp e (List.mem_cons_of_mem a he))
+  exact hfold (es.take k) o oi rv rc sy ho hoi hrv hrc hsy
+    (fun e he => hcl e (List.mem_of_mem_take he))
+
+/-- Tuple-state iterate for STEP_ID. -/
+theorem idataOf_iterK : ∀ (k : Nat) (es : List LTerm)
+    (o oi rv rc sy : LTerm),
+    k ≤ es.length →
+    (∀ e ∈ es, closed 0 e = true) →
+    closed 0 o = true → closed 0 oi = true →
+    closed 0 rv = true → closed 0 rc = true →
+    closed 0 sy = true →
+    LRed (iterL idataStepL
+        (tupleL (idataAfterK 0 es o oi rv rc sy)) k)
+        (tupleL (idataAfterK k es o oi rv rc sy)) := by
+  intro k es o oi rv rc sy
+  induction k with
+  | zero => intro _ _ _ _ _ _ _; exact Relation.ReflTransGen.refl
+  | succ k ih =>
+      intro hk hcl ho hoi hrv hrc hsy
+      have hlt : k < es.length := hk
+      show LRed (.app idataStepL
+          (iterL idataStepL
+            (tupleL (idataAfterK 0 es o oi rv rc sy)) k))
+        (tupleL (idataAfterK (k+1) es o oi rv rc sy))
+      have hmid := LRed_app_right (f := idataStepL)
+        (ih (Nat.le_of_succ_le hk) hcl ho hoi hrv hrc hsy)
+      have hdrop : es.drop k = es[k] :: es.drop (k+1) :=
+        (List.getElem_cons_drop (as := es) hlt).symm
+      have hstep1 : LRed
+          (.app idataStepL (tupleL (idataAfterK k es o oi rv rc sy)))
+          (tupleL (idataAfterK (k+1) es o oi rv rc sy)) := by
+        have hk1 : idataAfterK k es o oi rv rc sy =
+            [cellLit es[k] (scottList (es.drop (k+1))),
+             ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).1,
+             ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.1,
+             ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.1,
+             ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.1,
+             ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.2]
+            := by
+          unfold idataAfterK
+          simp only [hdrop, scottList, List.foldr_cons]
+        have hk2 : idataAfterK (k+1) es o oi rv rc sy =
+            [scottList (es.drop (k+1)),
+             .app (.app b4addL
+               ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).1)
+               (idRl2 es[k]),
+             .app (.app b4addL
+               ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.1)
+               (bytesChunk b8),
+             .app (.app conssL (idHrv
+               ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).1))
+               ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.1,
+             .app (.app conssL (idRec es[k]))
+               ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.1,
+             .app (.app conssL
+               (.app (.app pairSrcL (iatPrefix es[k]))
+                 ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.1))
+               ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.2]
+            := by
+          unfold idataAfterK
+          rw [List.take_add_one, List.getElem?_eq_getElem hlt]
+          simp only [Option.toList_some, List.foldl_append,
+            List.foldl_cons, List.foldl_nil, idataStepSem]
+        rw [hk1, hk2]
+        obtain ⟨ho', hoi', hrv', hrc', hsy'⟩ := closed_idataAfterK
+          (k := k) (es := es) (o := o) (oi := oi) (rv := rv)
+          (rc := rc) (sy := sy) hcl ho hoi hrv hrc hsy
+        have hT : closed 0 (scottList (es.drop (k+1))) = true := by
+          apply closed_scottList
+          intro x hx
+          exact hcl x (List.mem_of_mem_drop hx)
+        exact idataStep_cons es[k]
+          (scottList (es.drop (k+1)))
+          ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).1
+          ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.1
+          ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.1
+          ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.1
+          ((es.take k).foldl idataStepSem (o,oi,rv,rc,sy)).2.2.2.2
+          (hcl es[k] (List.getElem_mem hlt)) hT
+          ho' hoi' hrv' hrc' hsy'
+      exact hmid.trans hstep1
+
+-- _IDATA_FIN finalizer -----------------------------------------------------
+
+/-- `B4ADD (b4 0x2000) o` — the directory-name RVA (same shape as
+    `idHrv` but kept separate: it lives in the finalizer, not the
+    step). -/
+def idDrva (o : LTerm) : LTerm :=
+  .app (.app b4addL (bytesChunk b2000)) o
+
+/-- `JOIN (REV (conss (bytes 8×00) (MAP U64 rv)))` — the ILT/IAT. -/
+def idIlt (rv : LTerm) : LTerm :=
+  .app joinL (.app revL
+    (.app (.app conssL (bytesChunk bZero8))
+      (.app (.app mapL u64L) rv)))
+
+/-- `JOIN [b4 0x2028, b4 0, b4 0, drva, iat4, ZEROFILL 20]` — the
+    import directory table entry. -/
+def idIdt (o : LTerm) (iat4 : List (Fin 16 × Fin 16)) : LTerm :=
+  .app joinL (scottList
+    [bytesChunk b2028, bytesChunk bZero4, bytesChunk bZero4,
+     idDrva o, bytesChunk iat4, .app zerofillL (churchL 20)])
+
+/-- `JOIN (REV rc)` — the hint/name + record area. -/
+def idNams (rc : LTerm) : LTerm := .app joinL (.app revL rc)
+
+/-- `JOIN [idt, ilt, ilt, nams, kernel32.dll\x00]` — the section body. -/
+def idBody (o rv rc : LTerm) (iat4 : List (Fin 16 × Fin 16)) : LTerm :=
+  .app joinL (scottList
+    [idIdt o iat4, idIlt rv, idIlt rv, idNams rc,
+     bytesChunk bKernel])
+
+/-- `λl.λo.λoi.λrv.λrc.λsy. LETS[drva,ilt,idt,nams,body]
+    (PRS body sy)` — `_IDATA_FIN`.  Let-binding ctx grows
+    `[drva,sy,rc,rv,oi,o,l]` → `[body,…,l]`. -/
+def idFinL (iat4 : List (Fin 16 × Fin 16)) : LTerm :=
+  .abs (.abs (.abs (.abs (.abs (.abs
+    (.app (.abs                       -- drva
+      (.app (.abs                     -- ilt
+        (.app (.abs                   -- idt
+          (.app (.abs                 -- nams
+            (.app (.abs               -- body
+              (.app (.app pairSrcL (.var 0)) (.var 5)))
+              (.app joinL (scottList
+                [.var 1, .var 2, .var 2, .var 0,
+                 bytesChunk bKernel]))))
+            (.app joinL (.app revL (.var 4)))))
+          (.app joinL (scottList
+            [bytesChunk b2028, bytesChunk bZero4, bytesChunk bZero4,
+             .var 1, bytesChunk iat4,
+             .app zerofillL (churchL 20)]))))
+        (.app joinL (.app revL
+          (.app (.app conssL (bytesChunk bZero8))
+            (.app (.app mapL u64L) (.var 3)))))))
+      (.app (.app b4addL (bytesChunk b2000)) (.var 4))))))))
+
+theorem closed_revL_any (c : Nat) : closed c revL = true :=
+  closed_mono closed_revL (Nat.zero_le c)
+
+theorem closed_mapL_any (c : Nat) : closed c mapL = true :=
+  closed_mono closed_mapL (Nat.zero_le c)
+
+theorem closed_appendL_any (c : Nat) : closed c appendL = true :=
+  closed_mono closed_appendL (Nat.zero_le c)
+
+theorem closed_nibs2bytesL_any (c : Nat) :
+    closed c nibs2bytesL = true :=
+  closed_mono closed_nibs2bytesL (Nat.zero_le c)
+
+theorem closed_niboddL_any (c : Nat) : closed c niboddL = true :=
+  closed_mono closed_niboddL (Nat.zero_le c)
+
+theorem closed_iatPrefix_any (c : Nat) {nm : LTerm}
+    (h : closed c nm = true) : closed c (iatPrefix nm) = true := by
+  simp [iatPrefix, closed, Bool.and_eq_true,
+    closed_conssL_any, closed_nibLit_any, h]
+
+theorem closed_idFinL (iat4 : List (Fin 16 × Fin 16)) :
+    closed 0 (idFinL iat4) = true := by
+  simp [idFinL, scottList, cellLit,
+        closed, shift, List.foldr, List.foldl, List.map, aps,
+        shift_of_closed0, subst_of_closed0,
+        closed_joinL_any, closed_revL_any, closed_mapL_any,
+        closed_appendL_any, closed_u64L_any, closed_zerofillL_any,
+        closed_churchL_any, closed_b4addL_any, closed_conssL_any,
+        closed_pairSrcL_any, closed_nibLit_any, closed_nilL_any,
+        closed_bytesChunk, closed_bytesChunk_any]
+
+-- empirical: FIN count on closed literals — 6 state betas + 5 lets
+-- + 2 pairSrc betas = 13.
+set_option maxHeartbeats 1600000 in
+example :
+    hsteps 13 (aps (idFinL bZero4)
+        [nilL, nilL, nilL, nilL, nilL, nilL])
+      = pairLit (idBody nilL nilL nilL bZero4) nilL := by decide
+
+/-- `idFinL·l·o·oi·rv·rc·sy →* pairLit (idBody o rv rc) sy`. -/
+theorem idFin_eval (l o oi rv rc sy : LTerm)
+    (iat4 : List (Fin 16 × Fin 16))
+    (ho : closed 0 o = true) (hoi : closed 0 oi = true)
+    (hrv : closed 0 rv = true) (hrc : closed 0 rc = true)
+    (hsy : closed 0 sy = true) :
+    LRed (aps (idFinL iat4) [l, o, oi, rv, rc, sy])
+        (pairLit (idBody o rv rc iat4) sy) :=
+  LRed_of_hsteps (k := 13) (by
+    simp [idFinL, idBody, idIdt, idIlt, idDrva, idNams, pairLit,
+          pairSrcL, scottList, cellLit, iatPrefix,
+          aps, List.foldl, List.map, List.foldr,
+          hsteps, hstep, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          closed_cellLit, closed_scottList,
+          closed_joinL, closed_revL, closed_mapL, closed_appendL,
+          closed_u64L, closed_zerofillL, closed_churchL,
+          closed_b4addL, closed_conssL, closed_pairSrcL,
+          closed_bytesChunk, closed_nibLit, closed_nilL,
+          ho, hoi, hrv, hrc, hsy])
+
+/-- `idata_src n` — `(church n · STEP_ID · init) FIN` with
+    `init = tupleL [imports, namesOff, iatB, K, K, K]`.  The three
+    placeholder bytes4 are parameters (they depend on n_imp). -/
+def idataOfL (n : Nat) (namesOff iatB iat4 : List (Fin 16 × Fin 16))
+    : LTerm :=
+  .abs (.app
+    (.app (.app (churchL n) idataStepL)
+      (tupleL [.var 0, bytesChunk namesOff, bytesChunk iatB,
+               nilL, nilL, nilL]))
+    (idFinL iat4))
+
+theorem closed_idataOfL (n : Nat)
+    (namesOff iatB iat4 : List (Fin 16 × Fin 16)) :
+    closed 0 (idataOfL n namesOff iatB iat4) = true := by
+  unfold idataOfL
+  simp only [closed, Bool.and_eq_true]
+  refine ⟨⟨⟨closed_mono (closed_churchL n) (Nat.zero_le 1),
+      closed_mono closed_idataStepL (Nat.zero_le 1)⟩, ?_⟩,
+    closed_mono (closed_idFinL iat4) (Nat.zero_le 1)⟩
+  show closed 2 (aps (.var 0)
+      ([.var 0, bytesChunk namesOff, bytesChunk iatB,
+        nilL, nilL, nilL].map (shift 1 0))) = true
+  apply closed_aps
+  · rfl
+  · intro e he
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp he
+    simp only [List.mem_cons, List.mem_singleton,
+      List.not_mem_nil, or_false] at hx
+    rcases hx with rfl | rfl | rfl | rfl | rfl | rfl
+    · decide
+    · rw [shift_of_closed0 (closed_bytesChunk namesOff)]
+      exact closed_mono (closed_bytesChunk namesOff)
+        (Nat.zero_le 2)
+    · rw [shift_of_closed0 (closed_bytesChunk iatB)]
+      exact closed_mono (closed_bytesChunk iatB) (Nat.zero_le 2)
+    · rw [shift_of_closed0 closed_nilL]
+      exact closed_mono closed_nilL (Nat.zero_le 2)
+    · rw [shift_of_closed0 closed_nilL]
+      exact closed_mono closed_nilL (Nat.zero_le 2)
+    · rw [shift_of_closed0 closed_nilL]
+      exact closed_mono closed_nilL (Nat.zero_le 2)
+
+/-- `idataOf` evaluation: iterate STEP_ID over the import names, then
+    project `(body, sy)` — the section bytes and the
+    `(iat_nm, oi)` symbol table. -/
+theorem idataOf_eval (es : List LTerm)
+    (namesOff iatB iat4 : List (Fin 16 × Fin 16))
+    (hcl : ∀ e ∈ es, closed 0 e = true) :
+    LRed (.app (idataOfL es.length namesOff iatB iat4)
+        (scottList es))
+      (pairLit
+        (idBody (idataFinal es namesOff iatB).1
+                (idataFinal es namesOff iatB).2.2.1
+                (idataFinal es namesOff iatB).2.2.2.1 iat4)
+        (idataFinal es namesOff iatB).2.2.2.2) := by
+  have hclosedS : closed 0 (scottList es) = true :=
+    closed_scottList (fun x hx => hcl x hx)
+  have hinit : closed 0 (tupleL [scottList es,
+      bytesChunk namesOff, bytesChunk iatB,
+      nilL, nilL, nilL]) = true :=
+    closed_tupleL (fun e he => by
+      simp only [List.mem_cons, List.mem_singleton,
+        List.not_mem_nil, or_false] at he
+      rcases he with rfl | rfl | rfl | rfl | rfl | rfl
+      · exact hclosedS
+      · exact closed_bytesChunk namesOff
+      · exact closed_bytesChunk iatB
+      · exact closed_nilL
+      · exact closed_nilL
+      · exact closed_nilL)
+  have hopen : LRed
+      (.app (idataOfL es.length namesOff iatB iat4)
+        (scottList es))
+      (.app
+        (.app (.app (churchL es.length) idataStepL)
+          (tupleL [scottList es, bytesChunk namesOff,
+                   bytesChunk iatB, nilL, nilL, nilL]))
+        (idFinL iat4)) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [idataOfL, tupleL, aps, List.foldl, List.map,
+            hsteps, hstep, subst, shift, shift_zero,
+            subst_shift_succ,
+            subst_of_closed0, shift_of_closed0, closed, closed_app,
+            closed_churchL, closed_idataStepL, closed_idFinL,
+            closed_bytesChunk, closed_nilL, hclosedS])
+  have hiter : LRed
+      (.app (.app (churchL es.length) idataStepL)
+        (tupleL [scottList es, bytesChunk namesOff,
+                 bytesChunk iatB, nilL, nilL, nilL]))
+      (iterL idataStepL
+        (tupleL [scottList es, bytesChunk namesOff,
+                 bytesChunk iatB, nilL, nilL, nilL]) es.length) :=
+    church_eval es.length idataStepL _ closed_idataStepL hinit
+  have hrun : LRed
+      (iterL idataStepL
+        (tupleL [scottList es, bytesChunk namesOff,
+                 bytesChunk iatB, nilL, nilL, nilL]) es.length)
+      (tupleL [nilL, (idataFinal es namesOff iatB).1,
+               (idataFinal es namesOff iatB).2.1,
+               (idataFinal es namesOff iatB).2.2.1,
+               (idataFinal es namesOff iatB).2.2.2.1,
+               (idataFinal es namesOff iatB).2.2.2.2]) := by
+    have h := idataOf_iterK es.length es
+      (bytesChunk namesOff) (bytesChunk iatB) nilL nilL nilL
+      (Nat.le_refl _) hcl
+      (closed_bytesChunk namesOff) (closed_bytesChunk iatB)
+      closed_nilL closed_nilL closed_nilL
+    have h0 : idataAfterK 0 es
+        (bytesChunk namesOff) (bytesChunk iatB) nilL nilL nilL =
+        [scottList es, bytesChunk namesOff, bytesChunk iatB,
+         nilL, nilL, nilL] := by
+      simp only [idataAfterK, List.take_zero, List.drop_zero,
+        List.foldl_nil]
+    have hn : idataAfterK es.length es
+        (bytesChunk namesOff) (bytesChunk iatB) nilL nilL nilL =
+        [nilL, (idataFinal es namesOff iatB).1,
+         (idataFinal es namesOff iatB).2.1,
+         (idataFinal es namesOff iatB).2.2.1,
+         (idataFinal es namesOff iatB).2.2.2.1,
+         (idataFinal es namesOff iatB).2.2.2.2] := by
+      simp only [idataAfterK, idataFinal, List.take_length,
+        List.drop_length, scottList, List.foldr_nil]
+    rwa [h0, hn] at h
+  have hfin : LRed
+      (.app (tupleL [nilL, (idataFinal es namesOff iatB).1,
+                     (idataFinal es namesOff iatB).2.1,
+                     (idataFinal es namesOff iatB).2.2.1,
+                     (idataFinal es namesOff iatB).2.2.2.1,
+                     (idataFinal es namesOff iatB).2.2.2.2])
+        (idFinL iat4))
+      (pairLit
+        (idBody (idataFinal es namesOff iatB).1
+                (idataFinal es namesOff iatB).2.2.1
+                (idataFinal es namesOff iatB).2.2.2.1 iat4)
+        (idataFinal es namesOff iatB).2.2.2.2) := by
+    have h := tupleL_apply [nilL, (idataFinal es namesOff iatB).1,
+      (idataFinal es namesOff iatB).2.1,
+      (idataFinal es namesOff iatB).2.2.1,
+      (idataFinal es namesOff iatB).2.2.2.1,
+      (idataFinal es namesOff iatB).2.2.2.2] (idFinL iat4)
+    obtain ⟨ho', hoi', hrv', hrc', hsy'⟩ := closed_idataAfterK
+      (k := es.length) (es := es)
+      (o := bytesChunk namesOff) (oi := bytesChunk iatB)
+      (rv := nilL) (rc := nilL) (sy := nilL) hcl
+      (closed_bytesChunk namesOff) (closed_bytesChunk iatB)
+      closed_nilL closed_nilL closed_nilL
+    have heq : es.take es.length = es := List.take_length
+    rw [heq] at ho' hoi' hrv' hrc' hsy'
+    exact h.trans (idFin_eval nilL _ _ _ _ _ iat4
+      ho' hoi' hrv' hrc' hsy')
+  exact hopen.trans ((LRed_app_left
+      (hiter.trans hrun)).trans hfin)
+
+
+-- batch J axiom audit ---------------------------------------------------
+
+#print axioms dataStep_cons
+#print axioms dataStep_nil
+#print axioms dataOf_iterK
+#print axioms dataFin_eval
+#print axioms dataOf_eval
+#print axioms idataStep_cons
+#print axioms idataStep_nil
+#print axioms idataOf_iterK
+#print axioms idFin_eval
+#print axioms idataOf_eval
+
 end ISAR
