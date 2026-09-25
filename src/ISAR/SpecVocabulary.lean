@@ -4127,6 +4127,339 @@ theorem align4096_eval (xs : List (Fin 16 × Fin 16))
 
 
 
+
+
+-- ============================================================
+-- Batch E: PADLIST — peel b0 b1, rem = l0 + 16·h0 + 256·(l1 mod 2),
+--          isZero-guarded TAIL-drop of ZEROFILL 512
+-- ============================================================
+
+/-- `_PADLIST`'s rem expression, under `λl1.λh1` — context
+    `h1 l1 h0 l0 t1 b1 t0 b0 v`: l1 = var 1, h0 = var 2, l0 = var 3.
+    `ADD (ADD (NIB2NUM l0) (MUL 16 (NIB2NUM h0))) (MUL 256 (NIBPAR l1))`. -/
+def padRemL : LTerm :=
+  aps churchAddL
+    [aps churchAddL [aps nib2numL [.var 3],
+       aps churchMulL [churchL 16, aps nib2numL [.var 2]]],
+     aps churchMulL [churchL 256, aps nibparL [.var 1]]]
+
+/-- `λrem. (rem·(λx.KI)·K)·K·(rem·TAIL·(ZEROFILL 512))` — the
+    zero-remainder guard. -/
+def padGuardL : LTerm :=
+  .abs (aps (aps (.var 0) [iszStepL, klL])
+        [klL, aps (.var 0) [tailL, .app zerofillL (churchL 512)]])
+
+/-- `_PADLIST`'s byte body, under `λb1.λt1` — context
+    `t1 b1 t0 b0 v`: b1 = var 1, b0 = var 3.
+    `b0 (λl0.λh0. b1 (λl1.λh1. INNER))`. -/
+def padBodyL : LTerm :=
+  .app (.var 3)
+    (.abs (.abs
+      (.app (.var 3)
+        (.abs (.abs (.app padGuardL padRemL))))))
+
+/-- `_PADLIST = λv. v K (λb0.λt0. t0 K (λb1.λt1. BODY))`. -/
+def padlistL : LTerm :=
+  .abs (aps (.var 0) [klL,
+    .abs (.abs (aps (.var 0) [klL, .abs (.abs padBodyL)]))])
+
+/-- `padRemL` after the `l0,h0` substitution — `l1` still at var 1. -/
+def padRemL1 (l0 h0 : Fin 16) : LTerm :=
+  aps churchAddL
+    [aps churchAddL [aps nib2numL [nibLit l0],
+       aps churchMulL [churchL 16, aps nib2numL [nibLit h0]]],
+     aps churchMulL [churchL 256, aps nibparL [.var 1]]]
+
+/-- `padRemL` fully nibble-substituted. -/
+def padRemInst (l0 h0 l1 : Fin 16) : LTerm :=
+  aps churchAddL
+    [aps churchAddL [aps nib2numL [nibLit l0],
+       aps churchMulL [churchL 16, aps nib2numL [nibLit h0]]],
+     aps churchMulL [churchL 256, aps nibparL [nibLit l1]]]
+
+/-- Semantic remainder: `len & 511` = byte0 + byte1's parity byte. -/
+def padRemN (x0 x1 : Fin 16 × Fin 16) : Nat :=
+  x0.1.val + 16 * x0.2.val + 256 * (x1.1.val % 2)
+
+/-- Output cells: `zeros((512 − rem) mod 512)` — nil on aligned
+    input, else the 512-zero block minus `rem` cells. -/
+def padCells (r : Nat) : List LTerm :=
+  if r = 0 then [] else (List.replicate 512 b0cT).drop r
+
+theorem closed_padGuardL : closed 0 padGuardL = true := by
+  have hz : closed 0 (.app zerofillL (churchL 512)) = true :=
+    closed_app closed_zerofillL (closed_churchL 512)
+  simp only [padGuardL, aps, List.foldl, closed, Bool.and_eq_true,
+    decide_eq_true_eq]
+  refine ⟨⟨⟨⟨Nat.zero_lt_one,
+    closed_mono closed_iszStepL (Nat.zero_le 1)⟩,
+    closed_mono closed_klL (Nat.zero_le 1)⟩,
+    closed_mono closed_klL (Nat.zero_le 1)⟩,
+    ⟨⟨Nat.zero_lt_one,
+    closed_mono closed_tailL (Nat.zero_le 1)⟩,
+    ⟨closed_mono closed_zerofillL (Nat.zero_le 1),
+     closed_mono (closed_churchL 512) (Nat.zero_le 1)⟩⟩⟩
+
+theorem closed_padGuardL_any (c : Nat) : closed c padGuardL = true :=
+  closed_mono closed_padGuardL (Nat.zero_le c)
+
+theorem closed_padRemL_c {c : Nat} (h : 4 ≤ c) :
+    closed c padRemL = true := by
+  have hmo : ∀ {t : LTerm}, closed 0 t = true → closed c t = true :=
+    fun ht => closed_mono ht (Nat.zero_le c)
+  simp only [padRemL, aps, List.foldl, closed, Bool.and_eq_true,
+    decide_eq_true_eq]
+  refine ⟨⟨hmo closed_churchAddL,
+    ⟨⟨hmo closed_churchAddL,
+      ⟨hmo closed_nib2numL, Nat.lt_of_lt_of_le (by decide) h⟩⟩,
+    ⟨⟨hmo closed_churchMulL, hmo (closed_churchL 16)⟩,
+     ⟨hmo closed_nib2numL, Nat.lt_of_lt_of_le (by decide) h⟩⟩⟩⟩,
+   ⟨⟨hmo closed_churchMulL, hmo (closed_churchL 256)⟩,
+    ⟨hmo closed_nibparL, Nat.lt_of_lt_of_le (by decide) h⟩⟩⟩
+
+theorem closed_padlistL : closed 0 padlistL = true := by
+  have hmo : ∀ {t : LTerm} (c : Nat), closed 0 t = true →
+      closed c t = true :=
+    fun c ht => closed_mono ht (Nat.zero_le c)
+  have h9 : closed 9 padRemL = true :=
+    closed_padRemL_c (by decide)
+  simp only [padlistL, padBodyL, aps, List.foldl,
+    closed, Bool.and_eq_true, decide_eq_true_eq]
+  refine ⟨⟨Nat.zero_lt_one, hmo 1 closed_klL⟩,
+    ⟨⟨by decide, hmo 3 closed_klL⟩,
+      ⟨by decide,
+        ⟨by decide, ⟨hmo 9 closed_padGuardL, h9⟩⟩⟩⟩⟩
+
+/-- closedness of `padBodyL` at any context depth ≥ 4. -/
+theorem closed_padBodyL_c {c : Nat} (h : 4 ≤ c) :
+    closed c padBodyL = true := by
+  simp only [padBodyL, closed, Bool.and_eq_true, decide_eq_true_eq]
+  refine ⟨Nat.lt_of_lt_of_le (by decide : 3 < 4) h,
+    ⟨Nat.lt_trans (Nat.lt_of_lt_of_le (by decide : 3 < 4) h)
+        (by omega : c < c + 2),
+      ⟨closed_padGuardL_any _,
+        closed_padRemL_c (by omega : 4 ≤ c + 4)⟩⟩⟩
+
+-- closed-at-any-depth lemmas (conditional-rewrite friendly forms) --
+
+theorem closed_nilL_any (c : Nat) : closed c nilL = true :=
+  closed_mono closed_nilL (Nat.zero_le c)
+theorem closed_klL_any (c : Nat) : closed c klL = true :=
+  closed_mono closed_klL (Nat.zero_le c)
+theorem closed_iszStepL_any (c : Nat) : closed c iszStepL = true :=
+  closed_mono closed_iszStepL (Nat.zero_le c)
+theorem closed_tailL_any (c : Nat) : closed c tailL = true :=
+  closed_mono closed_tailL (Nat.zero_le c)
+theorem closed_zerofillL_any (c : Nat) : closed c zerofillL = true :=
+  closed_mono closed_zerofillL (Nat.zero_le c)
+theorem closed_churchL_any (n c : Nat) : closed c (churchL n) = true :=
+  closed_mono (closed_churchL n) (Nat.zero_le c)
+theorem closed_nibLit_any (i : Fin 16) (c : Nat) :
+    closed c (nibLit i) = true :=
+  closed_mono (closed_nibLit i) (Nat.zero_le c)
+theorem closed_byteLit_any (lo hi : Fin 16) (c : Nat) :
+    closed c (byteLit lo hi) = true :=
+  closed_mono (closed_byteLit lo hi) (Nat.zero_le c)
+theorem closed_nib2numL_any (c : Nat) : closed c nib2numL = true :=
+  closed_mono closed_nib2numL (Nat.zero_le c)
+theorem closed_nibparL_any (c : Nat) : closed c nibparL = true :=
+  closed_mono closed_nibparL (Nat.zero_le c)
+theorem closed_churchAddL_any (c : Nat) :
+    closed c churchAddL = true :=
+  closed_mono closed_churchAddL (Nat.zero_le c)
+theorem closed_churchMulL_any (c : Nat) :
+    closed c churchMulL = true :=
+  closed_mono closed_churchMulL (Nat.zero_le c)
+
+/-- 2-cell peel of a 4-list: `scott4·K·peel2(BODY) →* BODY-inst`. -/
+theorem padlist_peel (B0 B1 B2 B3 : LTerm)
+    (h0 : closed 0 B0 = true) (h1 : closed 0 B1 = true)
+    (h2 : closed 0 B2 = true) (h3 : closed 0 B3 = true)
+    (hT2 : closed 0 (cellLit B2 (cellLit B3 nilL)) = true)
+    (hT1 : closed 0 (cellLit B1 (cellLit B2 (cellLit B3 nilL)))
+      = true) :
+    LRed (aps (scottList [B0, B1, B2, B3])
+             [klL, .abs (.abs (aps (.var 0) [klL,
+                 .abs (.abs padBodyL)]))])
+      (.app B0 (.abs (.abs (.app B1
+        (.abs (.abs (.app padGuardL padRemL))))))) :=
+  LRed_of_hsteps (k := 8) (by
+    simp [scottList, cellLit, aps, List.foldl, List.foldr, hsteps, hstep,
+          padBodyL, subst, shift, shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, subst_of_closed,
+          shift_of_closed, closed, closed_app, closed_mono,
+          closed_nilL, closed_klL,
+          closed_padGuardL_any, closed_padRemL_c,
+          h0, h1, h2, h3, hT1, hT2])
+
+/-- isZero on a behavioral numeral: `M·iszStep·K →* boolLit (n == 0)`. -/
+theorem isZero_num {n : Nat} {M : LTerm} (hM : IsChurchNum n M) :
+    LRed (aps M [iszStepL, klL]) (boolLit (decide (n = 0))) := by
+  have hstep : ∀ x, closed 0 x = true →
+      LRed (.app iszStepL x) kilL ∧ closed 0 kilL = true :=
+    fun x hx => ⟨iszStep_cell x hx, closed_kilL⟩
+  have hiter := iter_red iszStepL (fun _ => kilL) hstep n klL closed_klL
+  have hiterS : iterS (fun _ => kilL) klL n
+      = if n = 0 then klL else kilL := by
+    cases n with
+    | zero => rfl
+    | succ n => simp [iterS]
+  refine (hM iszStepL klL closed_iszStepL closed_klL).trans (hiter.trans ?_)
+  rw [hiterS]
+  cases n <;> exact Relation.ReflTransGen.refl
+
+/-- the pad leg: `rem·TAIL·(ZEROFILL 512) →* scottList (rep512.drop n)`. -/
+theorem padLeg_num {n : Nat} {M : LTerm} (hM : IsChurchNum n M) :
+    LRed (aps M [tailL, .app zerofillL (churchL 512)])
+         (scottList ((List.replicate 512 b0cT).drop n)) := by
+  have hcl : ∀ e ∈ List.replicate 512 b0cT, closed 0 e = true :=
+    fun _ he => closed_rep_b0c he
+  have h1 : LRed (aps M [tailL, .app zerofillL (churchL 512)])
+      (aps M [tailL, scottList (List.replicate 512 b0cT)]) :=
+    LRed_app_right (zerofill_eval 512)
+  have h2 : LRed (aps M [tailL, scottList (List.replicate 512 b0cT)])
+      (iterL tailL (scottList (List.replicate 512 b0cT)) n) :=
+    hM tailL _ closed_tailL (closed_scottList hcl)
+  exact (h1.trans h2).trans (iterL_tail_drop n _ hcl)
+
+/-- `rem`'s behavioral numeral: `l0 + 16·h0 + 256·(l1 mod 2)`. -/
+theorem padRem_num (l0 h0 l1 : Fin 16) :
+    IsChurchNum (l0.val + 16 * h0.val + 256 * (l1.val % 2))
+      (padRemInst l0 h0 l1) := by
+  show IsChurchNum (l0.val + 16 * h0.val + 256 * (l1.val % 2))
+      (aps churchAddL
+        [aps churchAddL [aps nib2numL [nibLit l0],
+           aps churchMulL [churchL 16, aps nib2numL [nibLit h0]]],
+         aps churchMulL [churchL 256, aps nibparL [nibLit l1]]])
+  have hlo : IsChurchNum (l0.val + 16 * h0.val)
+      (aps churchAddL [aps nib2numL [nibLit l0],
+        aps churchMulL [churchL 16, aps nib2numL [nibLit h0]]]) :=
+    churchAdd_num _ _ _ _ (nib2num_num l0)
+      (churchMul_num _ _ _ _ (churchL_num 16) (nib2num_num h0)
+        (closed_churchL 16)
+        (closed_app closed_nib2numL (closed_nibLit h0)))
+      (closed_app closed_nib2numL (closed_nibLit l0))
+      (closed_app (closed_app closed_churchMulL (closed_churchL 16))
+        (closed_app closed_nib2numL (closed_nibLit h0)))
+  have hhi : IsChurchNum (256 * (l1.val % 2))
+      (aps churchMulL [churchL 256, aps nibparL [nibLit l1]]) :=
+    churchMul_num _ _ _ _ (churchL_num 256) (nibpar_num l1)
+      (closed_churchL 256)
+      (closed_app closed_nibparL (closed_nibLit l1))
+  exact churchAdd_num _ _ _ _ hlo hhi
+    (closed_app (closed_app closed_churchAddL
+      (closed_app closed_nib2numL (closed_nibLit l0)))
+      (closed_app (closed_app closed_churchMulL (closed_churchL 16))
+        (closed_app closed_nib2numL (closed_nibLit h0))))
+    (closed_app (closed_app closed_churchMulL (closed_churchL 256))
+      (closed_app closed_nibparL (closed_nibLit l1)))
+
+/-- `PADLIST·(b4 xs) →* scottList (padCells (padRemN x0 x1))` — the
+    zero-padding segment `zeros(align512 len − len)`. -/
+theorem padlist_eval (x0 x1 x2 x3 : Fin 16 × Fin 16) :
+    LRed (.app padlistL (b4Lit [x0, x1, x2, x3]))
+         (scottList (padCells (padRemN x0 x1))) := by
+  have hopen : LRed (.app padlistL (b4Lit [x0,x1,x2,x3]))
+      (aps (b4Lit [x0,x1,x2,x3]) [klL,
+        .abs (.abs (aps (.var 0) [klL, .abs (.abs padBodyL)]))]) := by
+    simp only [padlistL]
+    exact LRed_of_hsteps (k := 1) (by
+      simp [aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_zero, subst_shift_succ, subst_of_closed0,
+            subst_of_closed, closed, closed_app, closed_mono,
+            closed_klL_any, closed_padBodyL_c])
+  have hnf : LRed (aps (b4Lit [x0,x1,x2,x3]) [klL,
+        .abs (.abs (aps (.var 0) [klL, .abs (.abs padBodyL)]))])
+      (aps (scottList [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+                        byteLit x2.1 x2.2, byteLit x3.1 x3.2])
+             [klL, .abs (.abs (aps (.var 0) [klL,
+                .abs (.abs padBodyL)]))]) :=
+    LRed_app_left (LRed_app_left (b4Lit_nf _))
+  have hpeel := padlist_peel
+    (byteLit x0.1 x0.2) (byteLit x1.1 x1.2)
+    (byteLit x2.1 x2.2) (byteLit x3.1 x3.2)
+    (closed_byteLit _ _) (closed_byteLit _ _)
+    (closed_byteLit _ _) (closed_byteLit _ _)
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _) closed_nilL))
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _) closed_nilL)))
+  have happ0 := byteLit_apply2 x0.1 x0.2
+    (.app (byteLit x1.1 x1.2)
+      (.abs (.abs (.app padGuardL padRemL))))
+  have hsub0 : subst (nibLit x0.2) 0 (subst (nibLit x0.1) 1
+      (.app (byteLit x1.1 x1.2)
+        (.abs (.abs (.app padGuardL padRemL))))) =
+      .app (byteLit x1.1 x1.2)
+        (.abs (.abs (.app padGuardL (padRemL1 x0.1 x0.2)))) := by
+    simp [padRemL, padRemL1, aps, List.foldl, subst, shift,
+          shift_zero, subst_shift_succ, subst_of_closed0,
+          shift_of_closed0, subst_of_closed, shift_of_closed,
+          closed, closed_app, closed_mono,
+          closed_padGuardL_any, closed_nibLit_any, closed_byteLit_any,
+          closed_churchL_any, closed_nib2numL_any, closed_nibparL_any,
+          closed_churchAddL_any, closed_churchMulL_any]
+  have happ1 := byteLit_apply2 x1.1 x1.2
+    (.app padGuardL (padRemL1 x0.1 x0.2))
+  have hsub1 : subst (nibLit x1.2) 0 (subst (nibLit x1.1) 1
+      (.app padGuardL (padRemL1 x0.1 x0.2))) =
+      .app padGuardL (padRemInst x0.1 x0.2 x1.1) := by
+    simp [padRemL1, padRemInst, aps, List.foldl, subst, shift,
+          shift_zero, subst_shift_succ, subst_of_closed0,
+          shift_of_closed0, subst_of_closed, shift_of_closed,
+          closed, closed_app, closed_mono,
+          closed_padGuardL_any, closed_nibLit_any,
+          closed_churchL_any, closed_nib2numL_any, closed_nibparL_any,
+          closed_churchAddL_any, closed_churchMulL_any]
+  have hbeta : LRed (.app padGuardL (padRemInst x0.1 x0.2 x1.1))
+      (aps (aps (padRemInst x0.1 x0.2 x1.1) [iszStepL, klL])
+        [klL, aps (padRemInst x0.1 x0.2 x1.1)
+          [tailL, .app zerofillL (churchL 512)]]) := by
+    apply LRed_of_hsteps (k := 1)
+    simp [padGuardL, aps, List.foldl, hsteps, hstep, subst, shift,
+          shift_zero, subst_shift_succ, subst_of_closed0,
+          shift_of_closed0, subst_of_closed, shift_of_closed,
+          closed, closed_app, closed_mono,
+          closed_iszStepL_any, closed_klL_any, closed_tailL_any,
+          closed_zerofillL_any, closed_churchL_any]
+  have hrem : IsChurchNum (padRemN x0 x1)
+      (padRemInst x0.1 x0.2 x1.1) :=
+    padRem_num x0.1 x0.2 x1.1
+  have hisz : LRed (aps (padRemInst x0.1 x0.2 x1.1) [iszStepL, klL])
+      (boolLit (decide (padRemN x0 x1 = 0))) := isZero_num hrem
+  have hpad : LRed (aps (padRemInst x0.1 x0.2 x1.1)
+        [tailL, .app zerofillL (churchL 512)])
+      (scottList ((List.replicate 512 b0cT).drop (padRemN x0 x1))) :=
+    padLeg_num hrem
+  have hdisp : LRed (aps (aps (padRemInst x0.1 x0.2 x1.1)
+        [iszStepL, klL])
+        [klL, aps (padRemInst x0.1 x0.2 x1.1)
+          [tailL, .app zerofillL (churchL 512)]])
+      (aps (boolLit (decide (padRemN x0 x1 = 0)))
+        [klL, scottList
+          ((List.replicate 512 b0cT).drop (padRemN x0 x1))]) :=
+    (LRed_app_left (LRed_app_left hisz)).trans (LRed_app_right hpad)
+  have htail : LRed
+      (if decide (padRemN x0 x1 = 0) then klL
+       else scottList
+         ((List.replicate 512 b0cT).drop (padRemN x0 x1)))
+      (scottList (padCells (padRemN x0 x1))) := by
+    cases hd : decide (padRemN x0 x1 = 0) with
+    | true =>
+        have h0 : padRemN x0 x1 = 0 := of_decide_eq_true hd
+        rw [padCells, if_pos h0]
+        exact Relation.ReflTransGen.refl
+    | false =>
+        have h0 : ¬ padRemN x0 x1 = 0 := of_decide_eq_false hd
+        simp only [padCells, if_neg h0]
+        exact Relation.ReflTransGen.refl
+  exact hopen.trans (hnf.trans (hpeel.trans
+    ((hsub0 ▸ happ0).trans ((hsub1 ▸ happ1).trans
+      (hbeta.trans (hdisp.trans
+        ((boolLit_sel _ _ _).trans htail)))))))
+
+
 -- axiom audits ---------------------------------------------------------------
 #print axioms emitCells_nf
 #print axioms pairLit_apply
@@ -4155,6 +4488,12 @@ theorem align4096_eval (xs : List (Fin 16 × Fin 16))
 #print axioms align512_peel_emit
 #print axioms align512_eval
 #print axioms align4096_eval
+#print axioms padlist_peel
+#print axioms padlist_eval
+#print axioms isZero_num
+#print axioms padLeg_num
+#print axioms padRem_num
+
 
 
 end ISAR
