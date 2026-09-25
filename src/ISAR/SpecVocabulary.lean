@@ -3214,6 +3214,919 @@ def peelLo2 (r : LTerm) : LTerm :=
   (hsteps 600 (aps b4incL
     [b4Lit [(15, 15), (0, 0), (0, 0), (0, 0)]])))
 
+
+-- ============================================================
+-- Batch A: nibble dispatch tables (NIB2NUM / NIBPAR / NIBANDE)
+--          + EQNIB / NOT / EQB
+-- (andL/orL already in SpecVocabulary; only evals added here)
+-- ============================================================
+
+/-- `_NIB2NUM = λa. a (churchL 0) … (churchL 15)` — nibble → Church
+    numeral. -/
+def nib2numL : LTerm :=
+  .abs (aps (.var 0) (List.ofFn fun j : Fin 16 => churchL j.val))
+
+theorem closed_nib2numL : closed 0 nib2numL = true := by decide
+
+/-- `_NIBPAR = λa. a (churchL (0&1)) …` — nibble → parity numeral. -/
+def nibparL : LTerm :=
+  .abs (aps (.var 0) (List.ofFn fun j : Fin 16 => churchL (j.val % 2)))
+
+theorem closed_nibparL : closed 0 nibparL = true := by decide
+
+/-- `2·(i/2)` — the ALIGN512 low-nibble mask (`i & 0xE` for i<16). -/
+def nibMaskE (i : Fin 16) : Fin 16 := ⟨2 * (i.val / 2), by omega⟩
+
+/-- `_NIBANDE = λa. a sel_{0&E} … sel_{15&E}` — nibble mask for
+    ALIGN512 (clears the low bit). -/
+def nibandEL : LTerm :=
+  .abs (aps (.var 0) (List.ofFn fun j : Fin 16 => nibLit (nibMaskE j)))
+
+theorem closed_nibandEL : closed 0 nibandEL = true := by decide
+
+theorem nib2num_table : ∀ i : Fin 16,
+    hsteps 24 (aps nib2numL [nibLit i]) = churchL i.val := by
+  decide
+
+theorem nibpar_table : ∀ i : Fin 16,
+    hsteps 24 (aps nibparL [nibLit i]) = churchL (i.val % 2) := by
+  decide
+
+theorem nibandE_table : ∀ i : Fin 16,
+    hsteps 24 (aps nibandEL [nibLit i]) = nibLit (nibMaskE i) := by
+  decide
+
+theorem nib2num_correct (i : Fin 16) :
+    LRed (aps nib2numL [nibLit i]) (churchL i.val) :=
+  LRed_of_hsteps (nib2num_table i)
+
+theorem nibpar_correct (i : Fin 16) :
+    LRed (aps nibparL [nibLit i]) (churchL (i.val % 2)) :=
+  LRed_of_hsteps (nibpar_table i)
+
+theorem nibandE_correct (i : Fin 16) :
+    LRed (aps nibandEL [nibLit i]) (nibLit (nibMaskE i)) :=
+  LRed_of_hsteps (nibandE_table i)
+
+-- EQNIB: nibble equality ------------------------------------------------
+
+/-- `EQNIB = λa.λb. a (b K KI …) (b KI K …) …` — double 16-table:
+    row `i` selects `K` iff `b = i`. -/
+def eqnibL : LTerm :=
+  .abs (.abs (aps (.var 1) (List.ofFn fun i : Fin 16 =>
+    aps (.var 0) (List.ofFn fun j : Fin 16 =>
+      boolLit (decide (j.val = i.val))))))
+
+theorem closed_eqnibL : closed 0 eqnibL = true := by decide
+
+theorem eqnib_table : ∀ i j : Fin 16,
+    hsteps 60 (aps eqnibL [nibLit i, nibLit j])
+      = boolLit (decide (i = j)) := by
+  decide
+
+theorem eqnib_eval (i j : Fin 16) :
+    LRed (aps eqnibL [nibLit i, nibLit j]) (boolLit (decide (i = j))) :=
+  LRed_of_hsteps (eqnib_table i j)
+
+-- NOT ---------------------------------------------------------------------
+
+/-- `_NOT = λp. p KI K`. -/
+def notL : LTerm := .abs (aps (.var 0) [kilL, klL])
+
+theorem closed_notL : closed 0 notL = true := by decide
+
+theorem not_table : ∀ p : Bool,
+    hsteps 5 (aps notL [boolLit p]) = boolLit (!p) := by
+  decide
+
+theorem not_eval (p : Bool) :
+    LRed (aps notL [boolLit p]) (boolLit (!p)) :=
+  LRed_of_hsteps (not_table p)
+
+theorem and_table : ∀ p q : Bool,
+    hsteps 6 (aps andL [boolLit p, boolLit q]) = boolLit (p && q) := by
+  decide
+
+theorem or_table : ∀ p q : Bool,
+    hsteps 6 (aps orL [boolLit p, boolLit q]) = boolLit (p || q) := by
+  decide
+
+theorem and_eval (p q : Bool) :
+    LRed (aps andL [boolLit p, boolLit q]) (boolLit (p && q)) :=
+  LRed_of_hsteps (and_table p q)
+
+theorem or_eval (p q : Bool) :
+    LRed (aps orL [boolLit p, boolLit q]) (boolLit (p || q)) :=
+  LRed_of_hsteps (or_table p q)
+
+-- EQB: byte equality -------------------------------------------------------
+
+/-- `_EQB = λx.λy. x (λxl.λxh. y (λyl.λyh. AND (EQNIB xl yl)
+    (EQNIB xh yh)))` — byte equality on pair cells. -/
+def eqbL : LTerm :=
+  .abs (.abs (.app (.var 1)
+    (.abs (.abs (.app (.var 2)
+      (.abs (.abs (aps andL
+        [aps eqnibL [.var 3, .var 1],
+         aps eqnibL [.var 2, .var 0]]))))))))
+
+theorem closed_eqbL : closed 0 eqbL = true := by decide
+
+/-- `EQB·(byteLit)·(byteLit) →* boolLit (a = b)` — peel both pairs,
+    two eqnibs, one and. -/
+theorem eqb_eval (xlo xhi ylo yhi : Fin 16) :
+    LRed (aps eqbL [byteLit xlo xhi, byteLit ylo yhi])
+         (boolLit (decide ((xlo, xhi) = (ylo, yhi)))) := by
+  have hbeta : LRed (aps eqbL [byteLit xlo xhi, byteLit ylo yhi])
+      (aps andL [aps eqnibL [nibLit xlo, nibLit ylo],
+                 aps eqnibL [nibLit xhi, nibLit yhi]]) :=
+    LRed_of_hsteps (k := 8) (by
+      simp [eqbL, byteLit, pairLit, aps, List.foldl,
+            hsteps, hstep, subst, shift,
+            subst_of_closed0, shift_of_closed0, subst_of_closed,
+            shift_of_closed, closed, closed_app, closed_absN,
+            closed_mono, decide_eq_true_eq,
+            closed_nibLit, closed_byteLit, closed_eqnibL,
+            closed_andL, closed_klL, closed_kilL])
+  refine hbeta.trans ?_
+  refine (LRed_app (LRed_app_right (eqnib_eval xlo ylo))
+      (eqnib_eval xhi yhi)).trans ?_
+  refine (and_eval _ _).trans ?_
+  have hbool : (decide (xlo = ylo) && decide (xhi = yhi))
+      = decide ((xlo, xhi) = (ylo, yhi)) := by
+    by_cases h1 : xlo = ylo <;> by_cases h2 : xhi = yhi <;> simp [h1, h2]
+  rw [hbool]
+
+-- ============================================================
+-- Batch B: Church arithmetic (_ADD_SRC / _MUL_SRC), TAIL/HEAD,
+--          numeral-iteration lemmas, isZero
+-- ============================================================
+
+/-- `iterL` composition: `f^m·(f^n·z) = f^(n+m)·z`. -/
+theorem iterL_add : ∀ (n m : Nat) (f z : LTerm),
+    iterL f (iterL f z n) m = iterL f z (n + m) := by
+  intro n m f z
+  induction m with
+  | zero => rfl
+  | succ m ih =>
+    rw [Nat.add_succ]
+    show LTerm.app f (iterL f (iterL f z n) m)
+       = LTerm.app f (iterL f z (n + m))
+    rw [ih]
+
+/-- `iterS (λx. iterL f x n)` nests `n`-iterates `m` times: `f^(m·n)`. -/
+theorem iterS_iterL : ∀ (m n : Nat) (f z : LTerm),
+    iterS (fun x => iterL f x n) z m = iterL f z (m * n) := by
+  intro m n f z
+  induction m with
+  | zero => simp [iterS, iterL]
+  | succ m ih =>
+    simp only [iterS, ih]
+    rw [iterL_add, Nat.succ_mul]
+
+/-- `_ADD_SRC = λm.λn.λf.λx. m f (n f x)` — Church addition. -/
+def churchAddL : LTerm :=
+  .abs (.abs (.abs (.abs (.app (.app (.var 3) (.var 1))
+    (.app (.app (.var 2) (.var 1)) (.var 0))))))
+
+theorem closed_churchAddL : closed 0 churchAddL = true := by decide
+
+/-- `ADD·(num m)·(num n)·f·z →* f^(m+n)·z` — application form (the
+    numeral is only consumed by application downstream). -/
+theorem churchAdd_eval (m n : Nat) (f z : LTerm)
+    (hf : closed 0 f = true) (hz : closed 0 z = true) :
+    LRed (aps churchAddL [churchL m, churchL n, f, z])
+         (iterL f z (m + n)) := by
+  have hbeta : LRed (aps churchAddL [churchL m, churchL n, f, z])
+      (.app (.app (churchL m) f)
+        (.app (.app (churchL n) f) z)) :=
+    LRed_of_hsteps (k := 4) (by
+      simp [churchAddL, aps, List.foldl, hsteps, hstep, subst, shift,
+            subst_of_closed0, shift_of_closed0,
+            closed_churchL, hf, hz])
+  have hn := church_eval n f z hf hz
+  have hX : closed 0 (iterL f z n) = true := closed_iterL f z hf hz n
+  have hm := church_eval m f (iterL f z n) hf hX
+  refine hbeta.trans ((LRed_app_right hn).trans (hm.trans ?_))
+  rw [iterL_add, Nat.add_comm n m]
+
+/-- `_MUL_SRC = λm.λn.λf. m (n f)` — Church multiplication. -/
+def churchMulL : LTerm :=
+  .abs (.abs (.abs (.app (.var 2) (.app (.var 1) (.var 0)))))
+
+theorem closed_churchMulL : closed 0 churchMulL = true := by decide
+
+/-- `MUL·(num m)·(num n)·f·z →* f^(m·n)·z`. -/
+theorem churchMul_eval (m n : Nat) (f z : LTerm)
+    (hf : closed 0 f = true) (hz : closed 0 z = true) :
+    LRed (aps churchMulL [churchL m, churchL n, f, z])
+         (iterL f z (m * n)) := by
+  have hbeta : LRed (aps churchMulL [churchL m, churchL n, f, z])
+      (.app (.app (churchL m) (.app (churchL n) f)) z) :=
+    LRed_of_hsteps (k := 3) (by
+      simp [churchMulL, aps, List.foldl, hsteps, hstep, subst, shift,
+            subst_of_closed0, shift_of_closed0,
+            closed_churchL, hf, hz])
+  have hnf : closed 0 (.app (churchL n) f) = true :=
+    closed_app (closed_churchL n) hf
+  have hm := church_eval m (.app (churchL n) f) z hnf hz
+  have hstep : ∀ x, closed 0 x = true →
+      LRed (.app (.app (churchL n) f) x) (iterL f x n) ∧
+      closed 0 (iterL f x n) = true :=
+    fun x hx => ⟨church_eval n f x hf hx, closed_iterL f x hf hx n⟩
+  have hiter := iter_red (.app (churchL n) f) (fun x => iterL f x n)
+    hstep m z hz
+  rw [iterS_iterL m n f z] at hiter
+  exact hbeta.trans (hm.trans hiter)
+
+-- TAIL / HEAD ---------------------------------------------------------------
+
+/-- `_TAIL = λx. x K KI` — Scott-list tail. -/
+def tailL : LTerm := .abs (aps (.var 0) [klL, kilL])
+
+/-- `_HEAD = λx. x K K` — Scott-list head. -/
+def headL : LTerm := .abs (aps (.var 0) [klL, klL])
+
+theorem closed_tailL : closed 0 tailL = true := by decide
+theorem closed_headL : closed 0 headL = true := by decide
+
+/-- `TAIL·(cellLit h t) →* t`. -/
+theorem tail_cell (h t : LTerm) (hh : closed 0 h = true)
+    (ht : closed 0 t = true) :
+    LRed (.app tailL (cellLit h t)) t :=
+  LRed_of_hsteps (k := 5) (by
+    simp [tailL, cellLit, klL, kilL, aps, List.foldl, hsteps, hstep,
+          subst, shift, subst_of_closed0 ht, shift_of_closed0 ht,
+          subst_of_closed0 hh, shift_of_closed0 hh])
+
+/-- `HEAD·(cellLit h t) →* h`. -/
+theorem head_cell (h t : LTerm) (hh : closed 0 h = true)
+    (ht : closed 0 t = true) :
+    LRed (.app headL (cellLit h t)) h :=
+  LRed_of_hsteps (k := 5) (by
+    simp [headL, cellLit, klL, kilL, aps, List.foldl, hsteps, hstep,
+          subst, shift, subst_of_closed0 ht, shift_of_closed0 ht,
+          subst_of_closed0 hh, shift_of_closed0 hh])
+
+/-- `TAIL·nilL →* nilL` — tail of nil is nil. -/
+theorem tail_nil : LRed (.app tailL nilL) nilL :=
+  LRed_of_hsteps (k := 4) (by
+    simp [tailL, nilL, klL, kilL, aps, List.foldl, hsteps, hstep,
+          subst, shift])
+
+/-- `TAIL·(scottList cs) →* scottList cs.tail`. -/
+theorem tail_scott (cs : List LTerm)
+    (hcl : ∀ e ∈ cs, closed 0 e = true) :
+    LRed (.app tailL (scottList cs)) (scottList cs.tail) := by
+  cases cs with
+  | nil => exact tail_nil
+  | cons h t =>
+    have hh : closed 0 h = true := hcl h List.mem_cons_self
+    have ht : closed 0 (scottList t) = true :=
+      closed_scottList (fun e he => hcl e (List.mem_cons_of_mem _ he))
+    exact tail_cell h (scottList t) hh ht
+
+/-- `iterL TAIL (scott cs) n →* scott (cs.drop n)` — `n` tails drop
+    `n` cells (saturating at nil, matching `List.drop`). -/
+theorem iterL_tail_drop : ∀ (n : Nat) (cs : List LTerm),
+    (∀ e ∈ cs, closed 0 e = true) →
+    LRed (iterL tailL (scottList cs) n) (scottList (cs.drop n)) := by
+  intro n
+  induction n with
+  | zero => intro cs _; exact Relation.ReflTransGen.refl
+  | succ n ih =>
+    intro cs hcl
+    simp only [iterL]
+    refine (LRed_app_right (ih cs hcl)).trans ?_
+    rw [← List.tail_drop]
+    exact tail_scott (cs.drop n)
+      (fun e he => hcl e ((List.drop_sublist n cs).mem he))
+
+-- isZero --------------------------------------------------------------------
+
+/-- `_PADLIST`'s zero-check step `λx. KI` — const-false. -/
+def iszStepL : LTerm := .abs kilL
+
+theorem closed_iszStepL : closed 0 iszStepL = true := by decide
+
+/-- `iszStepL·x →* KI` for closed `x`. -/
+theorem iszStep_cell (x : LTerm) (hx : closed 0 x = true) :
+    LRed (.app iszStepL x) kilL :=
+  LRed_of_hsteps (k := 1) (by
+    simp [iszStepL, hsteps, hstep, subst, shift,
+          subst_of_closed0 hx, shift_of_closed0 hx,
+          subst_of_closed0 closed_kilL, shift_of_closed0 closed_kilL])
+
+/-- `n·iszStep·K →* boolLit (n == 0)` — Church isZero. -/
+theorem isZero_eval (n : Nat) :
+    LRed (aps (churchL n) [iszStepL, klL])
+         (boolLit (decide (n = 0))) := by
+  have hchurch := church_eval n iszStepL klL closed_iszStepL closed_klL
+  have hstep : ∀ x, closed 0 x = true →
+      LRed (.app iszStepL x) kilL ∧ closed 0 kilL = true :=
+    fun x hx => ⟨iszStep_cell x hx, closed_kilL⟩
+  have hiter := iter_red iszStepL (fun _ => kilL) hstep n klL closed_klL
+  have hiterS : iterS (fun _ => kilL) klL n
+      = if n = 0 then klL else kilL := by
+    cases n with
+    | zero => rfl
+    | succ n => simp [iterS]
+  refine hchurch.trans (hiter.trans ?_)
+  rw [hiterS]
+  cases n with
+  | zero => exact Relation.ReflTransGen.refl
+  | succ n => exact Relation.ReflTransGen.refl
+
+-- ============================================================
+-- Batch C: IsChurchNum (numeral-as-iteration-behaviour, closed
+--          under ADD/MUL composition), U64
+-- ============================================================
+
+/-- A term behaves as the Church numeral `n` iff applying it to closed
+    `f z` reduces to the `n`-fold iteration chain.  Intermediate
+    `MUL`/`ADD` results are `λf. …` closures — not literal `churchL`s —
+    so the invariant is stated by application behaviour. -/
+def IsChurchNum (n : Nat) (M : LTerm) : Prop :=
+  ∀ f z, closed 0 f = true → closed 0 z = true →
+    LRed (aps M [f, z]) (iterL f z n)
+
+theorem churchL_num (n : Nat) : IsChurchNum n (churchL n) :=
+  fun f z hf hz => church_eval n f z hf hz
+
+/-- `LRed`-transport: any reduct-convertible numeral keeps the count. -/
+theorem IsChurchNum_of_red {n : Nat} {M N : LTerm}
+    (h : LRed M N) (hN : IsChurchNum n N) : IsChurchNum n M :=
+  fun f z hf hz =>
+    (LRed_app_left (LRed_app_left h)).trans (hN f z hf hz)
+
+/-- `ADD·M·N` is the `m+n` numeral when `M`,`N` are `m`,`n`. -/
+theorem churchAdd_num (m n : Nat) (M N : LTerm)
+    (hM : IsChurchNum m M) (hN : IsChurchNum n N)
+    (hcM : closed 0 M = true) (hcN : closed 0 N = true) :
+    IsChurchNum (m + n) (aps churchAddL [M, N]) := by
+  intro f z hf hz
+  have hbeta : LRed (aps churchAddL [M, N, f, z])
+      (.app (.app M f) (.app (.app N f) z)) :=
+    LRed_of_hsteps (k := 4) (by
+      simp [churchAddL, aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_zero, subst_of_closed0 hcM, shift_of_closed0 hcM,
+            subst_of_closed0 hcN, shift_of_closed0 hcN,
+            subst_of_closed0 hf, shift_of_closed0 hf,
+            subst_of_closed0 hz, shift_of_closed0 hz])
+  have hnfz : LRed (.app (.app N f) z) (iterL f z n) := hN f z hf hz
+  have hX : closed 0 (iterL f z n) = true := closed_iterL f z hf hz n
+  refine hbeta.trans ((LRed_app_right hnfz).trans ?_)
+  refine (hM f (iterL f z n) hf hX).trans ?_
+  rw [iterL_add, Nat.add_comm n m]
+
+/-- `MUL·M·N` is the `m·n` numeral when `M`,`N` are `m`,`n`. -/
+theorem churchMul_num (m n : Nat) (M N : LTerm)
+    (hM : IsChurchNum m M) (hN : IsChurchNum n N)
+    (hcM : closed 0 M = true) (hcN : closed 0 N = true) :
+    IsChurchNum (m * n) (aps churchMulL [M, N]) := by
+  intro f z hf hz
+  have hbeta : LRed (aps churchMulL [M, N, f, z])
+      (.app (.app M (.app N f)) z) :=
+    LRed_of_hsteps (k := 3) (by
+      simp [churchMulL, aps, List.foldl, hsteps, hstep, subst, shift,
+            subst_of_closed0 hcM, shift_of_closed0 hcM,
+            subst_of_closed0 hcN, shift_of_closed0 hcN,
+            subst_of_closed0 hf, shift_of_closed0 hf])
+  have hnf : closed 0 (.app N f) = true := closed_app hcN hf
+  have hm := hM (.app N f) z hnf hz
+  have hstep : ∀ x, closed 0 x = true →
+      LRed (.app (.app N f) x) (iterL f x n) ∧
+      closed 0 (iterL f x n) = true :=
+    fun x hx => ⟨hN f x hf hx, closed_iterL f x hf hx n⟩
+  have hiter := iter_red (.app N f) (fun x => iterL f x n) hstep m z hz
+  rw [iterS_iterL m n f z] at hiter
+  exact hbeta.trans (hm.trans hiter)
+
+/-- `NIB2NUM·(nibLit i)` is the `i`-numeral. -/
+theorem nib2num_num (i : Fin 16) :
+    IsChurchNum i.val (aps nib2numL [nibLit i]) :=
+  IsChurchNum_of_red (nib2num_correct i) (churchL_num i.val)
+
+/-- `NIBPAR·(nibLit i)` is the `(i&1)`-numeral. -/
+theorem nibpar_num (i : Fin 16) :
+    IsChurchNum (i.val % 2) (aps nibparL [nibLit i]) :=
+  IsChurchNum_of_red (nibpar_correct i) (churchL_num (i.val % 2))
+
+-- U64 ----------------------------------------------------------------------
+
+/-- `_U64`'s four zero-byte tail cells (raw `conss` chain). -/
+def u64Tail : LTerm :=
+  aps conssL [b0cT, aps conssL [b0cT, aps conssL [b0cT,
+    aps conssL [b0cT, nilL]]]]
+
+theorem closed_u64Tail : closed 0 u64Tail = true := by decide
+
+/-- `_U64 = λb. APPEND b tail4` — bytes4 → 8 LE cells (zero-extend). -/
+def u64L : LTerm := .abs (aps appendL [.var 0, u64Tail])
+
+theorem closed_u64L : closed 0 u64L = true := by decide
+
+/-- elements of a `b0cT`-replicate are closed. -/
+theorem closed_rep_b0c {e : LTerm} {n : Nat}
+    (he : e ∈ List.replicate n b0cT) : closed 0 e = true := by
+  rw [List.mem_replicate] at he
+  exact he.2 ▸ closed_b0cT
+
+/-- The raw tail reduces to the scottList of four `b0cT` cells. -/
+theorem u64Tail_nf :
+    LRed u64Tail (scottList (List.replicate 4 b0cT)) := by
+  have h1 : LRed (aps conssL [b0cT, nilL])
+      (scottList (List.replicate 1 b0cT)) :=
+    conss_nf b0cT nilL closed_b0cT closed_nilL
+  have h2 : LRed (aps conssL [b0cT, aps conssL [b0cT, nilL]])
+      (scottList (List.replicate 2 b0cT)) :=
+    (LRed_app_right h1).trans
+      (conss_nf b0cT (scottList (List.replicate 1 b0cT)) closed_b0cT
+        (closed_scottList (fun _ he => closed_rep_b0c he)))
+  have h3 : LRed (aps conssL [b0cT,
+        aps conssL [b0cT, aps conssL [b0cT, nilL]]])
+      (scottList (List.replicate 3 b0cT)) :=
+    (LRed_app_right h2).trans
+      (conss_nf b0cT (scottList (List.replicate 2 b0cT)) closed_b0cT
+        (closed_scottList (fun _ he => closed_rep_b0c he)))
+  exact (LRed_app_right h3).trans
+    (conss_nf b0cT (scottList (List.replicate 3 b0cT)) closed_b0cT
+      (closed_scottList (fun _ he => closed_rep_b0c he)))
+
+/-- `U64·(b4Lit xs) →* scottList (bytes ++ [b0cT×4])`. -/
+theorem u64_eval (xs : List (Fin 16 × Fin 16)) :
+    LRed (.app u64L (b4Lit xs))
+      (scottList ((xs.map fun p => byteLit p.1 p.2)
+        ++ List.replicate 4 b0cT)) := by
+  -- β: u64L·B → appendL·B·tail4
+  have hopen : LRed (.app u64L (b4Lit xs))
+      (aps appendL [b4Lit xs, u64Tail]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [u64L, aps, List.foldl, hsteps, hstep, subst, shift,
+            subst_of_closed0 (closed_b4Lit xs),
+            shift_of_closed0 (closed_b4Lit xs),
+            subst_of_closed0 closed_u64Tail,
+            shift_of_closed0 closed_u64Tail,
+            subst_of_closed0 closed_appendL,
+            shift_of_closed0 closed_appendL])
+  have htail_is : IsList u64Tail (List.replicate 4 b0cT) := u64Tail_nf
+  have hb4_is : IsList (b4Lit xs)
+      (xs.map fun p => byteLit p.1 p.2) := b4Lit_nf xs
+  refine hopen.trans ((appendL_to_appendT _ _ (closed_b4Lit xs)
+    closed_u64Tail).trans ?_)
+  exact append_eval _ _ _ _ hb4_is htail_is
+    (fun e he => by
+      obtain ⟨p, _, rfl⟩ := List.mem_map.mp he
+      exact closed_byteLit _ _)
+    (fun e he => closed_rep_b0c he)
+    (closed_b4Lit xs) closed_u64Tail
+
+-- ============================================================
+-- Batch D: ALIGN512 / ALIGN4096 — B4ADD + peel + nibble mask
+-- ============================================================
+
+/-- `_b4_src 0x1FF` — the ALIGN512 addend (LE bytes). -/
+def b4_1FF : List (Fin 16 × Fin 16) := [(15, 15), (1, 0), (0, 0), (0, 0)]
+
+/-- `_b4_src 0xFFF` — the ALIGN4096 addend. -/
+def b4_FFF : List (Fin 16 × Fin 16) := [(15, 15), (15, 0), (0, 0), (0, 0)]
+
+/-- Emit body shared by both aligns, parameterized by the byte-1 cell:
+    `conss B0C (conss CELL1 (conss b2 (conss b3 nil)))` under
+    `λlo.λhi` (b1's nibble destructure).  Binders below λlo.λhi:
+    hi=0, lo=1, b3=3, b2=5. -/
+def alignEmit (cell1 : LTerm) : LTerm :=
+  aps conssL [b0cT, aps conssL [cell1,
+    aps conssL [.var 5, aps conssL [.var 3, nilL]]]]
+
+/-- `_ALIGN512`'s inner `λlo.λhi. conss B0C (conss (PAIR (NIBANDE lo) hi)
+    (conss b2 (conss b3 K)))`. -/
+def align512K : LTerm :=
+  .abs (.abs (alignEmit
+    (aps pairSrcL [.app nibandEL (.var 1), .var 0])))
+
+/-- `_ALIGN4096`'s inner `λlo.λhi. conss B0C (conss (PAIR sel0 hi)
+    (conss b2 (conss b3 K)))`. -/
+def align4096K : LTerm :=
+  .abs (.abs (alignEmit
+    (aps pairSrcL [nibLit 0, .var 0])))
+
+/-- 4-cell peel continuation `λb0.λt0. t0 K (λb1.λt1. t1 K (λb2.λt2.
+    t2 K (λb3.λt3. BODY)))` — `_peel` for names [b0..b3]. -/
+def peel4K (BODY : LTerm) : LTerm :=
+  .abs (.abs (aps (.var 0) [klL,
+    .abs (.abs (aps (.var 0) [klL,
+      .abs (.abs (aps (.var 0) [klL,
+        .abs (.abs BODY)]))]))]))
+
+/-- `_ALIGN512 = λv. (λw. w K (peel4 BODY)) (B4ADD v 0x1FF)` with
+    `BODY = b1·align512K`.  Under `λw λb0 λt0 λb1 λt1 λb2 λt2 λb3 λt3`:
+    b1 = var 5. -/
+def align512L : LTerm :=
+  .abs (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+    (aps b4addL [.var 0, b4Lit b4_1FF]))
+
+/-- `_ALIGN4096` — same skeleton, `0xFFF` addend, sel0 mask. -/
+def align4096L : LTerm :=
+  .abs (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align4096K)]))
+    (aps b4addL [.var 0, b4Lit b4_FFF]))
+
+theorem closed_align512L : closed 0 align512L = true := by decide
+theorem closed_align4096L : closed 0 align4096L = true := by decide
+
+-- empirical milestone check -------------------------------------------------
+
+
+/-- Generic `peel4K` execution on abstract cells (same discharge shape as
+    `b4inc_peel`): `scott4·K·peel4K(BODY)` → `BODY`-with-cells, where BODY is
+    `.app (var 5) K2` — i.e. `b1`'s emit-continuation application. -/
+theorem align512_peel (B0 B1 B2 B3 : LTerm)
+    (h0 : closed 0 B0 = true) (h1 : closed 0 B1 = true)
+    (h2 : closed 0 B2 = true) (h3 : closed 0 B3 = true)
+    (hT3 : closed 0 (cellLit B3 nilL) = true)
+    (hT2 : closed 0 (cellLit B2 (cellLit B3 nilL)) = true)
+    (hT1 : closed 0 (cellLit B1 (cellLit B2 (cellLit B3 nilL))) = true) :
+    LRed (aps (scottList [B0, B1, B2, B3])
+             [klL, peel4K (.app (.var 5) align512K)])
+      (.app B1 (.abs (.abs
+        (aps conssL [b0cT,
+          aps conssL [aps pairSrcL [.app nibandEL (.var 1), .var 0],
+            aps conssL [B2, aps conssL [B3, nilL]]]])))) :=
+  LRed_of_hsteps (k := 16) (by
+    simp [peel4K, align512K, alignEmit, scottList, cellLit, aps,
+          List.foldl, List.foldr, hsteps, hstep, subst, shift,
+          shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          closed_mono, closed_nilL, closed_klL, closed_conssL,
+          closed_pairSrcL, closed_nibandEL, closed_b0cT,
+          h0, h1, h2, h3, hT1, hT2, hT3])
+
+/-- Same peel for the 4096 continuation (cell1 = `PAIR sel0 hi`). -/
+theorem align4096_peel (B0 B1 B2 B3 : LTerm)
+    (h0 : closed 0 B0 = true) (h1 : closed 0 B1 = true)
+    (h2 : closed 0 B2 = true) (h3 : closed 0 B3 = true)
+    (hT3 : closed 0 (cellLit B3 nilL) = true)
+    (hT2 : closed 0 (cellLit B2 (cellLit B3 nilL)) = true)
+    (hT1 : closed 0 (cellLit B1 (cellLit B2 (cellLit B3 nilL))) = true) :
+    LRed (aps (scottList [B0, B1, B2, B3])
+             [klL, peel4K (.app (.var 5) align4096K)])
+      (.app B1 (.abs (.abs
+        (aps conssL [b0cT,
+          aps conssL [aps pairSrcL [nibLit 0, .var 0],
+            aps conssL [B2, aps conssL [B3, nilL]]]])))) :=
+  LRed_of_hsteps (k := 16) (by
+    simp [peel4K, align4096K, alignEmit, scottList, cellLit, aps,
+          List.foldl, List.foldr, hsteps, hstep, subst, shift,
+          shift_zero, subst_shift_succ,
+          subst_of_closed0, shift_of_closed0, closed, closed_app,
+          closed_mono, closed_nilL, closed_klL, closed_conssL,
+          closed_pairSrcL, closed_nibandEL, closed_b0cT,
+          closed_nibLit,
+          h0, h1, h2, h3, hT1, hT2, hT3])
+
+/-- `byteLit lo hi · (λlo.λhi.T) →* T[lo,hi]` — the emit-body entry. -/
+theorem byteLit_apply2 (lo hi : Fin 16) (T : LTerm) :
+    LRed (.app (byteLit lo hi) (.abs (.abs T)))
+         (subst (nibLit hi) 0 (subst (nibLit lo) 1 T)) := by
+  apply LRed_of_hsteps (k := 3)
+  simp [byteLit, pairLit, hsteps, hstep, subst, shift, shift_zero,
+        subst_shift_succ, subst_of_closed0, shift_of_closed0,
+        closed_nibLit]
+
+/-- peel + emit: `scott4·K·peel4K(b1·align512K) →* scottList` of the
+    masked cells — byte0 := 0, byte1.lo &:= 0xE, bytes 2–3 passthrough. -/
+theorem align512_peel_emit (w0 w1 w2 w3 : Fin 16 × Fin 16) :
+    LRed (aps (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                          byteLit w2.1 w2.2, byteLit w3.1 w3.2])
+             [klL, peel4K (.app (.var 5) align512K)])
+      (scottList [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+                  byteLit w2.1 w2.2, byteLit w3.1 w3.2]) := by
+  have hp := align512_peel (byteLit w0.1 w0.2) (byteLit w1.1 w1.2)
+    (byteLit w2.1 w2.2) (byteLit w3.1 w3.2)
+    (closed_byteLit _ _) (closed_byteLit _ _) (closed_byteLit _ _)
+    (closed_byteLit _ _)
+    (closed_cellLit (closed_byteLit _ _) closed_nilL)
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _) closed_nilL))
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _) closed_nilL)))
+  have happ := byteLit_apply2 w1.1 w1.2
+    (aps conssL [b0cT,
+      aps conssL [aps pairSrcL [.app nibandEL (.var 1), .var 0],
+        aps conssL [byteLit w2.1 w2.2,
+          aps conssL [byteLit w3.1 w3.2, nilL]]]])
+  have hsub : (subst (nibLit w1.2) 0 (subst (nibLit w1.1) 1
+      (aps conssL [b0cT,
+        aps conssL [aps pairSrcL [.app nibandEL (.var 1), .var 0],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]]))) =
+      aps conssL [b0cT,
+        aps conssL [aps pairSrcL [.app nibandEL (nibLit w1.1), nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]] := by
+    simp [aps, List.foldl, subst, shift, subst_of_closed0, shift_of_closed0,
+          closed_nibLit, closed_byteLit, closed_nibandEL, closed_b0cT,
+          closed_conssL, closed_pairSrcL, closed_nilL]
+  have hbody : LRed
+      (.app (byteLit w1.1 w1.2)
+        (.abs (.abs (aps conssL [b0cT,
+          aps conssL [aps pairSrcL [.app nibandEL (.var 1), .var 0],
+            aps conssL [byteLit w2.1 w2.2,
+              aps conssL [byteLit w3.1 w3.2, nilL]]]]))))
+      (aps conssL [b0cT,
+        aps conssL [aps pairSrcL [.app nibandEL (nibLit w1.1), nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]]) :=
+    hsub ▸ happ
+  -- cell1: `PAIR (NIBANDE lo) hi →* byteLit (lo&E) hi`
+  have hpr : LRed (aps pairSrcL [.app nibandEL (nibLit w1.1), nibLit w1.2])
+      (byteLit (nibMaskE w1.1) w1.2) := by
+    have h1 : LRed
+        (.app (.app pairSrcL (.app nibandEL (nibLit w1.1))) (nibLit w1.2))
+        (.app (.app pairSrcL (nibLit (nibMaskE w1.1))) (nibLit w1.2)) :=
+      LRed_app_left (LRed_app_right (nibandE_correct w1.1))
+    exact h1.trans (pairSrc_nf _ _ (closed_nibLit _) (closed_nibLit _))
+  -- emit chain, inside-out
+  have hZ : LRed (aps conssL [byteLit w3.1 w3.2, nilL])
+      (cellLit (byteLit w3.1 w3.2) nilL) :=
+    conss_nf _ _ (closed_byteLit _ _) closed_nilL
+  have hY : LRed (aps conssL [byteLit w2.1 w2.2,
+        aps conssL [byteLit w3.1 w3.2, nilL]])
+      (cellLit (byteLit w2.1 w2.2) (cellLit (byteLit w3.1 w3.2) nilL)) :=
+    (LRed_app_right hZ).trans
+      (conss_nf _ _ (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _) closed_nilL))
+  have hc1 : LRed
+      (aps conssL [aps pairSrcL [.app nibandEL (nibLit w1.1), nibLit w1.2],
+        aps conssL [byteLit w2.1 w2.2,
+          aps conssL [byteLit w3.1 w3.2, nilL]]])
+      (cellLit (byteLit (nibMaskE w1.1) w1.2)
+        (cellLit (byteLit w2.1 w2.2) (cellLit (byteLit w3.1 w3.2) nilL))) := by
+    have h1 : LRed
+        (aps conssL [aps pairSrcL [.app nibandEL (nibLit w1.1), nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]])
+        (aps conssL [byteLit (nibMaskE w1.1) w1.2,
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]) :=
+      LRed_app_left (LRed_app_right hpr)
+    have h2 : LRed
+        (aps conssL [byteLit (nibMaskE w1.1) w1.2,
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]])
+        (aps conssL [byteLit (nibMaskE w1.1) w1.2,
+          cellLit (byteLit w2.1 w2.2)
+            (cellLit (byteLit w3.1 w3.2) nilL)]) :=
+      LRed_app_right hY
+    exact (h1.trans h2).trans
+      (conss_nf _ _ (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _)
+          (closed_cellLit (closed_byteLit _ _) closed_nilL)))
+  -- byte0 cell: `b0cT →* byteLit 0 0`, then collapse the outer conss
+  have hb0 : LRed (.app conssL b0cT) (.app conssL (byteLit 0 0)) :=
+    LRed_app_right (pairSrc_nf _ _ (closed_nibLit _) (closed_nibLit _))
+  have hfin : LRed
+      (aps conssL [b0cT,
+        aps conssL [aps pairSrcL [.app nibandEL (nibLit w1.1), nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]])
+      (scottList [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+                  byteLit w2.1 w2.2, byteLit w3.1 w3.2]) :=
+    ((LRed_app_left hb0).trans (LRed_app_right hc1)).trans
+      (conss_nf _ _ (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _)
+          (closed_cellLit (closed_byteLit _ _)
+            (closed_cellLit (closed_byteLit _ _) closed_nilL))))
+  exact (hp.trans hbody).trans hfin
+
+/-- `_ALIGN4096`'s peel+emit — same skeleton, cell1 = `PAIR sel0 hi`. -/
+theorem align4096_peel_emit (w0 w1 w2 w3 : Fin 16 × Fin 16) :
+    LRed (aps (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                          byteLit w2.1 w2.2, byteLit w3.1 w3.2])
+             [klL, peel4K (.app (.var 5) align4096K)])
+      (scottList [byteLit 0 0, byteLit 0 w1.2,
+                  byteLit w2.1 w2.2, byteLit w3.1 w3.2]) := by
+  have hp := align4096_peel (byteLit w0.1 w0.2) (byteLit w1.1 w1.2)
+    (byteLit w2.1 w2.2) (byteLit w3.1 w3.2)
+    (closed_byteLit _ _) (closed_byteLit _ _) (closed_byteLit _ _)
+    (closed_byteLit _ _)
+    (closed_cellLit (closed_byteLit _ _) closed_nilL)
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _) closed_nilL))
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _) closed_nilL)))
+  have happ := byteLit_apply2 w1.1 w1.2
+    (aps conssL [b0cT,
+      aps conssL [aps pairSrcL [nibLit 0, .var 0],
+        aps conssL [byteLit w2.1 w2.2,
+          aps conssL [byteLit w3.1 w3.2, nilL]]]])
+  have hsub : (subst (nibLit w1.2) 0 (subst (nibLit w1.1) 1
+      (aps conssL [b0cT,
+        aps conssL [aps pairSrcL [nibLit 0, .var 0],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]]))) =
+      aps conssL [b0cT,
+        aps conssL [aps pairSrcL [nibLit 0, nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]] := by
+    simp [aps, List.foldl, subst, shift, subst_of_closed0, shift_of_closed0,
+          closed_nibLit, closed_byteLit, closed_b0cT,
+          closed_conssL, closed_pairSrcL, closed_nilL]
+  have hbody : LRed
+      (.app (byteLit w1.1 w1.2)
+        (.abs (.abs (aps conssL [b0cT,
+          aps conssL [aps pairSrcL [nibLit 0, .var 0],
+            aps conssL [byteLit w2.1 w2.2,
+              aps conssL [byteLit w3.1 w3.2, nilL]]]]))))
+      (aps conssL [b0cT,
+        aps conssL [aps pairSrcL [nibLit 0, nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]]) :=
+    hsub ▸ happ
+  have hpr : LRed (aps pairSrcL [nibLit 0, nibLit w1.2])
+      (byteLit 0 w1.2) :=
+    pairSrc_nf _ _ (closed_nibLit _) (closed_nibLit _)
+  have hZ : LRed (aps conssL [byteLit w3.1 w3.2, nilL])
+      (cellLit (byteLit w3.1 w3.2) nilL) :=
+    conss_nf _ _ (closed_byteLit _ _) closed_nilL
+  have hY : LRed (aps conssL [byteLit w2.1 w2.2,
+        aps conssL [byteLit w3.1 w3.2, nilL]])
+      (cellLit (byteLit w2.1 w2.2) (cellLit (byteLit w3.1 w3.2) nilL)) :=
+    (LRed_app_right hZ).trans
+      (conss_nf _ _ (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _) closed_nilL))
+  have hc1 : LRed
+      (aps conssL [aps pairSrcL [nibLit 0, nibLit w1.2],
+        aps conssL [byteLit w2.1 w2.2,
+          aps conssL [byteLit w3.1 w3.2, nilL]]])
+      (cellLit (byteLit 0 w1.2)
+        (cellLit (byteLit w2.1 w2.2) (cellLit (byteLit w3.1 w3.2) nilL))) := by
+    have h1 : LRed
+        (aps conssL [aps pairSrcL [nibLit 0, nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]])
+        (aps conssL [byteLit 0 w1.2,
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]) :=
+      LRed_app_left (LRed_app_right hpr)
+    have h2 : LRed
+        (aps conssL [byteLit 0 w1.2,
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]])
+        (aps conssL [byteLit 0 w1.2,
+          cellLit (byteLit w2.1 w2.2)
+            (cellLit (byteLit w3.1 w3.2) nilL)]) :=
+      LRed_app_right hY
+    exact (h1.trans h2).trans
+      (conss_nf _ _ (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _)
+          (closed_cellLit (closed_byteLit _ _) closed_nilL)))
+  have hb0 : LRed (.app conssL b0cT) (.app conssL (byteLit 0 0)) :=
+    LRed_app_right (pairSrc_nf _ _ (closed_nibLit _) (closed_nibLit _))
+  have hfin : LRed
+      (aps conssL [b0cT,
+        aps conssL [aps pairSrcL [nibLit 0, nibLit w1.2],
+          aps conssL [byteLit w2.1 w2.2,
+            aps conssL [byteLit w3.1 w3.2, nilL]]]])
+      (scottList [byteLit 0 0, byteLit 0 w1.2,
+                  byteLit w2.1 w2.2, byteLit w3.1 w3.2]) :=
+    ((LRed_app_left hb0).trans (LRed_app_right hc1)).trans
+      (conss_nf _ _ (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _)
+          (closed_cellLit (closed_byteLit _ _)
+            (closed_cellLit (closed_byteLit _ _) closed_nilL))))
+  exact (hp.trans hbody).trans hfin
+
+/-- `resList` preserves length when the operand lengths agree. -/
+theorem resList_length (as bs : List (Fin 16 × Fin 16)) (cn : Fin 16)
+    (h : as.length = bs.length) :
+    (resList as bs cn).length = as.length := by
+  induction as generalizing bs cn with
+  | nil => rfl
+  | cons a as ih =>
+    cases bs with
+    | nil => simp at h
+    | cons b bs =>
+      show ((byteStepN a b cn).1 ::
+              resList as bs (byteStepN a b cn).2).length
+        = (a :: as).length
+      simp only [List.length_cons]
+      exact congrArg Nat.succ (ih bs _ (Nat.succ.inj h))
+
+theorem exists_eq_of_length4 {α : Type} {l : List α} (h : l.length = 4) :
+    ∃ a b c d, l = [a, b, c, d] := by
+  rcases l with _ | ⟨a, _ | ⟨b, _ | ⟨c, _ | ⟨d, tl⟩⟩⟩⟩
+  · simp at h
+  · simp at h
+  · simp at h
+  · simp at h
+  · cases tl with
+    | nil => exact ⟨a, b, c, d, rfl⟩
+    | cons e tl => simp [List.length_cons] at h
+
+/-- **`align512_eval`** — `ALIGN512·(b4 xs) →* scottList` of the aligned
+    bytes: the `xs + 0x1FF` sum with byte0 := 0 and byte1.lo `& 0xE`. -/
+theorem align512_eval (xs : List (Fin 16 × Fin 16))
+    (hxs : xs.length = 4) :
+    ∃ w0 w1 w2 w3,
+      resList xs b4_1FF 0 = [w0, w1, w2, w3] ∧
+      LRed (.app align512L (b4Lit xs))
+        (scottList [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]) := by
+  have hlen : (resList xs b4_1FF 0).length = 4 := by
+    have h := resList_length xs b4_1FF 0 (by simp [b4_1FF]; exact hxs)
+    rw [h, hxs]
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hlen
+  refine ⟨w0, w1, w2, w3, hws, ?_⟩
+  have hadd := b4add_eval xs b4_1FF (by simp [b4_1FF]; exact hxs)
+  rw [hws] at hadd
+  simp only [List.map_cons, List.map_nil] at hadd
+  have hopen : LRed (.app align512L (b4Lit xs))
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (aps b4addL [b4Lit xs, b4Lit b4_1FF])) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [align512L, hsteps, hstep, subst, shift, aps, List.foldl,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_b4Lit, closed_b4addL, closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT,
+            peel4K, align512K, alignEmit])
+  have harg : LRed
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (aps b4addL [b4Lit xs, b4Lit b4_1FF]))
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2])) :=
+    LRed_app_right hadd
+  have hbeta : LRed
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]))
+      (aps (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                        byteLit w2.1 w2.2, byteLit w3.1 w3.2])
+           [klL, peel4K (.app (.var 5) align512K)]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [hsteps, hstep, subst, shift, aps, List.foldl,
+            peel4K, align512K, alignEmit,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_scottList, closed_byteLit, closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT])
+  exact (hopen.trans harg).trans
+    (hbeta.trans (align512_peel_emit w0 w1 w2 w3))
+
+/-- **`align4096_eval`** — same skeleton; `xs + 0xFFF`, byte0 := 0,
+    byte1.lo := 0. -/
+theorem align4096_eval (xs : List (Fin 16 × Fin 16))
+    (hxs : xs.length = 4) :
+    ∃ w0 w1 w2 w3,
+      resList xs b4_FFF 0 = [w0, w1, w2, w3] ∧
+      LRed (.app align4096L (b4Lit xs))
+        (scottList [byteLit 0 0, byteLit 0 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]) := by
+  have hlen : (resList xs b4_FFF 0).length = 4 := by
+    have h := resList_length xs b4_FFF 0 (by simp [b4_FFF]; exact hxs)
+    rw [h, hxs]
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hlen
+  refine ⟨w0, w1, w2, w3, hws, ?_⟩
+  have hadd := b4add_eval xs b4_FFF (by simp [b4_FFF]; exact hxs)
+  rw [hws] at hadd
+  simp only [List.map_cons, List.map_nil] at hadd
+  have hopen : LRed (.app align4096L (b4Lit xs))
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align4096K)]))
+        (aps b4addL [b4Lit xs, b4Lit b4_FFF])) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [align4096L, hsteps, hstep, subst, shift, aps, List.foldl,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_b4Lit, closed_b4addL, closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT,
+            closed_nibLit, peel4K, align4096K, alignEmit])
+  have harg : LRed
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align4096K)]))
+        (aps b4addL [b4Lit xs, b4Lit b4_FFF]))
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align4096K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2])) :=
+    LRed_app_right hadd
+  have hbeta : LRed
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align4096K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]))
+      (aps (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                        byteLit w2.1 w2.2, byteLit w3.1 w3.2])
+           [klL, peel4K (.app (.var 5) align4096K)]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [hsteps, hstep, subst, shift, aps, List.foldl,
+            peel4K, align4096K, alignEmit,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_scottList, closed_byteLit, closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT,
+            closed_nibLit])
+  exact (hopen.trans harg).trans
+    (hbeta.trans (align4096_peel_emit w0 w1 w2 w3))
+
+
+
 -- axiom audits ---------------------------------------------------------------
 #print axioms emitCells_nf
 #print axioms pairLit_apply
@@ -3228,6 +4141,20 @@ def peelLo2 (r : LTerm) : LTerm :=
 #print axioms lenStep_cell
 #print axioms foldl_incBytes_val
 #print axioms lenb4_eval
+#print axioms nib2num_correct
+#print axioms nibpar_correct
+#print axioms nibandE_correct
+#print axioms eqnib_eval
+#print axioms eqb_eval
+#print axioms churchAdd_eval
+#print axioms churchMul_eval
+#print axioms tail_scott
+#print axioms isZero_eval
+#print axioms u64_eval
+#print axioms align512_peel
+#print axioms align512_peel_emit
+#print axioms align512_eval
+#print axioms align4096_eval
 
 
 end ISAR
