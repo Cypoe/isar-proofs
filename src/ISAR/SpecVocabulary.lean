@@ -7771,4 +7771,365 @@ theorem zChain_eval (n : Nat) (zs : List LTerm)
 #print axioms idHrv_eval
 #print axioms zChain_eval
 
+-- ============================================================
+-- Batch K layer 2: ILT/IDT/NAMS/DRVA/BODY section normalization.
+-- ============================================================
+
+-- Forall₂ plumbing ----------------------------------------------------
+
+theorem forall₂_append {α β : Type} {R : α → β → Prop}
+    {xs xs' : List α} {ys ys' : List β}
+    (h : List.Forall₂ R xs ys) (h' : List.Forall₂ R xs' ys') :
+    List.Forall₂ R (xs ++ xs') (ys ++ ys') := by
+  induction h with
+  | nil => simpa using h'
+  | cons hr _ ih =>
+    simp only [List.cons_append]
+    exact List.Forall₂.cons hr ih
+
+theorem forall₂_reverse {α β : Type} {R : α → β → Prop}
+    {xs : List α} {ys : List β}
+    (h : List.Forall₂ R xs ys) :
+    List.Forall₂ R xs.reverse ys.reverse := by
+  induction h with
+  | nil => exact List.Forall₂.nil
+  | cons hr _ ih =>
+    rw [List.reverse_cons, List.reverse_cons]
+    exact forall₂_append ih (List.Forall₂.cons hr List.Forall₂.nil)
+
+-- per-element U64 thunk ------------------------------------------------
+
+/-- `U64·e` on a thunk `e → scott(bm xs)` normalizes to the
+    `xs ++ 4×00` cell list. -/
+theorem u64_thunk_eval (e : LTerm) (xs : List (Fin 16 × Fin 16))
+    (he : LRed e (scottList (xs.map (fun p => byteLit p.1 p.2)))) :
+    LRed (.app u64L e)
+      (scottList (xs.map (fun p => byteLit p.1 p.2)
+        ++ List.replicate 4 b0cT)) :=
+  (LRed_app_right he).trans (u64_eval_scott xs)
+
+/-- Forall₂ lift across `map (u64L ·_)`: per-element thunk evals. -/
+theorem forall₂_u64_thunks (rvs : List LTerm)
+    (xv : List (List (Fin 16 × Fin 16)))
+    (h : List.Forall₂ (fun e xs =>
+      LRed e (scottList (xs.map (fun p => byteLit p.1 p.2))))
+      rvs xv) :
+    List.Forall₂ (fun t bs => LRed t (scottList bs))
+      (rvs.map (fun e => .app u64L e))
+      (xv.map (fun xs => xs.map (fun p => byteLit p.1 p.2)
+        ++ List.replicate 4 b0cT)) := by
+  induction h with
+  | nil => exact List.Forall₂.nil
+  | cons hr _ ih =>
+    exact List.Forall₂.cons (u64_thunk_eval _ _ hr) ih
+
+-- ILT/IAT --------------------------------------------------------------
+
+/-- `ilt` cells: reversed per-import `u64` lists, `8×00` terminator. -/
+def iltCells (xv : List (List (Fin 16 × Fin 16))) : List LTerm :=
+  ((xv.map (fun xs => bm xs ++ List.replicate 4 b0cT)).reverse
+    ++ [bm bZero8]).flatten
+
+theorem closed_iltCells (xv : List (List (Fin 16 × Fin 16))) :
+    ∀ e ∈ iltCells xv, closed 0 e = true := by
+  intro e he
+  simp only [iltCells] at he
+  obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+  rcases List.mem_append.mp hw with hw | hw
+  · rw [List.mem_reverse] at hw
+    obtain ⟨xs, _, rfl⟩ := List.mem_map.mp hw
+    rcases List.mem_append.mp hew with h2 | h2
+    · obtain ⟨p, _, rfl⟩ := List.mem_map.mp h2
+      exact closed_byteLit _ _
+    · obtain ⟨_, rfl⟩ := List.mem_replicate.mp h2
+      exact closed_b0cT
+  · simp only [List.mem_singleton] at hw
+    rw [hw] at hew
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp hew
+    exact closed_byteLit _ _
+
+/-- `JOIN (REV (conss (bytes 8×00) (MAP U64 rv)))`. -/
+theorem idIlt_eval (rv : LTerm) (rvs : List LTerm)
+    (xv : List (List (Fin 16 × Fin 16)))
+    (hrv : LRed rv (scottList rvs))
+    (hper : List.Forall₂ (fun e xs => LRed e (scottList (bm xs)))
+      rvs xv)
+    (hcl : ∀ e ∈ rvs, closed 0 e = true)
+    (hrvc : closed 0 rv = true) :
+    LRed (idIlt rv) (scottList (iltCells xv)) := by
+  simp only [idIlt]
+  have hmap := map_eval u64L rv rvs closed_u64L hrvc hcl hrv
+  have hclm : ∀ e ∈ rvs.map (fun e => .app u64L e),
+      closed 0 e = true := fun e he => by
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp he
+    exact closed_app closed_u64L (hcl x hx)
+  have hcons : IsList
+      (.app (.app conssL (bytesChunk bZero8))
+        (.app (.app mapL u64L) rv))
+      (bytesChunk bZero8 :: rvs.map (fun e => .app u64L e)) :=
+    (LRed_app_right hmap).trans
+      (conss_nf _ _ (closed_bytesChunk bZero8)
+        (closed_scottList hclm))
+  have hconssT : closed 0
+      (.app (.app conssL (bytesChunk bZero8))
+        (.app (.app mapL u64L) rv)) = true :=
+    closed_app (closed_app closed_conssL (closed_bytesChunk bZero8))
+      (closed_app (closed_app closed_mapL closed_u64L) hrvc)
+  have hrev := revL_eval _ _ hconssT (fun e he => by
+      simp only [List.mem_cons] at he
+      rcases he with rfl | he
+      · exact closed_bytesChunk bZero8
+      · exact hclm e he)
+    hcons
+  rw [List.reverse_cons] at hrev
+  have hF := forall₂_append (forall₂_reverse (forall₂_u64_thunks
+      rvs xv hper))
+    (List.Forall₂.cons (bytesChunk_nf bZero8) List.Forall₂.nil)
+  have htcl : ∀ t ∈ (rvs.map (fun e => .app u64L e)).reverse
+      ++ [bytesChunk bZero8], closed 0 t = true := by
+    intro t ht
+    rcases List.mem_append.mp ht with h | h
+    · rw [List.mem_reverse] at h
+      exact hclm t h
+    · simp only [List.mem_singleton] at h
+      rw [h]; exact closed_bytesChunk bZero8
+  show LRed (.app joinL (.app revL
+      (.app (.app conssL (bytesChunk bZero8))
+        (.app (.app mapL u64L) rv))))
+      (scottList (iltCells xv))
+  exact (LRed_app_right hrev).trans
+    (join_thunks_eval _ _ hF (closed_iltCells xv) htcl)
+
+-- NAMS -----------------------------------------------------------------
+
+/-- `JOIN (REV rc)` — records reversed into the names area. -/
+theorem idNams_eval (rc : LTerm) (rcs : List LTerm)
+    (rbs : List (List LTerm))
+    (hrc : LRed rc (scottList rcs))
+    (hper : List.Forall₂ (fun e bs => LRed e (scottList bs)) rcs rbs)
+    (hclf : ∀ e ∈ rbs.flatten, closed 0 e = true)
+    (hclr : ∀ e ∈ rcs, closed 0 e = true)
+    (hrcc : closed 0 rc = true) :
+    LRed (idNams rc) (scottList rbs.reverse.flatten) := by
+  simp only [idNams]
+  have hrev := revL_eval rc rcs hrcc hclr hrc
+  have hF : List.Forall₂ (fun t bs => LRed t (scottList bs))
+      rcs.reverse rbs.reverse := forall₂_reverse hper
+  have hrevcl : ∀ e ∈ rcs.reverse, closed 0 e = true :=
+    fun e he => hclr e (List.mem_reverse.mp he)
+  have hbcl : ∀ e ∈ rbs.reverse.flatten, closed 0 e = true :=
+    fun e he => by
+      obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+      exact hclf e (List.mem_flatten.mpr
+        ⟨w, List.mem_reverse.mp hw, hew⟩)
+  exact (LRed_app_right hrev).trans
+    (join_thunks_eval _ _ hF hbcl hrevcl)
+
+-- DRVA -----------------------------------------------------------------
+
+/-- `drva = B4ADD <B 0x2000>·o` — same term as `idHrv`. -/
+theorem idDrva_eval (o : LTerm) (bs : List (Fin 16 × Fin 16))
+    (ho : LRed o (scottList (bs.map (fun p => byteLit p.1 p.2))))
+    (hlen : b2000.length = bs.length) :
+    LRed (idDrva o)
+      (scottList ((resList b2000 bs 0).map
+        (fun p => byteLit p.1 p.2))) :=
+  idHrv_eval o bs ho hlen
+
+theorem closed_idDrva {o : LTerm} (h : closed 0 o = true) :
+    closed 0 (idDrva o) = true :=
+  closed_app (closed_app closed_b4addL (closed_bytesChunk b2000)) h
+
+theorem closed_idIlt {rv : LTerm} (h : closed 0 rv = true) :
+    closed 0 (idIlt rv) = true := by
+  show closed 0 (.app joinL (.app revL
+    (.app (.app conssL (bytesChunk bZero8))
+      (.app (.app mapL u64L) rv)))) = true
+  exact closed_app closed_joinL (closed_app closed_revL
+    (closed_app (closed_app closed_conssL (closed_bytesChunk bZero8))
+      (closed_app (closed_app closed_mapL closed_u64L) h)))
+
+theorem closed_idNams {rc : LTerm} (h : closed 0 rc = true) :
+    closed 0 (idNams rc) = true :=
+  closed_app closed_joinL (closed_app closed_revL h)
+
+-- IDT ------------------------------------------------------------------
+
+/-- `idt` cells: `[0x2028, 0, 0, drva, iat4, 20×00]` flattened. -/
+def idtCells (os iat4 : List (Fin 16 × Fin 16)) : List LTerm :=
+  [bm b2028, bm bZero4, bm bZero4, bm (resList b2000 os 0),
+   bm iat4, List.replicate 20 b0cT].flatten
+
+theorem closed_idtCells (os iat4 : List (Fin 16 × Fin 16)) :
+    ∀ e ∈ idtCells os iat4, closed 0 e = true := by
+  intro e he
+  simp only [idtCells] at he
+  obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hw
+  rcases hw with rfl | rfl | rfl | rfl | rfl | rfl
+  · obtain ⟨p, _, rfl⟩ := List.mem_map.mp hew
+    exact closed_byteLit _ _
+  · obtain ⟨p, _, rfl⟩ := List.mem_map.mp hew
+    exact closed_byteLit _ _
+  · obtain ⟨p, _, rfl⟩ := List.mem_map.mp hew
+    exact closed_byteLit _ _
+  · obtain ⟨p, _, rfl⟩ := List.mem_map.mp hew
+    exact closed_byteLit _ _
+  · obtain ⟨p, _, rfl⟩ := List.mem_map.mp hew
+    exact closed_byteLit _ _
+  · obtain ⟨_, rfl⟩ := List.mem_replicate.mp hew
+    exact closed_b0cT
+
+theorem closed_idIdt {o : LTerm} (h : closed 0 o = true)
+    (iat4 : List (Fin 16 × Fin 16)) :
+    closed 0 (idIdt o iat4) = true := by
+  show closed 0 (.app joinL (scottList
+    [bytesChunk b2028, bytesChunk bZero4, bytesChunk bZero4,
+     idDrva o, bytesChunk iat4,
+     .app zerofillL (churchL 20)])) = true
+  apply closed_app closed_joinL
+  apply closed_scottList
+  intro e he
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at he
+  rcases he with rfl | rfl | rfl | rfl | rfl | rfl
+  · exact closed_bytesChunk b2028
+  · exact closed_bytesChunk bZero4
+  · exact closed_bytesChunk bZero4
+  · exact closed_idDrva h
+  · exact closed_bytesChunk iat4
+  · exact closed_app closed_zerofillL (closed_churchL 20)
+
+/-- `JOIN [b4 0x2028, b4 0, b4 0, drva, iat4, ZEROFILL 20]`. -/
+theorem idIdt_eval (o : LTerm) (os iat4 : List (Fin 16 × Fin 16))
+    (ho : LRed o (scottList (os.map (fun p => byteLit p.1 p.2))))
+    (hlen : b2000.length = os.length)
+    (hoc : closed 0 o = true) :
+    LRed (idIdt o iat4) (scottList (idtCells os iat4)) := by
+  simp only [idIdt]
+  have hF : List.Forall₂ (fun t bs => LRed t (scottList bs))
+      [bytesChunk b2028, bytesChunk bZero4, bytesChunk bZero4,
+       idDrva o, bytesChunk iat4, .app zerofillL (churchL 20)]
+      [bm b2028, bm bZero4, bm bZero4, bm (resList b2000 os 0),
+       bm iat4, List.replicate 20 b0cT] :=
+    List.Forall₂.cons (bytesChunk_nf b2028)
+      (List.Forall₂.cons (bytesChunk_nf bZero4)
+        (List.Forall₂.cons (bytesChunk_nf bZero4)
+          (List.Forall₂.cons (idDrva_eval o os ho hlen)
+            (List.Forall₂.cons (bytesChunk_nf iat4)
+              (List.Forall₂.cons
+                (zerofill_num 20 (churchL 20) (churchL_num 20)
+                  (closed_churchL 20))
+                List.Forall₂.nil)))))
+  have htcl : ∀ t ∈ [bytesChunk b2028, bytesChunk bZero4,
+      bytesChunk bZero4, idDrva o, bytesChunk iat4,
+      .app zerofillL (churchL 20)], closed 0 t = true := by
+    intro t ht
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ht
+    rcases ht with rfl | rfl | rfl | rfl | rfl | rfl
+    · exact closed_bytesChunk b2028
+    · exact closed_bytesChunk bZero4
+    · exact closed_bytesChunk bZero4
+    · exact closed_idDrva hoc
+    · exact closed_bytesChunk iat4
+    · exact closed_app closed_zerofillL (closed_churchL 20)
+  show LRed (.app joinL (scottList
+      [bytesChunk b2028, bytesChunk bZero4, bytesChunk bZero4,
+       idDrva o, bytesChunk iat4, .app zerofillL (churchL 20)]))
+      (scottList (idtCells os iat4))
+  have h := join_thunks_eval _ _ hF (closed_idtCells os iat4) htcl
+  -- join's RHS is `scottList (bss.flatten)` = `scottList (idtCells …)`
+  exact h
+
+-- BODY -----------------------------------------------------------------
+
+theorem closed_idBody {o rv rc : LTerm}
+    (ho : closed 0 o = true) (hrv : closed 0 rv = true)
+    (hrc : closed 0 rc = true) (iat4 : List (Fin 16 × Fin 16)) :
+    closed 0 (idBody o rv rc iat4) = true := by
+  show closed 0 (.app joinL (scottList
+    [idIdt o iat4, idIlt rv, idIlt rv, idNams rc,
+     bytesChunk bKernel])) = true
+  apply closed_app closed_joinL
+  apply closed_scottList
+  intro e he
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at he
+  rcases he with rfl | rfl | rfl | rfl | rfl
+  · exact closed_idIdt ho iat4
+  · exact closed_idIlt hrv
+  · exact closed_idIlt hrv
+  · exact closed_idNams hrc
+  · exact closed_bytesChunk bKernel
+
+/-- `JOIN [idt, ilt, ilt, nams, kernel32.dll\x00]` — the .idata body. -/
+theorem idBody_eval (o rv rc : LTerm)
+    (os iat4 : List (Fin 16 × Fin 16))
+    (xv : List (List (Fin 16 × Fin 16)))
+    (rvs rcs : List LTerm) (rbs : List (List LTerm))
+    (ho : LRed o (scottList (os.map (fun p => byteLit p.1 p.2))))
+    (hlen : b2000.length = os.length)
+    (hrv : LRed rv (scottList rvs))
+    (hper : List.Forall₂ (fun e xs => LRed e (scottList (bm xs)))
+      rvs xv)
+    (hclv : ∀ e ∈ rvs, closed 0 e = true)
+    (hrc : LRed rc (scottList rcs))
+    (hper2 : List.Forall₂ (fun e bs => LRed e (scottList bs)) rcs rbs)
+    (hclf : ∀ e ∈ rbs.flatten, closed 0 e = true)
+    (hclr : ∀ e ∈ rcs, closed 0 e = true)
+    (hoc : closed 0 o = true) (hrvc : closed 0 rv = true)
+    (hrcc : closed 0 rc = true) :
+    LRed (idBody o rv rc iat4)
+      (scottList ([idtCells os iat4, iltCells xv, iltCells xv,
+        rbs.reverse.flatten, bm bKernel].flatten)) := by
+  simp only [idBody]
+  have hF : List.Forall₂ (fun t bs => LRed t (scottList bs))
+      [idIdt o iat4, idIlt rv, idIlt rv, idNams rc,
+       bytesChunk bKernel]
+      [idtCells os iat4, iltCells xv, iltCells xv,
+       rbs.reverse.flatten, bm bKernel] :=
+    List.Forall₂.cons (idIdt_eval o os iat4 ho hlen hoc)
+      (List.Forall₂.cons
+        (idIlt_eval rv rvs xv hrv hper hclv hrvc)
+        (List.Forall₂.cons
+          (idIlt_eval rv rvs xv hrv hper hclv hrvc)
+          (List.Forall₂.cons
+            (idNams_eval rc rcs rbs hrc hper2 hclf hclr hrcc)
+            (List.Forall₂.cons (bytesChunk_nf bKernel)
+              List.Forall₂.nil))))
+  have htcl : ∀ t ∈ [idIdt o iat4, idIlt rv, idIlt rv, idNams rc,
+      bytesChunk bKernel], closed 0 t = true := by
+    intro t ht
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ht
+    rcases ht with rfl | rfl | rfl | rfl | rfl
+    · exact closed_idIdt hoc iat4
+    · exact closed_idIlt hrvc
+    · exact closed_idIlt hrvc
+    · exact closed_idNams hrcc
+    · exact closed_bytesChunk bKernel
+  have hbcl : ∀ e ∈ [idtCells os iat4, iltCells xv, iltCells xv,
+      rbs.reverse.flatten, bm bKernel].flatten,
+      closed 0 e = true := by
+    intro e he
+    obtain ⟨w, hw, hew⟩ := List.mem_flatten.mp he
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hw
+    rcases hw with rfl | rfl | rfl | rfl | rfl
+    · exact closed_idtCells os iat4 e hew
+    · exact closed_iltCells xv e hew
+    · exact closed_iltCells xv e hew
+    · obtain ⟨w2, hw2, hew2⟩ := List.mem_flatten.mp hew
+      exact hclf e (List.mem_flatten.mpr
+        ⟨w2, List.mem_reverse.mp hw2, hew2⟩)
+    · obtain ⟨p, _, rfl⟩ := List.mem_map.mp hew
+      exact closed_byteLit _ _
+  exact join_thunks_eval _ _ hF hbcl htcl
+
+#print axioms forall₂_append
+#print axioms forall₂_reverse
+#print axioms u64_thunk_eval
+#print axioms forall₂_u64_thunks
+#print axioms idIlt_eval
+#print axioms idNams_eval
+#print axioms idDrva_eval
+#print axioms idIdt_eval
+#print axioms idBody_eval
+
 end ISAR
