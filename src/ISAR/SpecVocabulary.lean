@@ -4460,6 +4460,535 @@ theorem padlist_eval (x0 x1 x2 x3 : Fin 16 × Fin 16) :
         ((boolLit_sel _ _ _).trans htail)))))))
 
 
+-- ============================================================
+-- Batch F: scottList-input variants — the assembly stage feeds
+-- scottList NFs between lets; the b4Lit-typed state slots get
+-- cellLit-carriers (the conss collapse is already done).
+-- ============================================================
+
+/-- `b4stepL` spine on a `cellLit`-formed `remB` — the `conss`
+    collapse is skipped (2 steps saved vs `b4step_spine`). -/
+theorem b4step_spine_scott (h bh bt cn acc : LTerm)
+    (hh : closed 0 h = true) (hbh : closed 0 bh = true)
+    (hbt : closed 0 bt = true) (hcn : closed 0 cn = true)
+    (hacc : closed 0 acc = true) :
+    LRed (aps b4stepL
+           [pairLit (cellLit bh bt) (pairLit cn acc), h])
+         (.app (aps addbcL [h, bh, cn]) (b4stepCont bt acc)) :=
+  LRed_of_hsteps (k := 12) (by
+    simp [b4stepL, pairLit, cellLit, addbcL, b4stepCont, letsL, aps,
+          List.foldl, hsteps, hstep, subst, shift,
+          shift_of_closed0, subst_of_closed0, closed, closed_app,
+          closed_klL, closed_pairSrcL, closed_b2nL, closed_conssL,
+          closed_nibAddL, closed_nibCarryL, closed_orL,
+          hh, hbh, hbt, hcn, hacc])
+
+/-- full byte-step evaluation on a cellLit-carried state. -/
+theorem b4step_eval_scott (xl xh yl yh cn : Fin 16) (bt acc : LTerm)
+    (hbt : closed 0 bt = true) (hacc : closed 0 acc = true) :
+    LRed (aps b4stepL
+           [pairLit (cellLit (byteLit yl yh) bt)
+                    (pairLit (nibLit cn) acc),
+            byteLit xl xh])
+         (pairLit bt
+           (pairLit
+             (nibLit (byteStepN (xl, xh) (yl, yh) cn).2)
+             (cellLit
+               (byteLit (byteStepN (xl, xh) (yl, yh) cn).1.1
+                        (byteStepN (xl, xh) (yl, yh) cn).1.2)
+               acc))) := by
+  have hm := b4step_spine_scott (byteLit xl xh) (byteLit yl yh) bt
+    (nibLit cn) acc
+    (closed_byteLit xl xh) (closed_byteLit yl yh) hbt
+    (closed_nibLit cn) hacc
+  have h1 := addbc_eval xl xh yl yh cn
+  have h2 : LRed (.app (aps addbcL [byteLit xl xh, byteLit yl yh,
+                     nibLit cn]) (b4stepCont bt acc))
+      (.app (pairLit
+         (byteLit ⟨(xl.val + yl.val + cn.val) % 16,
+                    Nat.mod_lt _ (by omega)⟩
+                  ⟨(xh.val + yh.val
+                      + (if 16 ≤ xl.val + yl.val + cn.val then 1 else 0))
+                      % 16, Nat.mod_lt _ (by omega)⟩)
+         (boolLit (decide (16 ≤ xh.val + yh.val
+             + (if 16 ≤ xl.val + yl.val + cn.val then 1 else 0)))))
+        (b4stepCont bt acc)) :=
+    LRed_app_left (h1.trans (pairSrc_nf _ _
+      (closed_byteLit _ _) (closed_boolLit _)))
+  refine hm.trans (h2.trans ?_)
+  refine (pairLit_apply2 _ _ _ _
+    (closed_byteLit _ _) (closed_boolLit _) hbt hacc).trans ?_
+  have hb2n : LRed (.app b2nL
+        (boolLit (decide (16 ≤ xh.val + yh.val
+            + (if 16 ≤ xl.val + yl.val + cn.val then 1 else 0)))))
+      (nibLit (byteStepN (xl, xh) (yl, yh) cn).2) := by
+    refine (b2n_correct _).trans (nibLit_eq_red ?_)
+    apply Fin.ext
+    simp [byteStepN, lowCarry, apply_ite, decide_eq_true_eq]
+    split <;> simp_all <;> omega
+  have hcell : LRed (aps conssL
+        [byteLit ⟨(xl.val + yl.val + cn.val) % 16, Nat.mod_lt _ (by omega)⟩
+                 ⟨(xh.val + yh.val
+                     + (if 16 ≤ xl.val + yl.val + cn.val then 1 else 0)) % 16,
+                   Nat.mod_lt _ (by omega)⟩, acc])
+      (cellLit (byteLit (byteStepN (xl, xh) (yl, yh) cn).1.1
+                        (byteStepN (xl, xh) (yl, yh) cn).1.2) acc) := by
+    refine (conss_nf _ _ (closed_byteLit _ _) hacc).trans ?_
+    rw [show (⟨(xl.val + yl.val + cn.val) % 16,
+               Nat.mod_lt _ (by omega)⟩ : Fin 16)
+          = (byteStepN (xl, xh) (yl, yh) cn).1.1
+        from Fin.ext rfl,
+        show (⟨(xh.val + yh.val
+                 + (if 16 ≤ xl.val + yl.val + cn.val then 1 else 0)) % 16,
+               Nat.mod_lt _ (by omega)⟩ : Fin 16)
+          = (byteStepN (xl, xh) (yl, yh) cn).1.2
+        from Fin.ext rfl]
+  have hinner : LRed (aps pairSrcL
+        [.app b2nL (boolLit (decide (16 ≤ xh.val + yh.val
+            + (if 16 ≤ xl.val + yl.val + cn.val then 1 else 0)))),
+         aps conssL
+           [byteLit ⟨(xl.val + yl.val + cn.val) % 16, Nat.mod_lt _ (by omega)⟩
+                    ⟨(xh.val + yh.val
+                        + (if 16 ≤ xl.val + yl.val + cn.val then 1 else 0)) % 16,
+                      Nat.mod_lt _ (by omega)⟩, acc]])
+      (pairLit (nibLit (byteStepN (xl, xh) (yl, yh) cn).2)
+               (cellLit (byteLit (byteStepN (xl, xh) (yl, yh) cn).1.1
+                                 (byteStepN (xl, xh) (yl, yh) cn).1.2) acc)) :=
+    (LRed_app_left (LRed_app_right hb2n)).trans
+      ((LRed_app_right hcell).trans
+        (pairSrc_nf _ _ (closed_nibLit _)
+          (closed_cellLit (closed_byteLit _ _) hacc)))
+  exact (LRed_app_right hinner).trans
+    (pairSrc_nf _ _ hbt
+      (closed_pairLit
+        (closed_mono (closed_nibLit _) (Nat.zero_le 1))
+        (closed_mono (closed_cellLit (closed_byteLit _ _) hacc)
+          (Nat.zero_le 1))))
+
+/-- `b4fold_run` on a scottList-carried `remB` state. -/
+theorem b4fold_run_scott : ∀ (cs : List (Fin 16 × Fin 16))
+    (bs : List (Fin 16 × Fin 16)) (cn : Fin 16) (acc : LTerm),
+    cs.length ≤ bs.length → closed 0 acc = true →
+    LRed (ggbA b4stepL (scottList (cs.map (fun p => byteLit p.1 p.2)))
+           (pairLit (scottList (bs.map (fun p => byteLit p.1 p.2)))
+             (pairLit (nibLit cn) acc)))
+         (pairLit (scottList ((bs.drop cs.length).map
+                    (fun p => byteLit p.1 p.2)))
+           (pairLit (nibLit (carryAfter cs bs cn))
+             ((resList cs bs cn).reverse.foldr
+               (fun p t => cellLit (byteLit p.1 p.2) t) acc))) := by
+  intro cs
+  induction cs with
+  | nil =>
+    intro bs cn acc _ hacc
+    simp only [scottList, List.map_nil, List.foldr_nil, List.drop_zero,
+               carryAfter, resList, List.reverse_nil]
+    have hcl : ∀ e ∈ bs.map (fun p => byteLit p.1 p.2),
+        closed 0 e = true := fun e he => by
+      simp only [List.mem_map] at he
+      obtain ⟨q, _, rfl⟩ := he; exact closed_byteLit _ _
+    exact nil_unfold b4stepL _ closed_b4stepL
+      (closed_b4state (closed_scottList hcl) (closed_nibLit cn) hacc)
+  | cons c cs' ih =>
+    intro bs cn acc hlen hacc
+    cases bs with
+    | nil => simp only [List.length_cons, List.length_nil] at hlen; omega
+    | cons b bs' =>
+      simp only [List.length_cons, Nat.succ_le_succ_iff] at hlen
+      have htail : ∀ e ∈ cs'.map (fun p => byteLit p.1 p.2),
+          closed 0 e = true := fun e he => by
+        simp only [List.mem_map] at he
+        obtain ⟨q, _, rfl⟩ := he; exact closed_byteLit _ _
+      have hstate0 : closed 0
+          (pairLit (scottList ((b :: bs').map (fun p => byteLit p.1 p.2)))
+            (pairLit (nibLit cn) acc)) = true :=
+        closed_b4state
+          (closed_scottList (fun e he => by
+            simp only [List.mem_map] at he
+            obtain ⟨q, _, rfl⟩ := he; exact closed_byteLit _ _))
+          (closed_nibLit cn) hacc
+      have e0 : scottList ((c :: cs').map (fun p => byteLit p.1 p.2))
+          = cellLit (byteLit c.1 c.2)
+              (scottList (cs'.map (fun p => byteLit p.1 p.2))) := rfl
+      have e1 : scottList ((b :: bs').map (fun p => byteLit p.1 p.2))
+          = cellLit (byteLit b.1 b.2)
+              (scottList (bs'.map (fun p => byteLit p.1 p.2))) := rfl
+      rw [e0, e1]
+      have hstep := b4step_eval_scott c.1 c.2 b.1 b.2 cn
+        (scottList (bs'.map (fun p => byteLit p.1 p.2))) acc
+        (closed_scottList (fun e he => by
+          simp only [List.mem_map] at he
+          obtain ⟨q, _, rfl⟩ := he; exact closed_byteLit _ _)) hacc
+      refine (cell_unfold b4stepL _ _ _ closed_b4stepL
+        (closed_byteLit _ _) (closed_scottList htail) hstate0).trans ?_
+      refine (LRed_app_right hstep).trans ?_
+      have hih := ih bs' (byteStepN (c.1, c.2) (b.1, b.2) cn).2
+        (cellLit (byteLit (byteStepN (c.1, c.2) (b.1, b.2) cn).1.1
+                          (byteStepN (c.1, c.2) (b.1, b.2) cn).1.2) acc)
+        hlen (closed_cellLit (closed_byteLit _ _) hacc)
+      rw [show pairLit (scottList (((b :: bs').drop (c :: cs').length).map
+                (fun p => byteLit p.1 p.2)))
+            (pairLit (nibLit (carryAfter (c :: cs') (b :: bs') cn))
+              ((resList (c :: cs') (b :: bs') cn).reverse.foldr
+                (fun p t => cellLit (byteLit p.1 p.2) t) acc))
+          = pairLit (scottList ((bs'.drop cs'.length).map
+                (fun p => byteLit p.1 p.2)))
+            (pairLit (nibLit (carryAfter cs' bs' (byteStepN c b cn).2))
+              ((resList cs' bs' (byteStepN c b cn).2).reverse.foldr
+                (fun p t => cellLit (byteLit p.1 p.2) t)
+                (cellLit (byteLit (byteStepN c b cn).1.1
+                          (byteStepN c b cn).1.2) acc)))
+        from by
+          simp [carryAfter, resList, List.length_cons, List.reverse_cons,
+                List.foldr_append]]
+      exact hih
+
+/-- `B4ADD` on scottList-carried operands. -/
+theorem b4add_eval_scott (as bs : List (Fin 16 × Fin 16))
+    (h : as.length = bs.length) :
+    LRed (aps b4addL [scottList (as.map (fun p => byteLit p.1 p.2)),
+                      scottList (bs.map (fun p => byteLit p.1 p.2))])
+         (scottList ((resList as bs 0).map
+           (fun p => byteLit p.1 p.2))) := by
+  have hclA : ∀ e ∈ as.map (fun p => byteLit p.1 p.2),
+      closed 0 e = true := fun e he => by
+    simp only [List.mem_map] at he
+    obtain ⟨q, _, rfl⟩ := he; exact closed_byteLit _ _
+  have hclB : ∀ e ∈ bs.map (fun p => byteLit p.1 p.2),
+      closed 0 e = true := fun e he => by
+    simp only [List.mem_map] at he
+    obtain ⟨q, _, rfl⟩ := he; exact closed_byteLit _ _
+  have hstate0 : closed 0 (pairLit
+      (scottList (bs.map (fun p => byteLit p.1 p.2)))
+      (pairLit (nibLit 0) klL)) = true :=
+    closed_b4state (closed_scottList hclB) (closed_nibLit _) closed_klL
+  have e1 : LRed (aps b4addL [scottList (as.map (fun p => byteLit p.1 p.2)),
+                      scottList (bs.map (fun p => byteLit p.1 p.2))])
+      (.app (aps foldlL [b4stepL,
+              scottList (as.map (fun p => byteLit p.1 p.2)),
+              aps pairSrcL [scottList (bs.map (fun p => byteLit p.1 p.2)),
+                aps pairSrcL [nibLit 0, klL]]])
+            b4finL) :=
+    LRed_of_hsteps (k := 2) (by
+      simp [b4addL, aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_zero, subst_shift_succ,
+            shift_of_closed0, subst_of_closed0, closed, closed_app,
+            closed_b4stepL, closed_b4finL, closed_foldlL, closed_pairSrcL,
+            closed_nibLit, closed_klL, closed_scottList, hclA, hclB])
+  have e2 : LRed (aps pairSrcL [scottList (bs.map (fun p => byteLit p.1 p.2)),
+                    aps pairSrcL [nibLit 0, klL]])
+      (pairLit (scottList (bs.map (fun p => byteLit p.1 p.2)))
+        (pairLit (nibLit 0) klL)) :=
+    (LRed_app_right (pairSrc_nf _ _ (closed_nibLit _) closed_klL)).trans
+      (pairSrc_nf _ _ (closed_scottList hclB)
+        (closed_pairLit (closed_mono (closed_nibLit _) (Nat.zero_le 1))
+          (closed_mono closed_klL (Nat.zero_le 1))))
+  refine e1.trans ((LRed_app_left (LRed_app_right e2)).trans ?_)
+  refine (LRed_app_left (foldl_to_ggb b4stepL
+    (scottList (as.map (fun p => byteLit p.1 p.2))) _
+    closed_b4stepL (closed_scottList hclA) hstate0)).trans ?_
+  refine (LRed_app_left (b4fold_run_scott as bs 0 klL h.le
+    closed_klL)).trans ?_
+  have hdrop : scottList ((bs.drop as.length).map
+      (fun p => byteLit p.1 p.2)) = nilL := by
+    have hd : bs.drop as.length = [] := by
+      rw [h]; exact List.drop_length
+    rw [hd]; rfl
+  rw [hdrop]
+  refine (b4fin_apply nilL (nibLit (carryAfter as bs 0)) _ closed_nilL
+    (closed_nibLit _) (closed_accRev closed_klL)).trans ?_
+  have haccEq : (resList as bs 0).reverse.foldr
+        (fun p t => cellLit (byteLit p.1 p.2) t) klL
+      = scottList ((resList as bs 0).reverse.map
+          (fun p => byteLit p.1 p.2)) := by
+    simp only [scottList, List.foldr_map]
+    rfl
+  refine (revL_eval _ ((resList as bs 0).reverse.map
+      (fun p => byteLit p.1 p.2)) (closed_accRev closed_klL)
+    (fun e he => by
+      obtain ⟨q, _, rfl⟩ := List.mem_map.mp he; exact closed_byteLit _ _)
+    (by rw [← haccEq])).trans ?_
+  rw [← List.map_reverse, List.reverse_reverse]
+
+/-- `U64` on a scottList input — the append path is already
+    `IsList`-parameterized, so this is `u64_eval` minus `b4Lit_nf`. -/
+theorem u64_eval_scott (xs : List (Fin 16 × Fin 16)) :
+    LRed (.app u64L (scottList (xs.map (fun p => byteLit p.1 p.2))))
+      (scottList ((xs.map fun p => byteLit p.1 p.2)
+        ++ List.replicate 4 b0cT)) := by
+  have hxcl : ∀ e ∈ xs.map (fun p => byteLit p.1 p.2),
+      closed 0 e = true := fun e he => by
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp he
+    exact closed_byteLit _ _
+  have hsc : closed 0 (scottList (xs.map (fun p => byteLit p.1 p.2)))
+      = true := closed_scottList hxcl
+  have hopen : LRed (.app u64L (scottList (xs.map
+        (fun p => byteLit p.1 p.2))))
+      (aps appendL [scottList (xs.map (fun p => byteLit p.1 p.2)),
+        u64Tail]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [u64L, aps, List.foldl, hsteps, hstep, subst, shift,
+            subst_of_closed0 hsc, shift_of_closed0 hsc,
+            subst_of_closed0 closed_u64Tail,
+            shift_of_closed0 closed_u64Tail,
+            subst_of_closed0 closed_appendL,
+            shift_of_closed0 closed_appendL])
+  have htail_is : IsList u64Tail (List.replicate 4 b0cT) := u64Tail_nf
+  have hb4_is : IsList (scottList (xs.map fun p => byteLit p.1 p.2))
+      (xs.map fun p => byteLit p.1 p.2) := Relation.ReflTransGen.refl
+  refine hopen.trans ((appendL_to_appendT _ _ hsc
+    closed_u64Tail).trans ?_)
+  exact append_eval _ _ _ _ hb4_is htail_is hxcl
+    (fun e he => closed_rep_b0c he) hsc closed_u64Tail
+
+/-- `ALIGN512` on a scottList input — `B4ADD` gets a scott operand and a
+    literal mask (normalized via `b4Lit_nf`). -/
+theorem align512_eval_scott (xs : List (Fin 16 × Fin 16))
+    (hxs : xs.length = 4) :
+    ∃ w0 w1 w2 w3,
+      resList xs b4_1FF 0 = [w0, w1, w2, w3] ∧
+      LRed (.app align512L (scottList (xs.map (fun p => byteLit p.1 p.2))))
+        (scottList [byteLit 0 0, byteLit (nibMaskE w1.1) w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]) := by
+  have hlen : (resList xs b4_1FF 0).length = 4 := by
+    have h := resList_length xs b4_1FF 0 (by simp [b4_1FF]; exact hxs)
+    rw [h, hxs]
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hlen
+  refine ⟨w0, w1, w2, w3, hws, ?_⟩
+  have hxcl : ∀ e ∈ xs.map (fun p => byteLit p.1 p.2),
+      closed 0 e = true := fun e he => by
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp he
+    exact closed_byteLit _ _
+  have hscX : closed 0 (scottList (xs.map (fun p => byteLit p.1 p.2)))
+      = true := closed_scottList hxcl
+  have hmask : LRed (aps b4addL [scottList (xs.map
+        (fun p => byteLit p.1 p.2)), b4Lit b4_1FF])
+      (scottList ((resList xs b4_1FF 0).map (fun p => byteLit p.1 p.2))) :=
+    (LRed_app_right (b4Lit_nf b4_1FF)).trans
+      (b4add_eval_scott xs b4_1FF (by simp [b4_1FF]; exact hxs))
+  have hadd := hmask
+  rw [hws] at hadd
+  simp only [List.map_cons, List.map_nil] at hadd
+  have hopen : LRed (.app align512L
+        (scottList (xs.map (fun p => byteLit p.1 p.2))))
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (aps b4addL [scottList (xs.map (fun p => byteLit p.1 p.2)),
+          b4Lit b4_1FF])) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [align512L, hsteps, hstep, subst, shift, aps, List.foldl,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_scottList, hxcl, closed_b4Lit, closed_b4addL,
+            closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT,
+            peel4K, align512K, alignEmit])
+  have harg : LRed
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (aps b4addL [scottList (xs.map (fun p => byteLit p.1 p.2)),
+          b4Lit b4_1FF]))
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2])) :=
+    LRed_app_right hadd
+  have hbeta : LRed
+      (.app (.abs (aps (.var 0) [klL, peel4K (.app (.var 5) align512K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]))
+      (aps (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                        byteLit w2.1 w2.2, byteLit w3.1 w3.2])
+           [klL, peel4K (.app (.var 5) align512K)]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [hsteps, hstep, subst, shift, aps, List.foldl,
+            peel4K, align512K, alignEmit,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_scottList, closed_byteLit, closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT])
+  exact (hopen.trans harg).trans
+    (hbeta.trans (align512_peel_emit w0 w1 w2 w3))
+
+/-- `ALIGN4096` on a scottList input — same skeleton, `b4_FFF` mask. -/
+theorem align4096_eval_scott (xs : List (Fin 16 × Fin 16))
+    (hxs : xs.length = 4) :
+    ∃ w0 w1 w2 w3,
+      resList xs b4_FFF 0 = [w0, w1, w2, w3] ∧
+      LRed (.app align4096L (scottList (xs.map (fun p => byteLit p.1 p.2))))
+        (scottList [byteLit 0 0, byteLit 0 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]) := by
+  have hlen : (resList xs b4_FFF 0).length = 4 := by
+    have h := resList_length xs b4_FFF 0 (by simp [b4_FFF]; exact hxs)
+    rw [h, hxs]
+  obtain ⟨w0, w1, w2, w3, hws⟩ := exists_eq_of_length4 hlen
+  refine ⟨w0, w1, w2, w3, hws, ?_⟩
+  have hxcl : ∀ e ∈ xs.map (fun p => byteLit p.1 p.2),
+      closed 0 e = true := fun e he => by
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp he
+    exact closed_byteLit _ _
+  have hadd : LRed (aps b4addL [scottList (xs.map
+        (fun p => byteLit p.1 p.2)), b4Lit b4_FFF])
+      (scottList ((resList xs b4_FFF 0).map (fun p => byteLit p.1 p.2))) :=
+    (LRed_app_right (b4Lit_nf b4_FFF)).trans
+      (b4add_eval_scott xs b4_FFF (by simp [b4_FFF]; exact hxs))
+  rw [hws] at hadd
+  simp only [List.map_cons, List.map_nil] at hadd
+  have hopen : LRed (.app align4096L
+        (scottList (xs.map (fun p => byteLit p.1 p.2))))
+      (.app (.abs (aps (.var 0)
+          [klL, peel4K (.app (.var 5) align4096K)]))
+        (aps b4addL [scottList (xs.map (fun p => byteLit p.1 p.2)),
+          b4Lit b4_FFF])) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [align4096L, hsteps, hstep, subst, shift, aps, List.foldl,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_scottList, hxcl, closed_b4Lit, closed_b4addL,
+            closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT,
+            closed_nibLit, peel4K, align4096K, alignEmit])
+  have harg : LRed
+      (.app (.abs (aps (.var 0)
+          [klL, peel4K (.app (.var 5) align4096K)]))
+        (aps b4addL [scottList (xs.map (fun p => byteLit p.1 p.2)),
+          b4Lit b4_FFF]))
+      (.app (.abs (aps (.var 0)
+          [klL, peel4K (.app (.var 5) align4096K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2])) :=
+    LRed_app_right hadd
+  have hbeta : LRed
+      (.app (.abs (aps (.var 0)
+          [klL, peel4K (.app (.var 5) align4096K)]))
+        (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                    byteLit w2.1 w2.2, byteLit w3.1 w3.2]))
+      (aps (scottList [byteLit w0.1 w0.2, byteLit w1.1 w1.2,
+                        byteLit w2.1 w2.2, byteLit w3.1 w3.2])
+           [klL, peel4K (.app (.var 5) align4096K)]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [hsteps, hstep, subst, shift, aps, List.foldl,
+            peel4K, align4096K, alignEmit,
+            shift_zero, subst_of_closed0, shift_of_closed0,
+            closed_scottList, closed_byteLit, closed_klL, closed_nilL,
+            closed_conssL, closed_pairSrcL, closed_nibandEL, closed_b0cT,
+            closed_nibLit])
+  exact (hopen.trans harg).trans
+    (hbeta.trans (align4096_peel_emit w0 w1 w2 w3))
+
+/-- `PADLIST` on a scottList input — `padlist_peel` already takes the
+    scott form; this is `padlist_eval` minus the `b4Lit_nf` bridge. -/
+theorem padlist_eval_scott (x0 x1 x2 x3 : Fin 16 × Fin 16) :
+    LRed (.app padlistL (scottList [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+          byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+         (scottList (padCells (padRemN x0 x1))) := by
+  have hopen : LRed (.app padlistL (scottList [byteLit x0.1 x0.2,
+        byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+      (aps (scottList [byteLit x0.1 x0.2, byteLit x1.1 x1.2,
+            byteLit x2.1 x2.2, byteLit x3.1 x3.2])
+        [klL, .abs (.abs (aps (.var 0) [klL, .abs (.abs padBodyL)]))]) := by
+    simp only [padlistL]
+    exact LRed_of_hsteps (k := 1) (by
+      simp [aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_zero, subst_shift_succ, subst_of_closed0,
+            subst_of_closed, closed, closed_app, closed_mono,
+            closed_scottList, closed_byteLit,
+            closed_klL_any, closed_padBodyL_c])
+  have hpeel := padlist_peel
+    (byteLit x0.1 x0.2) (byteLit x1.1 x1.2)
+    (byteLit x2.1 x2.2) (byteLit x3.1 x3.2)
+    (closed_byteLit _ _) (closed_byteLit _ _)
+    (closed_byteLit _ _) (closed_byteLit _ _)
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _) closed_nilL))
+    (closed_cellLit (closed_byteLit _ _)
+      (closed_cellLit (closed_byteLit _ _)
+        (closed_cellLit (closed_byteLit _ _) closed_nilL)))
+  have happ0 := byteLit_apply2 x0.1 x0.2
+    (.app (byteLit x1.1 x1.2)
+      (.abs (.abs (.app padGuardL padRemL))))
+  have hsub0 : subst (nibLit x0.2) 0 (subst (nibLit x0.1) 1
+      (.app (byteLit x1.1 x1.2)
+        (.abs (.abs (.app padGuardL padRemL))))) =
+      .app (byteLit x1.1 x1.2)
+        (.abs (.abs (.app padGuardL (padRemL1 x0.1 x0.2)))) := by
+    simp [padRemL, padRemL1, aps, List.foldl, subst, shift,
+          shift_zero, subst_shift_succ, subst_of_closed0,
+          shift_of_closed0, subst_of_closed, shift_of_closed,
+          closed, closed_app, closed_mono,
+          closed_padGuardL_any, closed_nibLit_any, closed_byteLit_any,
+          closed_churchL_any, closed_nib2numL_any, closed_nibparL_any,
+          closed_churchAddL_any, closed_churchMulL_any]
+  have happ1 := byteLit_apply2 x1.1 x1.2
+    (.app padGuardL (padRemL1 x0.1 x0.2))
+  have hsub1 : subst (nibLit x1.2) 0 (subst (nibLit x1.1) 1
+      (.app padGuardL (padRemL1 x0.1 x0.2))) =
+      .app padGuardL (padRemInst x0.1 x0.2 x1.1) := by
+    simp [padRemL1, padRemInst, aps, List.foldl, subst, shift,
+          shift_zero, subst_shift_succ, subst_of_closed0,
+          shift_of_closed0, subst_of_closed, shift_of_closed,
+          closed, closed_app, closed_mono,
+          closed_padGuardL_any, closed_nibLit_any,
+          closed_churchL_any, closed_nib2numL_any, closed_nibparL_any,
+          closed_churchAddL_any, closed_churchMulL_any]
+  have hbeta : LRed (.app padGuardL (padRemInst x0.1 x0.2 x1.1))
+      (aps (aps (padRemInst x0.1 x0.2 x1.1) [iszStepL, klL])
+        [klL, aps (padRemInst x0.1 x0.2 x1.1)
+          [tailL, .app zerofillL (churchL 512)]]) := by
+    apply LRed_of_hsteps (k := 1)
+    simp [padGuardL, aps, List.foldl, hsteps, hstep, subst, shift,
+          shift_zero, subst_shift_succ, subst_of_closed0,
+          shift_of_closed0, subst_of_closed, shift_of_closed,
+          closed, closed_app, closed_mono,
+          closed_iszStepL_any, closed_klL_any, closed_tailL_any,
+          closed_zerofillL_any, closed_churchL_any]
+  have hrem : IsChurchNum (padRemN x0 x1)
+      (padRemInst x0.1 x0.2 x1.1) :=
+    padRem_num x0.1 x0.2 x1.1
+  have hisz : LRed (aps (padRemInst x0.1 x0.2 x1.1) [iszStepL, klL])
+      (boolLit (decide (padRemN x0 x1 = 0))) := isZero_num hrem
+  have hpad : LRed (aps (padRemInst x0.1 x0.2 x1.1)
+        [tailL, .app zerofillL (churchL 512)])
+      (scottList ((List.replicate 512 b0cT).drop (padRemN x0 x1))) :=
+    padLeg_num hrem
+  have hdisp : LRed (aps (aps (padRemInst x0.1 x0.2 x1.1)
+        [iszStepL, klL])
+        [klL, aps (padRemInst x0.1 x0.2 x1.1)
+          [tailL, .app zerofillL (churchL 512)]])
+      (aps (boolLit (decide (padRemN x0 x1 = 0)))
+        [klL, scottList
+          ((List.replicate 512 b0cT).drop (padRemN x0 x1))]) :=
+    (LRed_app_left (LRed_app_left hisz)).trans (LRed_app_right hpad)
+  have htail : LRed
+      (if decide (padRemN x0 x1 = 0) then klL
+       else scottList
+         ((List.replicate 512 b0cT).drop (padRemN x0 x1)))
+      (scottList (padCells (padRemN x0 x1))) := by
+    cases hd : decide (padRemN x0 x1 = 0) with
+    | true =>
+        have h0 : padRemN x0 x1 = 0 := of_decide_eq_true hd
+        rw [padCells, if_pos h0]
+        exact Relation.ReflTransGen.refl
+    | false =>
+        have h0 : ¬ padRemN x0 x1 = 0 := of_decide_eq_false hd
+        simp only [padCells, if_neg h0]
+        exact Relation.ReflTransGen.refl
+  exact hopen.trans (hpeel.trans
+    ((hsub0 ▸ happ0).trans ((hsub1 ▸ happ1).trans
+      (hbeta.trans (hdisp.trans
+        ((boolLit_sel _ _ _).trans htail))))))
+
+/-- A conss-chain of closed cells normalizes to the scottList — the
+    JOIN argument's chunk-list shape. -/
+theorem conssChain_nf : ∀ (cs : List LTerm),
+    (∀ e ∈ cs, closed 0 e = true) →
+    LRed (cs.foldr (fun h t => aps conssL [h, t]) nilL)
+         (scottList cs) := by
+  intro cs; induction cs with
+  | nil => intro _; exact Relation.ReflTransGen.refl
+  | cons c cs' ih =>
+      intro hcl
+      rw [List.foldr_cons]
+      exact (LRed_app_right (ih (fun e he =>
+        hcl e (List.mem_cons_of_mem _ he)))).trans
+        (conss_nf _ _ (hcl c (List.mem_cons_self))
+          (closed_scottList (fun e he =>
+            hcl e (List.mem_cons_of_mem _ he))))
+
 -- axiom audits ---------------------------------------------------------------
 #print axioms emitCells_nf
 #print axioms pairLit_apply
@@ -4495,5 +5024,118 @@ theorem padlist_eval (x0 x1 x2 x3 : Fin 16 × Fin 16) :
 #print axioms padRem_num
 
 
+
+#print axioms b4step_eval_scott
+#print axioms b4fold_run_scott
+#print axioms b4add_eval_scott
+#print axioms u64_eval_scott
+#print axioms align512_eval_scott
+#print axioms align4096_eval_scott
+#print axioms padlist_eval_scott
+#print axioms conssChain_nf
+
+-- ============================================================
+-- Batch G: assembly machinery — composed numerals, chunk-chain
+-- congruence, literal-byte chunks, the beta primitive.
+-- ============================================================
+
+/-- `ZEROFILL·M` for any `n`-behaving numeral — the `_num_src`
+    MUL/ADD-composites land here, not at `churchL`-form. -/
+theorem zerofill_num (n : Nat) (M : LTerm) (hM : IsChurchNum n M)
+    (hc : closed 0 M = true) :
+    LRed (.app zerofillL M) (scottList (List.replicate n b0cT)) := by
+  have e1 : LRed (.app zerofillL M) (aps M [zerostepL, klL]) :=
+    LRed_of_hsteps (k := 1) (by
+      simp [zerofillL, aps, List.foldl, hsteps, hstep, subst, shift,
+            shift_of_closed0 hc, subst_of_closed0 hc,
+            shift_of_closed0 closed_zerostepL,
+            subst_of_closed0 closed_zerostepL,
+            shift_of_closed0 closed_klL, subst_of_closed0 closed_klL])
+  have hs' : ∀ x, closed 0 x = true →
+      LRed (.app zerostepL x) (cellLit b0cT x) ∧
+      closed 0 (cellLit b0cT x) = true :=
+    fun x hx => ⟨zerostep_cell x hx, closed_cellLit closed_b0cT hx⟩
+  have hsc : iterS (fun x => cellLit b0cT x) klL n
+      = scottList (List.replicate n b0cT) := by
+    rw [iterS_scott]; rfl
+  exact e1.trans ((hM zerostepL klL closed_zerostepL closed_klL).trans
+    ((iter_red zerostepL (fun x => cellLit b0cT x) hs' n klL
+      closed_klL).trans (hsc ▸ Relation.ReflTransGen.refl)))
+
+/-- `_num_src 58` — `MUL 2 (ADD (MUL 14 2) 1)` (29 is prime). -/
+def nz58 : LTerm := aps churchMulL [churchL 2,
+  aps churchAddL [aps churchMulL [churchL 14, churchL 2], churchL 1]]
+
+/-- `_num_src 64` — `MUL 16 4`. -/
+def nz64 : LTerm := aps churchMulL [churchL 16, churchL 4]
+
+/-- `_num_src 112` — `MUL 16 7`. -/
+def nz112 : LTerm := aps churchMulL [churchL 16, churchL 7]
+
+theorem closed_nz58 : closed 0 nz58 = true := by decide
+theorem closed_nz64 : closed 0 nz64 = true := by decide
+theorem closed_nz112 : closed 0 nz112 = true := by decide
+
+theorem nz58_num : IsChurchNum 58 nz58 :=
+  churchMul_num 2 (14 * 2 + 1) _ _
+    (churchL_num 2)
+    (churchAdd_num (14 * 2) 1 _ _
+      (churchMul_num 14 2 _ _ (churchL_num 14) (churchL_num 2)
+        (closed_churchL 14) (closed_churchL 2))
+      (churchL_num 1)
+      (by decide) (closed_churchL 1))
+    (closed_churchL 2) (by decide)
+
+theorem nz64_num : IsChurchNum 64 nz64 :=
+  churchMul_num 16 4 _ _ (churchL_num 16) (churchL_num 4)
+    (closed_churchL 16) (closed_churchL 4)
+
+theorem nz112_num : IsChurchNum 112 nz112 :=
+  churchMul_num 16 7 _ _ (churchL_num 16) (churchL_num 7)
+    (closed_churchL 16) (closed_churchL 7)
+
+/-- Pointwise `LRed` lifts into a `conss`-chain — the chunk-list
+    congruence. -/
+theorem conssChain_map_red : ∀ {cs cs' : List LTerm},
+    List.Forall₂ LRed cs cs' →
+    LRed (cs.foldr (fun h t => aps conssL [h, t]) nilL)
+         (cs'.foldr (fun h t => aps conssL [h, t]) nilL) := by
+  intro cs cs' h; induction h with
+  | nil => exact Relation.ReflTransGen.refl
+  | cons hhead _ ih =>
+      simp only [List.foldr_cons]
+      exact (LRed_app_left (LRed_app_right hhead)).trans
+        (LRed_app_right ih)
+
+/-- `_bytes_src` chunk: `conss (PAIR sel sel) · …` chain normalizes to
+    the scottList of byteLit cells — `PAIR sel sel` collapses to the
+    `pairLit`-form via `pairSrc_nf`, then `conssChain_nf`. -/
+theorem bytesChunk_nf (bs : List (Fin 16 × Fin 16)) :
+    LRed (bs.foldr (fun p t => aps conssL
+             [aps pairSrcL [nibLit p.1, nibLit p.2], t]) nilL)
+         (scottList (bs.map (fun p => byteLit p.1 p.2))) := by
+  induction bs with
+  | nil => exact Relation.ReflTransGen.refl
+  | cons p bs' ih =>
+      simp only [List.foldr_cons, List.map_cons]
+      have hcell : LRed (aps pairSrcL [nibLit p.1, nibLit p.2])
+          (byteLit p.1 p.2) :=
+        pairSrc_nf _ _ (closed_nibLit _) (closed_nibLit _)
+      exact ((LRed_app_left (LRed_app_right hcell)).trans
+        (LRed_app_right ih)).trans
+        (conss_nf _ _ (closed_byteLit _ _)
+          (closed_scottList (fun e he => by
+            obtain ⟨q, _, rfl⟩ := List.mem_map.mp he
+            exact closed_byteLit _ _)))
+
+/-- one beta step — the let primitive. -/
+theorem beta_app (B V : LTerm) :
+    LRed (.app (.abs B) V) (subst V 0 B) :=
+  LRed_of_hsteps (k := 1) rfl
+
+#print axioms zerofill_num
+#print axioms nz58_num
+#print axioms conssChain_map_red
+#print axioms bytesChunk_nf
 
 end ISAR
