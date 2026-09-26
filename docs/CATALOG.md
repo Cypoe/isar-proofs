@@ -12,17 +12,20 @@
 | dialect | phi.rel | — | declared | spec only |
 | isa | x86_64 | isa_x86_64.X86_64 | realized |  |
 | isa | aarch64 | isa_aarch64.AARCH64 | realized |  |
+| isa | c | isa_c.C_ISA | realized | C11 statements as data; assemble emits source text |
 | isa | riscv64 | — | declared | no riscv64 ISA table |
 | routines | x86_64.win64.lo | routines_x86_64_win64.X86_64_WIN64 | realized |  |
 | routines | x86_64.win64.xdu | routines_x86_64_win64_xdu.X86_64_WIN64_XDU | realized | nibble transducer plex routines (W3) |
 | routines | x86_64.win64.cd | routines_x86_64_win64_cd.X86_64_WIN64_CD | realized | Lean ParStep / host reduce_cd contract |
 | routines | x86_64.linux.lo | routines_x86_64_linux_lo.X86_64_LINUX_LO | realized | syscall ABI, no kernel32 IAT |
 | routines | x86_64.uefi.lo | — | declared | UEFI boot services ABI |
+| routines | c.hosted.lo | — | declared | C reducer kernel (routines_c) — the second host; not yet realized |
 | target | pe64 | target_pe64.PE64 | realized |  |
 | target | elf64 | target_elf64.ELF64 | realized | ELF64 container writer |
 | target | macho64 | — | declared | Mach-O 64 container writer |
 | target | flat | — | declared | flat binary, no loader |
 | target | pe64.uefi | — | declared | PE32+ EFI application subsystem |
+| target | c | target_c.C | realized | C11 source container; compiles via system cc |
 | piece | graph.lo | host_pieces.GRAPH_PIECE | realized |  |
 | piece | graph.cd | host_pieces.GRAPH_CD_PIECE | realized |  |
 | piece | lambda.lstep | lambda_eval.LSTEP_PIECE | realized | weak-beta NExpr evaluator (Lean LStep mirror) + saturated combs |
@@ -47,6 +50,7 @@
 | pe64.uefi | bytecode.postfix | x86_64 | x86_64.uefi.lo | pe64.uefi | runtime | declared |
 | lambda.bracket | lambda.bracket | x86_64 | x86_64.win64.lo | pe64 | runtime | declared |
 | phi.rel | phi.rel | x86_64 | x86_64.win64.lo | pe64 | runtime | declared |
+| native.c | bytecode.postfix | c | c.hosted.lo | c | runtime | declared |
 
 ## Strategy axes
 

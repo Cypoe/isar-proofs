@@ -13,6 +13,8 @@
   "isas": {
     "x86_64": {"module": "isa_x86_64", "record": "X86_64"},
     "aarch64": {"module": "isa_aarch64", "record": "AARCH64"},
+    "c": {"module": "isa_c", "record": "C_ISA",
+      "note": "C11 statements as data; assemble emits source text"},
     "riscv64": {"note": "no riscv64 ISA table"}
   },
   "routines": {
@@ -27,7 +29,9 @@
     "x86_64.linux.lo": {"module": "routines_x86_64_linux_lo",
       "record": "X86_64_LINUX_LO", "path": "runtime",
       "note": "syscall ABI, no kernel32 IAT"},
-    "x86_64.uefi.lo": {"note": "UEFI boot services ABI"}
+    "x86_64.uefi.lo": {"note": "UEFI boot services ABI"},
+    "c.hosted.lo": {"path": "runtime",
+      "note": "C reducer kernel (routines_c) — the second host; not yet realized"}
   },
   "targets": {
     "pe64": {"module": "target_pe64", "record": "PE64"},
@@ -35,7 +39,9 @@
       "note": "ELF64 container writer"},
     "macho64": {"note": "Mach-O 64 container writer"},
     "flat": {"note": "flat binary, no loader"},
-    "pe64.uefi": {"note": "PE32+ EFI application subsystem"}
+    "pe64.uefi": {"note": "PE32+ EFI application subsystem"},
+    "c": {"module": "target_c", "record": "C",
+      "note": "C11 source container; compiles via system cc"}
   },
   "pieces": {
     "graph.lo": {"module": "host_pieces", "record": "GRAPH_PIECE"},
@@ -97,7 +103,10 @@
      "note": "host QuotientMap exists (lambda_dialect.py); no native token alphabet"},
     {"name": "phi.rel", "dialect": "phi.rel", "isa": "x86_64",
      "routines": "x86_64.win64.lo", "target": "pe64", "path": "runtime",
-     "note": "spec only, no parser"}
+     "note": "spec only, no parser"},
+    {"name": "native.c", "dialect": "bytecode.postfix", "isa": "c",
+     "routines": "c.hosted.lo", "target": "c", "path": "runtime",
+     "note": "C reducer kernel via system cc — the second host (routines declared)"}
   ],
   "strategy_axes": {
     "order":   {"lo": "realized", "cd": "realized"},
