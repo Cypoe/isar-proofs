@@ -15,7 +15,9 @@ Semantic contract mirrored from seed/seed.py + routines:
   step      normβ konstβ dupβ compβ swapβ (+sβ iff fuse_s), then
             appL then appR — full IStepBasis, not host/reduce.py IStep
   parse     token push; '@' pops x,y pushes app(y,x); underflow pads
-            the stack top with I; " \\t\\r\\n," skipped; else exit(3)
+            the stack top with I; " \\t\\r\\n" skipped; else exit(3)
+            (the native parser's set — Python bc_compile's ","
+            skip is host-side laxness, not the exe contract)
   out       NF tokens each followed by ' ', then '\\n' on stdout;
             "steps=N alloc=M\\n" on stderr; rc 0/2/3/4
   alloc     nalloc counts term cells (mkleaf/mkapp); parse-stack
@@ -235,7 +237,7 @@ def r_parse(R: Realization, ctx: Ctx) -> Program:
         I("while", "(n = fread(rbuf, 1, sizeof rbuf, stdin)) > 0"),
         I("for", "size_t i = 0", "i < n", "i++"),
         I("decl", "unsigned char", "ch", "rbuf[i]"),
-        I("if", "ch==' '||ch=='\\t'||ch=='\\r'||ch=='\\n'||ch==','"),
+        I("if", "ch==' '||ch=='\\t'||ch=='\\r'||ch=='\\n'"),
         I("continue"),
         I("end"),
         I("if", "TAG_OF[ch]"),
