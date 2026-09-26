@@ -132,6 +132,7 @@ def emit_image(R: seed.Realization,
                run: Callable[[T], Tuple[T, int, int]] = _graph_run,
                stage_runs: Optional[dict] = None,
                decompose_asm: bool = False,
+               decompose_pack: bool = False,
                workdir: Optional[str] = None,
                verbose: bool = True) -> Tuple[bytes, List[tuple]]:
     """Emit the host image for R via the staged term chain.
@@ -158,12 +159,19 @@ def emit_image(R: seed.Realization,
                   f"({time.time()-t0:.0f}s)", flush=True)
         return nf
 
-    # stage 1 — programOf R: the routine-fragment list
-    prog_nf = _stage("program", st.program_query(R))
+    # stages 1/2 are lazy — a resumed run whose seams are already
+    # checkpointed never re-reduces programOf/linkOf.
+    _nfs: dict = {}
 
-    # stage 2 — linkOf IMPORTS SLOTS: sections + merged symtab
-    link_nf = _stage("link", st.link_query(imports, slots))
-    sym_t = app(link_nf, KI)                        # L (K I) -> symtab
+    def _prog_nf() -> T:
+        if "program" not in _nfs:
+            _nfs["program"] = _stage("program", st.program_query(R))
+        return _nfs["program"]
+
+    def _link_nf() -> T:
+        if "link" not in _nfs:
+            _nfs["link"] = _stage("link", st.link_query(imports, slots))
+        return _nfs["link"]
 
     # stage 3 — .text bytes + localmap.  `decompose_asm` runs
     # assemble_staged (per-insn encodeOf terms at the data seam) when
@@ -195,10 +203,11 @@ def emit_image(R: seed.Realization,
                 return pickle.load(f)
 
         t0 = time.time()
-        items = _ck("program.items", lambda: st.decode_program(prog_nf),
+        items = _ck("program.items",
+                    lambda: st.decode_program(_prog_nf()),
                     _dump, _load)
         ib, db, syms = _ck("link.sections",
-                           lambda: st.decode_link(link_nf),
+                           lambda: st.decode_link(_link_nf()),
                            _dump, _load)
         text, _loc = _ck("text.bin", lambda: assemble_staged(
             items, syms, text_base, runs.get("assemble*", run),
@@ -209,9 +218,25 @@ def emit_image(R: seed.Realization,
                   f"({time.time()-t0:.0f}s)", flush=True)
         text_t = st.bytelist_term(text)
         idata_t, datab_t = st.bytelist_term(ib), st.bytelist_term(db)
+        if decompose_pack:
+            t0 = time.time()
+            img = _ck("image.bin",
+                      lambda: pack_staged(
+                          text, ib, db, R.stack_reserve,
+                          runs.get("pack*", run), verbose=verbose),
+                      lambda p, v: open(p, "wb").write(v),
+                      lambda p: open(p, "rb").read())
+            report.append(("pack*", -1, -1))
+            if verbose:
+                print(f"    pack*: decomposed {len(img)}B "
+                      f"({time.time()-t0:.0f}s)", flush=True)
+            return img, report
     else:
+        link_nf = _link_nf()
         asm_nf = _stage("assemble",
-                        st.assemble_query_t(prog_nf, sym_t, text_base))
+                        st.assemble_query_t(_prog_nf(),
+                                            app(link_nf, KI),
+                                            text_base))
         text_t = st._l0_nf(app(asm_nf, KK), 500_000)
         idata_t = app(app(link_nf, KK), KK)
         datab_t = app(app(link_nf, KK), KI)
@@ -321,6 +346,99 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     return bytes(out), loc
 
 
+def pack_staged(text: bytes, idata: bytes, datab: bytes,
+                stackres: int,
+                run: Callable[[T], Tuple[T, int, int]],
+                verbose: bool = False) -> bytes:
+    """pack2Of decomposed at chunk granularity — mirrors _pack_body's
+    chunk list exactly.  Every derived chunk (bytes4 size fields, the
+    u64 stack-reserve, zerofills, padlists) is a small `run`-ed term
+    reduction over the same vocabulary constants; the byte join is
+    the seam (identical to what pack2Of's JOIN computes — the oracle
+    gate `python_pack` verifies byte-exact)."""
+    import struct
+    _c: dict = {}
+
+    def K_(name: str):
+        if name not in _c:
+            _c[name] = bracket(parse(getattr(st, name)))
+        return _c[name]
+
+    def b4(v: int) -> T:
+        return st.bytelist_term(v.to_bytes(4, "little"))
+
+    def r1(q: T) -> T:
+        return run(q)[0]
+
+    def dec(t: T) -> bytes:
+        return st._decode_bytecells(t)
+
+    # the lets — ALIGN/B4ADD/U64/PADLIST/ZEROFILL as standalone
+    # reductions over bytes4/Church numerals (tiny terms; section
+    # contents never enter).  lt/li/ld are NOT re-folded through
+    # LENB4: at the chunk seam the sections are serialized bytes and
+    # their length is boundary metadata — the same discipline as
+    # assemble_staged's pos/loc bookkeeping.  (LENB4-as-term measured
+    # OOM-class: ~16GB LO live set / 72GB naive-exe arena on the
+    # 2696-cell win64 text — a sequential fold has no cones to
+    # develop and nothing to share.)
+    lt = r1(b4(len(text)))
+    li = r1(b4(len(idata)))
+    ld = r1(b4(len(datab)))
+    traw = r1(st._appn(K_("_ALIGN512"), lt))
+    iraw = r1(st._appn(K_("_ALIGN512"), li))
+    draw = r1(st._appn(K_("_ALIGN512"), ld))
+    iptr = r1(st._appn(K_("_B4ADD"), b4(0x200), traw))
+    dptr = r1(st._appn(K_("_B4ADD"), iptr, iraw))
+    iddr = r1(st._appn(K_("_B4ADD"), iraw, draw))
+    img = r1(st._appn(K_("_ALIGN4096"),
+                      st._appn(K_("_B4ADD"), b4(0x3000), ld)))
+    u64 = r1(st._appn(K_("_U64"), b4(stackres)))
+
+    def zf(n: int) -> bytes:
+        return dec(r1(st._appn(K_("_ZEROFILL"), st.church(n))))
+
+    def pad(len4: T) -> bytes:
+        return dec(r1(st._appn(K_("_PADLIST"), len4)))
+
+    sizes = {"lt": lt, "li": li, "ld": ld, "traw": traw,
+             "iraw": iraw, "draw": draw, "iptr": iptr,
+             "dptr": dptr, "iddr": iddr, "img": img}
+    sects = {"text": text, "idata": idata, "datab": datab}
+    z12 = zf(12)
+    chunks = [
+        b"MZ", zf(58), struct.pack("<I", 0x40), b"PE\x00\x00",
+        struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x22),
+        struct.pack("<HBB", 0x20B, 0, 0),
+        dec(traw), dec(iddr), struct.pack("<I", 0),
+        struct.pack("<I", 0x1000), struct.pack("<I", 0x1000),
+        struct.pack("<Q", 0x140000000),
+        struct.pack("<II", 0x1000, 0x200),
+        struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0),
+        struct.pack("<I", 0), dec(img),
+        struct.pack("<II", 0x200, 0),
+        struct.pack("<HH", 3, 0x8100),
+        dec(u64),
+        struct.pack("<QQQ", 0x1000, 0x100000, 0x1000),
+        struct.pack("<II", 0, 16), struct.pack("<II", 0, 0),
+        struct.pack("<I", 0x2000), dec(li),
+        zf(14 * 8),
+        b".text\x00\x00\x00", dec(lt),
+        struct.pack("<I", 0x1000), dec(traw),
+        struct.pack("<I", 0x200), z12,
+        struct.pack("<I", 0x60000020),
+        b".idata\x00\x00", dec(li),
+        struct.pack("<I", 0x2000), dec(iraw), dec(iptr), z12,
+        struct.pack("<I", 0x40000040),
+        b".data\x00\x00\x00", dec(ld),
+        struct.pack("<I", 0x3000), dec(draw), dec(dptr), z12,
+        struct.pack("<I", 0xC0000040),
+        zf(0x200 - 448),
+        text, pad(lt), idata, pad(li), datab, pad(ld),
+    ]
+    return b"".join(chunks)
+
+
 def emit_native(name: str = "native.x86_64.pe",
                 R: Optional[seed.Realization] = None) -> bytes:
     """The record-driven emit — the oracle this file gates against."""
@@ -330,7 +448,8 @@ def emit_native(name: str = "native.x86_64.pe",
 
 def emit_mini_image(run: Callable[[T], Tuple[T, int, int]],
                     stage_runs: Optional[dict] = None,
-                    decompose_asm: bool = False
+                    decompose_asm: bool = False,
+                    decompose_pack: bool = False
                     ) -> Tuple[bytes, List[tuple]]:
     """The staged chain at mini scale (ASM_LINK frag list + one
     import/slot) — small enough for the native/C exes to compute:
@@ -357,6 +476,12 @@ def emit_mini_image(run: Callable[[T], Tuple[T, int, int]],
             st.fraglist_term(st.ASM_LINK), sym_t, base))
         report.append(("assemble", s, n))
         text_t = st._l0_nf(app(asm_nf, KK), 500_000)
+    if decompose_pack:
+        tb = text if decompose_asm else st._decode_bytecells(text_t)
+        ib, db, _s2 = st.decode_link(link_nf)
+        img = pack_staged(tb, ib, db, sr, runs.get("pack*", run))
+        report.append(("pack*", -1, -1))
+        return img, report
     img_nf, s, n = runs.get("pack", run)(st.pack2_query_t(
         text_t, app(app(link_nf, KK), KK),
         app(app(link_nf, KK), KI), sr))
@@ -374,10 +499,12 @@ def _mini_oracle() -> bytes:
 def main() -> int:
     ok = True
 
-    # mini chain on graph.lo — the fast regression leg
+    # mini chain on graph.lo — the fast regression leg (decomposed:
+    # the same stage seams the win64 legs exercise)
     t0 = time.time()
     want_mini = _mini_oracle()
-    got, report = emit_mini_image(_graph_run)
+    got, report = emit_mini_image(_graph_run, decompose_asm=True,
+                                  decompose_pack=True)
     good = got == want_mini
     ok = ok and good
     print(f"{'OK ' if good else 'FAIL'} mini on graph.lo: "
@@ -401,7 +528,7 @@ def main() -> int:
                 seed._exe_for(seed.Realization(fuel=2_000_000))
                 if tag == "pe" else exe)
             got, report = emit_mini_image(
-                _graph_run, decompose_asm=True,
+                _graph_run, decompose_asm=True, decompose_pack=True,
                 stage_runs={"link": runner, "assemble*": runner})
             good = got == want_mini
             ok = ok and good
@@ -412,10 +539,10 @@ def main() -> int:
 
     if "--win64" in sys.argv[1:]:
         # pack's live set is image-construction-sized on LO (the JOIN
-        # spine holds all section intermediates) — cd+compact develops
-        # the disjoint chunks per round instead.  Same NF, round
-        # counts instead of step counts.
-        sr = {"pack": _graph_cd_run}
+        # spine holds all section intermediates); decomposed chunks are
+        # small enough for the default LO runner.  cd+compact is the
+        # monolithic alternative ("pack": _graph_cd_run).
+        sr = {}
         if "--insns-on-exe" in sys.argv[1:]:
             # the emitted host computes the per-insn encodes of its own
             # image — self-hosting through the stage seam, not just
@@ -429,6 +556,7 @@ def main() -> int:
             wd = os.path.join(_HOST, "emit_work", tag)
             os.makedirs(wd, exist_ok=True)
             got, report = emit_image(R, decompose_asm=True,
+                                     decompose_pack=True,
                                      stage_runs=sr, workdir=wd)
             good = got == want
             ok = ok and good
