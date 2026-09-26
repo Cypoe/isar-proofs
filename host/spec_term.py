@@ -1880,6 +1880,13 @@ def assemble_query(prog: T, symbols: Dict[str, int], base: int) -> T:
                  bytelist_term(base.to_bytes(4, "little")))
 
 
+def assemble_query_t(prog: T, symtab: T, base: int) -> T:
+    """`assembleOf` with program and symtab already terms — the staged
+    seam: prog is programOf's NF, symtab a linkOf-NF projection."""
+    return _appn(_ASSEMBLE, prog, symtab,
+                 bytelist_term(base.to_bytes(4, "little")))
+
+
 def decode_assemble(nf: T):
     """NF pair(bytes, localmap) -> (bytes, {name: rva})."""
     if nf.k == K.NORM:
@@ -2246,6 +2253,14 @@ def pack2_query(text: bytes, idata: bytes, datab: bytes,
     """`pack2Of text idata datab stackres` — pack over linked sections."""
     return _appn(bracket(parse(pack2_src())), bytelist_term(text),
                  bytelist_term(idata), bytelist_term(datab),
+                 bytelist_term(stackres.to_bytes(4, "little")))
+
+
+def pack2_query_t(text: T, idata: T, datab: T, stackres: int) -> T:
+    """`pack2Of` with all section inputs already terms — the staged
+    seam: text is an assembleOf-NF projection, idata/datab linkOf
+    projections."""
+    return _appn(bracket(parse(pack2_src())), text, idata, datab,
                  bytelist_term(stackres.to_bytes(4, "little")))
 
 

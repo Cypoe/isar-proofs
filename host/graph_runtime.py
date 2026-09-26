@@ -520,7 +520,8 @@ class Graph:
     def step_basis(self, i: int) -> Optional[int]:
         return self.step(i)
 
-    def reduce(self, i: int, fuel: int = 100_000) -> Tuple[int, int]:
+    def reduce(self, i: int, fuel: int = 100_000,
+               compact_every: int = 0) -> Tuple[int, int]:
         fwd = self.fwd
         cur = self.repr(i) if fwd[i] >= 0 else i
         steps = 0
@@ -532,6 +533,12 @@ class Graph:
                 nxt = self.repr(nxt)
             cur = nxt
             steps += 1
+            if compact_every and steps % compact_every == 0:
+                # between steps _pending is empty — the compact safety
+                # precondition.  Drops _step_memo: cached redirects are
+                # recomputed, semantically transparent (decision 030).
+                cur = self.compact(cur)
+                fwd = self.fwd
         return cur, steps
 
     def reduce_lo(self, i: int, fuel: int = 100_000) -> Tuple[int, int]:
