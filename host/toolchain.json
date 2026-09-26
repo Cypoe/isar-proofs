@@ -30,8 +30,9 @@
       "record": "X86_64_LINUX_LO", "path": "runtime",
       "note": "syscall ABI, no kernel32 IAT"},
     "x86_64.uefi.lo": {"note": "UEFI boot services ABI"},
-    "c.hosted.lo": {"path": "runtime",
-      "note": "C reducer kernel (routines_c) — the second host; not yet realized"}
+    "c.hosted.lo": {"module": "routines_c", "record": "C_HOSTED_LO",
+      "path": "runtime",
+      "note": "C reducer kernel — the second host (IStepBasis, hosted)"}
   },
   "targets": {
     "pe64": {"module": "target_pe64", "record": "PE64"},
@@ -106,7 +107,7 @@
      "note": "spec only, no parser"},
     {"name": "native.c", "dialect": "bytecode.postfix", "isa": "c",
      "routines": "c.hosted.lo", "target": "c", "path": "runtime",
-     "note": "C reducer kernel via system cc — the second host (routines declared)"}
+     "note": "C reducer kernel via system cc — the second host"}
   ],
   "strategy_axes": {
     "order":   {"lo": "realized", "cd": "realized"},

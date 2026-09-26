@@ -19,7 +19,7 @@
 | routines | x86_64.win64.cd | routines_x86_64_win64_cd.X86_64_WIN64_CD | realized | Lean ParStep / host reduce_cd contract |
 | routines | x86_64.linux.lo | routines_x86_64_linux_lo.X86_64_LINUX_LO | realized | syscall ABI, no kernel32 IAT |
 | routines | x86_64.uefi.lo | — | declared | UEFI boot services ABI |
-| routines | c.hosted.lo | — | declared | C reducer kernel (routines_c) — the second host; not yet realized |
+| routines | c.hosted.lo | routines_c.C_HOSTED_LO | realized | C reducer kernel — the second host (IStepBasis, hosted) |
 | target | pe64 | target_pe64.PE64 | realized |  |
 | target | elf64 | target_elf64.ELF64 | realized | ELF64 container writer |
 | target | macho64 | — | declared | Mach-O 64 container writer |
@@ -50,7 +50,7 @@
 | pe64.uefi | bytecode.postfix | x86_64 | x86_64.uefi.lo | pe64.uefi | runtime | declared |
 | lambda.bracket | lambda.bracket | x86_64 | x86_64.win64.lo | pe64 | runtime | declared |
 | phi.rel | phi.rel | x86_64 | x86_64.win64.lo | pe64 | runtime | declared |
-| native.c | bytecode.postfix | c | c.hosted.lo | c | runtime | declared |
+| native.c | bytecode.postfix | c | c.hosted.lo | c | runtime | realized |
 
 ## Strategy axes
 
