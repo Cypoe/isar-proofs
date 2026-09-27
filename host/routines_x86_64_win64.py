@@ -38,6 +38,24 @@ DATA_SLOTS: Tuple[Tuple[str, int], ...] = (
     ("nalloc", 8), ("ds", 8), ("scratch", 64),
 )
 
+# packed-IR batch front end (ADR-005): extra .data slots.
+# irbuf/irlen/irtotal = input blob; irnodes/irnroots = header counts;
+# irroots = root-ptr table; irarena = reserved heap base; irj/irsteps = batch state.
+DATA_SLOTS_IR: Tuple[Tuple[str, int], ...] = DATA_SLOTS + (
+    ("irbuf", 8), ("irlen", 8), ("irtotal", 8), ("irnodes", 8),
+    ("irnroots", 8), ("irroots", 8), ("irarena", 8), ("irj", 8),
+    ("irsteps", 8),
+)
+
+# packed-IR constants — pinned by docs/adr/0005; keep in sync with
+# spec_term.IR_MAGIC / IR_VERSION / IR_VAR.
+IR_MAGIC = 0x30524950                # "PIR0"
+IR_VERSION = 1
+MEM_RESERVE = 0x2000                 # VirtualAlloc MEM_RESERVE
+MEM_COMMIT = 0x1000                  # VirtualAlloc MEM_COMMIT
+MEM_DECOMMIT = 0x4000                # VirtualFree MEM_DECOMMIT
+IR_DS_AREA = 1 << 12                 # depack-region tail reserved for build_ds
+
 VA_COMMIT_RESERVE = 0x3000
 PAGE_RW = 4
 STK_TAG = 7   # native-internal parse-stack cons cell tag (never a term node;
@@ -604,6 +622,380 @@ def r_build_ds(R: Realization, ctx: Ctx) -> Program:
     ]
 
 
+# ======================================================================
+# PACKED-IR BATCH FRONT END (ADR-005)
+#
+# stdin carries one IR stream: header(magic,ver,n_nodes,n_roots) +
+# u32 root indices + 9B node records (postorder, children before parents).
+# The depack region (nodes*24 + roots*8 + ds area) is its own VirtualAlloc
+# and NEVER resets — node i's cell lives at base+i*24, so index resolution
+# is address arithmetic and one forward pass suffices.  The reduction heap
+# is a single reserved arena committed ahead in chunks; each root starts
+# by decommitting the used span (physical pages freed, VA retained) and
+# ends by writing one NF line to stdout.
+# ======================================================================
+
+def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
+    """_start (IR): handles, granule buffer for the header read (r12),
+    reserved commit-ahead heap arena (rbx=bump, rbp=committed end)."""
+    iat = ctx["iat"]
+    return [
+        LBL("_start"),
+        I("sub_r64_imm", "rsp", 0x28),
+        I("mov_r32_imm32", "ecx", -10), I("call_mrip", iat("GetStdHandle")),
+        I("mov_rip_r64", ("p", "hin"), "rax"),
+        I("mov_r32_imm32", "ecx", -11), I("call_mrip", iat("GetStdHandle")),
+        I("mov_rip_r64", ("p", "hout"), "rax"),
+        I("mov_r32_imm32", "ecx", -12), I("call_mrip", iat("GetStdHandle")),
+        I("mov_rip_r64", ("p", "herr"), "rax"),
+        # granule buffer for the header peek + oversize probe
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r32_imm32", "edx", R.read_buf_bytes),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_r64", "r12", "rax"),
+        # heap: one reserved region; rbx=rbp=base means "nothing committed"
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_imm", "rdx", R.ir_arena_bytes),
+        I("mov_r32_imm32", "r8d", MEM_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "irarena"), "rax"),
+        I("mov_r64_r64", "rbx", "rax"),
+        I("mov_r64_r64", "rbp", "rax"),
+    ]
+
+
+def r_ir_read(R: Realization, ctx: Ctx) -> Program:
+    """ir_read: granule 1 yields the header; n_nodes/n_roots size the blob
+    exactly -> VirtualAlloc -> copy granule -> stream the rest straight in.
+    Truncated, oversized, or bad-header input -> exit3."""
+    iat = ctx["iat"]
+    return [
+        LBL("ir_read"),
+        I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("mov_r64_r64", "rdx", "r12"),
+        I("mov_r32_imm32", "r8d", R.read_buf_bytes),
+        I("lea_r64_rip", "r9", ("p", "nread")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("ReadFile")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "nread")),
+        I("cmp_r64_imm", "rax", 16), I("jl_rel32", ("l", "exit3")),
+        # header: magic u32 @0, ver u32 @4, n_nodes u32 @8, n_roots u32 @12
+        I("mov_r32_m32", "eax", ("m", "r12", 0)),
+        I("mov_r32_imm32", "ecx", IR_MAGIC), I("cmp_r64_r64", "rax", "rcx"),
+        I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r12", 4)),
+        I("cmp_r64_imm", "rax", IR_VERSION), I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r12", 8)),
+        I("cmp_r64_imm", "rax", 0x7FFFFFFF), I("jge_rel32", ("l", "exit3")),
+        I("mov_rip_r64", ("p", "irnodes"), "rax"),
+        I("mov_r32_m32", "ecx", ("m", "r12", 12)),
+        I("cmp_r64_imm", "rcx", 0x7FFFFFFF), I("jge_rel32", ("l", "exit3")),
+        I("mov_rip_r64", ("p", "irnroots"), "rcx"),
+        # total = 16 + 4*n_roots + 9*n_nodes  (blob alloc adds 8 slack for
+        # the qword copy tail)
+        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rax", 3),
+        I("add_r64_r64", "rax", "rdx"),
+        I("shl_r64_imm8", "rcx", 2),
+        I("add_r64_r64", "rax", "rcx"), I("add_r64_imm", "rax", 16),
+        I("mov_rip_r64", ("p", "irtotal"), "rax"),
+        I("lea_r64_m64", "rdx", ("m", "rax", 8)),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "irbuf"), "rax"),
+        # copy granule-1: qwords while rdx+8<=nread, then byte tail
+        I("mov_r64_rip", "rcx", ("p", "nread")),
+        I("mov_rip_r64", ("p", "irlen"), "rcx"),
+        I("xor_r32_r32", "edx", "edx"),
+        LBL("ir_cqw"),
+        I("lea_r64_m64", "rax", ("m", "rdx", 8)),
+        I("cmp_r64_r64", "rax", "rcx"), I("jbe_rel32", ("l", "ir_cqwb")),
+        I("jmp_rel32", ("l", "ir_ctail")),
+        LBL("ir_cqwb"),
+        I("lea_r64_m64", "rdi", ("m", "r12", 0)), I("add_r64_r64", "rdi", "rdx"),
+        I("mov_r64_m64", "rax", ("m", "rdi", 0)),
+        I("mov_r64_rip", "rdi", ("p", "irbuf")), I("add_r64_r64", "rdi", "rdx"),
+        I("mov_m64_r64", ("m", "rdi", 0), "rax"),
+        I("add_r64_imm", "rdx", 8), I("jmp_rel32", ("l", "ir_cqw")),
+        LBL("ir_ctail"),
+        I("cmp_r64_r64", "rdx", "rcx"), I("jge_rel32", ("l", "ir_floop")),
+        I("lea_r64_m64", "rdi", ("m", "r12", 0)), I("add_r64_r64", "rdi", "rdx"),
+        I("mov_r8_m8", "al", ("m", "rdi", 0)),
+        I("mov_r64_rip", "rdi", ("p", "irbuf")), I("add_r64_r64", "rdi", "rdx"),
+        I("mov_m8_r8", ("m", "rdi", 0), "al"),
+        I("inc_r64", "rdx"), I("jmp_rel32", ("l", "ir_ctail")),
+        # ---- stream the remainder straight into the blob ----
+        LBL("ir_floop"),
+        I("mov_r64_rip", "rax", ("p", "irlen")),
+        I("mov_r64_rip", "rcx", ("p", "irtotal")),
+        I("cmp_r64_r64", "rax", "rcx"), I("jge_rel32", ("l", "ir_fdone")),
+        I("mov_r64_rip", "rdx", ("p", "irbuf")), I("add_r64_r64", "rdx", "rax"),
+        I("mov_r64_r64", "r8", "rcx"), I("sub_r64_r64", "r8", "rax"),
+        I("cmp_r64_imm", "r8", R.read_buf_bytes),
+        I("jbe_rel32", ("l", "ir_fsz")),
+        I("mov_r32_imm32", "r8d", R.read_buf_bytes),
+        LBL("ir_fsz"),
+        I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("lea_r64_rip", "r9", ("p", "nread")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("ReadFile")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "nread")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rcx", ("p", "irlen")), I("add_r64_r64", "rcx", "rax"),
+        I("mov_rip_r64", ("p", "irlen"), "rcx"),
+        I("jmp_rel32", ("l", "ir_floop")),
+        LBL("ir_fdone"),
+        # exact-size contract + oversize probe (one byte past total -> junk)
+        I("mov_r64_rip", "rax", ("p", "irlen")),
+        I("mov_r64_rip", "rcx", ("p", "irtotal")),
+        I("cmp_r64_r64", "rax", "rcx"), I("jne_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("mov_r64_r64", "rdx", "r12"),
+        I("mov_r32_imm32", "r8d", 1),
+        I("lea_r64_rip", "r9", ("p", "nread")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("ReadFile")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_depack")),
+        I("mov_r64_rip", "rax", ("p", "nread")),
+        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "exit3")),
+    ]
+
+
+def _mul24() -> Program:
+    """rax = rax*24 (idx -> cell offset; no scaled-mem form in this ISA)."""
+    return [
+        I("shl_r64_imm8", "rax", 3), I("mov_r64_r64", "rdx", "rax"),
+        I("add_r64_r64", "rdx", "rdx"), I("add_r64_r64", "rax", "rdx"),
+    ]
+
+
+def r_ir_depack(R: Realization, ctx: Ctx) -> Program:
+    """ir_depack: depack region (nodes*24 + roots*8 [+ ds area]); one
+    forward pass over postorder records.  Default mode builds the shared
+    derived_s template into the region tail (survives arena resets) and
+    tag-3 cells copy its root triple; fuse_s keeps tag-3 a primitive leaf.
+    Tags >= 7 (STK/VAR/junk) and forward/out-of-range indices -> exit3."""
+    iat = ctx["iat"]
+    p: Program = [
+        LBL("ir_depack"),
+        # region size = 24*nn + 8*nr (+IR_DS_AREA in default mode)
+        I("mov_r64_rip", "rax", ("p", "irnodes")),
+    ] + _mul24() + [
+        I("mov_r64_rip", "rcx", ("p", "irnroots")), I("shl_r64_imm8", "rcx", 3),
+        I("add_r64_r64", "rax", "rcx"),
+    ]
+    if not R.fuse_s:
+        p += [I("add_r64_imm", "rax", IR_DS_AREA)]
+    p += [
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_r64", "rdx", "rax"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_r64", "r13", "rax"),              # region base
+        # roots table = base + 24*nn
+        I("mov_r64_rip", "rax", ("p", "irnodes")),
+    ] + _mul24() + [
+        I("add_r64_r64", "rax", "r13"),
+        I("mov_rip_r64", ("p", "irroots"), "rax"),
+    ]
+    if not R.fuse_s:
+        # build derived_s into the region tail: rbx/rbp temporarily swapped
+        # to the ds area so mkleaf/mkapp land in never-reset memory
+        p += [
+            I("mov_r64_rip", "rbx", ("p", "irroots")),
+            I("mov_r64_rip", "rax", ("p", "irnroots")),
+            I("shl_r64_imm8", "rax", 3), I("add_r64_r64", "rbx", "rax"),
+            I("lea_r64_m64", "rbp", ("m", "rbx", IR_DS_AREA)),
+            I("call_rel32", ("l", "build_ds")),
+            I("mov_r64_rip", "rbx", ("p", "irarena")),
+            I("mov_r64_r64", "rbp", "rbx"),
+            # build_ds uses r13/r14/r15 as scratch — recover the region
+            # base: r13 = [irroots] - 24*n_nodes
+            I("mov_r64_rip", "r13", ("p", "irroots")),
+            I("mov_r64_rip", "rax", ("p", "irnodes")),
+        ] + _mul24() + [
+            I("sub_r64_r64", "r13", "rax"),
+        ]
+    p += [
+        # source cursor: rsi = irbuf + 16 + 4*nr; cell cursor r14; i r15
+        I("mov_r64_rip", "rsi", ("p", "irbuf")), I("add_r64_imm", "rsi", 16),
+        I("mov_r64_rip", "rax", ("p", "irnroots")), I("shl_r64_imm8", "rax", 2),
+        I("add_r64_r64", "rsi", "rax"),
+        I("mov_r64_r64", "r14", "r13"), I("xor_r32_r32", "r15d", "r15d"),
+        LBL("ir_dloop"),
+        I("mov_r64_rip", "rax", ("p", "irnodes")),
+        I("cmp_r64_r64", "r15", "rax"), I("jge_rel32", ("l", "ir_ddone")),
+        I("movzx_r32_m8", "eax", ("m", "rsi", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_d_app")),
+        I("cmp_r64_imm", "rax", 7), I("jge_rel32", ("l", "exit3")),
+    ]
+    if not R.fuse_s:
+        p += [I("cmp_r64_imm", "rax", Tag.s), I("je_rel32", ("l", "ir_d_ds"))]
+    p += [
+        # leaf cell {tag,0,0}
+        LBL("ir_d_leaf"),
+        I("mov_m64_r64", ("m", "r14", 0), "rax"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_m64_r64", ("m", "r14", 8), "rcx"),
+        I("mov_m64_r64", ("m", "r14", 16), "rcx"),
+        I("jmp_rel32", ("l", "ir_d_st")),
+    ]
+    if not R.fuse_s:
+        p += [
+            # tag-3 cell := structural copy of the ds root (children alias
+            # the region-resident template — stable across arena resets)
+            LBL("ir_d_ds"),
+            I("mov_m64_imm32", ("m", "r14", 0), Tag.APP),
+            I("mov_r64_rip", "rax", ("p", "ds")),
+            I("mov_r64_m64", "rcx", ("m", "rax", 8)),
+            I("mov_m64_r64", ("m", "r14", 8), "rcx"),
+            I("mov_r64_m64", "rcx", ("m", "rax", 16)),
+            I("mov_m64_r64", ("m", "r14", 16), "rcx"),
+            I("jmp_rel32", ("l", "ir_d_st")),
+        ]
+    p += [
+        # app node: l idx @+1, r idx @+5 (postorder => idx < i)
+        LBL("ir_d_app"),
+        I("mov_r32_m32", "eax", ("m", "rsi", 1)),
+        I("cmp_r64_r64", "rax", "r15"), I("jge_rel32", ("l", "exit3")),
+    ] + _mul24() + [
+        I("add_r64_r64", "rax", "r13"),
+        I("mov_m64_r64", ("m", "r14", 8), "rax"),
+        I("mov_r32_m32", "eax", ("m", "rsi", 5)),
+        I("cmp_r64_r64", "rax", "r15"), I("jge_rel32", ("l", "exit3")),
+    ] + _mul24() + [
+        I("add_r64_r64", "rax", "r13"),
+        I("mov_m64_r64", ("m", "r14", 16), "rax"),
+        I("mov_m64_imm32", ("m", "r14", 0), Tag.APP),
+        LBL("ir_d_st"),
+        I("inc_r64", "r15"), I("add_r64_imm", "rsi", 9),
+        I("add_r64_imm", "r14", 24), I("jmp_rel32", ("l", "ir_dloop")),
+        LBL("ir_ddone"),
+        # depacked cells counted like parse's mk* allocations
+        I("mov_r64_rip", "rax", ("p", "nalloc")),
+        I("mov_r64_rip", "rcx", ("p", "irnodes")), I("add_r64_r64", "rax", "rcx"),
+        I("mov_rip_r64", ("p", "nalloc"), "rax"),
+        # roots: rsi back to roots base (hdr+16; file layout is
+        # header|root idx|nodes), rdi = [irroots]; j r15=0
+        I("mov_r64_rip", "rsi", ("p", "irbuf")), I("add_r64_imm", "rsi", 16),
+        I("mov_r64_rip", "rdi", ("p", "irroots")),
+        I("xor_r32_r32", "r15d", "r15d"),
+        LBL("ir_rtloop"),
+        I("mov_r64_rip", "rax", ("p", "irnroots")),
+        I("cmp_r64_r64", "r15", "rax"), I("jge_rel32", ("l", "ir_binit")),
+        I("mov_r32_m32", "eax", ("m", "rsi", 0)),
+        I("mov_r64_rip", "rcx", ("p", "irnodes")),
+        I("cmp_r64_r64", "rax", "rcx"), I("jge_rel32", ("l", "exit3")),
+    ] + _mul24() + [
+        I("add_r64_r64", "rax", "r13"),
+        I("mov_m64_r64", ("m", "rdi", 0), "rax"),
+        I("inc_r64", "r15"), I("add_r64_imm", "rsi", 4),
+        I("add_r64_imm", "rdi", 8), I("jmp_rel32", ("l", "ir_rtloop")),
+    ]
+    return p
+
+
+def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
+    """ir_binit/ir_bloop: per root — decommit used arena span, fresh fuel
+    (per-root fuel semantics), LO loop, one NF line on stdout.  irsteps
+    accumulates total steps; stats/alloc report the whole batch."""
+    iat = ctx["iat"]
+    p: Program = [
+        LBL("ir_binit"),
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "irj"), "rax"),
+        I("mov_rip_r64", ("p", "irsteps"), "rax"),
+        LBL("ir_bloop"),
+        I("mov_r64_rip", "rax", ("p", "irj")),
+        I("mov_r64_rip", "rcx", ("p", "irnroots")),
+        I("cmp_r64_r64", "rax", "rcx"), I("jge_rel32", ("l", "ir_bdone")),
+        # arena reset: decommit the used span (VA retained)
+        I("mov_r64_rip", "rcx", ("p", "irarena")),
+        I("cmp_r64_r64", "rbp", "rcx"), I("jbe_rel32", ("l", "ir_nofree")),
+        I("mov_r64_r64", "rdx", "rbp"), I("sub_r64_r64", "rdx", "rcx"),
+        I("mov_r32_imm32", "r8d", MEM_DECOMMIT),
+        I("call_mrip", iat("VirtualFree")),
+        LBL("ir_nofree"),
+        I("mov_r64_rip", "rbx", ("p", "irarena")),
+        I("mov_r64_r64", "rbp", "rbx"),
+        # r12 = roots[j]; r15 = this root's step counter
+        I("mov_r64_rip", "rax", ("p", "irj")), I("shl_r64_imm8", "rax", 3),
+        I("mov_r64_rip", "rcx", ("p", "irroots")), I("add_r64_r64", "rax", "rcx"),
+        I("mov_r64_m64", "r12", ("m", "rax", 0)),
+        I("xor_r32_r32", "r15d", "r15d"),
+        LBL("ir_rloop"),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_red_done")),
+        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
+    ]
+    if R.fuel is not None:
+        p += [I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2"))]
+    p += [
+        I("jmp_rel32", ("l", "ir_rloop")),
+        # ---- per-root NF line (same emit block as the token path) ----
+        LBL("ir_red_done"),
+        I("mov_r64_rip", "rax", ("p", "irsteps")),
+        I("add_r64_r64", "rax", "r15"),
+        I("mov_rip_r64", ("p", "irsteps"), "rax"),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
+        I("lea_r64_m64", "rdx", ("m", "rax", 0)), I("add_r64_r64", "rdx", "rdx"),
+        I("add_r64_imm", "rdx", 16),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_r64", "r14", "rax"),
+        I("mov_r64_r64", "rsi", "rax"),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "emit_nf")),
+        I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("mov_r64_r64", "rdx", "r14"),
+        I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "r14"),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        I("mov_r64_rip", "rax", ("p", "irj")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "irj"), "rax"),
+        I("jmp_rel32", ("l", "ir_bloop")),
+        LBL("ir_bdone"),
+        I("mov_r64_rip", "r15", ("p", "irsteps")),
+    ]
+    return p
+
+
+def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
+    """grow_heap (IR): commit-ahead inside the reserved arena —
+    VirtualAlloc(rbp, chunk, MEM_COMMIT, RW); rbp += chunk on success.
+    Also bounds the depack-region ds build (its rbp = region end)."""
+    iat = ctx["iat"]
+    return [
+        LBL("grow_heap"),
+        I("sub_r64_imm", "rsp", 0x28),
+        I("mov_r64_r64", "rcx", "rbp"),
+        I("mov_r64_imm", "rdx", R.chunk_bytes),
+        I("mov_r32_imm32", "r8d", MEM_COMMIT),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "grow_fail")),
+        I("mov_r64_imm", "rax", R.chunk_bytes), I("add_r64_r64", "rbp", "rax"),
+        I("add_r64_imm", "rsp", 0x28), I("ret"),
+        LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
+        I("call_mrip", iat("ExitProcess")),
+    ]
+
+
 # Ordered routine names = emission order.  "st_s" emits iff R.fuse_s,
 # "build_ds" iff not R.fuse_s (handled in program()).
 ROUTINES: Tuple[str, ...] = (
@@ -613,24 +1005,48 @@ ROUTINES: Tuple[str, ...] = (
     "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
 
+# IR variant: same reducer core, different front end — no token parser,
+# no parse stack (mkstk/mkstk unused); entry/read/depack/reduce replace
+# entry/parse/reduce.  "ir_reduce" is the batch loop.
+ROUTINES_IR: Tuple[str, ...] = (
+    "ir_entry", "ir_read", "ir_depack", "ir_reduce", "stats", "exits",
+    "grow_heap_ir", "mkleaf", "mkapp",
+    "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
+    "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
+)
+
+IMPORTS_IR: Tuple[str, ...] = IMPORTS + ("VirtualFree",)
+
 _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
     name[2:]: fn for name, fn in list(globals().items())
     if name.startswith("r_")
 }
 
 
-def program(R: Realization) -> Program:
-    if R.order != "lo":
-        raise NotRealized(f"order={R.order!r} declared but not realized")
+def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
     ctx = _ctx()
     p: Program = []
-    for name in ROUTINES:
+    for name in names:
         if name == "st_s" and not R.fuse_s:
             continue
         if name == "build_ds" and R.fuse_s:
             continue
         p += _BUILDERS[name](R, ctx)
     return p
+
+
+def program(R: Realization) -> Program:
+    if R.order != "lo":
+        raise NotRealized(f"order={R.order!r} declared but not realized")
+    return _emit(R, ROUTINES)
+
+
+def program_ir(R: Realization) -> Program:
+    """Packed-IR batch kernel: depack replaces the token parse; the
+    reducer core is shared verbatim."""
+    if R.order != "lo":
+        raise NotRealized(f"order={R.order!r} declared but not realized")
+    return _emit(R, ROUTINES_IR)
 
 
 @dataclass(frozen=True)
@@ -657,19 +1073,33 @@ X86_64_WIN64 = Routines(
 )
 
 
-def _dummy_symbols() -> Dict[str, int]:
-    syms = {f"iat_{n}": 0x2000 + i * 8 for i, n in enumerate(IMPORTS)}
+X86_64_WIN64_IR = Routines(
+    name="x86_64.win64.ir",
+    isa="x86_64",
+    abi="win64",
+    orders=("lo",),
+    routines=ROUTINES_IR,
+    program=program_ir,
+    imports=IMPORTS_IR,
+    data_slots=DATA_SLOTS_IR,
+)
+
+
+def _dummy_symbols(slots: Tuple[Tuple[str, int], ...] = DATA_SLOTS,
+                   imports: Tuple[str, ...] = IMPORTS) -> Dict[str, int]:
+    syms = {f"iat_{n}": 0x2000 + i * 8 for i, n in enumerate(imports)}
     off = 0x3000
-    for name, sz in DATA_SLOTS:
+    for name, sz in slots:
         syms[name] = off
         off += sz
     return syms
 
 
-def _routine_sizes(R: Realization) -> Dict[str, int]:
+def _routine_sizes(R: Realization, names: Tuple[str, ...] = ROUTINES
+                   ) -> Dict[str, int]:
     ctx = _ctx()
     out: Dict[str, int] = {}
-    for name in ROUTINES:
+    for name in names:
         if name == "st_s" and not R.fuse_s:
             continue
         if name == "build_ds" and R.fuse_s:
@@ -690,6 +1120,16 @@ def main() -> int:
         has_ds, has_s = "build_ds" in labels, "st_s" in labels
         if has_ds != (not R.fuse_s) or has_s != R.fuse_s:
             print(f"  FAIL {tag}: build_ds={has_ds} st_s={has_s}")
+            ok = False
+        prog = program_ir(R)
+        text, labels = _isa.assemble(
+            prog, _dummy_symbols(DATA_SLOTS_IR, IMPORTS_IR))
+        sizes = _routine_sizes(R, ROUTINES_IR)
+        print(f"  {tag}.ir: {len(text)}B text, routines "
+              + " ".join(f"{n}={s}" for n, s in sizes.items()))
+        has_ds, has_s = "build_ds" in labels, "st_s" in labels
+        if has_ds != (not R.fuse_s) or has_s != R.fuse_s:
+            print(f"  FAIL {tag}.ir: build_ds={has_ds} st_s={has_s}")
             ok = False
     print(f"{'OK' if ok else 'FAIL'} routines_x86_64_win64")
     return 0 if ok else 1

@@ -126,6 +126,37 @@ def make_exe_runner(exe: str, timeout: int = 3600
     return run
 
 
+def make_ir_runner(exe: str, timeout: int = 3600
+                   ) -> Callable[[T], Tuple[T, int, int]]:
+    """Packed-IR exe runner (ADR-005): the exe seam carries the term
+    graph itself — `pack_ir(*queries)` in, N NF token-lines out, one
+    process per batch.  `.batch` is the bulk entry; `run` keeps the
+    single-query runner contract."""
+    def batch(qs: List[T]) -> Tuple[List[T], int, int]:
+        blob = st.pack_ir(*qs)
+        cp = subprocess.run([exe], input=blob,
+                            capture_output=True, timeout=timeout)
+        m = re.search(rb"steps=(\d+)", cp.stderr)
+        if cp.returncode != 0:
+            raise RuntimeError(
+                f"exe ir batch failed rc={cp.returncode} "
+                f"stderr={cp.stderr!r} "
+                f"(2=fuel exhausted — never a silent success)")
+        lines = cp.stdout.decode().splitlines()
+        if len(lines) != len(qs):
+            raise RuntimeError(
+                f"ir batch: {len(lines)} NF lines for {len(qs)} roots "
+                f"stderr={cp.stderr!r}")
+        return ([seed._parse_native_out(ln) for ln in lines],
+                int(m.group(1)) if m else -1, -1)
+
+    def run(t: T) -> Tuple[T, int, int]:
+        nfs, s, n = batch([t])
+        return nfs[0], s, n
+    run.batch = batch
+    return run
+
+
 def emit_image(R: seed.Realization,
                imports=rts.IMPORTS, slots=rts.DATA_SLOTS,
                text_base: int = target_pe64.TEXT_RVA,
@@ -302,47 +333,85 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     Returns (text_bytes, local_map) matching isa.assemble / assembleOf.
     """
     sym_t = st.symtab_term(syms)
-    cache: dict = {}
     loc: dict = {}
     prep: List[tuple] = []          # (item, off, len, zero_bytes)
-    pos = 0
     t0 = time.time()
     n_red = 0
+    batch = getattr(run, "batch", None)
     # pass 1 — ZRESV encodes (resv never consulted: rel fields emit
     # four zero cells — byte COUNT is correct) give per-insn lengths;
     # labels record base+pos exactly as assembleOf's label_case.
+    # With a packed-IR runner the uniques go out as ONE batch stream —
+    # the multi-root header is the work unit (fork-pool / CUDA shape).
+    uniq: dict = {}
     for it in items:
-        if it[0] == "label":
-            loc[it[1]] = base + pos
-            continue
-        b = cache.get(it)
-        if b is None:
-            b = st.decode_encode(run(st.encode_query(it))[0])
-            cache[it] = b
+        if it[0] != "label" and it not in uniq:
+            uniq[it] = None
+    uq = list(uniq)
+    if batch is not None:
+        nfs, _, _ = batch([st.encode_query(it) for it in uq])
+        for it, nf in zip(uq, nfs):
+            uniq[it] = st.decode_encode(nf)
+        n_red += len(uq)
+        if verbose:
+            print(f"      pass1: {n_red} encodes (1 batch) "
+                  f"({time.time()-t0:.0f}s)", flush=True)
+    else:
+        for it in uq:
+            uniq[it] = st.decode_encode(run(st.encode_query(it))[0])
             n_red += 1
             if verbose and n_red % 50 == 0:
                 print(f"      pass1: {n_red} encodes "
                       f"({time.time()-t0:.0f}s)", flush=True)
+    pos = 0
+    for it in items:
+        if it[0] == "label":
+            loc[it[1]] = base + pos
+            continue
+        b = uniq[it]
         prep.append((it, pos, len(b), b))
         pos += len(b)
     # pass 2 — rel-sensitive items re-encode with the real resolver
     # (same term as assembleOf's insn_emit calls); all others reuse
     # the pass-1 bytes — their resv is never applied.
     loc_t = st.symtab_term(loc)
-    out = bytearray()
-    for it, off, ln, b0 in prep:
-        if _is_rel_item(it):
-            e4 = st.bytelist_term(
-                (base + off + ln).to_bytes(4, "little"))
-            resv_t = st._appn(_resvmk(), sym_t, loc_t, e4)
-            b = st.decode_encode(run(st.encode_query(it, resv_t))[0])
-            n_red += 1
-            if verbose and n_red % 50 == 0:
-                print(f"      pass2: {n_red} encodes "
+    rel = [(i, it) for i, (it, off, ln, b0) in enumerate(prep)
+           if _is_rel_item(it)]
+    rel_bytes: List[bytes] = []
+    if rel:
+        if batch is not None:
+            nfs, _, _ = batch([
+                st.encode_query(it, st._appn(
+                    _resvmk(), sym_t, loc_t,
+                    st.bytelist_term(
+                        (base + prep[i][1] + prep[i][2]).to_bytes(
+                            4, "little"))))
+                for i, it in rel])
+            rel_bytes = [st.decode_encode(nf) for nf in nfs]
+            n_red += len(rel)
+            if verbose:
+                print(f"      pass2: {n_red} encodes (1 batch) "
                       f"({time.time()-t0:.0f}s)", flush=True)
-            out += b
         else:
-            out += b0
+            for i, it in rel:
+                e4 = st.bytelist_term(
+                    (base + prep[i][1] + prep[i][2]).to_bytes(
+                        4, "little"))
+                resv_t = st._appn(_resvmk(), sym_t, loc_t, e4)
+                rel_bytes.append(
+                    st.decode_encode(
+                        run(st.encode_query(it, resv_t))[0]))
+                n_red += 1
+                if verbose and n_red % 50 == 0:
+                    print(f"      pass2: {n_red} encodes "
+                          f"({time.time()-t0:.0f}s)", flush=True)
+    out = bytearray()
+    for i, (it, off, ln, b0) in enumerate(prep):
+        out += b0
+    for (i, _it), b in zip(rel, rel_bytes):
+        # splice pass-2 bytes back over the pass-1 placeholder positions
+        off_i = prep[i][1]
+        out[off_i:off_i + prep[i][2]] = b
     return bytes(out), loc
 
 
@@ -546,9 +615,15 @@ def main() -> int:
         if "--insns-on-exe" in sys.argv[1:]:
             # the emitted host computes the per-insn encodes of its own
             # image — self-hosting through the stage seam, not just
-            # around it.
-            sr["assemble*"] = make_exe_runner(
-                seed._exe_for(seed.Realization(fuel=2_000_000)))
+            # around it.  --ir: the seam carries packed IR batches
+            # (ADR-005) instead of per-encode token marshal.
+            if "--ir" in sys.argv[1:]:
+                sr["assemble*"] = make_ir_runner(seed._exe_for(
+                    seed.Realization(fuel=2_000_000),
+                    tc=toolchain.by_name("native.x86_64.pe.ir")))
+            else:
+                sr["assemble*"] = make_exe_runner(
+                    seed._exe_for(seed.Realization(fuel=2_000_000)))
         for tag, R in (("default", seed.Realization()),
                        ("fuse_s", seed.Realization(fuse_s=True))):
             t0 = time.time()

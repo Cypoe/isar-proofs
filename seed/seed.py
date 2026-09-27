@@ -322,6 +322,8 @@ class Realization:
     read_buf_bytes: int = 64 << 10    # read granule, NOT a cap: input streams
                                     # through one buffer of this size, parsed
                                     # chunk-by-chunk; total input is unbounded
+    ir_arena_bytes: int = 2 << 30     # IR mode: single reserved heap region,
+                                    # commit-ahead + DECOMMIT reset per root
     io: tuple = ("stdin", "stdout")
     abi: str = "win64"
     fuse_s: bool = False              # False: `S` token instantiates derived_s

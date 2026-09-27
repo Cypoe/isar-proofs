@@ -89,6 +89,7 @@ INSN: Tuple[Tuple[str, str, int, int, object, object], ...] = (
     ("mov_r64_rip",   "mov",   0x8B,   1, None,  "p"),
     ("mov_rip_r64",   "mov",   0x89,   1, None,  "p"),
     ("movzx_r32_m8",  "movzx", 0x0FB6, 0, None,  0),
+    ("mov_r32_m32",   "mov",   0x8B,   0, None,  0),
     ("mov_r8_m8",     "mov",   0x8A,   0, None,  0),
     ("mov_m8_r8",     "mov",   0x88,   0, None,  0),
     ("mov_m8_imm8",   "mov",   0xC6,   0, 0,     "i1m"),
@@ -234,6 +235,7 @@ ENCS: Dict[str, Tuple] = {
     "mov_rip_r64":   (((), (("rex", "w", "R1"), ("op",),
                            ("modrm", "reg1", "rip"), ("rel", 0))),),
     "movzx_r32_m8":  (((), _R64_MEM),),
+    "mov_r32_m32":   (((), _R64_MEM),),
     "mov_r8_m8":     (((), _R64_MEM),),
     "mov_m8_r8":     (((), _MEM_R64),),
     "mov_m8_imm8":   (((), (("rex", "B0"), ("op",),
@@ -416,6 +418,8 @@ def render_fasm(insn: Insn, resolve=None) -> str:
         return f"mov {ops[0]}, {ops[1]}"
     if form == "movzx_r32_m8":
         return f"movzx {ops[0]}, byte {mem(ops[1])}"
+    if form == "mov_r32_m32":
+        return f"mov {ops[0]}, dword {mem(ops[1])}"
     if form == "mov_r8_m8":
         return f"mov {ops[0]}, byte {mem(ops[1])}"
     if form == "mov_m8_r8":
@@ -464,6 +468,8 @@ def assemble(program: Program, symbols: Dict[str, int],
     pos = 0
     for item in program:
         if item[0] == "label":
+            if item[1] in local:
+                raise ValueError(f"duplicate label {item[1]!r}")
             local[item[1]] = base + pos
             offs.append(pos)
         else:
@@ -526,6 +532,8 @@ ROW_SAMPLES: List[Tuple[str, Insn]] = [
     ("mov_rip_r64", ("mov_rip_r64", ("p", 0x1234), "rax")),
     ("movzx_r32_m8", ("movzx_r32_m8", "eax", ("m", "rsi", 0))),
     ("movzx_r32_m8", ("movzx_r32_m8", "ecx", ("m", "rsi", 3))),
+    ("mov_r32_m32", ("mov_r32_m32", "eax", ("m", "rsi", 1))),
+    ("mov_r32_m32", ("mov_r32_m32", "r8d", ("m", "rsi", 4))),
     ("mov_r8_m8", ("mov_r8_m8", "al", ("m", "r9", 0))),
     ("mov_r8_m8", ("mov_r8_m8", "sil", ("m", "rax", 0))),   # byte-reg REX
     ("mov_r8_m8", ("mov_r8_m8", "r8b", ("m", "rax", 0))),   # REX.R

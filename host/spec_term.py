@@ -222,6 +222,8 @@ if _SEED not in sys.path:
 sys.setrecursionlimit(1_000_000)   # cons-spine depth ~ #nibble cells
 
 from reduce import T, K, I, KK, B, S, C, D, app  # noqa: E402
+from quotient_map import QuotientMap             # noqa: E402
+from observation_regime import encoding_regime   # noqa: E402
 from lambda_dialect import (parse, bracket, bracket_abstract0,  # noqa: E402
                             NAbs, NApp, NComb, NExpr, NVar)
 from graph_runtime import reduce_tree_lo, reduce_tree_cd     # noqa: E402
@@ -2747,6 +2749,19 @@ def unpack_ir(data: bytes) -> List[T]:
         else:
             cells.append(_IR_LEAF[tag])
     return [cells[i] for i in roots]
+
+
+def ir_map() -> QuotientMap:
+    """Dialect record `packed.ir`: bytes <-> T.  The map-level unit is
+    single-root (multi-root batching is a transport concern); decode
+    observes a term by canonical re-pack — equal NFs have equal bytes."""
+    enc = lambda b: unpack_ir(b)[0]
+    return QuotientMap(
+        name="packed.ir",
+        encode=enc,
+        decode=pack_ir,
+        regime=encoding_regime(enc, name="packed.ir.operEq"),
+    )
 
 
 # ---------------------------------------------------------------------------

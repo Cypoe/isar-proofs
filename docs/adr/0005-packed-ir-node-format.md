@@ -74,3 +74,36 @@ node  n_nodes × 9B:  u8 tag | u32 l | u32 r
 - Scope honesty: VAR markers serialize for probe/test completeness but are
   not stage payloads; `STK` (kernel-internal stack cells) is never on the
   wire — it is a runtime structure, not a term node.
+
+## Native realization (first consumer)
+
+`routines_x86_64_win64.py` carries a second routine record
+`X86_64_WIN64_IR` (toolchain `native.x86_64.pe.ir`, dialect `packed.ir`)
+— the same reducer core (`step`/`st_*`/`emit_nf`/`stats`) behind a
+different front end:
+
+- **Stream**: stdin `.ir` → header parse → exact-size blob → depack
+  (single forward pass; node *i*'s cell at `base + i*24`, so index
+  resolution is address arithmetic). Bad magic/version/tags ≥ 7
+  (`STK`, `VAR`, junk)/forward-or-out-of-range indices/truncated or
+  oversized streams → `exit3`.
+- **Batch**: `n_roots` queries per invocation, **one NF line per root**
+  on stdout, `steps=`/`alloc=` report batch totals on stderr.
+- **Fuel**: per-root (each root gets the full fuel budget; exhaustion
+  mid-batch is still `exit2`, never a silent success).
+- **Per-root arena reset**: the heap is one reserved region committed
+  ahead in chunks (`VirtualAlloc MEM_COMMIT` at the committed end);
+  between roots `VirtualFree MEM_DECOMMIT` releases physical pages and
+  retains the VA — batch peak memory = the *largest single query*, not
+  the sum. The depack region (nodes + roots + derived_s template) is a
+  separate VirtualAlloc that never resets; tag-3 cells depack to a
+  structural copy of the `ds` root (children aliased), matching the
+  token path's `S` view expansion. `alloc=` counts depacked cells like
+  parse's `mk*` allocations.
+- **Honest bound**: a single root exceeding `ir_arena_bytes` (2 GiB
+  reserve) is an `exit4` OOM — the same class of bound the token path's
+  per-process arena already imposed, now explicit.
+
+Verified: `S K K I → I` in 10 steps / 59 allocs — identical numbers to
+the token kernel (view-expansion parity); batch of 4 → `K I I B`,
+`steps=12 alloc=62`; malformed streams → `rc=3`.
