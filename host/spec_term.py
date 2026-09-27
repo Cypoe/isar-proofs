@@ -2517,6 +2517,51 @@ def _l0_nf(t: T, cap: int = 100_000) -> T:
     raise ValueError("decode probe did not terminate")
 
 
+# derived-S view: the default kernel expands tag-3 `S` leaves to this
+# fixed tree at parse/depack time (same shape build_ds materializes in
+# the emitted arena).  NFs under fuse_s keep `S` leaves, so consumers
+# written against the default basis view need this quotient map.
+_DS_TERM: Optional[T] = None
+
+
+def _ds_term() -> T:
+    global _DS_TERM
+    if _DS_TERM is None:
+        # exact tree build_ds materializes in the emitted kernel —
+        # `(B (B W)) ((C ((B B) ((B B) C))) I)`; verified against the
+        # token exe's `S` expansion and `ds v0 v1 v2 -> (v0 v2)(v1 v2)`.
+        bb = app(B, B)
+        _DS_TERM = app(app(B, app(B, D)),
+                       app(app(C, app(bb, app(bb, C))), I))
+    return _DS_TERM
+
+
+def lower_s_view(t: T, cap: int = 500_000) -> T:
+    """fuse_s NF -> default-basis NF.
+
+    Replaces every `S` leaf by the derived-S tree and renormalizes.
+    The expansion is observationally identical (sβ is exactly the
+    macro the derived tree computes) and confluence makes the result
+    the unique NF — i.e. the very term the default kernel would have
+    emitted for the same query.
+    """
+    memo: Dict[int, T] = {}
+
+    def rec(u: T) -> T:
+        if u.k == K.S:
+            return _ds_term()
+        if u.k != K.APP:
+            return u
+        i = id(u)
+        hit = memo.get(i)
+        if hit is not None:
+            return hit
+        memo[i] = v = app(rec(u.l), rec(u.r))
+        return v
+
+    return _l0_nf(rec(t), cap)
+
+
 def _cell_parts(cell: T) -> tuple:
     # NF of `_CONS h t` is the fixed compiled shape
     #   K (D ((B (C (D ((B (C I)) (K h))))) (K t)))

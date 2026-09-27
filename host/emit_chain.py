@@ -47,7 +47,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 _SEED = os.path.normpath(os.path.join(_HOST, "..", "seed"))
@@ -139,7 +139,8 @@ def _audit(msg: str) -> None:
 
 def make_ir_runner(exe: str, timeout: int = 3600,
                    workers: int = 1,
-                   cache_dir: Optional[str] = None
+                   cache_dir: Optional[str] = None,
+                   fuse_s: bool = False
                    ) -> Callable[[T], Tuple[T, int, int]]:
     """Packed-IR exe runner (ADR-005): the exe seam carries the term
     graph itself.  One `pack_ir_keyed` walk produces the canonical
@@ -158,7 +159,7 @@ def make_ir_runner(exe: str, timeout: int = 3600,
         os.makedirs(cache_dir, exist_ok=True)
 
     def _one_batch(blob: bytes, expect: int
-                   ) -> Tuple[List[str], int, float]:
+                   ) -> Tuple[List[str], int, float, Dict[str, int]]:
         t0 = time.time()
         cp = subprocess.run([exe], input=blob,
                             capture_output=True, timeout=timeout)
@@ -174,7 +175,13 @@ def make_ir_runner(exe: str, timeout: int = 3600,
             raise RuntimeError(
                 f"ir batch: {len(lines)} NF lines for "
                 f"{expect} streams stderr={cp.stderr!r}")
-        return lines, int(m.group(1)) if m else -1, wall
+        rules: Dict[str, int] = {}
+        mr = re.search(rb"rules=([^\n]+)", cp.stderr)
+        if mr:  # audit-built kernel: per-rule histogram
+            for kv in mr.group(1).decode().split(","):
+                k, _, v = kv.partition(":")
+                rules[k] = int(v)
+        return lines, int(m.group(1)) if m else -1, wall, rules
 
     def batch(qs: List[T]) -> Tuple[List[T], int, int]:
         if not qs:
@@ -203,6 +210,7 @@ def make_ir_runner(exe: str, timeout: int = 3600,
         exe_s = 0.0
         pool_wall = 0.0
         wire = 0
+        rules: Dict[str, int] = {}
         if miss_at:
             # strided chunks — consecutive queries tend to cost alike,
             # so round-robin spreads heavy roots across workers
@@ -222,25 +230,36 @@ def make_ir_runner(exe: str, timeout: int = 3600,
                         _one_batch, blobs,
                         [len(c) for c in chunks_idx]))
             pool_wall = time.time() - t0
-            for c, (ls, s, w) in zip(chunks_idx, outs):
+            for c, (ls, s, w, rr) in zip(chunks_idx, outs):
                 exe_s += w
                 if s > 0:
                     steps += s
+                for k, v in rr.items():
+                    rules[k] = rules.get(k, 0) + v
                 for i, ln in zip(c, ls):
                     lines[i] = ln
                     if keys is not None:
                         with open(os.path.join(cache_dir, keys[i]),
                                   "w") as f:
                             f.write(ln)
+        rule_str = (" rules=" + ",".join(
+            f"{k}:{rules[k]}" for k in
+            ("I", "K", "W", "C", "B", "S", "L", "R") if rules.get(k))
+                   ) if rules else ""
         _audit(
             f"ir.batch roots={len(qs)} hits={hits} "
             f"misses={len(miss_at)} "
             f"workers={min(max(1, workers), max(1, len(miss_at)))} "
             f"pack_s={pack_s:.2f} wire={wire / 1e6:.2f}MB "
             f"exe_s={exe_s:.2f} pool_wall_s={pool_wall:.2f} "
-            f"steps={steps} wall_s={time.time() - t_all:.2f}")
-        return ([seed._parse_native_out(ln) for ln in lines],
-                steps, -1)
+            f"steps={steps} wall_s={time.time() - t_all:.2f}{rule_str}")
+        outs = [seed._parse_native_out(ln) for ln in lines]
+        if fuse_s:
+            # fuse_s NFs keep primitive-S leaves; lower to the
+            # default-basis view so downstream decoders see the same
+            # term shape either kernel emits (quotient map on the seam)
+            outs = [st.lower_s_view(nf) for nf in outs]
+        return outs, steps, -1
 
     def run(t: T) -> Tuple[T, int, int]:
         nfs, s, n = batch([t])
@@ -718,12 +737,18 @@ def main() -> int:
                     ir_runner = make_ir_runner(
                         seed._exe_for(
                             seed.Realization(fuel=2_000_000,
-                                             fuse_s=R.fuse_s),
+                                             fuse_s=R.fuse_s,
+                                             audit=_AUDIT),
                             tc=toolchain.by_name(
                                 "native.x86_64.pe.ir")),
                         workers=os.cpu_count() or 4,
+                        # NF cache is keyed by term content but the VALUE
+                        # is realization-dependent (fuse_s reduces tag-3
+                        # primitively) — namespace per realization or
+                        # cross-leg hits serve the wrong NF
                         cache_dir=os.path.join(_HOST, "emit_work",
-                                               "nf_cache"))
+                                               "nf_cache", tag),
+                        fuse_s=R.fuse_s)
                     sr["assemble*"] = ir_runner
                     sr["pack*"] = ir_runner
                 else:

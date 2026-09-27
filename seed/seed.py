@@ -329,6 +329,10 @@ class Realization:
     fuse_s: bool = False              # False: `S` token instantiates derived_s
                                       # (IStepBasis only); True: primitive sβ
     reclaim: str = "none"             # GC slot — explicitly none this wave
+    audit: bool = False               # emit per-rule counters; stats gains a
+                                      # `rules=` histogram (redex classes +
+                                      # congruence descents) — the instrumented
+                                      # baseline for evaluator audits
 
 
 DEFAULT = Realization()
