@@ -333,6 +333,9 @@ class Realization:
                                       # `rules=` histogram (redex classes +
                                       # congruence descents) — the instrumented
                                       # baseline for evaluator audits
+    payload: bytes = b""              # residual programs: packed-IR blob baked
+                                      # into .data as initialized bytes —
+                                      # the specialized program's static part
 
 
 DEFAULT = Realization()
@@ -361,9 +364,13 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
             f"abi={R.abi!r} not realized by routines {rts.name!r}")
     prog = rts.program(program, R) if tc.path == "native" \
         else rts.program(R)
+    # data_slots may be a static tuple or a callable on R — the
+    # residual-application record sizes its payload slot per realization
+    slots = rts.data_slots(R) if callable(rts.data_slots) \
+        else rts.data_slots
     text, labels = isa.assemble(
-        prog, tgt.symbols(rts.imports, rts.data_slots), base=tgt.text_base)
-    return tgt.pack(text, labels, rts.imports, rts.data_slots, R)
+        prog, tgt.symbols(rts.imports, slots), base=tgt.text_base)
+    return tgt.pack(text, labels, rts.imports, slots, R)
 
 
 def build_pe(R: Realization = DEFAULT) -> bytes:

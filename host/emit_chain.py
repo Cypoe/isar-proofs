@@ -268,6 +268,33 @@ def make_ir_runner(exe: str, timeout: int = 3600,
     return run
 
 
+def ir_exe_for(R: seed.Realization) -> str:
+    """The emitted packed-IR kernel for realization R (cached per
+    process by seed._exe_for)."""
+    return seed._exe_for(R, toolchain.by_name("native.x86_64.pe.ir"))
+
+
+def reduce_batch_native(terms: List[T], R: Optional[seed.Realization] = None,
+                        workers: Optional[int] = None,
+                        cache_dir: Optional[str] = None
+                        ) -> Tuple[List[T], int]:
+    """seed.reduce_native vectorized over the packed-IR seam: one keyed
+    pack -> Merkle cache + pool of emitted exes -> NF lines -> surface
+    view.  Same NF contract as _reduce_via (quote_surface applied; the
+    fuse_s runner lowers primitive-S NFs first), but the marshal is the
+    batch stream — Python stays out of the evaluation loop."""
+    import tower
+    R = R or seed.DEFAULT
+    workers = workers if workers is not None else (os.cpu_count() or 4)
+    if cache_dir is None:
+        tag = "fuse_s" if R.fuse_s else "default"
+        cache_dir = os.path.join(_HOST, "emit_work", "nf_cache", tag)
+    run = make_ir_runner(ir_exe_for(R), workers=workers,
+                         cache_dir=cache_dir, fuse_s=R.fuse_s)
+    nfs, steps, _ = run.batch(list(terms))
+    return [tower.quote_surface(nf) for nf in nfs], steps
+
+
 def emit_image(R: seed.Realization,
                imports=rts.IMPORTS, slots=rts.DATA_SLOTS,
                text_base: int = target_pe64.TEXT_RVA,

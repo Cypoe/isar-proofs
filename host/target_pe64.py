@@ -61,13 +61,18 @@ def build_idata(imports: Sequence[str]) -> Tuple[bytes, Dict[str, int]]:
     return body, syms
 
 
-def build_data(data_slots: Sequence[Tuple[str, int]]) -> Tuple[bytes, Dict[str, int]]:
+def build_data(data_slots) -> Tuple[bytes, Dict[str, int]]:
+    """Slots are (name, size) zero-fill or (name, size, init) with
+    initialized content — residual programs bake their packed-IR
+    payload into .data this way."""
     syms: Dict[str, int] = {}
-    off = 0
-    for name, sz in data_slots:
-        syms[name] = DATA_RVA + off
-        off += sz
-    return b"\x00" * off, syms
+    out = bytearray()
+    for slot in data_slots:
+        name, sz = slot[0], slot[1]
+        syms[name] = DATA_RVA + len(out)
+        init = slot[2] if len(slot) > 2 else b""
+        out += init[:sz] + b"\x00" * (sz - len(init))
+    return bytes(out), syms
 
 
 def _align(v: int, a: int) -> int:

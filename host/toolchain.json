@@ -39,7 +39,10 @@
       "note": "C reducer kernel — the second host (IStepBasis, hosted)"},
     "x86_64.win64.ir": {"module": "routines_x86_64_win64", "record": "X86_64_WIN64_IR",
       "path": "runtime",
-      "note": "packed-IR batch front end (depack replaces token parse; per-root arena reset)"}
+      "note": "packed-IR batch front end (depack replaces token parse; per-root arena reset)"},
+    "x86_64.win64.res": {"module": "routines_x86_64_win64", "record": "X86_64_WIN64_RES",
+      "path": "runtime",
+      "note": "residual-application kernel: packed residual in .data, per-root graft + reduce"}
   },
   "targets": {
     "pe64": {"module": "target_pe64", "record": "PE64"},
@@ -90,6 +93,14 @@
      "isa": "x86_64.fasmg", "routines": "x86_64.win64.ir",
      "target": "fasmg.pe64", "path": "runtime",
      "note": "packed-IR batch kernel as fasmg source -> PE via fasmg.exe"},
+    {"name": "native.x86_64.res", "dialect": "packed.ir",
+     "isa": "x86_64", "routines": "x86_64.win64.res",
+     "target": "pe64", "path": "runtime",
+     "note": "Futamura-2 residual program: packed residual in .data + graft loop"},
+    {"name": "native.x86_64.res.fasmg", "dialect": "packed.ir",
+     "isa": "x86_64.fasmg", "routines": "x86_64.win64.res",
+     "target": "fasmg.pe64", "path": "runtime",
+     "note": "residual program as fasmg source -> PE via fasmg.exe"},
     {"name": "xdu.x86_64.pe", "dialect": "xdu.json", "isa": "x86_64",
      "routines": "x86_64.win64.xdu", "target": "pe64", "path": "native",
      "note": "nibble transducer plex -> PE exe (W3)"},

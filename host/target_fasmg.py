@@ -47,7 +47,7 @@ def symbols(imports: Sequence[str],
     """Nominal symbol table — fasmg resolves iat_/data labels itself.
     Imports become `iat_<name>` labels on the IAT slots (the kernel's
     ("p", "iat_X") operands read through them)."""
-    out = {name: name for name, _sz in data_slots}
+    out = {s[0]: s[0] for s in data_slots}
     out.update({f"iat_{nm}": f"iat_{nm}" for nm in imports})
     return out
 
@@ -77,8 +77,16 @@ def pack(text: bytes, labels: Dict[str, int], imports: Sequence[str],
     body = text.decode()
     lines.append(body.rstrip("\n"))
     lines += ["", "section '.data' data readable writeable", ""]
-    for name, sz in data_slots:
-        lines.append(f"  {name}: rb {sz}")
+    for slot in data_slots:
+        name, sz = slot[0], slot[1]
+        init = slot[2] if len(slot) > 2 else b""
+        if init:
+            lines.append(f"  {name}: db "
+                         + ",".join(f"0x{b:02x}" for b in init[:sz]))
+            if len(init) < sz:
+                lines.append(f"    rb {sz - len(init)}")
+        else:
+            lines.append(f"  {name}: rb {sz}")
     lines += ["", "section '.idata' import data readable writeable", ""]
     # canonical pe.inc import shape (examples/x86/win64.asm):
     # descriptor (OriginalFirstThunk=0, FirstThunk=iat) | zero

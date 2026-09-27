@@ -209,6 +209,7 @@ import json
 import os
 import struct
 import sys
+import time
 from types import SimpleNamespace
 from typing import Dict, List, Optional
 
@@ -3303,14 +3304,23 @@ def main() -> int:
         print("FAIL residual has no dynamic input — "
               "the specializer evaluated instead of specializing")
 
-    for name in NAMES + [NEGATIVE]:
+    # residual instances are independent roots — the native witness
+    # runs them as ONE packed-IR batch (pool + Merkle cache), the same
+    # seam the emit stages ride; per-name steps collapse to the batch
+    # total (the kernel reports aggregates, not per-root tallies).
+    names = NAMES + [NEGATIVE]
+    insts = [mix.specialize(residual, {1: str_term(name)})
+             for name in names]
+    import emit_chain
+    nfs_nat, steps_nat = emit_chain.reduce_batch_native(insts)
+    print(f"  native batch: {len(insts)} instances, {steps_nat} steps")
+
+    for name, inst, nf_nat in zip(names, insts, nfs_nat):
         expected = python_walk(name)
-        inst = mix.specialize(residual, {1: str_term(name)})
 
         nf_lo, steps_lo, _ = reduce_tree_lo(inst, LO_FUEL)
         val_lo = decode_result(nf_lo)
 
-        nf_nat, steps_nat, _ = seed.reduce_native(inst, 0)
         val_nat = decode_result(nf_nat)
 
         nf_cd, rounds_cd, _ = reduce_tree_cd(inst, CD_FUEL)
@@ -3318,14 +3328,52 @@ def main() -> int:
 
         line = (f"{'OK ' if val_lo == expected else 'FAIL'} "
                 f"{name:18s} residual -> {val_lo!r} "
-                f"[lo {steps_lo} | native {steps_nat} | "
-                f"cd {rounds_cd} rounds]")
+                f"[lo {steps_lo} | cd {rounds_cd} rounds]")
         good = (val_lo == expected and val_nat == expected
                 and val_cd == expected and nf_lo == nf_nat)
         if not good:
             nfail += 1
             line = "FAIL " + line[4:] + f"  expected {expected!r}"
         print(line)
+
+    # G9b-emit: the residual as a self-contained host artifact — the
+    # Futamura-2 object.  pack_ir(residual) rides .data of a
+    # native.x86_64.res image; the kernel depacks it once at entry
+    # (VAR records -> hole cells), then per arg root grafts a fresh
+    # copy (hole -> arg) and reduces.  Wire stays the IR stream —
+    # one packed arg per root.  Cross-check: exe(arg) must equal the
+    # pooled instantiation residual[1 := arg] byte-for-byte.
+    # ------------------------------------------------------------------
+    if live:
+        import subprocess
+        import toolchain as _tc
+        import tower as _tw
+        res_pe = seed.emit(
+            seed.Realization(payload=pack_ir(residual)),
+            tc=_tc.by_name("native.x86_64.res"))
+        exe_dir = os.path.join(_HOST, "emit_work")
+        os.makedirs(exe_dir, exist_ok=True)
+        res_exe = os.path.join(exe_dir, "res_g9b.exe")
+        with open(res_exe, "wb") as f:
+            f.write(res_pe)
+        arg_blob = pack_ir(*[str_term(n) for n in names])
+        t0 = time.time()
+        cp = subprocess.run([res_exe], input=arg_blob, capture_output=True,
+                            timeout=600)
+        res_lines = cp.stdout.decode().splitlines()
+        print(f"  res exe: rc={cp.returncode} {len(res_lines)} lines "
+              f"in {time.time()-t0:.1f}s  {cp.stderr.decode().strip()}")
+        if cp.returncode != 0 or len(res_lines) != len(names):
+            nfail += 1
+            print("FAIL residual exe contract "
+                  f"(rc={cp.returncode}, lines={len(res_lines)})")
+        else:
+            for name, ln, nf_nat in zip(names, res_lines, nfs_nat):
+                nf_res = _tw.quote_surface(seed._parse_native_out(ln))
+                if nf_res != nf_nat:
+                    nfail += 1
+                    print(f"FAIL {name}: residual exe NF != pooled "
+                          "instantiation NF")
 
     # ------------------------------------------------------------------
     # ADR-005 packed IR: roundtrip + canonicality.  Sharing survives
@@ -3369,4 +3417,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # emit_chain (used by the residual-instance batch) imports this
+    # module — alias __main__ so that lazy import finds the SAME module
+    # object (dataclass __eq__ is class-identity; a second spec_term
+    # instance would make equal terms compare False across the seam)
+    sys.modules["spec_term"] = sys.modules[__name__]
     raise SystemExit(main())

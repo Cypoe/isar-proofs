@@ -1018,6 +1018,273 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
     return p
 
 
+# residual-application front end: the residual term's packed-IR blob is
+# initialized .data (R.payload); VAR records (tag 0xFE — legal inside
+# the payload, still rejected on the wire) depack to hole cells which
+# the per-root graft substitutes with the current argument root.
+IR_HOLE = 8   # hole-cell tag in the residual's depacked cells
+
+
+def r_res_entry(R: Realization, ctx: Ctx) -> Program:
+    """res_entry: ir_entry + permanent region for the residual's
+    depacked cells + res_depack.  Layout of the residual payload:
+    pack_ir(residual) verbatim — 16B header, root table, 9B records."""
+    iat = ctx["iat"]
+    return r_ir_entry(R, ctx) + [
+        # permanent cell region for the residual: 24*nres bytes
+        I("lea_r64_rip", "rax", ("p", "resblob")),
+        I("mov_r32_m32", "ecx", ("m", "rax", 0)),
+        I("mov_r32_imm32", "edx", IR_MAGIC), I("cmp_r64_r64", "rcx", "rdx"),
+        I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "ecx", ("m", "rax", 8)),
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rax", "rcx"),
+    ] + _mul24() + [
+        I("mov_r64_r64", "rdx", "rax"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "rescells"), "rax"),
+        I("call_rel32", ("l", "res_depack")),
+        # residual depack cells count like stream depack cells
+        I("mov_r64_rip", "rax", ("p", "nalloc")),
+        I("mov_r64_rip", "rcx", ("p", "resn")), I("add_r64_r64", "rax", "rcx"),
+        I("mov_rip_r64", ("p", "nalloc"), "rax"),
+        I("jmp_rel32", ("l", "ir_sloop")),
+    ]
+
+
+def r_res_depack(R: Realization, ctx: Ctx) -> Program:
+    """res_depack: resblob (.data) -> pointer cells in the permanent
+    region.  Same record walk as ir_depack; tag 0xFE -> hole cell
+    {IR_HOLE, varidx, 0}; tag 3 -> ds-root copy (default build).
+    Roots table first entry -> resroot (cell INDEX, graft resolves it
+    per argument)."""
+    p: Program = [
+        LBL("res_depack"),
+        I("lea_r64_rip", "rsi", ("p", "resblob")),
+        I("mov_r32_m32", "eax", ("m", "rsi", 4)),
+        I("cmp_r64_imm", "rax", IR_VERSION), I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "rsi", 12)),
+        I("cmp_r64_imm", "rax", 1), I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "rsi", 8)),
+        I("mov_rip_r64", ("p", "resn"), "rax"),
+        I("mov_r32_m32", "eax", ("m", "rsi", 16)),
+        I("mov_rip_r64", ("p", "resroot"), "rax"),
+        I("add_r64_imm", "rsi", 20),                # records @ +16+4*nr
+        I("mov_r64_rip", "rdi", ("p", "rescells")),
+        I("mov_r64_r64", "r14", "rdi"),
+        I("xor_r32_r32", "r15d", "r15d"),
+        LBL("res_dloop"),
+        I("mov_r64_rip", "rax", ("p", "resn")),
+        I("cmp_r64_r64", "r15", "rax"), I("jge_rel32", ("l", "res_ddone")),
+        I("movzx_r32_m8", "eax", ("m", "rsi", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "res_d_app")),
+        I("cmp_r64_imm", "rax", 0xFE), I("je_rel32", ("l", "res_d_hole")),
+        I("cmp_r64_imm", "rax", 7), I("jge_rel32", ("l", "exit3")),
+    ]
+    if not R.fuse_s:
+        p += [I("cmp_r64_imm", "rax", Tag.s), I("je_rel32", ("l", "res_d_ds"))]
+    p += [
+        LBL("res_d_leaf"),
+        I("mov_m64_r64", ("m", "r14", 0), "rax"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_m64_r64", ("m", "r14", 8), "rcx"),
+        I("mov_m64_r64", ("m", "r14", 16), "rcx"),
+        I("jmp_rel32", ("l", "res_d_st")),
+        LBL("res_d_hole"),
+        I("mov_m64_imm32", ("m", "r14", 0), IR_HOLE),
+        I("mov_r32_m32", "eax", ("m", "rsi", 1)),
+        I("mov_m64_r64", ("m", "r14", 8), "rax"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_m64_r64", ("m", "r14", 16), "rcx"),
+        I("jmp_rel32", ("l", "res_d_st")),
+    ]
+    if not R.fuse_s:
+        p += [
+            LBL("res_d_ds"),
+            I("mov_m64_imm32", ("m", "r14", 0), Tag.APP),
+            I("mov_r64_rip", "rax", ("p", "ds")),
+            I("mov_r64_m64", "rcx", ("m", "rax", 8)),
+            I("mov_m64_r64", ("m", "r14", 8), "rcx"),
+            I("mov_r64_m64", "rcx", ("m", "rax", 16)),
+            I("mov_m64_r64", ("m", "r14", 16), "rcx"),
+            I("jmp_rel32", ("l", "res_d_st")),
+        ]
+    p += [
+        LBL("res_d_app"),
+        I("mov_r32_m32", "eax", ("m", "rsi", 1)),
+        I("cmp_r64_r64", "rax", "r15"), I("jge_rel32", ("l", "exit3")),
+    ] + _mul24() + [
+        I("add_r64_r64", "rax", "rdi"),
+        I("mov_m64_r64", ("m", "r14", 8), "rax"),
+        I("mov_r32_m32", "eax", ("m", "rsi", 5)),
+        I("cmp_r64_r64", "rax", "r15"), I("jge_rel32", ("l", "exit3")),
+    ] + _mul24() + [
+        I("add_r64_r64", "rax", "rdi"),
+        I("mov_m64_r64", ("m", "r14", 16), "rax"),
+        I("mov_m64_imm32", ("m", "r14", 0), Tag.APP),
+        LBL("res_d_st"),
+        I("inc_r64", "r15"), I("add_r64_imm", "rsi", 9),
+        I("add_r64_imm", "r14", 24), I("jmp_rel32", ("l", "res_dloop")),
+        LBL("res_ddone"), I("ret"),
+    ]
+    return p
+
+
+def r_res_reduce(R: Realization, ctx: Ctx) -> Program:
+    """ir_binit/ir_bloop with graft: per arg root — arena reset, then a
+    postorder copy of the residual into the arena where hole children
+    remap to the arg pointer (residual[1 := arg] at cell level), reduce
+    the grafted root, one NF line.  remap(child): if child is inside
+    [rescells, rescells+24*resn) it is a residual cell — hole -> arg,
+    else rescells + delta (contiguous mkapp run); outside stays as-is
+    (ds template pointers)."""
+    iat = ctx["iat"]
+    p: Program = [
+        LBL("ir_binit"),
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "irj"), "rax"),
+        LBL("ir_bloop"),
+        I("mov_r64_rip", "rax", ("p", "irj")),
+        I("mov_r64_rip", "rcx", ("p", "irnroots")),
+        I("cmp_r64_r64", "rax", "rcx"), I("jge_rel32", ("l", "ir_bdone")),
+        # arena reset: decommit the used span (VA retained)
+        I("mov_r64_rip", "rcx", ("p", "irarena")),
+        I("cmp_r64_r64", "rbp", "rcx"), I("jbe_rel32", ("l", "ir_nofree")),
+        I("mov_r64_r64", "rdx", "rbp"), I("sub_r64_r64", "rdx", "rcx"),
+        I("mov_r32_imm32", "r8d", MEM_DECOMMIT),
+        I("call_mrip", iat("VirtualFree")),
+        I("mov_r64_rip", "rbp", ("p", "irarena")),
+        I("mov_r64_r64", "rbx", "rbp"),
+        LBL("ir_nofree"),
+        I("mov_r64_rip", "rbx", ("p", "irarena")),
+        I("mov_r64_r64", "rbp", "rbx"),
+        # ---- graft: residual[hole := arg] into fresh arena cells ----
+        # r14 = arg root ptr; r13 = rescell cursor; r15 = src end
+        I("mov_r64_rip", "rax", ("p", "irj")), I("shl_r64_imm8", "rax", 3),
+        I("mov_r64_rip", "rcx", ("p", "irroots")), I("add_r64_r64", "rax", "rcx"),
+        I("mov_r64_m64", "r14", ("m", "rax", 0)),
+        I("mov_rip_r64", ("p", "resarg"), "r14"),
+        I("mov_r64_rip", "r13", ("p", "rescells")),
+        I("mov_r64_rip", "rax", ("p", "resn")),
+    ] + _mul24() + [
+        I("mov_r64_r64", "r15", "r13"), I("add_r64_r64", "r15", "rax"),
+        # resdelta = rbx - rescells (out_base - src_base)
+        I("mov_r64_r64", "rax", "rbx"), I("sub_r64_r64", "rax", "r13"),
+        I("mov_rip_r64", ("p", "resdelta"), "rax"),
+        LBL("res_gloop"),
+        I("cmp_r64_r64", "r13", "r15"), I("jge_rel32", ("l", "res_gdone")),
+        I("mov_r64_m64", "rax", ("m", "r13", 0)),
+        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "res_gleaf")),
+        # APP cell: remap l (then r) — child in residual range + hole ->
+        # arg; in range non-hole -> +delta; outside -> verbatim
+        I("mov_r64_m64", "rax", ("m", "r13", 8)),
+        I("call_rel32", ("l", "res_remap")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("mov_r64_m64", "rax", ("m", "r13", 16)),
+        I("call_rel32", ("l", "res_remap")),
+        I("mov_r64_r64", "rsi", "rax"),
+        I("jmp_rel32", ("l", "res_gmk")),
+        LBL("res_gleaf"),          # leaf or hole: copy tag verbatim
+        I("mov_r64_r64", "rdx", "rax"),
+        I("call_rel32", ("l", "mkleaf")),
+        I("jmp_rel32", ("l", "res_gstep")),
+        LBL("res_gmk"),
+        I("call_rel32", ("l", "mkapp")),
+        LBL("res_gstep"),
+        I("add_r64_imm", "r13", 24), I("jmp_rel32", ("l", "res_gloop")),
+        LBL("res_gdone"),
+        # graft root: out_base + 24*resroot — out_base = rbx0 =
+        # rescells + resdelta; if the root record is a hole the whole
+        # residual IS the argument
+        I("mov_r64_rip", "rax", ("p", "resroot")),
+    ] + _mul24() + [
+        I("mov_r64_r64", "rcx", "rax"),
+        I("mov_r64_rip", "rax", ("p", "rescells")), I("add_r64_r64", "rcx", "rax"),
+        # r12 = out twin of the residual root cell; flags-free before cmp
+        I("mov_r64_rip", "r12", ("p", "resdelta")), I("add_r64_r64", "r12", "rcx"),
+        I("mov_r64_m64", "rax", ("m", "rcx", 0)),
+        I("cmp_r64_imm", "rax", IR_HOLE),
+        I("jne_rel32", ("l", "res_rooted")),
+        I("mov_r64_rip", "r12", ("p", "resarg")),
+        LBL("res_rooted"),
+        I("xor_r32_r32", "r15d", "r15d"),
+        LBL("ir_rloop"),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_red_done")),
+        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
+    ]
+    if R.fuel is not None:
+        p += [I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2"))]
+    p += [
+        I("jmp_rel32", ("l", "ir_rloop")),
+        LBL("ir_red_done"),
+        I("mov_r64_rip", "rax", ("p", "irsteps")),
+        I("add_r64_r64", "rax", "r15"),
+        I("mov_rip_r64", ("p", "irsteps"), "rax"),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
+        I("lea_r64_m64", "rdx", ("m", "rax", 0)), I("add_r64_r64", "rdx", "rdx"),
+        I("add_r64_imm", "rdx", 16),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_r64", "r14", "rax"),
+        I("mov_r64_r64", "rsi", "rax"),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "emit_nf")),
+        I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("mov_r64_r64", "rdx", "r14"),
+        I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "r14"),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        I("mov_r64_rip", "rax", ("p", "irj")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "irj"), "rax"),
+        I("jmp_rel32", ("l", "ir_bloop")),
+        LBL("ir_bdone"),
+        I("mov_r64_rip", "rcx", ("p", "irbuf")),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "r8d", MEM_RELEASE),
+        I("call_mrip", iat("VirtualFree")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_rip", "rax", ("p", "irnstreams")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "irnstreams"), "rax"),
+        I("jmp_rel32", ("l", "ir_sloop")),
+        LBL("ir_sdone"),
+        I("mov_r64_rip", "rax", ("p", "irnstreams")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "r15", ("p", "irsteps")),
+    ]
+    return p
+
+
+def r_res_remap(R: Realization, ctx: Ctx) -> Program:
+    """res_remap(rax=child ptr) -> rax: hole cell -> resarg; ptr inside
+    the residual block -> +resdelta (the mkapp twin); else verbatim."""
+    return [
+        LBL("res_remap"),
+        I("mov_r64_rip", "rcx", ("p", "rescells")),
+        I("mov_r64_r64", "rdx", "rax"), I("sub_r64_r64", "rdx", "rcx"),
+        I("mov_r64_rip", "r8", ("p", "resn")),
+        I("shl_r64_imm8", "r8", 3), I("mov_r64_r64", "r9", "r8"),
+        I("add_r64_r64", "r9", "r9"), I("add_r64_r64", "r8", "r9"),  # 24*resn
+        I("cmp_r64_r64", "rdx", "r8"), I("jb_rel32", ("l", "res_rm_in")),
+        I("ret"),                                       # outside -> verbatim
+        LBL("res_rm_in"),
+        I("cmp_m64_imm", ("m", "rax", 0), IR_HOLE),
+        I("jne_rel32", ("l", "res_rm_delta")),
+        I("mov_r64_rip", "rax", ("p", "resarg")), I("ret"),
+        LBL("res_rm_delta"),
+        I("mov_r64_rip", "rdx", ("p", "resdelta")), I("add_r64_r64", "rax", "rdx"),
+        I("ret"),
+    ]
+
+
 def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
     """grow_heap (IR): commit-ahead inside the reserved arena —
     VirtualAlloc(rbp, chunk, MEM_COMMIT, RW); rbp += chunk on success.
@@ -1128,13 +1395,56 @@ X86_64_WIN64_IR = Routines(
 )
 
 
-def _dummy_symbols(slots: Tuple[Tuple[str, int], ...] = DATA_SLOTS,
+# Residual-application variant (Futamura-2 artifact): R.payload holds
+# pack_ir(residual) — the specialized program's static part — baked
+# into .data.  At entry the kernel depacks it once into a permanent
+# region (VAR records become hole cells); each input stream supplies
+# dynamic arguments as packed-IR roots, grafted into the residual's
+# holes before reduction.  Same wire contract as the IR kernel.
+ROUTINES_RES: Tuple[str, ...] = (
+    "res_entry", "ir_read", "ir_depack", "res_reduce", "stats", "exits",
+    "grow_heap_ir", "mkleaf", "mkapp", "res_depack", "res_remap",
+    "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
+    "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
+)
+
+
+def data_slots_res(R: Realization) -> tuple:
+    if not R.payload:
+        raise NotRealized("residual realization requires R.payload")
+    return DATA_SLOTS_IR + (
+        ("resblob", len(R.payload), R.payload),
+        ("rescells", 8), ("resn", 8), ("resroot", 8),
+        ("resarg", 8), ("resdelta", 8),
+    )
+
+
+def program_res(R: Realization) -> Program:
+    """Residual-application kernel: graft loop + shared reducer core."""
+    if R.order != "lo":
+        raise NotRealized(f"order={R.order!r} declared but not realized")
+    return _emit(R, ROUTINES_RES)
+
+
+X86_64_WIN64_RES = Routines(
+    name="x86_64.win64.res",
+    isa="x86_64",
+    abi="win64",
+    orders=("lo",),
+    routines=ROUTINES_RES,
+    program=program_res,
+    imports=IMPORTS_IR,
+    data_slots=data_slots_res,
+)
+
+
+def _dummy_symbols(slots=DATA_SLOTS,
                    imports: Tuple[str, ...] = IMPORTS) -> Dict[str, int]:
     syms = {f"iat_{n}": 0x2000 + i * 8 for i, n in enumerate(imports)}
     off = 0x3000
-    for name, sz in slots:
-        syms[name] = off
-        off += sz
+    for slot in slots:
+        syms[slot[0]] = off
+        off += slot[1]
     return syms
 
 
