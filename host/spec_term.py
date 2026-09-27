@@ -2698,33 +2698,79 @@ IR_VAR = 0xFE
 _IR_TAG = {K.APP: 0, K.NORM: 1, K.KONST: 2, K.S: 3,
            K.COMP: 4, K.DUP: 5, K.SWAP: 6}
 _IR_LEAF = {1: I, 2: KK, 3: S, 4: B, 5: D, 6: C}
+_IR_NODE = struct.Struct("<BII")
+
+
+def _pack_ir_all(*roots: T):
+    """One walk -> (node bytes, root indices, per-node Merkle digests).
+
+    Iterative postorder; `done` memoizes by object identity (shared T
+    objects emit once), `memo` hash-conses structurally — equal terms
+    pack identically regardless of object graph.  The digest of a node
+    is sha256 over its own record with child INDICES replaced by child
+    digests — position-independent, so a root's digest is the content
+    key of the term in any surrounding graph."""
+    import hashlib
+    memo: Dict[tuple, int] = {}
+    done: Dict[int, int] = {}
+    nodes = bytearray()
+    digs: List[bytes] = []
+    pack_node = _IR_NODE.pack
+    idx: List[int] = []
+    for root in roots:
+        stack = [root]
+        while stack:
+            t = stack[-1]
+            tid = id(t)
+            if tid in done:
+                stack.pop()
+                continue
+            if t.k == K.APP:
+                li = done.get(id(t.l))
+                ri = done.get(id(t.r))
+                if li is None or ri is None:
+                    stack.append(t.r)
+                    stack.append(t.l)
+                    continue
+                stack.pop()
+                key = (0, li, ri)
+            else:
+                stack.pop()
+                key = ((IR_VAR, t.n, 0) if t.k == K.VAR
+                       else (_IR_TAG[t.k], 0, 0))
+            i = memo.get(key)
+            if i is None:
+                i = len(memo)
+                memo[key] = i
+                nodes += pack_node(*key)
+                digs.append(hashlib.sha256(
+                    b"\x00" + digs[key[1]] + digs[key[2]]
+                    if key[0] == 0 else pack_node(*key)).digest())
+            done[tid] = i
+        idx.append(done[id(root)])
+    return nodes, idx, digs
 
 
 def pack_ir(*roots: T) -> bytes:
     """terms -> canonical packed-IR bytes (multi-root, arg order)."""
-    memo: Dict[tuple, int] = {}
-    nodes = bytearray()
-
-    def emit(t: T) -> int:
-        if t.k == K.APP:
-            key = (0, emit(t.l), emit(t.r))
-        elif t.k == K.VAR:
-            key = (IR_VAR, t.n, 0)
-        else:
-            key = (_IR_TAG[t.k], 0, 0)
-        i = memo.get(key)
-        if i is None:
-            i = len(memo)
-            memo[key] = i
-            nodes.extend(struct.pack("<BII", *key))
-        return i
-
-    idx = [emit(r) for r in roots]
+    nodes, idx, digs = _pack_ir_all(*roots)
     out = bytearray(struct.pack("<IIII", IR_MAGIC, IR_VERSION,
-                                len(memo), len(roots)))
+                                len(digs), len(roots)))
     for i in idx:
         out += struct.pack("<I", i)
     return bytes(out) + bytes(nodes)
+
+
+def pack_ir_keyed(*roots: T):
+    """(blob, [sha256 hex digest per root]) — digests are the Merkle
+    content keys of each root term; the blob is the same canonical
+    multi-root stream pack_ir emits."""
+    nodes, idx, digs = _pack_ir_all(*roots)
+    out = bytearray(struct.pack("<IIII", IR_MAGIC, IR_VERSION,
+                                len(digs), len(roots)))
+    for i in idx:
+        out += struct.pack("<I", i)
+    return bytes(out) + bytes(nodes), [digs[i].hex()[:32] for i in idx]
 
 
 def unpack_ir(data: bytes) -> List[T]:

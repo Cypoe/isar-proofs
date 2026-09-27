@@ -126,16 +126,43 @@ def make_exe_runner(exe: str, timeout: int = 3600
     return run
 
 
-def make_ir_runner(exe: str, timeout: int = 3600
+_AUDIT = os.environ.get("ISAR_AUDIT", "") not in ("", "0")
+
+
+def _audit(msg: str) -> None:
+    """Chain-level counters, on demand — ISAR_AUDIT=1 prints one line
+    per IR batch: pack/wire/exe split, cache hits, steps.  Off by
+    default; the counters exist so no ad-hoc probe is needed."""
+    if _AUDIT:
+        print(f"[audit] {msg}", file=sys.stderr, flush=True)
+
+
+def make_ir_runner(exe: str, timeout: int = 3600,
+                   workers: int = 1,
+                   cache_dir: Optional[str] = None
                    ) -> Callable[[T], Tuple[T, int, int]]:
     """Packed-IR exe runner (ADR-005): the exe seam carries the term
-    graph itself — `pack_ir(*queries)` in, N NF token-lines out, one
-    process per batch.  `.batch` is the bulk entry; `run` keeps the
-    single-query runner contract."""
-    def batch(qs: List[T]) -> Tuple[List[T], int, int]:
-        blob = st.pack_ir(*qs)
+    graph itself.  One `pack_ir_keyed` walk produces the canonical
+    multi-root blob AND per-root Merkle digests; misses are repacked
+    into per-chunk multi-root blobs (cross-query sharing dedups within
+    each worker's stream).
+
+    workers > 1 splits the miss list into strided chunks across N
+    exes — the stream as a work pool (the shape a CUDA grid inherits
+    later; per-worker step counts merge, root order and NFs are
+    preserved).  cache_dir is a content-addressed NF store keyed by
+    the Merkle digest; cached values are the NF's stdout token line."""
+    import concurrent.futures
+
+    if cache_dir is not None:
+        os.makedirs(cache_dir, exist_ok=True)
+
+    def _one_batch(blob: bytes, expect: int
+                   ) -> Tuple[List[str], int, float]:
+        t0 = time.time()
         cp = subprocess.run([exe], input=blob,
                             capture_output=True, timeout=timeout)
+        wall = time.time() - t0
         m = re.search(rb"steps=(\d+)", cp.stderr)
         if cp.returncode != 0:
             raise RuntimeError(
@@ -143,12 +170,77 @@ def make_ir_runner(exe: str, timeout: int = 3600
                 f"stderr={cp.stderr!r} "
                 f"(2=fuel exhausted — never a silent success)")
         lines = cp.stdout.decode().splitlines()
-        if len(lines) != len(qs):
+        if len(lines) != expect:
             raise RuntimeError(
-                f"ir batch: {len(lines)} NF lines for {len(qs)} roots "
-                f"stderr={cp.stderr!r}")
+                f"ir batch: {len(lines)} NF lines for "
+                f"{expect} streams stderr={cp.stderr!r}")
+        return lines, int(m.group(1)) if m else -1, wall
+
+    def batch(qs: List[T]) -> Tuple[List[T], int, int]:
+        if not qs:
+            return [], 0, -1
+        t_all = time.time()
+        lines: List[Optional[str]] = [None] * len(qs)
+        keys: Optional[List[str]] = None
+        miss_at: List[int] = []
+        pack_s = 0.0
+        hits = 0
+        if cache_dir is not None:
+            # one keyed walk: Merkle digest per root = content key
+            t0 = time.time()
+            _, keys = st.pack_ir_keyed(*qs)
+            pack_s += time.time() - t0
+            for i, k in enumerate(keys):
+                try:
+                    with open(os.path.join(cache_dir, k)) as f:
+                        lines[i] = f.read()
+                    hits += 1
+                except OSError:
+                    miss_at.append(i)
+        else:
+            miss_at = list(range(len(qs)))
+        steps = 0
+        exe_s = 0.0
+        pool_wall = 0.0
+        wire = 0
+        if miss_at:
+            # strided chunks — consecutive queries tend to cost alike,
+            # so round-robin spreads heavy roots across workers
+            n = min(max(1, workers), len(miss_at))
+            chunks_idx = [miss_at[j::n] for j in range(n)]
+            t0 = time.time()
+            blobs = [st.pack_ir(*[qs[i] for i in c])
+                     for c in chunks_idx]
+            pack_s += time.time() - t0
+            wire = sum(len(b) for b in blobs)
+            t0 = time.time()
+            if n <= 1:
+                outs = [_one_batch(blobs[0], len(chunks_idx[0]))]
+            else:
+                with concurrent.futures.ThreadPoolExecutor(n) as pool:
+                    outs = list(pool.map(
+                        _one_batch, blobs,
+                        [len(c) for c in chunks_idx]))
+            pool_wall = time.time() - t0
+            for c, (ls, s, w) in zip(chunks_idx, outs):
+                exe_s += w
+                if s > 0:
+                    steps += s
+                for i, ln in zip(c, ls):
+                    lines[i] = ln
+                    if keys is not None:
+                        with open(os.path.join(cache_dir, keys[i]),
+                                  "w") as f:
+                            f.write(ln)
+        _audit(
+            f"ir.batch roots={len(qs)} hits={hits} "
+            f"misses={len(miss_at)} "
+            f"workers={min(max(1, workers), max(1, len(miss_at)))} "
+            f"pack_s={pack_s:.2f} wire={wire / 1e6:.2f}MB "
+            f"exe_s={exe_s:.2f} pool_wall_s={pool_wall:.2f} "
+            f"steps={steps} wall_s={time.time() - t_all:.2f}")
         return ([seed._parse_native_out(ln) for ln in lines],
-                int(m.group(1)) if m else -1, -1)
+                steps, -1)
 
     def run(t: T) -> Tuple[T, int, int]:
         nfs, s, n = batch([t])
@@ -611,21 +703,33 @@ def main() -> int:
         # spine holds all section intermediates); decomposed chunks are
         # small enough for the default LO runner.  cd+compact is the
         # monolithic alternative ("pack": _graph_cd_run).
-        sr = {}
-        if "--insns-on-exe" in sys.argv[1:]:
-            # the emitted host computes the per-insn encodes of its own
-            # image — self-hosting through the stage seam, not just
-            # around it.  --ir: the seam carries packed IR batches
-            # (ADR-005) instead of per-encode token marshal.
-            if "--ir" in sys.argv[1:]:
-                sr["assemble*"] = make_ir_runner(seed._exe_for(
-                    seed.Realization(fuel=2_000_000),
-                    tc=toolchain.by_name("native.x86_64.pe.ir")))
-            else:
-                sr["assemble*"] = make_exe_runner(
-                    seed._exe_for(seed.Realization(fuel=2_000_000)))
         for tag, R in (("default", seed.Realization()),
                        ("fuse_s", seed.Realization(fuse_s=True))):
+            # per-realization stage runners — a fuse_s leg must run on
+            # the fuse_s kernel (derived-S view differs), not just when
+            # checkpoints happen to be cold
+            sr = {}
+            if "--insns-on-exe" in sys.argv[1:]:
+                # the emitted host computes the per-insn encodes of its
+                # own image — self-hosting through the stage seam, not
+                # just around it.  --ir: the seam carries packed IR
+                # batches (ADR-005) instead of per-encode token marshal.
+                if "--ir" in sys.argv[1:]:
+                    ir_runner = make_ir_runner(
+                        seed._exe_for(
+                            seed.Realization(fuel=2_000_000,
+                                             fuse_s=R.fuse_s),
+                            tc=toolchain.by_name(
+                                "native.x86_64.pe.ir")),
+                        workers=os.cpu_count() or 4,
+                        cache_dir=os.path.join(_HOST, "emit_work",
+                                               "nf_cache"))
+                    sr["assemble*"] = ir_runner
+                    sr["pack*"] = ir_runner
+                else:
+                    sr["assemble*"] = make_exe_runner(
+                        seed._exe_for(seed.Realization(
+                            fuel=2_000_000, fuse_s=R.fuse_s)))
             t0 = time.time()
             want = emit_native("native.x86_64.pe", R)
             wd = os.path.join(_HOST, "emit_work", tag)

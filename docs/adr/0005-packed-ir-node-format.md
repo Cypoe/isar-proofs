@@ -55,8 +55,19 @@ node  n_nodes × 9B:  u8 tag | u32 l | u32 r
   preserved even though `Graph.export_tree` unrolls into a fresh tree, and
   **equal NFs serialize to identical bytes** — the format is
   content-addressable by construction (the Merkle/package layer's hook).
-- Multi-root: one file can carry `program_nf + link_nf` or a batch of
-  encode-query closures — the fork-pool/CUDA work unit.
+- Multi-root: one stream element can carry `program_nf + link_nf` or a
+  batch of encode-query closures — the fork-pool/CUDA work unit.
+- **Stream of streams**: the wire unit is the *concatenation* of
+  self-describing stream elements (`header|roots|nodes` each). The
+  kernel loops elements until EOF; a batch is `b"".join(elements)`.
+  Chunk boundaries for a fork pool (or later a CUDA grid tile) are
+  stream boundaries — no coordination format on top.
+- **Merkle content keys**: `pack_ir_keyed` emits the blob plus a
+  per-root digest in one walk — `h(node) = sha256(tag ‖ h(l) ‖ h(r))`
+  over the hash-consed DAG, position-independent. Equal terms key
+  identically in any surrounding graph; this is the content-addressing
+  primitive the package layer (typed-ir-packages) builds on and the
+  NF-cache key the emit chain uses.
 
 ## Consequences
 
@@ -82,28 +93,43 @@ node  n_nodes × 9B:  u8 tag | u32 l | u32 r
 — the same reducer core (`step`/`st_*`/`emit_nf`/`stats`) behind a
 different front end:
 
-- **Stream**: stdin `.ir` → header parse → exact-size blob → depack
-  (single forward pass; node *i*'s cell at `base + i*24`, so index
-  resolution is address arithmetic). Bad magic/version/tags ≥ 7
-  (`STK`, `VAR`, junk)/forward-or-out-of-range indices/truncated or
-  oversized streams → `exit3`.
-- **Batch**: `n_roots` queries per invocation, **one NF line per root**
-  on stdout, `steps=`/`alloc=` report batch totals on stderr.
+- **Stream loop**: stdin is read as concatenated stream elements —
+  16B header read-exactly, then the `4*nr + 9*nn` body into a
+  per-stream region laid out
+  `[root idx | node records | cells | root ptrs]` (33·nn + 12·nr B).
+  Pipes report EOF as ReadFile-FALSE/ERROR_BROKEN_PIPE — clean at a
+  stream boundary, truncated mid-header/body. Depack is a single
+  forward pass; node *i*'s cell at `cells + i*24`, so index resolution
+  is address arithmetic. Bad magic/version/tags ≥ 7 (`STK`, `VAR`,
+  junk)/forward-or-out-of-range indices/truncation/empty input →
+  `exit3`.
+- **Batch**: `n_roots` queries per stream element, **one NF line per
+  root** on stdout, `steps=`/`alloc=` report whole-batch totals on
+  stderr at EOF.
 - **Fuel**: per-root (each root gets the full fuel budget; exhaustion
   mid-batch is still `exit2`, never a silent success).
 - **Per-root arena reset**: the heap is one reserved region committed
   ahead in chunks (`VirtualAlloc MEM_COMMIT` at the committed end);
   between roots `VirtualFree MEM_DECOMMIT` releases physical pages and
   retains the VA — batch peak memory = the *largest single query*, not
-  the sum. The depack region (nodes + roots + derived_s template) is a
-  separate VirtualAlloc that never resets; tag-3 cells depack to a
-  structural copy of the `ds` root (children aliased), matching the
-  token path's `S` view expansion. `alloc=` counts depacked cells like
-  parse's `mk*` allocations.
+  the sum. The derived-S template lives in a permanent region built
+  once in `entry`; tag-3 cells copy its root triple (children aliased),
+  matching the token path's `S` view expansion. `alloc=` counts
+  depacked cells like parse's `mk*` allocations.
 - **Honest bound**: a single root exceeding `ir_arena_bytes` (2 GiB
   reserve) is an `exit4` OOM — the same class of bound the token path's
   per-process arena already imposed, now explicit.
+- **Fork-pool**: `emit_chain.make_ir_runner(workers=N)` splits a
+  batch's miss list into strided chunks, packs each chunk as a
+  multi-root stream, and runs N exes concurrently. Merkle digests key
+  `emit_work/nf_cache` (NF line per digest) — confluence makes the memo
+  sound. Measured win64 assemble*: 643 encodes, exe work 157s summed →
+  16.6s pool wall (~9.5× on 12 workers), stage 38s total vs ~263s
+  sequential IR / ~2000s token marshal.
 
 Verified: `S K K I → I` in 10 steps / 59 allocs — identical numbers to
-the token kernel (view-expansion parity); batch of 4 → `K I I B`,
-`steps=12 alloc=62`; malformed streams → `rc=3`.
+the token kernel (view-expansion parity); stream-of-streams batch →
+`I K I B` with cumulative `steps=10 alloc=62`; multi-root element
+inside a concatenation works; malformed/truncated/junk inputs → `rc=3`;
+empty input → `rc=3`; both `default` and `fuse_s` realizations; win64
+emit_chain byte-exact through the pool.

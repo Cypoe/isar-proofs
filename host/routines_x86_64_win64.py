@@ -39,12 +39,13 @@ DATA_SLOTS: Tuple[Tuple[str, int], ...] = (
 )
 
 # packed-IR batch front end (ADR-005): extra .data slots.
-# irbuf/irlen/irtotal = input blob; irnodes/irnroots = header counts;
-# irroots = root-ptr table; irarena = reserved heap base; irj/irsteps = batch state.
+# irbuf = current stream region; irnodes/irnroots = stream header counts;
+# irroots = root-ptr table; irarena = reserved heap base; irj/irsteps/
+# irnstreams = batch state.
 DATA_SLOTS_IR: Tuple[Tuple[str, int], ...] = DATA_SLOTS + (
-    ("irbuf", 8), ("irlen", 8), ("irtotal", 8), ("irnodes", 8),
-    ("irnroots", 8), ("irroots", 8), ("irarena", 8), ("irj", 8),
-    ("irsteps", 8),
+    ("irbuf", 8), ("irhdr", 8), ("irnodes", 8), ("irnroots", 8),
+    ("irroots", 8), ("irarena", 8), ("irj", 8), ("irsteps", 8),
+    ("irnstreams", 8),
 )
 
 # packed-IR constants — pinned by docs/adr/0005; keep in sync with
@@ -54,7 +55,8 @@ IR_VERSION = 1
 MEM_RESERVE = 0x2000                 # VirtualAlloc MEM_RESERVE
 MEM_COMMIT = 0x1000                  # VirtualAlloc MEM_COMMIT
 MEM_DECOMMIT = 0x4000                # VirtualFree MEM_DECOMMIT
-IR_DS_AREA = 1 << 12                 # depack-region tail reserved for build_ds
+MEM_RELEASE = 0x8000                 # VirtualFree MEM_RELEASE
+IR_DS_AREA = 1 << 12                 # permanent region for build_ds output
 
 VA_COMMIT_RESERVE = 0x3000
 PAGE_RW = 4
@@ -636,10 +638,11 @@ def r_build_ds(R: Realization, ctx: Ctx) -> Program:
 # ======================================================================
 
 def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
-    """_start (IR): handles, granule buffer for the header read (r12),
-    reserved commit-ahead heap arena (rbx=bump, rbp=committed end)."""
+    """_start (IR): handles, granule buffer for header reads (r12),
+    reserved commit-ahead heap arena (rbx=bump, rbp=committed end),
+    zeroed batch state, permanent derived-S region (default mode)."""
     iat = ctx["iat"]
-    return [
+    p: Program = [
         LBL("_start"),
         I("sub_r64_imm", "rsp", 0x28),
         I("mov_r32_imm32", "ecx", -10), I("call_mrip", iat("GetStdHandle")),
@@ -655,7 +658,7 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
         I("mov_r32_imm32", "r9d", PAGE_RW),
         I("call_mrip", iat("VirtualAlloc")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-        I("mov_r64_r64", "r12", "rax"),
+        I("mov_rip_r64", ("p", "irhdr"), "rax"),
         # heap: one reserved region; rbx=rbp=base means "nothing committed"
         I("xor_r32_r32", "ecx", "ecx"),
         I("mov_r64_imm", "rdx", R.ir_arena_bytes),
@@ -666,107 +669,115 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
         I("mov_rip_r64", ("p", "irarena"), "rax"),
         I("mov_r64_r64", "rbx", "rax"),
         I("mov_r64_r64", "rbp", "rax"),
+        # batch state (slots may be uninitialised data)
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "irsteps"), "rax"),
+        I("mov_rip_r64", ("p", "irnstreams"), "rax"),
+        I("mov_rip_r64", ("p", "irj"), "rax"),
     ]
+    if not R.fuse_s:
+        # permanent derived-S region: tag-3 cells alias its root across
+        # the whole run, so it must outlive the per-stream regions
+        p += [
+            I("xor_r32_r32", "ecx", "ecx"),
+            I("mov_r32_imm32", "edx", IR_DS_AREA),
+            I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+            I("mov_r64_r64", "rbx", "rax"),
+            I("lea_r64_m64", "rbp", ("m", "rax", IR_DS_AREA)),
+            I("call_rel32", ("l", "build_ds")),
+            I("mov_r64_rip", "rbx", ("p", "irarena")),
+            I("mov_r64_r64", "rbp", "rbx"),
+        ]
+    return p
 
 
 def r_ir_read(R: Realization, ctx: Ctx) -> Program:
-    """ir_read: granule 1 yields the header; n_nodes/n_roots size the blob
-    exactly -> VirtualAlloc -> copy granule -> stream the rest straight in.
-    Truncated, oversized, or bad-header input -> exit3."""
+    """ir_sloop: one packed-IR stream element per iteration — 16B header
+    read-exactly (clean EOF -> ir_sdone, partial -> exit3), then the
+    4*n_roots + 9*n_nodes body into a per-stream region laid out as
+    [root idx | node records | cells | root ptrs].  Concatenated
+    streams are the batch unit (ADR-005): each element is
+    self-describing, so the same blob feeds a fork-pool chunk today
+    and a CUDA grid tile later."""
     iat = ctx["iat"]
     return [
-        LBL("ir_read"),
+        LBL("ir_sloop"),
+        # ---- 16-byte header, read-exactly into the granule buf ----
+        I("xor_r32_r32", "r13d", "r13d"),
+        LBL("ir_hloop"),
         I("mov_r64_rip", "rcx", ("p", "hin")),
-        I("mov_r64_r64", "rdx", "r12"),
-        I("mov_r32_imm32", "r8d", R.read_buf_bytes),
+        I("mov_r64_rip", "rdx", ("p", "irhdr")),
+        I("add_r64_r64", "rdx", "r13"),
+        I("mov_r32_imm32", "r8d", 16), I("sub_r64_r64", "r8", "r13"),
         I("lea_r64_rip", "r9", ("p", "nread")),
         I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
         I("call_mrip", iat("ReadFile")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        # pipes report EOF as FALSE/ERROR_BROKEN_PIPE, files as nread=0 —
+        # clean at a stream boundary (r13==0), truncated otherwise
+        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "ir_hok")),
+        I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "ir_sdone")),
+        I("jmp_rel32", ("l", "exit3")),
+        LBL("ir_hok"),
         I("mov_r64_rip", "rax", ("p", "nread")),
-        I("cmp_r64_imm", "rax", 16), I("jl_rel32", ("l", "exit3")),
+        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "ir_hgot")),
+        I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "ir_sdone")),
+        I("jmp_rel32", ("l", "exit3")),
+        LBL("ir_hgot"),
+        I("add_r64_r64", "r13", "rax"),
+        I("cmp_r64_imm", "r13", 16), I("jl_rel32", ("l", "ir_hloop")),
         # header: magic u32 @0, ver u32 @4, n_nodes u32 @8, n_roots u32 @12
-        I("mov_r32_m32", "eax", ("m", "r12", 0)),
+        I("mov_r64_rip", "r13", ("p", "irhdr")),
+        I("mov_r32_m32", "eax", ("m", "r13", 0)),
         I("mov_r32_imm32", "ecx", IR_MAGIC), I("cmp_r64_r64", "rax", "rcx"),
         I("jne_rel32", ("l", "exit3")),
-        I("mov_r32_m32", "eax", ("m", "r12", 4)),
+        I("mov_r32_m32", "eax", ("m", "r13", 4)),
         I("cmp_r64_imm", "rax", IR_VERSION), I("jne_rel32", ("l", "exit3")),
-        I("mov_r32_m32", "eax", ("m", "r12", 8)),
+        I("mov_r32_m32", "eax", ("m", "r13", 8)),
         I("cmp_r64_imm", "rax", 0x7FFFFFFF), I("jge_rel32", ("l", "exit3")),
         I("mov_rip_r64", ("p", "irnodes"), "rax"),
-        I("mov_r32_m32", "ecx", ("m", "r12", 12)),
+        I("mov_r32_m32", "ecx", ("m", "r13", 12)),
         I("cmp_r64_imm", "rcx", 0x7FFFFFFF), I("jge_rel32", ("l", "exit3")),
         I("mov_rip_r64", ("p", "irnroots"), "rcx"),
-        # total = 16 + 4*n_roots + 9*n_nodes  (blob alloc adds 8 slack for
-        # the qword copy tail)
-        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rax", 3),
-        I("add_r64_r64", "rax", "rdx"),
-        I("shl_r64_imm8", "rcx", 2),
-        I("add_r64_r64", "rax", "rcx"), I("add_r64_imm", "rax", 16),
-        I("mov_rip_r64", ("p", "irtotal"), "rax"),
-        I("lea_r64_m64", "rdx", ("m", "rax", 8)),
+        # stream region = 33*n_nodes + 12*n_roots, laid out as
+        #   [4*nr root idx][9*nn node records][24*nn cells][8*nr ptrs]
+        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rax", 5),
+        I("add_r64_r64", "rax", "rdx"),                      # 33*nn
+        I("mov_r64_r64", "rdx", "rcx"), I("shl_r64_imm8", "rdx", 1),
+        I("add_r64_r64", "rdx", "rcx"), I("shl_r64_imm8", "rdx", 2),
+        I("add_r64_r64", "rax", "rdx"),                      # +12*nr
+        I("mov_r64_r64", "rdx", "rax"),
         I("xor_r32_r32", "ecx", "ecx"),
         I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
         I("mov_r32_imm32", "r9d", PAGE_RW),
         I("call_mrip", iat("VirtualAlloc")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
         I("mov_rip_r64", ("p", "irbuf"), "rax"),
-        # copy granule-1: qwords while rdx+8<=nread, then byte tail
-        I("mov_r64_rip", "rcx", ("p", "nread")),
-        I("mov_rip_r64", ("p", "irlen"), "rcx"),
-        I("xor_r32_r32", "edx", "edx"),
-        LBL("ir_cqw"),
-        I("lea_r64_m64", "rax", ("m", "rdx", 8)),
-        I("cmp_r64_r64", "rax", "rcx"), I("jbe_rel32", ("l", "ir_cqwb")),
-        I("jmp_rel32", ("l", "ir_ctail")),
-        LBL("ir_cqwb"),
-        I("lea_r64_m64", "rdi", ("m", "r12", 0)), I("add_r64_r64", "rdi", "rdx"),
-        I("mov_r64_m64", "rax", ("m", "rdi", 0)),
-        I("mov_r64_rip", "rdi", ("p", "irbuf")), I("add_r64_r64", "rdi", "rdx"),
-        I("mov_m64_r64", ("m", "rdi", 0), "rax"),
-        I("add_r64_imm", "rdx", 8), I("jmp_rel32", ("l", "ir_cqw")),
-        LBL("ir_ctail"),
-        I("cmp_r64_r64", "rdx", "rcx"), I("jge_rel32", ("l", "ir_floop")),
-        I("lea_r64_m64", "rdi", ("m", "r12", 0)), I("add_r64_r64", "rdi", "rdx"),
-        I("mov_r8_m8", "al", ("m", "rdi", 0)),
-        I("mov_r64_rip", "rdi", ("p", "irbuf")), I("add_r64_r64", "rdi", "rdx"),
-        I("mov_m8_r8", ("m", "rdi", 0), "al"),
-        I("inc_r64", "rdx"), I("jmp_rel32", ("l", "ir_ctail")),
-        # ---- stream the remainder straight into the blob ----
-        LBL("ir_floop"),
-        I("mov_r64_rip", "rax", ("p", "irlen")),
-        I("mov_r64_rip", "rcx", ("p", "irtotal")),
-        I("cmp_r64_r64", "rax", "rcx"), I("jge_rel32", ("l", "ir_fdone")),
-        I("mov_r64_rip", "rdx", ("p", "irbuf")), I("add_r64_r64", "rdx", "rax"),
-        I("mov_r64_r64", "r8", "rcx"), I("sub_r64_r64", "r8", "rax"),
-        I("cmp_r64_imm", "r8", R.read_buf_bytes),
-        I("jbe_rel32", ("l", "ir_fsz")),
-        I("mov_r32_imm32", "r8d", R.read_buf_bytes),
-        LBL("ir_fsz"),
+        # ---- body, read-exactly: 4*nr + 9*nn bytes into irbuf ----
+        I("mov_r64_rip", "rax", ("p", "irnodes")),
+        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rax", 3),
+        I("add_r64_r64", "rax", "rdx"),                      # 9*nn
+        I("mov_r64_rip", "rcx", ("p", "irnroots")),
+        I("shl_r64_imm8", "rcx", 2), I("add_r64_r64", "rax", "rcx"),
+        I("mov_r64_r64", "r14", "rax"),                      # body size
+        I("test_r64_r64", "r14", "r14"),
+        I("je_rel32", ("l", "ir_depack")),                   # empty body
+        I("xor_r32_r32", "r13d", "r13d"),
+        LBL("ir_brd"),
         I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("mov_r64_rip", "rdx", ("p", "irbuf")),
+        I("add_r64_r64", "rdx", "r13"),
+        I("mov_r64_r64", "r8", "r14"), I("sub_r64_r64", "r8", "r13"),
         I("lea_r64_rip", "r9", ("p", "nread")),
         I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
         I("call_mrip", iat("ReadFile")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
         I("mov_r64_rip", "rax", ("p", "nread")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
-        I("mov_r64_rip", "rcx", ("p", "irlen")), I("add_r64_r64", "rcx", "rax"),
-        I("mov_rip_r64", ("p", "irlen"), "rcx"),
-        I("jmp_rel32", ("l", "ir_floop")),
-        LBL("ir_fdone"),
-        # exact-size contract + oversize probe (one byte past total -> junk)
-        I("mov_r64_rip", "rax", ("p", "irlen")),
-        I("mov_r64_rip", "rcx", ("p", "irtotal")),
-        I("cmp_r64_r64", "rax", "rcx"), I("jne_rel32", ("l", "exit3")),
-        I("mov_r64_rip", "rcx", ("p", "hin")),
-        I("mov_r64_r64", "rdx", "r12"),
-        I("mov_r32_imm32", "r8d", 1),
-        I("lea_r64_rip", "r9", ("p", "nread")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("ReadFile")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_depack")),
-        I("mov_r64_rip", "rax", ("p", "nread")),
-        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "exit3")),
+        I("add_r64_r64", "r13", "rax"),
+        I("cmp_r64_r64", "r13", "r14"), I("jl_rel32", ("l", "ir_brd")),
     ]
 
 
@@ -779,58 +790,34 @@ def _mul24() -> Program:
 
 
 def r_ir_depack(R: Realization, ctx: Ctx) -> Program:
-    """ir_depack: depack region (nodes*24 + roots*8 [+ ds area]); one
-    forward pass over postorder records.  Default mode builds the shared
-    derived_s template into the region tail (survives arena resets) and
-    tag-3 cells copy its root triple; fuse_s keeps tag-3 a primitive leaf.
+    """ir_depack: cells live inside the per-stream region — r13 = irbuf
+    + 4*nr + 9*nn, root-ptr table at r13 + 24*nn.  One forward pass
+    over the postorder records; tag-3 cells copy the permanent ds root
+    triple (built once in entry, children alias it — stable across
+    streams and arena resets); fuse_s keeps tag-3 a primitive leaf.
     Tags >= 7 (STK/VAR/junk) and forward/out-of-range indices -> exit3."""
     iat = ctx["iat"]
     p: Program = [
         LBL("ir_depack"),
-        # region size = 24*nn + 8*nr (+IR_DS_AREA in default mode)
+        # r13 = cells base = irbuf + 4*nr + 9*nn
         I("mov_r64_rip", "rax", ("p", "irnodes")),
-    ] + _mul24() + [
-        I("mov_r64_rip", "rcx", ("p", "irnroots")), I("shl_r64_imm8", "rcx", 3),
+        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rax", 3),
+        I("add_r64_r64", "rax", "rdx"),                      # 9*nn
+        I("mov_r64_rip", "rcx", ("p", "irnroots")),
+        I("shl_r64_imm8", "rcx", 2),
+        I("add_r64_r64", "rax", "rcx"),                      # +4*nr
+        I("mov_r64_rip", "rcx", ("p", "irbuf")),
         I("add_r64_r64", "rax", "rcx"),
-    ]
-    if not R.fuse_s:
-        p += [I("add_r64_imm", "rax", IR_DS_AREA)]
-    p += [
-        I("xor_r32_r32", "ecx", "ecx"),
-        I("mov_r64_r64", "rdx", "rax"),
-        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-        I("mov_r32_imm32", "r9d", PAGE_RW),
-        I("call_mrip", iat("VirtualAlloc")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-        I("mov_r64_r64", "r13", "rax"),              # region base
-        # roots table = base + 24*nn
+        I("mov_r64_r64", "r13", "rax"),
+        # irroots = r13 + 24*nn
         I("mov_r64_rip", "rax", ("p", "irnodes")),
     ] + _mul24() + [
         I("add_r64_r64", "rax", "r13"),
         I("mov_rip_r64", ("p", "irroots"), "rax"),
-    ]
-    if not R.fuse_s:
-        # build derived_s into the region tail: rbx/rbp temporarily swapped
-        # to the ds area so mkleaf/mkapp land in never-reset memory
-        p += [
-            I("mov_r64_rip", "rbx", ("p", "irroots")),
-            I("mov_r64_rip", "rax", ("p", "irnroots")),
-            I("shl_r64_imm8", "rax", 3), I("add_r64_r64", "rbx", "rax"),
-            I("lea_r64_m64", "rbp", ("m", "rbx", IR_DS_AREA)),
-            I("call_rel32", ("l", "build_ds")),
-            I("mov_r64_rip", "rbx", ("p", "irarena")),
-            I("mov_r64_r64", "rbp", "rbx"),
-            # build_ds uses r13/r14/r15 as scratch — recover the region
-            # base: r13 = [irroots] - 24*n_nodes
-            I("mov_r64_rip", "r13", ("p", "irroots")),
-            I("mov_r64_rip", "rax", ("p", "irnodes")),
-        ] + _mul24() + [
-            I("sub_r64_r64", "r13", "rax"),
-        ]
-    p += [
-        # source cursor: rsi = irbuf + 16 + 4*nr; cell cursor r14; i r15
-        I("mov_r64_rip", "rsi", ("p", "irbuf")), I("add_r64_imm", "rsi", 16),
-        I("mov_r64_rip", "rax", ("p", "irnroots")), I("shl_r64_imm8", "rax", 2),
+        # source cursor: rsi = irbuf + 4*nr; cell cursor r14; i r15
+        I("mov_r64_rip", "rsi", ("p", "irbuf")),
+        I("mov_r64_rip", "rax", ("p", "irnroots")),
+        I("shl_r64_imm8", "rax", 2),
         I("add_r64_r64", "rsi", "rax"),
         I("mov_r64_r64", "r14", "r13"), I("xor_r32_r32", "r15d", "r15d"),
         LBL("ir_dloop"),
@@ -886,9 +873,8 @@ def r_ir_depack(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rax", ("p", "nalloc")),
         I("mov_r64_rip", "rcx", ("p", "irnodes")), I("add_r64_r64", "rax", "rcx"),
         I("mov_rip_r64", ("p", "nalloc"), "rax"),
-        # roots: rsi back to roots base (hdr+16; file layout is
-        # header|root idx|nodes), rdi = [irroots]; j r15=0
-        I("mov_r64_rip", "rsi", ("p", "irbuf")), I("add_r64_imm", "rsi", 16),
+        # roots: rsi = region base (root idx table at +0), rdi = [irroots]
+        I("mov_r64_rip", "rsi", ("p", "irbuf")),
         I("mov_r64_rip", "rdi", ("p", "irroots")),
         I("xor_r32_r32", "r15d", "r15d"),
         LBL("ir_rtloop"),
@@ -915,7 +901,6 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         LBL("ir_binit"),
         I("xor_r32_r32", "eax", "eax"),
         I("mov_rip_r64", ("p", "irj"), "rax"),
-        I("mov_rip_r64", ("p", "irsteps"), "rax"),
         LBL("ir_bloop"),
         I("mov_r64_rip", "rax", ("p", "irj")),
         I("mov_r64_rip", "rcx", ("p", "irnroots")),
@@ -969,7 +954,19 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rax", ("p", "irj")), I("inc_r64", "rax"),
         I("mov_rip_r64", ("p", "irj"), "rax"),
         I("jmp_rel32", ("l", "ir_bloop")),
+        # stream done: release its region, count it, next stream
         LBL("ir_bdone"),
+        I("mov_r64_rip", "rcx", ("p", "irbuf")),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "r8d", MEM_RELEASE),
+        I("call_mrip", iat("VirtualFree")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_rip", "rax", ("p", "irnstreams")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "irnstreams"), "rax"),
+        I("jmp_rel32", ("l", "ir_sloop")),
+        LBL("ir_sdone"),
+        I("mov_r64_rip", "rax", ("p", "irnstreams")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
         I("mov_r64_rip", "r15", ("p", "irsteps")),
     ]
     return p

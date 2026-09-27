@@ -27,3 +27,5 @@ home_page/*.pdf
 
 isar_proofs.egg-info/
 seed/build/
+emit_work/
+nul
