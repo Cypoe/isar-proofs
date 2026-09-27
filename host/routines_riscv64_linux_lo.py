@@ -48,10 +48,16 @@ from seed import Tag, Realization               # noqa: E402
 # static image: no imports (the elf64 target refuses any non-empty list)
 IMPORTS: Tuple[str, ...] = ()
 
+# audit counters: cumulative per-process redex-class histogram —
+# incremented only when Realization.audit (dead .data otherwise).
+AUDIT_SLOTS: Tuple[Tuple[str, int], ...] = (
+    ("c_norm", 8), ("c_konst", 8), ("c_dup", 8), ("c_swap", 8),
+    ("c_comp", 8), ("c_s", 8), ("c_left", 8), ("c_right", 8),
+)
 DATA_SLOTS: Tuple[Tuple[str, int], ...] = (
     ("hin", 8), ("hout", 8), ("herr", 8), ("nread", 8), ("nw", 8),
     ("nalloc", 8), ("ds", 8), ("scratch", 64),
-)
+) + AUDIT_SLOTS
 
 # riscv64 linux uses the asm-generic syscall table — same numbers as
 # aarch64: read=63 write=64 mmap=222 munmap=215 exit=93
@@ -372,6 +378,18 @@ def r_stats(R: Realization, ctx: Ctx) -> Program:
     p += _lds("a0", "nalloc")
     p += [
         _call("itoa"),
+    ]
+    if R.audit:
+        _stats_str(p, " rules=I:")
+        p += _lds("a0", "c_norm")
+        p += [_call("itoa")]
+        for tag, slot in (("K:", "c_konst"), ("W:", "c_dup"), ("C:", "c_swap"),
+                          ("B:", "c_comp"), ("S:", "c_s"),
+                          ("L:", "c_left"), ("R:", "c_right")):
+            _stats_str(p, "," + tag)
+            p += _lds("a0", slot)
+            p += [_call("itoa")]
+    p += [
         I("addi", "t3", "zero", 0x0A), I("sb", "t3", "a1", 0),
         I("addi", "a1", "a1", 1),
         _mv("a2", "a1"),                   # end
@@ -547,26 +565,39 @@ def r_step(R: Realization, ctx: Ctx) -> Program:
     return p
 
 
+def _bump(slot: str) -> Program:
+    """counter[slot]++ — t0/t1 are tag scratch, dead at every site."""
+    return _incs(slot)
+
+
 def r_st_norm(R: Realization, ctx: Ctx) -> Program:
     """normβ: I x -> x."""
-    return [
-        LBL("st_norm"), _mv("a0", "s5"),
+    p = [LBL("st_norm")]
+    if R.audit:
+        p += _bump("c_norm")
+    return p + [
+        _mv("a0", "s5"),
         _jmp("st_out"),
     ]
 
 
 def r_st_konst(R: Realization, ctx: Ctx) -> Program:
     """konstβ (fused macro): K x y -> x."""
-    return [
-        LBL("st_konst"), _mv("a0", "a3"),
+    p = [LBL("st_konst")]
+    if R.audit:
+        p += _bump("c_konst")
+    return p + [
+        _mv("a0", "a3"),
         _jmp("st_out"),
     ]
 
 
 def r_st_dup(R: Realization, ctx: Ctx) -> Program:
     """dupβ: W f x -> f x x."""
-    return [
-        LBL("st_dup"),                                 # W f x -> f x x
+    p = [LBL("st_dup")]                                # W f x -> f x x
+    if R.audit:
+        p += _bump("c_dup")
+    return p + [
         _mv("a0", "a3"), _mv("a1", "s5"),
         _call("mkapp"),                                # a0 = (f x)
         _mv("a1", "s5"),
@@ -580,6 +611,8 @@ def r_st_swap(R: Realization, ctx: Ctx) -> Program:
     p: Program = [
         LBL("st_swap"),                                # C f x y -> f y x
     ]
+    if R.audit:
+        p += _bump("c_swap")
     p += _push("a3")                                   # save fr (=x)
     p += [
         _mv("a0", "a1"), _mv("a1", "s5"),
@@ -598,6 +631,8 @@ def r_st_comp(R: Realization, ctx: Ctx) -> Program:
     p: Program = [
         LBL("st_comp"),                                # B f g x -> f (g x)
     ]
+    if R.audit:
+        p += _bump("c_comp")
     p += _push("a1", "a3")                             # [sp]=flr=f, [sp+8]=fr=g
     p += [
         _mv("a0", "a3"), _mv("a1", "s5"),
@@ -617,6 +652,8 @@ def r_st_s(R: Realization, ctx: Ctx) -> Program:
     p: Program = [
         LBL("st_s"),                               # S f g x -> (f x)(g x)
     ]
+    if R.audit:
+        p += _bump("c_s")
     p += _push("a1", "a3")                         # [sp]=flr=f, [sp+8]=fr=g
     p += [
         _mv("a0", "a1"), _mv("a1", "s5"),
@@ -642,13 +679,21 @@ def r_st_s(R: Realization, ctx: Ctx) -> Program:
 
 def r_step_congr(R: Realization, ctx: Ctx) -> Program:
     """appL/appR congruence + st_none/st_out epilogue."""
-    return [
+    p: Program = [
         LBL("st_left"),
+    ]
+    if R.audit:
+        p += _bump("c_left")
+    p += [
         _mv("a0", "s4"), _call("step"),
         _beqz("a0", "st_right"),
         _mv("a1", "s5"),
         _call("mkapp"), _jmp("st_out"),
         LBL("st_right"),
+    ]
+    if R.audit:
+        p += _bump("c_right")
+    return p + [
         _mv("a0", "s5"), _call("step"),
         _beqz("a0", "st_none"),
         _mv("a1", "a0"), _mv("a0", "s4"),

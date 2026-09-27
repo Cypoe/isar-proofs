@@ -45,10 +45,16 @@ IMPORTS: Tuple[str, ...] = ()
 # .data slots — shape mirrored from the win64 module (hin/hout/herr/
 # nread/nw are unused here: fds are constants and syscall needs no
 # out-params); `alloc=` counts term nodes only, as on win64.
+# audit counters: cumulative per-process redex-class histogram —
+# incremented only when Realization.audit (dead .data otherwise).
+AUDIT_SLOTS: Tuple[Tuple[str, int], ...] = (
+    ("c_norm", 8), ("c_konst", 8), ("c_dup", 8), ("c_swap", 8),
+    ("c_comp", 8), ("c_s", 8), ("c_left", 8), ("c_right", 8),
+)
 DATA_SLOTS: Tuple[Tuple[str, int], ...] = (
     ("hin", 8), ("hout", 8), ("herr", 8), ("nread", 8), ("nw", 8),
     ("nalloc", 8), ("ds", 8), ("scratch", 64),
-)
+) + AUDIT_SLOTS
 
 SYS_read, SYS_write, SYS_mmap, SYS_exit = 0, 1, 9, 60
 PROT_READ_WRITE = 3                    # PROT_READ|PROT_WRITE
@@ -252,6 +258,18 @@ def r_stats(R: Realization, ctx: Ctx) -> Program:
     _stats_str(p, " alloc=")
     p += [
         I("mov_r64_rip", "rdi", ("p", "nalloc")), I("call_rel32", ("l", "itoa")),
+    ]
+    if R.audit:
+        _stats_str(p, " rules=I:")
+        p += [I("mov_r64_rip", "rdi", ("p", "c_norm")),
+              I("call_rel32", ("l", "itoa"))]
+        for tag, slot in (("K:", "c_konst"), ("W:", "c_dup"), ("C:", "c_swap"),
+                          ("B:", "c_comp"), ("S:", "c_s"),
+                          ("L:", "c_left"), ("R:", "c_right")):
+            _stats_str(p, "," + tag)
+            p += [I("mov_r64_rip", "rdi", ("p", slot)),
+                  I("call_rel32", ("l", "itoa"))]
+    p += [
         I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
         I("mov_r64_r64", "rdx", "rsi"),
         I("lea_r64_rip", "rsi", ("p", "scratch")),
@@ -397,26 +415,42 @@ def r_step(R: Realization, ctx: Ctx) -> Program:
     return p
 
 
+def _bump(slot: str) -> Program:
+    """counter[slot]++ — rax is dead at every site this is used."""
+    return [
+        I("mov_r64_rip", "rax", ("p", slot)), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", slot), "rax"),
+    ]
+
+
 def r_st_norm(R: Realization, ctx: Ctx) -> Program:
     """normβ: I x -> x."""
-    return [
-        LBL("st_norm"), I("mov_r64_r64", "rax", "r14"),
+    p = [LBL("st_norm")]
+    if R.audit:
+        p += _bump("c_norm")
+    return p + [
+        I("mov_r64_r64", "rax", "r14"),
         I("jmp_rel32", ("l", "st_out")),
     ]
 
 
 def r_st_konst(R: Realization, ctx: Ctx) -> Program:
     """konstβ (fused macro): K x y -> x."""
-    return [
-        LBL("st_konst"), I("mov_r64_r64", "rax", "rcx"),
+    p = [LBL("st_konst")]
+    if R.audit:
+        p += _bump("c_konst")
+    return p + [
+        I("mov_r64_r64", "rax", "rcx"),
         I("jmp_rel32", ("l", "st_out")),
     ]
 
 
 def r_st_dup(R: Realization, ctx: Ctx) -> Program:
     """dupβ: W f x -> f x x."""
-    return [
-        LBL("st_dup"),                                 # W f x -> f x x
+    p = [LBL("st_dup")]                                # W f x -> f x x
+    if R.audit:
+        p += _bump("c_dup")
+    return p + [
         I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
         I("call_rel32", ("l", "mkapp")),               # rax = (f x)
         I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
@@ -427,8 +461,10 @@ def r_st_dup(R: Realization, ctx: Ctx) -> Program:
 
 def r_st_swap(R: Realization, ctx: Ctx) -> Program:
     """swapβ: C f x y -> f y x."""
-    return [
-        LBL("st_swap"),                                # C f x y -> f y x
+    p = [LBL("st_swap")]                               # C f x y -> f y x
+    if R.audit:
+        p += _bump("c_swap")
+    return p + [
         I("push_r64", "rcx"), I("sub_r64_imm", "rsp", 8),  # save fr (=y-side)
         I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
         I("call_rel32", ("l", "mkapp")),               # rax = (f y)
@@ -441,8 +477,10 @@ def r_st_swap(R: Realization, ctx: Ctx) -> Program:
 
 def r_st_comp(R: Realization, ctx: Ctx) -> Program:
     """compβ: B f g x -> f (g x)."""
-    return [
-        LBL("st_comp"),                                # B f g x -> f (g x)
+    p = [LBL("st_comp")]                               # B f g x -> f (g x)
+    if R.audit:
+        p += _bump("c_comp")
+    return p + [
         I("push_r64", "rcx"), I("push_r64", "rsi"),
         I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
         I("call_rel32", ("l", "mkapp")),               # rax = (g x)
@@ -455,8 +493,10 @@ def r_st_comp(R: Realization, ctx: Ctx) -> Program:
 
 def r_st_s(R: Realization, ctx: Ctx) -> Program:
     """sβ (fuse_s=True only): S f g x -> (f x)(g x)."""
-    return [
-        LBL("st_s"),                               # S f g x -> (f x)(g x)
+    p = [LBL("st_s")]                            # S f g x -> (f x)(g x)
+    if R.audit:
+        p += _bump("c_s")
+    return p + [
         I("push_r64", "rcx"), I("push_r64", "rsi"),  # [rsp]=flr,[rsp+8]=fr
         I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
         I("call_rel32", ("l", "mkapp")),             # rax = (f x)
@@ -474,13 +514,19 @@ def r_st_s(R: Realization, ctx: Ctx) -> Program:
 
 def r_step_congr(R: Realization, ctx: Ctx) -> Program:
     """appL/appR congruence + st_none/st_out epilogue."""
-    return [
-        LBL("st_left"),
+    p = [LBL("st_left")]
+    if R.audit:
+        p += _bump("c_left")
+    p += [
         I("mov_r64_r64", "rdi", "r13"), I("call_rel32", ("l", "step")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "st_right")),
         I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
         I("call_rel32", ("l", "mkapp")), I("jmp_rel32", ("l", "st_out")),
         LBL("st_right"),
+    ]
+    if R.audit:
+        p += _bump("c_right")
+    return p + [
         I("mov_r64_r64", "rdi", "r14"), I("call_rel32", ("l", "step")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "st_none")),
         I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "rax"),
