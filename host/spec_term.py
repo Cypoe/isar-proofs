@@ -2682,6 +2682,74 @@ def has_var(t: T, n: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# packed IR (ADR-005) — canonical binary serialization of basis terms.
+# Node record: u8 tag | u32 l | u32 r, postorder (children < parents),
+# hash-consed on (tag,l,r) — sharing survives the unshared export and
+# equal terms serialize identically (content-addressable).  Tag byte is
+# seed.Tag's own numbering + 0xFE for VAR probes.
+# ---------------------------------------------------------------------------
+
+IR_MAGIC = 0x30524950                 # "PIR\0"
+IR_VERSION = 1
+IR_VAR = 0xFE
+
+_IR_TAG = {K.APP: 0, K.NORM: 1, K.KONST: 2, K.S: 3,
+           K.COMP: 4, K.DUP: 5, K.SWAP: 6}
+_IR_LEAF = {1: I, 2: KK, 3: S, 4: B, 5: D, 6: C}
+
+
+def pack_ir(*roots: T) -> bytes:
+    """terms -> canonical packed-IR bytes (multi-root, arg order)."""
+    memo: Dict[tuple, int] = {}
+    nodes = bytearray()
+
+    def emit(t: T) -> int:
+        if t.k == K.APP:
+            key = (0, emit(t.l), emit(t.r))
+        elif t.k == K.VAR:
+            key = (IR_VAR, t.n, 0)
+        else:
+            key = (_IR_TAG[t.k], 0, 0)
+        i = memo.get(key)
+        if i is None:
+            i = len(memo)
+            memo[key] = i
+            nodes.extend(struct.pack("<BII", *key))
+        return i
+
+    idx = [emit(r) for r in roots]
+    out = bytearray(struct.pack("<IIII", IR_MAGIC, IR_VERSION,
+                                len(memo), len(roots)))
+    for i in idx:
+        out += struct.pack("<I", i)
+    return bytes(out) + bytes(nodes)
+
+
+def unpack_ir(data: bytes) -> List[T]:
+    """packed-IR bytes -> root terms (single forward pass; the
+    postorder invariant makes every child index < its parent's)."""
+    magic, ver, n_nodes, n_roots = struct.unpack_from("<IIII", data, 0)
+    if magic != IR_MAGIC:
+        raise ValueError(f"bad packed-IR magic {magic:#x}")
+    if ver != IR_VERSION:
+        raise ValueError(f"packed-IR version {ver}")
+    pos = 16
+    roots = struct.unpack_from(f"<{n_roots}I", data, pos)
+    pos += 4 * n_roots
+    cells: List[T] = []
+    for _ in range(n_nodes):
+        tag, l, r = struct.unpack_from("<BII", data, pos)
+        pos += 9
+        if tag == 0:
+            cells.append(app(cells[l], cells[r]))
+        elif tag == IR_VAR:
+            cells.append(T(K.VAR, n=l))
+        else:
+            cells.append(_IR_LEAF[tag])
+    return [cells[i] for i in roots]
+
+
+# ---------------------------------------------------------------------------
 # gate
 # ---------------------------------------------------------------------------
 
@@ -3152,6 +3220,34 @@ def main() -> int:
             nfail += 1
             line = "FAIL " + line[4:] + f"  expected {expected!r}"
         print(line)
+
+    # ------------------------------------------------------------------
+    # ADR-005 packed IR: roundtrip + canonicality.  Sharing survives
+    # (hash-consed on (tag,l,r)); equal terms give identical bytes.
+    # ------------------------------------------------------------------
+    n_ir = 0
+    ir_cases = [I, app(S, app(KK, I)),
+                _appn(T(K.VAR, n=0), T(K.VAR, n=1)),
+                bytelist_term(b"MZ"),
+                st_query := bracket(parse("(\\x. x (K I))"))]
+    for t in ir_cases:
+        rt = unpack_ir(pack_ir(t))
+        ok = len(rt) == 1 and rt[0] == t
+        n_ir += 1
+        if not ok:
+            nfail += 1
+            print(f"FAIL ir roundtrip {t!r:.60}")
+    # multi-root + canonicality: equal-but-distinct trees -> same bytes
+    a1, a2 = app(S, I), app(S, I)
+    two = unpack_ir(pack_ir(a1, KK))
+    ok = (two[0] == a1 and two[1] == KK
+          and pack_ir(app(S, I)) == pack_ir(a1))
+    n_ir += 1
+    if not ok:
+        nfail += 1
+        print("FAIL ir multi-root/canonical")
+    print(f"OK  ir pack/unpack: {n_ir} cases "
+          f"({len(pack_ir(st_query))}B for a small λ-compiled term)")
 
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
           f"({len(NAMES) + 1} pathOf + {len(NAMES) + 1} resolveOf + "
