@@ -44,6 +44,15 @@ ET_EXEC, EM_X86_64, EM_AARCH64, EM_RISCV = 2, 0x3E, 0xB7, 0xF3
 PT_LOAD = 1
 PF_X, PF_W, PF_R = 1, 2, 4
 
+# ET_REL section/symbol constants for pack_obj
+ET_REL = 1
+SHT_NULL, SHT_PROGBITS, SHT_SYMTAB, SHT_STRTAB, SHT_RELA, SHT_NOBITS = \
+    0, 1, 2, 3, 4, 8
+SHF_WRITE, SHF_ALLOC, SHF_EXECINSTR = 1, 2, 4
+STB_LOCAL, STB_GLOBAL = 0, 1
+STT_NOTYPE, STT_OBJECT, STT_FUNC, STT_SECTION = 0, 1, 2, 3
+SHN_UNDEF = 0
+
 
 def _align(v: int, a: int) -> int:
     return (v + a - 1) // a * a
@@ -105,6 +114,126 @@ def pack(text: bytes, labels: Dict[str, int], imports: Sequence[str],
     return out + data
 
 
+def pack_obj(text: bytes, labels: Dict[str, int],
+             relocs: List[Tuple[int, str, int, int]],
+             data_slots, R, machine: int = EM_X86_64) -> bytes:
+    """Pack an ET_REL object: .text + .data + .symtab + .strtab +
+    .rela.text + shdrs.  `labels` are .text-section-relative offsets
+    (local FUNC symbols); `data_slots` name .data OBJECTs (global —
+    the audit interface); `relocs` are (text_off, sym, rtype, addend)
+    produced by isa.assemble_obj."""
+    data, dsyms = build_data_rel(data_slots)
+    strtab = bytearray(b"\x00")
+
+    def _stname(s: str) -> int:
+        off = len(strtab)
+        strtab.extend(s.encode() + b"\x00")
+        return off
+
+    # symbol order: null, section syms, label syms (local), data (global)
+    syms: List[Tuple] = [(0, STB_LOCAL << 4 | STT_NOTYPE, 0, SHN_UNDEF,
+                          0, 0)]
+    # st_shndx: .text=1, .data=2 (section index into the shdr table)
+    SEC_TEXT, SEC_DATA = 1, 2
+    syms.append((0, STB_LOCAL << 4 | STT_SECTION, 0, SEC_TEXT, 0, 0))
+    syms.append((0, STB_LOCAL << 4 | STT_SECTION, 0, SEC_DATA, 0, 0))
+    for name, off in labels.items():
+        if name != "_start":
+            syms.append((_stname(name), STB_LOCAL << 4 | STT_FUNC, 0,
+                         SEC_TEXT, off, 0))
+    first_global = len(syms)
+    # _start is GLOBAL — the entry contract a linker resolves by name
+    if "_start" in labels:
+        syms.append((_stname("_start"), STB_GLOBAL << 4 | STT_FUNC, 0,
+                     SEC_TEXT, labels["_start"], 0))
+    symidx: Dict[str, int] = {}
+    for name, off in dsyms.items():
+        symidx[name] = len(syms)
+        syms.append((_stname(name), STB_GLOBAL << 4 | STT_OBJECT, 0,
+                     SEC_DATA, off, 0))
+    symtab = b"".join(
+        struct.pack("<IBBHQQ", *s) for s in syms)
+
+    rela = b"".join(
+        struct.pack("<QQq", off,
+                    (symidx[sym] << 32) | rtype, addend)
+        for off, sym, rtype, addend in relocs)
+
+    # ---- layout: ehdr | .text | .data | .symtab | .strtab | .rela | shstrtab | shdrs
+    shstr = bytearray(b"\x00")
+    sec_names: List[int] = []
+    for s in (b"", b".text", b".data", b".symtab", b".strtab",
+              b".rela.text", b".shstrtab"):
+        sec_names.append(len(shstr))
+        shstr += s + b"\x00"
+
+    SEC_SYMTAB, SEC_STRTAB, SEC_RELA, SEC_SHSTR = 3, 4, 5, 6
+    NSEC = 7
+
+    body = bytearray()
+    body += b"\x00" * EHDR_SIZE
+    sec_off = {}
+
+    def _sec(idx: int, blob: bytes, align: int = 1) -> None:
+        pad = _align(len(body), align) - len(body)
+        body.extend(b"\x00" * pad)
+        sec_off[idx] = (len(body), len(blob))
+        body.extend(blob)
+
+    _sec(SEC_TEXT, text, 16)
+    _sec(SEC_DATA, data, 16)
+    _sec(SEC_SYMTAB, symtab, 8)
+    _sec(SEC_STRTAB, bytes(strtab), 1)
+    _sec(SEC_RELA, rela, 8)
+    _sec(SEC_SHSTR, bytes(shstr), 1)
+    shoff = _align(len(body), 8)
+    body += b"\x00" * (shoff - len(body))
+
+    ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + b"\x00" * 8
+    ehdr = ident + struct.pack(
+        "<HHIQQQIHHHHHH",
+        ET_REL, machine, 1,
+        0, 0, shoff, 0,
+        EHDR_SIZE, 0, 0,
+        64, NSEC, SEC_SHSTR)
+    assert len(ehdr) == EHDR_SIZE, len(ehdr)
+    body[:EHDR_SIZE] = ehdr
+
+    def _sh(idx: int, typ: int, flags: int, align: int,
+            link: int = 0, info: int = 0, entsize: int = 0) -> bytes:
+        off, size = sec_off.get(idx, (0, 0))
+        return struct.pack(
+            "<IIQQQQIIQQ",
+            sec_names[idx], typ, flags, 0, off, size,
+            link, info, align, entsize)
+
+    shdrs = _sh(0, SHT_NULL, 0, 0)
+    shdrs += _sh(SEC_TEXT, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 16)
+    shdrs += _sh(SEC_DATA, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 16)
+    shdrs += _sh(SEC_SYMTAB, SHT_SYMTAB, 0, 8,
+                 link=SEC_STRTAB, info=first_global, entsize=24)
+    shdrs += _sh(SEC_STRTAB, SHT_STRTAB, 0, 1)
+    shdrs += _sh(SEC_RELA, SHT_RELA, 0, 8,
+                 link=SEC_SYMTAB, info=SEC_TEXT, entsize=24)
+    shdrs += _sh(SEC_SHSTR, SHT_STRTAB, 0, 1)
+    body += shdrs
+    return bytes(body)
+
+
+def build_data_rel(data_slots) -> Tuple[bytes, Dict[str, int]]:
+    """.data contents + section-relative symbol offsets for pack_obj."""
+    syms: Dict[str, int] = {}
+    out = bytearray()
+    for slot in data_slots:
+        name, sz = slot[0], slot[1]
+        pad = _align(len(out), 8) - len(out)
+        out += b"\x00" * pad
+        syms[name] = len(out)
+        init = slot[2] if len(slot) > 2 else b""
+        out += init[:sz] + b"\x00" * (sz - len(init))
+    return bytes(out), syms
+
+
 @dataclass(frozen=True)
 class Target:
     name: str         # "elf64"
@@ -114,6 +243,7 @@ class Target:
     pack: Callable    # pack(text, labels, imports, data_slots, R) -> bytes
     symbols: Callable  # symbols(imports, data_slots) -> {name: vaddr}
     text_base: int    # TEXT_VA — .text load address for assembly
+    pack_obj: Callable = None  # pack_obj(text, labels, relocs, slots, R)
 
 
 ELF64 = Target(
@@ -146,6 +276,47 @@ ELF64_RISCV64 = Target(
     pack=lambda *a: pack(*a, machine=EM_RISCV),
     symbols=symbols,
     text_base=TEXT_VA,
+)
+
+
+# ---- relocatable (.o) variants — same container family, ET_REL layout
+# symbols() unused for .o (assemble_obj resolves locally); keep it as the
+# import-guard so the NotRealized policy stays centralized.
+
+ELFO64 = Target(
+    name="elfo64",
+    os="linux",
+    abi="linux",
+    ext=".o",
+    pack=lambda *a: (_ for _ in ()).throw(
+        NotRealized("elfo64 emits relocatables, not executables")),
+    symbols=symbols,
+    text_base=0,
+    pack_obj=lambda *a: pack_obj(*a, machine=EM_X86_64),
+)
+
+ELFO64_AARCH64 = Target(
+    name="elfo64.aarch64",
+    os="linux",
+    abi="linux",
+    ext=".o",
+    pack=lambda *a: (_ for _ in ()).throw(
+        NotRealized("elfo64 emits relocatables, not executables")),
+    symbols=symbols,
+    text_base=0,
+    pack_obj=lambda *a: pack_obj(*a, machine=EM_AARCH64),
+)
+
+ELFO64_RISCV64 = Target(
+    name="elfo64.riscv64",
+    os="linux",
+    abi="linux",
+    ext=".o",
+    pack=lambda *a: (_ for _ in ()).throw(
+        NotRealized("elfo64 emits relocatables, not executables")),
+    symbols=symbols,
+    text_base=0,
+    pack_obj=lambda *a: pack_obj(*a, machine=EM_RISCV),
 )
 
 

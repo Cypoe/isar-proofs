@@ -275,14 +275,12 @@ def _f_rs2(ctx: _Ctx, i: int) -> Tuple[int, int, int]:
 
 
 def _symbits(v, kind: str, ctx: _Ctx) -> int:
-    """("ahi"/"alo", s) tuple operand -> the resolved riscv value."""
+    """("ahi"/"alo", s) tuple operand -> the resolved riscv value.
+    The resolver sees the full tuple — it owns the hi/lo split (and
+    reloc recording under assemble_obj)."""
     if not isinstance(v, tuple):
         return v
-    a = ctx.resolve(("a", v[1])) if ctx.resolve else 0
-    if v[0] == "ahi":
-        return ((a + 0x800) >> 12) & 0xFFFFF
-    hi = (a + 0x800) & ~0xFFF
-    return a - hi                                  # signed lo12
+    return ctx.resolve(v) if ctx.resolve else 0
 
 
 def _f_iimm(ctx: _Ctx, i: int) -> Tuple[int, int, int]:
@@ -511,13 +509,69 @@ def assemble(program: Program, symbols: Dict[str, int],
         insn = item[1:]
         at = base + off
         def resolver(name, _a=at):
-            if isinstance(name, tuple):                 # ("a", sym)
-                return (symbols[name[1]] if name[1] in symbols
-                        else local[name[1]])
+            if isinstance(name, tuple):
+                # ("ahi", s)/("alo", s): resolver owns the split
+                s = name[1]
+                a = symbols[s] if s in symbols else local[s]
+                if name[0] == "ahi":
+                    return ((a + 0x800) >> 12) & 0xFFFFF
+                if name[0] == "alo":
+                    return a - ((a + 0x800) & ~0xFFF)
+                return a
             return (symbols[name] if name in symbols
                     else local[name]) - _a
         out += encode(insn, resolve=resolver)
     return bytes(out), local
+
+
+R_RISCV_HI20 = 26         # lui field — absolute hi20 of S+A
+R_RISCV_LO12_I = 27       # i-imm field — signed lo12 of S+A
+
+
+def assemble_obj(program: Program, syms=frozenset()) -> Tuple[
+        bytes, Dict[str, int], List[Tuple[int, str, int, int]]]:
+    """Relocatable assembly (ET_REL .o): branches/jal resolve inline
+    (pc-relative intra-.text is link-safe); ("ahi"/"alo", sym) refs to
+    non-local symbols become HI20/LO12_I relocations on the insn word —
+    reloc offset = insn offset, field zeroed.  The lui+addiw pair is the
+    standard absolute-address idiom the linker folds (+0x800) itself."""
+    local: Dict[str, int] = {}
+    offs: List[int] = []
+    pos = 0
+    for item in program:
+        if item[0] == "label":
+            if item[1] in local:
+                raise ValueError(f"duplicate label {item[1]!r}")
+            local[item[1]] = pos
+            offs.append(pos)
+        else:
+            offs.append(pos)
+            pos += len(encode(item[1:]))
+    _RTYPE = {"ahi": R_RISCV_HI20, "alo": R_RISCV_LO12_I}
+    relocs: List[Tuple[int, str, int, int]] = []
+    out = bytearray()
+    for item, off in zip(program, offs):
+        if item[0] == "label":
+            continue
+        insn = item[1:]
+
+        def resolver(name, _a=off, _o=off):
+            if isinstance(name, tuple):
+                s = name[1]
+                if s not in local:
+                    assert s in syms, f"undeclared symbol {s!r}"
+                    relocs.append((_o, s, _RTYPE[name[0]], 0))
+                    return 0
+                a = local[s]
+                if name[0] == "ahi":
+                    return ((a + 0x800) >> 12) & 0xFFFFF
+                if name[0] == "alo":
+                    return a - ((a + 0x800) & ~0xFFF)
+                return a
+            return local[name] - _a
+
+        out += encode(insn, resolve=resolver)
+    return bytes(out), local, relocs
 
 
 @dataclass(frozen=True)
@@ -530,6 +584,7 @@ class ISA:
     encode: Callable     # encode(insn, resolve=None) -> bytes
     assemble: Callable   # assemble(program, symbols, base=0) -> (bytes, labels)
     render: Callable     # render_mc
+    assemble_obj: Callable = None  # assemble_obj(prog, syms) -> (text, labels, relocs)
 
 
 RISCV64 = ISA(
@@ -541,6 +596,7 @@ RISCV64 = ISA(
     encode=encode,
     assemble=assemble,
     render=render_mc,
+    assemble_obj=assemble_obj,
 )
 
 

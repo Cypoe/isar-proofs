@@ -368,6 +368,15 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
     # residual-application record sizes its payload slot per realization
     slots = rts.data_slots(R) if callable(rts.data_slots) \
         else rts.data_slots
+    if getattr(tgt, "pack_obj", None) is not None:
+        # relocatable-object chain: .text section-relative labels,
+        # data-slot refs become ELF relocations
+        if getattr(isa, "assemble_obj", None) is None:
+            raise NotRealized(
+                f"isa {isa.name!r}: no assemble_obj for {tgt.name!r}")
+        text, labels, relocs = isa.assemble_obj(
+            prog, frozenset(s[0] for s in slots))
+        return tgt.pack_obj(text, labels, relocs, slots, R)
     text, labels = isa.assemble(
         prog, tgt.symbols(rts.imports, slots), base=tgt.text_base)
     return tgt.pack(text, labels, rts.imports, slots, R)

@@ -487,6 +487,49 @@ def assemble(program: Program, symbols: Dict[str, int],
     return bytes(out), local
 
 
+R_X86_64_PC32 = 2          # S + A - P, field = trailing rel32
+
+
+def assemble_obj(program: Program, syms=frozenset()) -> Tuple[
+        bytes, Dict[str, int], List[Tuple[int, str, int, int]]]:
+    """Relocatable assembly (ET_REL .o): intra-.text operands resolve
+    inline (pc-relative fixups are already link-safe); any operand
+    naming a non-local symbol — a data slot — becomes a relocation
+    record (text_off, sym, rtype, addend) with the field zeroed.
+    Labels are returned .text-section-relative."""
+    local: Dict[str, int] = {}
+    offs: List[int] = []
+    pos = 0
+    for item in program:
+        if item[0] == "label":
+            if item[1] in local:
+                raise ValueError(f"duplicate label {item[1]!r}")
+            local[item[1]] = pos
+            offs.append(pos)
+        else:
+            offs.append(pos)
+            pos += len(encode(item[1:]))
+    relocs: List[Tuple[int, str, int, int]] = []
+    out = bytearray()
+    for item, off in zip(program, offs):
+        if item[0] == "label":
+            continue
+        insn = item[1:]
+        end = off + len(encode(insn))
+
+        def resolver(name, _e=end):
+            if name in local:
+                return local[name] - _e
+            assert name in syms, f"undeclared symbol {name!r}"
+            # data-symbol ref: zero the field, emit R_X86_64_PC32 at the
+            # terminal rel32 (field base = insn end - 4), addend -4
+            relocs.append((_e - 4, name, R_X86_64_PC32, -4))
+            return 0
+
+        out += encode(insn, resolve=resolver)
+    return bytes(out), local, relocs
+
+
 @dataclass(frozen=True)
 class ISA:
     name: str            # "x86_64"
@@ -497,6 +540,7 @@ class ISA:
     encode: Callable     # encode(insn, resolve=None) -> bytes
     assemble: Callable   # assemble(program, symbols, base=0) -> (bytes, labels)
     render: Callable     # render_fasm
+    assemble_obj: Callable = None  # assemble_obj(prog, syms) -> (text, labels, relocs)
 
 
 X86_64 = ISA(
@@ -508,6 +552,7 @@ X86_64 = ISA(
     encode=encode,
     assemble=assemble,
     render=render_fasm,
+    assemble_obj=assemble_obj,
 )
 
 

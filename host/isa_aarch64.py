@@ -355,8 +355,10 @@ def _f_imm(ctx: _Ctx, w: int, lsb: int, i: int, scale: int = 1,
     — the movz/movk pair for a data/label address."""
     v = _op(ctx, i, default)
     if isinstance(v, tuple):
-        a = ctx.resolve(("a", v[1])) if ctx.resolve else 0
-        v = (a & 0xFFFF) if v[0] == "alo" else ((a >> 16) & 0xFFFF)
+        # ("alo", s)/("ahi", s): the RESOLVER splits — it owns whether s
+        # is a local label (section offset) or a data symbol (absolute
+        # VA, or a reloc site under assemble_obj).
+        v = ctx.resolve(v) if ctx.resolve else 0
     assert v % scale == 0, f"imm {v} not divisible by {scale}"
     v //= scale
     assert 0 <= v < (1 << w), f"imm {v} does not fit {w} bits"
@@ -552,13 +554,70 @@ def assemble(program: Program, symbols: Dict[str, int],
         insn = item[1:]
         at = base + off
         def resolver(name, _a=at):
-            if isinstance(name, tuple):                 # ("a", sym)
-                return (symbols[name[1]] if name[1] in symbols
-                        else local[name[1]])
+            if isinstance(name, tuple):
+                # ("a", s) absolute; ("alo", s)/("ahi", s) split halves
+                s = name[1]
+                a = (symbols[s] if s in symbols else local[s])
+                if name[0] == "alo":
+                    return a & 0xFFFF
+                if name[0] == "ahi":
+                    return (a >> 16) & 0xFFFF
+                return a
             return (symbols[name] if name in symbols
                     else local[name]) - _a
         out += encode(insn, resolve=resolver)
     return bytes(out), local
+
+
+R_AARCH64_MOVW_UABS_G0_NC = 264   # movz :lo16:sym
+R_AARCH64_MOVW_UABS_G1_NC = 266   # movk :hi16:sym lsl #16
+
+
+def assemble_obj(program: Program, syms=frozenset()) -> Tuple[
+        bytes, Dict[str, int], List[Tuple[int, str, int, int]]]:
+    """Relocatable assembly (ET_REL .o): branches resolve inline
+    (pc-relative intra-.text is link-safe); ("alo"/"ahi", sym) refs to
+    non-local symbols become MOVW relocations on the whole insn word —
+    reloc offset = insn offset, field zeroed."""
+    local: Dict[str, int] = {}
+    offs: List[int] = []
+    pos = 0
+    for item in program:
+        if item[0] == "label":
+            if item[1] in local:
+                raise ValueError(f"duplicate label {item[1]!r}")
+            local[item[1]] = pos
+            offs.append(pos)
+        else:
+            offs.append(pos)
+            pos += len(encode(item[1:]))
+    _RTYPE = {"alo": R_AARCH64_MOVW_UABS_G0_NC,
+              "ahi": R_AARCH64_MOVW_UABS_G1_NC}
+    relocs: List[Tuple[int, str, int, int]] = []
+    out = bytearray()
+    for item, off in zip(program, offs):
+        if item[0] == "label":
+            continue
+        insn = item[1:]
+
+        def resolver(name, _a=off, _o=off):
+            if isinstance(name, tuple):
+                s = name[1]
+                if s in local:
+                    a = local[s]
+                else:
+                    assert s in syms, f"undeclared symbol {s!r}"
+                    relocs.append((_o, s, _RTYPE[name[0]], 0))
+                    return 0
+                if name[0] == "alo":
+                    return a & 0xFFFF
+                if name[0] == "ahi":
+                    return (a >> 16) & 0xFFFF
+                return a
+            return local[name] - _a
+
+        out += encode(insn, resolve=resolver)
+    return bytes(out), local, relocs
 
 
 @dataclass(frozen=True)
@@ -571,6 +630,7 @@ class ISA:
     encode: Callable     # encode(insn, resolve=None) -> bytes
     assemble: Callable   # assemble(program, symbols, base=0) -> (bytes, labels)
     render: Callable     # render_mc
+    assemble_obj: Callable = None  # assemble_obj(prog, syms) -> (text, labels, relocs)
 
 
 AARCH64 = ISA(
@@ -582,6 +642,7 @@ AARCH64 = ISA(
     encode=encode,
     assemble=assemble,
     render=render_mc,
+    assemble_obj=assemble_obj,
 )
 
 
