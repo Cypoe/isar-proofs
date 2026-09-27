@@ -1169,6 +1169,7 @@ def r_res_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_m64", "r14", ("m", "rax", 0)),
         I("mov_rip_r64", ("p", "resarg"), "r14"),
         I("mov_r64_rip", "r13", ("p", "rescells")),
+        I("mov_r64_r64", "r12", "r13"),    # hoisted: residual block base
         I("mov_r64_rip", "rax", ("p", "resn")),
     ] + _mul24() + [
         I("mov_r64_r64", "r15", "r13"), I("add_r64_r64", "r15", "rax"),
@@ -1179,13 +1180,28 @@ def r_res_reduce(R: Realization, ctx: Ctx) -> Program:
         I("cmp_r64_r64", "r13", "r15"), I("jge_rel32", ("l", "res_gdone")),
         I("mov_r64_m64", "rax", ("m", "r13", 0)),
         I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "res_gleaf")),
-        # APP cell: remap l (then r) — child in residual range + hole ->
-        # arg; in range non-hole -> +delta; outside -> verbatim
+        # APP cell: remap l (then r) INLINED — child below rescells or at/
+        # beyond resend -> verbatim; in range: hole -> r14 (resarg),
+        # else +resdelta.  invariants in r12/r15/r14 across mkapp calls.
         I("mov_r64_m64", "rax", ("m", "r13", 8)),
-        I("call_rel32", ("l", "res_remap")),
+        I("cmp_r64_r64", "rax", "r12"), I("jb_rel32", ("l", "res_g_l")),
+        I("cmp_r64_r64", "rax", "r15"), I("jge_rel32", ("l", "res_g_l")),
+        I("cmp_m64_imm", ("m", "rax", 0), IR_HOLE),
+        I("jne_rel32", ("l", "res_g_ld")),
+        I("mov_r64_r64", "rax", "r14"), I("jmp_rel32", ("l", "res_g_l")),
+        LBL("res_g_ld"),
+        I("mov_r64_rip", "rdx", ("p", "resdelta")), I("add_r64_r64", "rax", "rdx"),
+        LBL("res_g_l"),
         I("mov_r64_r64", "rdi", "rax"),
         I("mov_r64_m64", "rax", ("m", "r13", 16)),
-        I("call_rel32", ("l", "res_remap")),
+        I("cmp_r64_r64", "rax", "r12"), I("jb_rel32", ("l", "res_g_r")),
+        I("cmp_r64_r64", "rax", "r15"), I("jge_rel32", ("l", "res_g_r")),
+        I("cmp_m64_imm", ("m", "rax", 0), IR_HOLE),
+        I("jne_rel32", ("l", "res_g_rd")),
+        I("mov_r64_r64", "rax", "r14"), I("jmp_rel32", ("l", "res_g_r")),
+        LBL("res_g_rd"),
+        I("mov_r64_rip", "rdx", ("p", "resdelta")), I("add_r64_r64", "rax", "rdx"),
+        LBL("res_g_r"),
         I("mov_r64_r64", "rsi", "rax"),
         I("jmp_rel32", ("l", "res_gmk")),
         LBL("res_gleaf"),          # leaf or hole: copy tag verbatim
@@ -1261,28 +1277,6 @@ def r_res_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "r15", ("p", "irsteps")),
     ]
     return p
-
-
-def r_res_remap(R: Realization, ctx: Ctx) -> Program:
-    """res_remap(rax=child ptr) -> rax: hole cell -> resarg; ptr inside
-    the residual block -> +resdelta (the mkapp twin); else verbatim."""
-    return [
-        LBL("res_remap"),
-        I("mov_r64_rip", "rcx", ("p", "rescells")),
-        I("mov_r64_r64", "rdx", "rax"), I("sub_r64_r64", "rdx", "rcx"),
-        I("mov_r64_rip", "r8", ("p", "resn")),
-        I("shl_r64_imm8", "r8", 3), I("mov_r64_r64", "r9", "r8"),
-        I("add_r64_r64", "r9", "r9"), I("add_r64_r64", "r8", "r9"),  # 24*resn
-        I("cmp_r64_r64", "rdx", "r8"), I("jb_rel32", ("l", "res_rm_in")),
-        I("ret"),                                       # outside -> verbatim
-        LBL("res_rm_in"),
-        I("cmp_m64_imm", ("m", "rax", 0), IR_HOLE),
-        I("jne_rel32", ("l", "res_rm_delta")),
-        I("mov_r64_rip", "rax", ("p", "resarg")), I("ret"),
-        LBL("res_rm_delta"),
-        I("mov_r64_rip", "rdx", ("p", "resdelta")), I("add_r64_r64", "rax", "rdx"),
-        I("ret"),
-    ]
 
 
 def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
@@ -1403,7 +1397,7 @@ X86_64_WIN64_IR = Routines(
 # holes before reduction.  Same wire contract as the IR kernel.
 ROUTINES_RES: Tuple[str, ...] = (
     "res_entry", "ir_read", "ir_depack", "res_reduce", "stats", "exits",
-    "grow_heap_ir", "mkleaf", "mkapp", "res_depack", "res_remap",
+    "grow_heap_ir", "mkleaf", "mkapp", "res_depack",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
     "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
 )

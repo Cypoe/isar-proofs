@@ -364,6 +364,13 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
             f"abi={R.abi!r} not realized by routines {rts.name!r}")
     prog = rts.program(program, R) if tc.path == "native" \
         else rts.program(R)
+    # -O3-style peephole: Program-level rewrites (fallthrough jmp,
+    # unreachable-after-jmp/ret, jump threading, self-move) — generic
+    # over ISAs via per-ISA classification data in host/opt_peephole.
+    # The resid kernel's graft loop is specialized separately at the
+    # routine-builder level (res_remap inlined, invariants hoisted).
+    import opt_peephole
+    prog = opt_peephole.optimize(prog, isa.name)
     # data_slots may be a static tuple or a callable on R — the
     # residual-application record sizes its payload slot per realization
     slots = rts.data_slots(R) if callable(rts.data_slots) \
