@@ -40,7 +40,7 @@ TEXT_VA = VBASE + HDRS                  # 0x4000B0 — _start lands here
 DATA_VA = 0x500000                      # .data segment base (fixed)
 PAGE = 0x1000
 
-ET_EXEC, EM_X86_64, EM_AARCH64 = 2, 0x3E, 0xB7
+ET_EXEC, EM_X86_64, EM_AARCH64, EM_RISCV = 2, 0x3E, 0xB7, 0xF3
 PT_LOAD = 1
 PF_X, PF_W, PF_R = 1, 2, 4
 
@@ -133,6 +133,17 @@ ELF64_AARCH64 = Target(
     abi="linux",
     ext=".elf",
     pack=lambda *a: pack(*a, machine=EM_AARCH64),
+    symbols=symbols,
+    text_base=TEXT_VA,
+)
+
+
+ELF64_RISCV64 = Target(
+    name="elf64.riscv64",
+    os="linux",
+    abi="linux",
+    ext=".elf",
+    pack=lambda *a: pack(*a, machine=EM_RISCV),
     symbols=symbols,
     text_base=TEXT_VA,
 )
