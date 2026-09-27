@@ -17,6 +17,8 @@
     "aarch64": {"module": "isa_aarch64", "record": "AARCH64"},
     "c": {"module": "isa_c", "record": "C_ISA",
       "note": "C11 statements as data; assemble emits source text"},
+    "x86_64.fasmg": {"module": "isa_fasmg", "record": "FASMG_X86_64",
+      "note": "x86-64 insn items rendered as fasmg source; resolution stays symbolic, fasmg does fixups"},
     "riscv64": {"note": "no riscv64 ISA table"}
   },
   "routines": {
@@ -47,7 +49,9 @@
     "flat": {"note": "flat binary, no loader"},
     "pe64.uefi": {"note": "PE32+ EFI application subsystem"},
     "c": {"module": "target_c", "record": "C",
-      "note": "C11 source container; compiles via system cc"}
+      "note": "C11 source container; compiles via system cc"},
+    "fasmg.pe64": {"module": "target_fasmg", "record": "FASMG_PE64",
+      "note": "PE64 source container for fasmg (format PE64 + manual .idata); compile() runs fasmg.exe"}
   },
   "pieces": {
     "graph.lo": {"module": "host_pieces", "record": "GRAPH_PIECE"},
@@ -78,6 +82,14 @@
     {"name": "native.x86_64.pe.ir", "dialect": "packed.ir", "isa": "x86_64",
      "routines": "x86_64.win64.ir", "target": "pe64", "path": "runtime",
      "note": "IStepBasis reducer consuming packed-IR batches: N roots in -> N NF lines out"},
+    {"name": "native.x86_64.fasmg", "dialect": "bytecode.postfix",
+     "isa": "x86_64.fasmg", "routines": "x86_64.win64.lo",
+     "target": "fasmg.pe64", "path": "runtime",
+     "note": "token kernel as fasmg source -> PE via fasmg.exe (witness realization)"},
+    {"name": "native.x86_64.ir.fasmg", "dialect": "packed.ir",
+     "isa": "x86_64.fasmg", "routines": "x86_64.win64.ir",
+     "target": "fasmg.pe64", "path": "runtime",
+     "note": "packed-IR batch kernel as fasmg source -> PE via fasmg.exe"},
     {"name": "xdu.x86_64.pe", "dialect": "xdu.json", "isa": "x86_64",
      "routines": "x86_64.win64.xdu", "target": "pe64", "path": "native",
      "note": "nibble transducer plex -> PE exe (W3)"},
