@@ -40,7 +40,7 @@ TEXT_VA = VBASE + HDRS                  # 0x4000B0 — _start lands here
 DATA_VA = 0x500000                      # .data segment base (fixed)
 PAGE = 0x1000
 
-ET_EXEC, EM_X86_64 = 2, 0x3E
+ET_EXEC, EM_X86_64, EM_AARCH64 = 2, 0x3E, 0xB7
 PT_LOAD = 1
 PF_X, PF_W, PF_R = 1, 2, 4
 
@@ -49,13 +49,17 @@ def _align(v: int, a: int) -> int:
     return (v + a - 1) // a * a
 
 
-def build_data(data_slots: Sequence[Tuple[str, int]]) -> Tuple[bytes, Dict[str, int]]:
+def build_data(data_slots) -> Tuple[bytes, Dict[str, int]]:
+    """Slots are (name, size) zero-fill or (name, size, init) with
+    initialized content (residual payloads ride .data)."""
     syms: Dict[str, int] = {}
-    off = 0
-    for name, sz in data_slots:
-        syms[name] = DATA_VA + off
-        off += sz
-    return b"\x00" * off, syms
+    out = bytearray()
+    for slot in data_slots:
+        name, sz = slot[0], slot[1]
+        syms[name] = DATA_VA + len(out)
+        init = slot[2] if len(slot) > 2 else b""
+        out += init[:sz] + b"\x00" * (sz - len(init))
+    return bytes(out), syms
 
 
 def symbols(imports: Sequence[str],
@@ -70,9 +74,11 @@ def symbols(imports: Sequence[str],
 
 
 def pack(text: bytes, labels: Dict[str, int], imports: Sequence[str],
-         data_slots: Sequence[Tuple[str, int]], R) -> bytes:
+         data_slots: Sequence[Tuple[str, int]], R,
+         machine: int = EM_X86_64) -> bytes:
     """Pack an assembled .text into a static ELF64 image: ehdr + 2 phdrs +
-    text (RX @VBASE) + page pad + data (RW @DATA_VA)."""
+    text (RX @VBASE) + page pad + data (RW @DATA_VA).  `machine` selects
+    e_machine — the container is ISA-agnostic row data."""
     if imports:
         raise NotRealized(
             f"elf64: imports {tuple(imports)!r} not realized (no IAT)")
@@ -83,7 +89,7 @@ def pack(text: bytes, labels: Dict[str, int], imports: Sequence[str],
     ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + b"\x00" * 8
     ehdr = ident + struct.pack(
         "<HHIQQQIHHHHHH",
-        ET_EXEC, EM_X86_64, 1,            # type, machine, version
+        ET_EXEC, machine, 1,              # type, machine, version
         entry, EHDR_SIZE, 0, 0,           # entry, phoff, shoff, flags
         EHDR_SIZE, PHDR_SIZE, 2,          # ehsize, phentsize, phnum
         0, 0, 0)                          # shentsize, shnum, shstrndx
@@ -116,6 +122,17 @@ ELF64 = Target(
     abi="linux",
     ext=".elf",
     pack=pack,
+    symbols=symbols,
+    text_base=TEXT_VA,
+)
+
+
+ELF64_AARCH64 = Target(
+    name="elf64.aarch64",
+    os="linux",
+    abi="linux",
+    ext=".elf",
+    pack=lambda *a: pack(*a, machine=EM_AARCH64),
     symbols=symbols,
     text_base=TEXT_VA,
 )

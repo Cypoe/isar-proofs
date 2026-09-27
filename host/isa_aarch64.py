@@ -182,6 +182,12 @@ INSN: Tuple[Tuple[str, str, int], ...] = (
     ("eor_reg",   "eor",  0x4A000000),
     ("ldr_uoff",  "ldr",  0x39400000),   # size field via "opc"
     ("str_uoff",  "str",  0x39000000),
+    ("ldrb_uoff", "ldrb", 0x39400000),   # size=0 fixed (rt names w*)
+    ("strb_uoff", "strb", 0x39000000),
+    ("subs_reg",  "subs", 0x6B000000),   # rd=xzr -> cmp
+    ("ands_reg",  "ands", 0x6A000000),   # rd=xzr -> tst
+    ("udiv_reg",  "udiv", 0x1AC00800),
+    ("msub_reg",  "msub", 0x1B008000),   # rd = ra - rn*rm
     ("b_rel",     "b",    0x14000000),
     ("bl_rel",    "bl",   0x94000000),
     ("bcond_rel", "b",    0x54000000),   # rendered b.<cond>
@@ -232,6 +238,24 @@ _LDST = (
                     ("rn", 1), ("rt", 0))),
 )
 
+# byte load/store: size field fixed 0, offsets unscaled (scale=1)
+_LDSTB = (((), (("bits",), ("opc", 0, 30, 2), ("imm", 12, 10, 2, 1),
+                ("rn", 1), ("rt", 0))),)
+
+# 3-reg no-shift arithmetic (udiv); sf bit from rd name like _SHREG
+_REG3 = (("bits",), ("sf", 0), ("rm", 2), ("rn", 1), ("rd", 0))
+_REG3_ALTS = (
+    ((("isw", 0),), _REG3),              # w regs: 32-bit datapath
+    ((("isx", 0),), _REG3),
+)
+
+# msub: rd = ra - rn*rm  (ra at lsb 10)
+_MSUB = (("bits",), ("sf", 0), ("rm", 2), ("ra", 3), ("rn", 1), ("rd", 0))
+_MSUB_ALTS = (
+    ((("isw", 0),), _MSUB),
+    ((("isx", 0),), _MSUB),
+)
+
 _CBZ = (("bits",), ("sf", 0), ("rel", 1, 19, 5), ("rt", 0))
 
 ENCS: Dict[str, Tuple] = {
@@ -253,6 +277,12 @@ ENCS: Dict[str, Tuple] = {
     "eor_reg":   _SHREG_ALTS,
     "ldr_uoff":  _LDST,
     "str_uoff":  _LDST,
+    "ldrb_uoff": _LDSTB,
+    "strb_uoff": _LDSTB,
+    "subs_reg":  _SHREG_ALTS,
+    "ands_reg":  _SHREG_ALTS,
+    "udiv_reg":  _REG3_ALTS,
+    "msub_reg":  _MSUB_ALTS,
     "b_rel":     (((("sfits", 26, 0),), (("bits",), ("rel", 0, 26, 0))),),
     "bl_rel":    (((("sfits", 26, 0),), (("bits",), ("rel", 0, 26, 0))),),
     "bcond_rel": (((("sfits", 19, 1),),
@@ -312,12 +342,21 @@ def _f_rm(ctx: _Ctx, i: int, default=None) -> Tuple[int, int, int]:
     return _reg(_op(ctx, i, default)), 16, 5
 
 
+def _f_ra(ctx: _Ctx, i: int) -> Tuple[int, int, int]:
+    return _reg(_op(ctx, i)), 10, 5
+
+
 def _f_imm(ctx: _Ctx, w: int, lsb: int, i: int, scale: int = 1,
            default: int = 0) -> Tuple[int, int, int]:
     """Unsigned immediate ops[i] (or `default` when absent) into
     bits[lsb, lsb+w); `scale` divides the operand first (scaled load/
-    store offsets) and asserts divisibility."""
+    store offsets) and asserts divisibility.  Tuple operands resolve
+    absolute symbols: ("alo", s) = sym & 0xFFFF, ("ahi", s) = sym>>16
+    — the movz/movk pair for a data/label address."""
     v = _op(ctx, i, default)
+    if isinstance(v, tuple):
+        a = ctx.resolve(("a", v[1])) if ctx.resolve else 0
+        v = (a & 0xFFFF) if v[0] == "alo" else ((a >> 16) & 0xFFFF)
     assert v % scale == 0, f"imm {v} not divisible by {scale}"
     v //= scale
     assert 0 <= v < (1 << w), f"imm {v} does not fit {w} bits"
@@ -384,7 +423,7 @@ def _f_sh6(ctx: _Ctx, i: int) -> Tuple[int, int, int]:
 
 FIELDS: Dict[str, Callable[..., Tuple[int, int, int]]] = {
     "bits": _f_bits, "opc": _f_opc, "sf": _f_sf,
-    "rd": _f_rd, "rn": _f_rn, "rm": _f_rm, "rt": _f_rt,
+    "rd": _f_rd, "rn": _f_rn, "rm": _f_rm, "rt": _f_rt, "ra": _f_ra,
     "imm": _f_imm, "hw": _f_hw, "cond": _f_cond, "rel": _f_rel,
     "sh": _f_sh, "shk": _f_shk, "sh6": _f_sh6,
 }
@@ -450,13 +489,18 @@ def render_mc(insn: Insn, resolve=None) -> str:
         s = ops[3] if len(ops) > 3 else 0
         return f"{m} {ops[0]}, {ops[1]}, #{ops[2]}" \
             + (f", lsl #{s}" if s else "")
-    if form in ("add_reg", "sub_reg", "orr_reg", "and_reg", "eor_reg"):
+    if form in ("add_reg", "sub_reg", "orr_reg", "and_reg", "eor_reg",
+                "subs_reg", "ands_reg"):
         t = f"{m} {ops[0]}, {ops[1]}, {ops[2]}"
         sh = ops[3] if len(ops) > 3 else ("shift", "lsl", 0)
         if sh[1] != "lsl" or sh[2]:
             t += f", {sh[1]} #{sh[2]}"
         return t
-    if form in ("ldr_uoff", "str_uoff"):
+    if form in ("udiv_reg",):
+        return f"{m} {ops[0]}, {ops[1]}, {ops[2]}"
+    if form == "msub_reg":
+        return f"msub {ops[0]}, {ops[1]}, {ops[2]}, {ops[3]}"
+    if form in ("ldr_uoff", "str_uoff", "ldrb_uoff", "strb_uoff"):
         off = ops[2] if len(ops) > 2 else 0
         return f"{m} {ops[0]}, [{ops[1]}" + (f", #{off}" if off else "") \
             + "]"
@@ -507,8 +551,12 @@ def assemble(program: Program, symbols: Dict[str, int],
             continue
         insn = item[1:]
         at = base + off
-        resolver = lambda name, _a=at: (
-            symbols[name] if name in symbols else local[name]) - _a
+        def resolver(name, _a=at):
+            if isinstance(name, tuple):                 # ("a", sym)
+                return (symbols[name[1]] if name[1] in symbols
+                        else local[name[1]])
+            return (symbols[name] if name in symbols
+                    else local[name]) - _a
         out += encode(insn, resolve=resolver)
     return bytes(out), local
 
@@ -604,6 +652,18 @@ ROW_SAMPLES: List[Tuple] = [
     ("cbz_rel", ("cbz_rel", "w6", ("p", 8))),
     ("cbnz_rel", ("cbnz_rel", "x30", ("p", 0))),
     ("cbnz_rel", ("cbnz_rel", "wzr", ("p", 4096))),
+    ("subs_reg", ("subs_reg", "xzr", "x9", "x10")),      # cmp x9, x10
+    ("subs_reg", ("subs_reg", "w1", "w2", "w3", ("shift", "lsr", 5))),
+    ("ands_reg", ("ands_reg", "xzr", "x0", "x0")),       # tst x0, x0
+    ("ands_reg", ("ands_reg", "wzr", "w4", "w5")),
+    ("udiv_reg", ("udiv_reg", "x7", "x4", "x6")),
+    ("udiv_reg", ("udiv_reg", "w0", "w1", "w2")),
+    ("msub_reg", ("msub_reg", "x9", "x7", "x6", "x4")),
+    ("msub_reg", ("msub_reg", "w9", "w7", "w6", "w4")),
+    ("ldrb_uoff", ("ldrb_uoff", "w9", "x21", 0)),
+    ("ldrb_uoff", ("ldrb_uoff", "w0", "x5", 4095)),
+    ("strb_uoff", ("strb_uoff", "w9", "x1", 0)),
+    ("strb_uoff", ("strb_uoff", "w2", "x3", 4095)),
 ]
 
 _REL_OPS = {"b_rel": 0, "bl_rel": 0, "bcond_rel": 1, "cbz_rel": 1,
