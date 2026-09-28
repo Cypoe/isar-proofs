@@ -83,6 +83,123 @@ class Obligation:
     suite: str
     what: str
     witnesses: Tuple[str, ...] = ()
+    family: str = ""
+    evidence: str = ""
+    regime: Optional[str] = None
+    tier: str = "fast"
+    requires: Tuple[str, ...] = ()
+    args: Tuple[str, ...] = ()
+    cost_model: Optional[Tuple[Tuple[str, str], ...]] = None
+    lean_decls: Tuple[str, ...] = ()
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class Selftest:
+    module: str
+    tier: str = "fast"
+    requires: Tuple[str, ...] = ()
+    args: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Bench:
+    name: str
+    module: str
+    measures: Tuple[str, ...] = ()
+    claim: str = ""
+
+
+@dataclass(frozen=True)
+class Demo:
+    name: str
+    entry: str
+    what: str = ""
+
+
+FAMILIES = {"quotient", "staging", "cost", "selection"}
+EVIDENCE = {"congruence", "seam", "cost", "selection", "lean", "structural"}
+TIERS = {"fast", "full", "env"}
+_REPO = os.path.dirname(_HOST)
+
+
+def _suite_file(suite: str) -> Optional[str]:
+    """Repo-relative file for a suite name; None for the special 'lake'."""
+    if suite == "seed":
+        return os.path.join(_REPO, "seed", "seed.py")
+    if suite == "lake":
+        return None
+    return os.path.join(_HOST, suite + ".py")
+
+
+def validate(raw: dict) -> List[str]:
+    """Pure schema/honesty check on the raw spec dict -> error strings."""
+    errs: List[str] = []
+
+    def _tags(item, kind, name):
+        fam, ev, tier = item.get("family"), item.get("evidence"), item.get("tier", "fast")
+        if kind == "obligation":
+            if fam not in FAMILIES:
+                errs.append(f"{name}: bad family {fam!r}")
+            if ev not in EVIDENCE:
+                errs.append(f"{name}: bad evidence {ev!r}")
+        if tier not in TIERS:
+            errs.append(f"{name}: bad tier {tier!r}")
+        req = item.get("requires", ())
+        if (tier == "env") != bool(req):
+            errs.append(f"{name}: tier env <=> requires non-empty violated")
+        return req
+
+    seen = set()
+    for o in raw.get("obligations", []):
+        oid = o.get("id", "?")
+        if oid in seen:
+            errs.append(f"{oid}: duplicate obligation id")
+        seen.add(oid)
+        _tags(o, "obligation", oid)
+        ev = o.get("evidence")
+        fam = o.get("family")
+        reg = o.get("regime")
+        if ev not in ("structural", "lean"):
+            if not reg or reg not in raw.get("regimes", {}):
+                errs.append(f"{oid}: regime {reg!r} missing or undeclared")
+        need_cost = fam == "cost" or ev == "cost"
+        cm = o.get("cost_model")
+        if need_cost != bool(cm):
+            errs.append(f"{oid}: cost_model required iff family/evidence is cost")
+        if cm:
+            for k in ("work", "C", "baseline", "scope"):
+                if k not in cm:
+                    errs.append(f"{oid}: cost_model missing key {k!r}")
+            for k in ("work", "C", "baseline"):
+                v = str(cm.get(k, "")).lower()
+                if "wall" in v or "qemu" in v:
+                    errs.append(
+                        f"{oid}: cost_model.{k}={cm.get(k)!r} — wall-clock/"
+                        "QEMU time is never a Jones/cost measure")
+        if bool(o.get("lean_decls")) != (ev == "lean"):
+            errs.append(f"{oid}: lean_decls non-empty iff evidence==lean")
+        sf = _suite_file(o.get("suite", ""))
+        if sf is not None and not os.path.exists(sf):
+            errs.append(f"{oid}: suite file missing: {sf}")
+    for st in raw.get("selftests", []):
+        nm = st.get("module", "?")
+        _tags(st, "selftest", nm)
+        if not os.path.exists(os.path.join(_HOST, nm + ".py")):
+            errs.append(f"selftest {nm}: host/{nm}.py missing")
+    for b in raw.get("benches", []):
+        nm = b.get("name", "?")
+        if not str(b.get("claim", "")).startswith("none"):
+            errs.append(f"bench {nm}: claim must start with 'none'")
+        if not b.get("measures"):
+            errs.append(f"bench {nm}: measures must be non-empty")
+        if not os.path.exists(
+                os.path.join(_HOST, b.get("module", "") + ".py")):
+            errs.append(f"bench {nm}: host/{b.get('module')}.py missing")
+    for d in raw.get("demos", []):
+        if not os.path.exists(os.path.join(_REPO, d.get("entry", ""))):
+            errs.append(f"demo {d.get('name')}: entry {d.get('entry')!r} missing")
+    return errs
 
 
 _SPEC = None
@@ -124,9 +241,31 @@ def load() -> dict:
         "strategy_axes": raw.get("strategy_axes", {}),
         "regimes": comps("regimes"),
         "obligations": tuple(
-            Obligation(id=o["id"], suite=o["suite"], what=o["what"],
-                       witnesses=tuple(o.get("witnesses", ())))
+            Obligation(
+                id=o["id"], suite=o["suite"], what=o["what"],
+                witnesses=tuple(o.get("witnesses", ())),
+                family=o.get("family", ""), evidence=o.get("evidence", ""),
+                regime=o.get("regime"), tier=o.get("tier", "fast"),
+                requires=tuple(o.get("requires", ())),
+                args=tuple(o.get("args", ())),
+                cost_model=(tuple(sorted(o["cost_model"].items()))
+                            if o.get("cost_model") else None),
+                lean_decls=tuple(o.get("lean_decls", ())),
+                label=o.get("label", ""))
             for o in raw.get("obligations", [])),
+        "selftests": tuple(
+            Selftest(module=s["module"], tier=s.get("tier", "fast"),
+                     requires=tuple(s.get("requires", ())),
+                     args=tuple(s.get("args", ())))
+            for s in raw.get("selftests", [])),
+        "benches": tuple(
+            Bench(name=b["name"], module=b["module"],
+                  measures=tuple(b.get("measures", ())),
+                  claim=b.get("claim", ""))
+            for b in raw.get("benches", [])),
+        "demos": tuple(
+            Demo(name=d["name"], entry=d["entry"], what=d.get("what", ""))
+            for d in raw.get("demos", [])),
         "witnesses": tuple(raw.get("witnesses", ())),
     }
     return _SPEC
@@ -177,6 +316,18 @@ def witnesses() -> Tuple[str, ...]:
     return load()["witnesses"]
 
 
+def selftests() -> Tuple[Selftest, ...]:
+    return load()["selftests"]
+
+
+def benches() -> Tuple[Bench, ...]:
+    return load()["benches"]
+
+
+def demos() -> Tuple[Demo, ...]:
+    return load()["demos"]
+
+
 def resolve(tc: Toolchain):
     """(ISA, Routines, Target) records for a realized toolchain.
     Each named component is resolved through the spec; a failure raises
@@ -197,13 +348,67 @@ def resolve(tc: Toolchain):
     return recs["isa"], recs["routines"], recs["target"]
 
 
+def _negative_cases() -> List[Tuple[str, dict]]:
+    """Deep-copied mutations of the real spec that MUST each be rejected."""
+    import copy
+    base = copy.deepcopy(json.load(open(SPEC_PATH, encoding="utf-8")))
+    cases = []
+
+    def mut(fn):
+        r = copy.deepcopy(base)
+        fn(r)
+        return r
+
+    cases.append(("obligation missing family",
+                  mut(lambda r: r["obligations"][0].pop("family", None))))
+    cases.append(("family cost without cost_model",
+                  mut(lambda r: r["obligations"][0].update(
+                      family="cost", evidence="congruence",
+                      regime="operEq"))))
+    cases.append(("cost_model work=wall_ms",
+                  mut(lambda r: r["obligations"][0].update(
+                      family="cost", evidence="congruence", regime="operEq",
+                      cost_model={"work": "wall_ms", "C": "pe_cost",
+                                  "baseline": "src", "scope": "x"}))))
+    cases.append(("cost_model C=qemu time",
+                  mut(lambda r: r["obligations"][0].update(
+                      family="cost", evidence="congruence", regime="operEq",
+                      cost_model={"work": "steps", "C": "qemu time",
+                                  "baseline": "src", "scope": "x"}))))
+    cases.append(("bench claim 'faster than graph'",
+                  mut(lambda r: r.setdefault("benches", []).append(
+                      {"name": "bad", "module": "reduce",
+                       "measures": ["ms"], "claim": "faster than graph"}))))
+    cases.append(("tier env with empty requires",
+                  mut(lambda r: r["obligations"][0].update(
+                      tier="env", requires=[]))))
+    cases.append(("evidence congruence with regime 'nonexistent'",
+                  mut(lambda r: r["obligations"][0].update(
+                      family="quotient", evidence="congruence",
+                      regime="nonexistent"))))
+    return cases
+
+
 def main() -> int:
     load()
     print(f"toolchain spec: {SPEC_PATH}")
+    ok = True
+    verrs = validate(json.load(open(SPEC_PATH, encoding="utf-8")))
+    for e in verrs:
+        print(f"  FAIL validate: {e}")
+        ok = False
+    if not verrs:
+        print("  ok validate: spec is well-formed")
+    for desc, raw in _negative_cases():
+        errs = validate(raw)
+        if errs:
+            print(f"  ok rejected ({desc}): {errs[0]}")
+        else:
+            print(f"  FAIL negative case accepted: {desc}")
+            ok = False
     for t in load()["toolchains"]:
         print(f"  {t.status:9s} {t.name:22s} {t.dialect} | {t.isa} | "
               f"{t.routines} | {t.target} | {t.path}  {t.note}")
-    ok = True
     for t in realized():
         isa, rts, tgt = resolve(t)
         good = (isa.name == t.isa and rts.name == t.routines

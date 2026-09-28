@@ -200,10 +200,10 @@ def main() -> int:
     want_lean = "--with-lean" in sys.argv[1:]
     if not want_lean:
         print("SKIP lean.eval (--with-lean not passed)")
-        return 0
+        return 77   # whole-suite skip: env/protocol, not pass
     if not available():
         print("SKIP lean_eval (lake not found)")
-        return 0
+        return 77
 
     import lambda_eval  # noqa: E402
 

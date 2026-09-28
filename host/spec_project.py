@@ -43,7 +43,11 @@ def _live(suite: str, suites: dict) -> str:
     cell = suites.get(suite)
     if cell is None:
         return "·"
-    return "✓" if cell.get("ok") else "✗"
+    st = cell.get("status")
+    if st is None:  # pre-protocol JSON: ok flag only
+        return "✓" if cell.get("ok") else "✗"
+    return {"pass": "✓", "pass*": "✓*", "fail": "✗",
+            "skip": "skip"}.get(st, "·")
 
 
 def render_gates() -> str:
@@ -53,16 +57,41 @@ def render_gates() -> str:
         "",
         "# Obligations (gates)",
         "",
-        "| id | suite | what | witnesses | live |",
-        "| --- | --- | --- | --- | --- |",
+        "| id | family | evidence | regime | tier | suite | what "
+        "| witnesses | live |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for o in toolchain.obligations():
         w = ", ".join(o.witnesses) if o.witnesses else "—"
-        lines.append(f"| {o.id} | {o.suite} | {o.what} | {w} | "
-                     f"{_live(o.suite, suites)} |")
+        what = f"[{o.label}] {o.what}" if o.label else o.what
+        lines.append(f"| {o.id} | {o.family} | {o.evidence} | "
+                     f"{o.regime or '—'} | {o.tier} | {o.suite} | {what} "
+                     f"| {w} | {_live(o.suite, suites)} |")
     lines += [
         "",
-        f"live column: `✓` suite ok, `✗` suite failed, `·` no battery record",
+        "## Selftests",
+        "",
+        "| module | tier | requires | args | live |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for s in toolchain.selftests():
+        lines.append(f"| {s.module} | {s.tier} | "
+                     f"{', '.join(s.requires) or '—'} | "
+                     f"{' '.join(s.args) or '—'} | "
+                     f"{_live(s.module, suites)} |")
+    lines += ["", "## Benches", "",
+              "| name | module | measures | claim |", "| --- | --- | --- | --- |"]
+    for b in toolchain.benches():
+        lines.append(f"| {b.name} | {b.module} | "
+                     f"{', '.join(b.measures)} | {b.claim} |")
+    lines += ["", "## Demos", "",
+              "| name | entry | what |", "| --- | --- | --- |"]
+    for d in toolchain.demos():
+        lines.append(f"| {d.name} | {d.entry} | {d.what} |")
+    lines += [
+        "",
+        "live column: `✓` pass, `✓*` pass with skipped legs, `✗` fail, "
+        "`skip` whole-suite skip (env/tier), `·` no battery record",
         f"(battery_last.json: {os.path.basename(BATTERY_JSON)})",
         "",
     ]

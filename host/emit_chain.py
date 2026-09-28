@@ -725,7 +725,7 @@ def main() -> int:
             exes["c"] = routines_c._exe_for(
                 seed.Realization(abi="hosted"))
         except Exception as e:                       # noqa: BLE001
-            print(f"  (c kernel skipped: {e})")
+            print(f"SKIP c-kernel ({e})")
         for tag, exe in exes.items():
             t0 = time.time()
             # fueled exe: a runaway stage term bounds to fuel steps

@@ -157,13 +157,18 @@ def main() -> int:
     """Gate: emit the win64 token kernel as fasmg source, assemble it
     with fasmg.exe, run it on S K K I — the emitted program must be a
     working PE (behavioral equivalence with the byte-emitted kernel)."""
+    _seed_dir = os.path.join(_HOST, "..", "seed")
+    if _seed_dir not in sys.path:
+        sys.path.insert(0, _seed_dir)
     import seed
     R = seed.Realization()
     src = seed.emit(R, tc=_tc())
     print(f"fasmg source: {len(src)}B")
     pe = compile(src)
     print(f"fasmg PE: {len(pe)}B  MZ={pe[:2] == b'MZ'}")
-    ok = pe[:2] == b"MZ" and pe[0x40:0x44] == b"PE\x00\x00"
+    lf = int.from_bytes(pe[0x3c:0x40], "little") if len(pe) > 0x40 else -1
+    ok = (pe[:2] == b"MZ" and 0 <= lf <= len(pe) - 4
+          and pe[lf:lf + 4] == b"PE\x00\x00")
     print(f"{'OK' if ok else 'FAIL'} target_fasmg")
     return 0 if ok else 1
 
