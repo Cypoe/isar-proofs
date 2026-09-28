@@ -33,7 +33,6 @@ Der Host ist ein **kataloggetriebener Realizer**, kein Compiler-Frontend:
 | **Specialize-Spine** | alles Statische weg: Dialect, Realization, Targetdaten, Routinen, ABI, bekannte Payload → HostPiece / Image | `spec_term`, `strategy`, `cogen`, `emit_chain`, `mine_adopt` |
 | **Target / Witnesses** | unabhängige Realisierungen | `graph.lo`/`graph.cd`, native PE/ELF/C, fasmg, `ir_cuda` (packed-IR) |
 | **Gate-Wahrheit (live)** | Kongruenz der Beobachtungen | `congruence`, `cross_verify`; Seam: byte-exakt `emit_image`/`seed.emit` |
-| **Room-Next (noch nicht GATES)** | Tempo-Messung | CUDA ↔ `graph.lo` — Protokoll §6; **keine** Catalog-Obligation |
 
 **Leserichtung:** nicht Frontend → IR → ISA → executable, sondern Dialect × Realization → specialize → Witnesses → Observe under \(\mathcal O\).
 
@@ -107,14 +106,13 @@ resolve(tc) → rts.program(R) → opt_peephole → isa.assemble[+_obj] → tgt.
 
 ---
 
-## 6. Nächste Ziele (Room-Tempo)
+## 6. Jones gap / Was der Tip noch nicht ist
 
-| Prio | Ziel | Erfolgskriterium |
-|------|------|------------------|
-| **1** | Ehrliche Tempo-Messung **CUDA ↔ `graph.lo`** (+ spezialisierte Stages) | Gleiches Workload; Wall + Kernel; **DEEP / fehlendes H2D = Gate-Fail**, nicht „langsam“ |
-| **2** | Optional: **Capability-Raum in Spec** | Nur soweit Specialize sonst blind |
-| **3** | Catalog-Hygiene | `CATALOG.md` / GATES an Tip; `ir_cuda` ehrlich einordnen (Witness, kein Timing-Gate bis Protokoll steht) |
-| later | Polyvariant mix / P2–P3 β-`specTerm`; reclaim; declared Targets (UEFI/macho/flat); native-path über xdu hinaus | siehe §5 |
+**Congruence**, Emissions-Kohärenz (Seam / `emit_chain`), **Cross-ISA-Parität** und **native-no-reducer** (Pfad `native` vs graph/runtime) sind etabliert oder explizit anvisiert — sie belegen **keine Jones-Optimalität** (partielle Evaluation als Speedup-Theorem).
+
+Jones verlangt ein **explizites Kostenmodell**: Vergleich *specialized residual run* vs *direct subject run* unter **demselben** Dialect, **demselben** ObservationRegime \(\mathcal O\) und **demselben** Witness — nicht QEMU-Wallzeit, nicht CUDA↔graph-Benchmarks als Catalog-Claim, kein Tempo-Gate in `toolchain.json`.
+
+**Strategy (Tip):** Identity + Mix-Subst — **nicht** 1993 polyvariant BTA (siehe §5.1).
 
 ---
 
@@ -188,10 +186,6 @@ flowchart TB
     SEAM["emit_image(R) = seed.emit(R)<br/>byte-exact seam gate"]
   end
 
-  subgraph Next["Room-Next (not GATES)"]
-    PERF["tempo measurement<br/>graph.lo ↔ specialized CUDA"]
-  end
-
   IL -.-> O
   QMO -.-> LAM
   QMO -.-> BC
@@ -227,8 +221,6 @@ flowchart TB
 
   CONG --> XVER
   IMG --> SEAM
-  GL --> PERF
-  CUDA --> PERF
 ```
 
 ## 8. Mermaid — Emit → Load → Run
@@ -263,6 +255,6 @@ sequenceDiagram
 | Modulrollen, emit-Kette, PIR, CUDA-Vertrag, paths | Tip-Source |
 | Cross-ISA QEMU, audit-Parity, peephole + residual bit-identity | Sep-27 Commit-Assertions (hier nicht neu gelaufen) |
 | GATES live-Spalte | generiertes `GATES.md` / letzte Battery auf Tip |
-| Tempo-Gate als Catalog-Obligation | **noch nicht** — Room-Protokoll (§6); funktional ja |
+| Jones-Optimalität / Tempo als Catalog-Obligation | **nein** — siehe §6 (Jones gap); funktionale CUDA/PIR-Parität ja |
 
 **Tip-Commits (Kontext):** `99dc32d` peephole+residual; `aa8d92d` audit `rules=` drei Linux-ISAs; `1666fbab` ET_REL `.o`; `687e385` riscv+QEMU in congruence set.
