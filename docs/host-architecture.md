@@ -85,7 +85,7 @@ resolve(tc) → rts.program(R) → opt_peephole → isa.assemble[+_obj] → tgt.
 | `native.x86_64.pe` (+ fuse_s, .ir, .res) | PE64 | G0–G5; emit_chain byte-exact; residual graft; audit `rules=` |
 | `x86_64.linux.lo` | ELF64 | Cross-ISA vs aarch64/riscv unter QEMU |
 | `aarch64.linux.lo` | ELF (+ `.o`) + qemu-aarch64 | NF/steps/alloc/rc; audit parity |
-| `riscv64.linux.lo` | ELF (+ `.o`) + qemu-riscv64 | dito (`687e385` — reducer in congruence set) |
+| `riscv64.linux.lo` | ELF (+ `.o`) + qemu-riscv64 | dito (`687e385`). **Korrektur:** nicht im `congruence`-Set — Cross-ISA-Parität lief ad hoc (Shell), bis sie als Gate G12 registriert ist |
 | `native.c` | `.c` → cc | PE↔C, graph↔C |
 | fasmg | Source → PE | Encoder-Orakel |
 | `ir_cuda` | device worker | Funktionale PIR-Parität vs IR-Kernel; **nicht** in `toolchain.json` / GATES-Timing |
@@ -113,6 +113,21 @@ resolve(tc) → rts.program(R) → opt_peephole → isa.assemble[+_obj] → tgt.
 Jones verlangt ein **explizites Kostenmodell**: Vergleich *specialized residual run* vs *direct subject run* unter **demselben** Dialect, **demselben** ObservationRegime \(\mathcal O\) und **demselben** Witness — nicht QEMU-Wallzeit, nicht CUDA↔graph-Benchmarks als Catalog-Claim, kein Tempo-Gate in `toolchain.json`.
 
 **Strategy (Tip):** Identity + Mix-Subst — **nicht** 1993 polyvariant BTA (siehe §5.1).
+
+### 6a. Theorem-Familien (nicht vermischen)
+
+Vier unabhängige Familien. Jede Obligation in `toolchain.json` trägt `family` (welche Behauptung) und orthogonal `evidence` (welche Art Stütze). congruence ≠ seam ≠ cost ≠ selection.
+
+| family | Behauptung | Stütze heute | Status |
+|---|---|---|---|
+| `quotient` | QuotientMap / Realisierung erhält Beobachtungen unter \(\mathcal O\) | `QuotientMapO.encode_sound`, `OperEq`, `operEqRegime`; Gates `congruence`, `cross_verify`, Cross-ISA | Lean-Aussagen + endliche Kongruenz-Gates |
+| `staging` | Statische Maschinerie reduziert zu residualem HostPiece mit gleichem beobachtbarem Verhalten; Konstruktionswege stimmen überein | `PESetup`, `futamura_first/second/third`, `spec_term` G9*, `emit_chain`-Seam, Residual-Exe, `.o`↔exec | Lean (abstrakt) + Seam + Kongruenz |
+| `cost` | Residual-Lauf kostet nicht mehr als Direktlauf, unter explizitem Tw,C | Lean `JonesOptimal` = **size-Jones (static)**: `pe_cost = term_size` auf abstraktem `PESetup`, bewiesen für `JonesIdPE` | Runtime-Tw,C **NotRealized**; Wall/QEMU nie als Jones-Ersatz |
+| `selection` | Gewählter `LoaderPlan` minimiert eine angegebene Kostenfunktion über endlicher Kandidatenmenge | `choose(budget, MachineContext)` ist Strategie-Interface | **NotRealized** |
+
+`evidence`-Arten: `congruence` (endliche Beobachtungsgleichheit unter deklariertem \(\mathcal O\)), `seam` (byte-exakte Gleichheit zweier Konstruktionswege), `cost` (Ungleichung unter explizitem `cost_model`), `selection` (Optimalität in deklarierter Kandidatenmenge), `lean` (Deklaration via `lake build`), `structural` (Quelltext-/Artefakteigenschaft ohne Ausführungsvergleich).
+
+Lean-`JonesOptimal` wird bei der nächsten Berührung von `Futamura.lean` in eigenem Commit zu `SizeJonesOptimal` umbenannt.
 
 ---
 
@@ -229,7 +244,7 @@ flowchart TB
 sequenceDiagram
   participant Spec as toolchain.json / Realization
   participant Seed as seed.emit
-  participant Opt as opt_peephole
+  participant Peep as opt_peephole
   participant ISA as isa_*.assemble
   participant Tgt as target_*.pack
   participant Exe as PE/ELF/C/CUDA
@@ -237,8 +252,8 @@ sequenceDiagram
 
   Spec->>Seed: resolve(tc) → isa,rts,tgt
   Seed->>Seed: rts.program(R)
-  Seed->>Opt: optimize(prog, isa)
-  Opt->>ISA: assemble(prog, symbols)
+  Seed->>Peep: peephole(prog, isa)
+  Peep->>ISA: assemble(prog, symbols)
   ISA->>Tgt: text + labels
   Tgt->>Exe: image bytes
   Note over Exe: load OS/QEMU/cc/nvcc
