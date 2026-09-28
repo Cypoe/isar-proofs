@@ -1,0 +1,13 @@
+import ISAR.SpecVocabulary
+open ISAR
+#check @closed_boolLit
+#check @closed_optionLit
+#check @closed_nibLit
+#check @subst_of_closed0
+#check @subst_of_closed
+#check @shift_of_closed0
+#check @closed_conssL
+#check @closed_nilL
+#check @closed_scottList
+#check @LRed.refl
+#check @LRed.trans

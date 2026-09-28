@@ -1,0 +1,169 @@
+=
+      aps foldlL
+        [(aps (LTerm.var 0)
+                [(aps (LTerm.var 0)
+                        [(aps (LTerm.var 3)
+                                [klL,
+                                  (aps eqStrL
+                                        [LTerm.var 1, lblL, aps lenL [LTerm.var 1], LTerm.var 7,
+                                          aps
+                                            (aps
+                                                (aps
+                                                    (aps foldlL
+                                                        [(aps conssL [LTerm.var 0, LTerm.var 1]).abs.abs,
+                                                          aps (LTerm.var 0) [klL], LTerm.var 10]).abs
+                                                    [aps e [LTerm.var 7, LTerm.var 0]]).abs
+                                                [(aps alookL
+                                                      [s, LTerm.var 0,
+                                                        aps alookL
+                                                          [aps
+                                                              (aps foldlL
+                                                                [(aps foldlL
+                                                                        [(aps (LTerm.var 0)
+                                                                                [klL, (aps eqStrL ⋯).abs.abs]).abs.abs,
+                                                                          LTerm.var 0, LTerm.var 1]).abs.abs,
+                                                                  p, aps pairSrcL [b4zL, aps pairSrcL [klL, klL]]])
+                                                              [aps klL [idL], klL],
+                                                            LTerm.var 0, aps b4subL [b4zL, LTerm.var 1],
+                                                            (aps b4subL [LTerm.var 0, LTerm.var 2]).abs],
+                                                        (aps b4subL [LTerm.var 0, LTerm.var 2]).abs]).abs]).abs
+                                            [aps b4addL
+                                                [aps b4addL [b, LTerm.var 3],
+                                                  LTerm.var 2]]]).abs.abs]).abs.abs]).abs.abs]).abs.abs,
+          aps revL
+            [aps
+                (aps foldlL
+                  [(aps foldlL
+                          [(aps (LTerm.var 0)
+                                  [klL,
+                                    (aps eqStrL
+                                          [LTerm.var 1, lblL, aps lenL [LTerm.var 1],
+                                            aps (LTerm.var 3)
+                                              [(aps (LTerm.var 0)
+                                                      [(aps pairSrcL
+                                                              [LTerm.var 3,
+                                                                aps pairSrcL
+                                                                  [aps conssL
+                                                                      [aps pairSrcL
+                                                                          [aps headL [LTerm.var 4],
+                                                                            aps b4addL [b, LTerm.var 3]],
+                                                                        LTerm.var 1],
+                                                                    aps conssL
+                                                                      [aps pairSrcL
+                                                                          [LTerm.var 6,
+                                                                            aps pairSrcL [LTerm.var 3, klL]],
+                                                                        LTerm.var 0]]]).abs.abs]).abs.abs],
+                                            aps
+                                              (aps
+                                                  (aps (LTerm.var 5)
+                                                      [(aps (LTerm.var 0)
+                                                              [(aps pairSrcL
+                                                                      [aps b4addL [LTerm.var 3, LTerm.var 4],
+                                                                        aps pairSrcL
+                                                                          [LTerm.var 1,
+                                                                            aps conssL
+                                                                              [aps pairSrcL
+                                                                                  [LTerm.var 8,
+                                                                                    aps pairSrcL
+                                                                                      [LTerm.var 3, LTerm.var 4]],
+                                                                                LTerm.var 0]]]).abs.abs]).abs.abs]).abs
+                                                  [aps nib2b4L [aps (LTerm.var 0) [aps klL [idL]]]]).abs
+                                              [aps e [LTerm.var 2, z]]]).abs.abs]).abs.abs,
+                            LTerm.var 0, LTerm.var 1]).abs.abs,
+                    p, aps pairSrcL [b4zL, aps pairSrcL [klL, klL]]])
+                [aps klL [idL], aps klL [idL]]],
+          klL] ∧
+    ((((foldlL.app
+                        (((foldlL.app
+                                      (((LTerm.var 0).app klL).app
+                                            (((((eqStrL.app (LTerm.var 1)).app lblL).app (lenL.app (LTerm.var 1))).app
+                                                      ((LTerm.var 3).app
+                                                        ((LTerm.var 0).app
+                                                              ((pairSrcL.app (LTerm.var 3)).app
+                                                                    ((pairSrcL.app
+                                                                          ((conssL.app
+                                                                                ((pairSrcL.app
+                                                                                      (headL.app (LTerm.var 4))).app
+                                                                                  ((b4addL.app b).app
+                                                                                    (LTerm.var 3)))).app
+                                                                            (LTerm.var 1))).app
+                                                                      ((conssL.app
+                                                                            ((pairSrcL.app (LTerm.var 6)).app
+                                                                              ((pairSrcL.app (LTerm.var 3)).app
+                                                                                klL))).app
+                                                                        (LTerm.var 0)))).abs.abs).abs.abs)).app
+                                                  ((((LTerm.var 5).app
+                                                                ((LTerm.var 0).app
+                                                                      ((pairSrcL.app
+                                                                                ((b4addL.app (LTerm.var 3)).app
+                                                                                  (LTerm.var 4))).app
+                                                                            ((pairSrcL.app (LTerm.var 1)).app
+                                                                              ((conssL.app
+                                                                                    ((pairSrcL.app (LTerm.var 8)).app
+                                                                                      ((pairSrcL.app (LTerm.var 3)).app
+                                                                                        (LTerm.var 4)))).app
+                                                                                (LTerm.var
+                                                                                  0)))).abs.abs).abs.abs).abs.app
+                                                          (nib2b4L.app ((LTerm.var 0).app (klL.app idL)))).abs.app
+                                                    ((e.app (LTerm.var 2)).app z))).abs.abs).abs.abs).app
+                                  (LTerm.var 0)).app
+                              (LTerm.var 1)).abs.abs).app
+                    p).app
+                ((pairSrcL.app b4zL).app ((pairSrcL.app klL).app klL))).app
+            (klL.app idL)).app
+        klL =
+      aps
+        (aps foldlL
+          [(aps foldlL
+                  [(aps (LTerm.var 0)
+                          [klL,
+                            (aps eqStrL
+                                  [LTerm.var 1, lblL, aps lenL [LTerm.var 1],
+                                    aps (LTerm.var 3)
+                                      [(aps (LTerm.var 0)
+                                              [(aps pairSrcL
+                                                      [LTerm.var 3,
+                                                        aps pairSrcL
+                                                          [aps conssL
+                                                              [aps pairSrcL
+                                                                  [aps headL [LTerm.var 4],
+                                                                    aps b4addL [b, LTerm.var 3]],
+                                                                LTerm.var 1],
+                                                            aps conssL
+                                                              [aps pairSrcL
+                                                                  [LTerm.var 6, aps pairSrcL [LTerm.var 3, klL]],
+                                                                LTerm.var 0]]]).abs.abs]).abs.abs],
+                                    aps
+                                      (aps
+                                          (aps (LTerm.var 5)
+                                              [(aps (LTerm.var 0)
+                                                      [(aps pairSrcL
+                                                              [aps b4addL [LTerm.var 3, LTerm.var 4],
+                                                                aps pairSrcL
+                                                                  [LTerm.var 1,
+                                                                    aps conssL
+                                                                      [aps pairSrcL
+                                                                          [LTerm.var 8,
+                                                                            aps pairSrcL [LTerm.var 3, LTerm.var 4]],
+                                                                        LTerm.var 0]]]).abs.abs]).abs.abs]).abs
+                                          [aps nib2b4L [aps (LTerm.var 0) [aps klL [idL]]]]).abs
+                                      [aps e [LTerm.var 2, z]]]).abs.abs]).abs.abs,
+                    LTerm.var 0, LTerm.var 1]).abs.abs,
+            p, aps pairSrcL [b4zL, aps pairSrcL [klL, klL]]])
+        [aps klL [idL], klL]
+  closed
+  simp [List.foldl, hsteps, hstep, subst, shift, c̵l̵o̵s̵e̵d̵,̵subst_of_closed0, shift_of_closed0, he, hz, hp,
+  ̲  ̲ ̲ ̲ ̲ ̲hs, hb, closed_klL, closed_idL, closed_kilL, closed_lblL, closed_b4zL, closed_pairSrcL,
+        closed_conssL, closed_foldlL, closed_revL, closed_eqStrL, closed_lenL, closed_alookL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_headL, closed_b4addL, closed_b4subL, closed_nib2b4L, closed_p1StepT he hz hb]
+  closed_kilL
+  simp [List.foldl, hsteps, hstep, subst, shift, closed, subst_of_closed0, shift_of_closed0, he,
+  ̲  ̲ ̲ ̲ ̲ ̲hz, hp, hs, hb, closed_klL, closed_idL, c̵l̵o̵s̵e̵d̵_̵k̵i̵l̵L̵,̵ ̵closed_lblL, closed_b4zL, closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_conssL, closed_foldlL, closed_revL, closed_eqStrL, closed_lenL, closed_alookL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_headL, closed_b4addL, closed_b4subL, closed_nib2b4L, closed_p1StepT he hz hb]
+  closed_p1StepT he hz hb
+  simp [List.foldl, hsteps, hstep, subst, shift, closed, subst_of_closed0, shift_of_closed0, he,
+  ̲  ̲ ̲ ̲ ̲ ̲hz, hp, hs, hb, closed_klL, closed_idL, closed_kilL, closed_lblL, closed_b4zL,
+        closed_pairSrcL, closed_conssL, closed_foldlL, closed_revL, closed_eqStrL, closed_lenL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_alookL, closed_headL, closed_b4addL, closed_b4subL, c̵l̵o̵s̵e̵d̵_̵n̵i̵b̵2̵b̵4̵L̵,̵
+  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵c̵l̵o̵s̵e̵d̵_̵p̵1̵S̵t̵e̵p̵T̵ ̵h̵e̵ ̵h̵z̵ ̵h̵b̵]̵c̲l̲o̲s̲e̲d̲_̲n̲i̲b̲2̲b̲4̲L̲]̲

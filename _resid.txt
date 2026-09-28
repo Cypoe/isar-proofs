@@ -1,0 +1,385 @@
+_spec_fixr_work.lean:339:28: error: unsolved goals
+x0 x1 x2 x3 : Fin 16 × Fin 16
+h0 : closed 0 (byteLit x0.1 x0.2) = true
+h1 : closed 0 (byteLit x1.1 x1.2) = true
+h2 : closed 0 (byteLit x2.1 x2.2) = true
+h3 : closed 0 (byteLit x3.1 x3.2) = true
+hT3 : closed 0 (cellLit (byteLit x3.1 x3.2) nilL) = true
+hT2 : closed 0 (cellLit (byteLit x2.1 x2.2) (cellLit (byteLit x3.1 x3.2) nilL)) = true
+hT1 : closed 0 (cellLit (byteLit x1.1 x1.2) (cellLit (byteLit x2.1 x2.2) (cellLit (byteLit x3.1 x3.2) nilL))) = true
+hT0 :
+  closed 0
+      (cellLit (byteLit x0.1 x0.2)
+        (cellLit (byteLit x1.1 x1.2) (cellLit (byteLit x2.1 x2.2) (cellLit (byteLit x3.1 x3.2) nilL)))) =
+    true
+⊢ subst nilL 0
+      (subst (byteLit x3.1 x3.2) 1
+        (subst (((LTerm.var 0).app (byteLit x3.1 x3.2)).app nilL).abs.abs 2
+          (subst (byteLit x2.1 x2.2) 3
+            (subst
+              (((LTerm.var 0).app (byteLit x2.1 x2.2)).app
+                    (((LTerm.var 0).app (byteLit x3.1 x3.2)).app nilL).abs.abs).abs.abs
+              4
+              (subst (byteLit x1.1 x1.2) 5
+                (subst
+                  (((LTerm.var 0).app (byteLit x1.1 x1.2)).app
+                        (((LTerm.var 0).app (byteLit x2.1 x2.2)).app
+                              (((LTerm.var 0).app (byteLit x3.1 x3.2)).app nilL).abs.abs).abs.abs).abs.abs
+                  6
+                  (subst (byteLit x0.1 x0.2) 7
+                    (subst
+                      (((LTerm.var 0).app (byteLit x0.1 x0.2)).app
+                            (((LTerm.var 0).app (byteLit x1.1 x1.2)).app
+                                  (((LTerm.var 0).app (byteLit x2.1 x2.2)).app
+                                        (((LTerm.var 0).app (byteLit x3.1 x3.2)).app
+                                              nilL).abs.abs).abs.abs).abs.abs).abs.abs
+                      8 b4incChain0)))))))) =
+    (incbL.app (byteLit x0.1 x0.2)).app
+      (((LTerm.var 0).app
+                ((incbL.app (byteLit x1.1 x1.2)).app
+                  (((LTerm.var 0).app
+                            ((incbL.app (byteLit x2.1 x2.2)).app
+                              (((LTerm.var 0).app
+                                        ((incbL.app (byteLit x3.1 x3.2)).app
+                                          (((LTerm.var 0).app
+                                                    (List.foldr (fun c t => (conssL.app c).app t) nilL
+                                                      (List.map (fun j => LTerm.var (2 * (3 - j) + 1))
+                                                        (List.range 4)))).app
+                                                (List.foldr (fun c t => (conssL.app c).app t) nilL
+                                                  (List.map (fun j => LTerm.var (2 * (3 - j) + 1))
+                                                    (List.range 4)))).abs.abs)).app
+                                    (List.foldr (fun c t => (conssL.app c).app t)
+                                      ((conssL.app (byteLit x3.1 x3.2)).app nilL)
+                                      (List.map (fun j => LTerm.var (2 * (2 - j) + 1)) (List.range 3)))).abs.abs)).app
+                        (List.foldr (fun c t => (conssL.app c).app t)
+                          ((conssL.app (byteLit x2.1 x2.2)).app ((conssL.app (byteLit x3.1 x3.2)).app nilL))
+                          (List.map (fun j => LTerm.var (2 * (1 - j) + 1)) (List.range 2)))).abs.abs)).app
+            ((conssL.app (LTerm.var 1)).app
+              ((conssL.app (byteLit x1.1 x1.2)).app
+                ((conssL.app (byteLit x2.1 x2.2)).app ((conssL.app (byteLit x3.1 x3.2)).app nilL))))).abs.abs
+_spec_fixr_work.lean:365:10: warning: This simp argument is unused:
+  shift_of_closed0 hT0
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵0̵,̵ ̵subst_of_closed0 hT0,
+        shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2, subst_of_closed0 hT2,
+        shift_of_closed0 hT3, subst_of_closed0 hT3, shift_of_closed0 closed_nilL,
+        subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+        shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+        subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+        subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+        subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:365:32: warning: This simp argument is unused:
+  subst_of_closed0 hT0
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵0̵,̵shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2, subst_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_of_closed0 hT3, subst_of_closed0 hT3, shift_of_closed0 closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:366:10: warning: This simp argument is unused:
+  shift_of_closed0 hT1
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵1̵,̵ ̵subst_of_closed0 hT1, shift_of_closed0 hT2, subst_of_closed0 hT2,
+        shift_of_closed0 hT3, subst_of_closed0 hT3, shift_of_closed0 closed_nilL,
+        subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+        shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+        subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+        subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+        subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:366:32: warning: This simp argument is unused:
+  subst_of_closed0 hT1
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵1̵,̵shift_of_closed0 hT2, subst_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_of_closed0 hT3, subst_of_closed0 hT3, shift_of_closed0 closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:367:10: warning: This simp argument is unused:
+  shift_of_closed0 hT2
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵2̵,̵ ̵subst_of_closed0 hT2,
+        shift_of_closed0 hT3, subst_of_closed0 hT3, shift_of_closed0 closed_nilL,
+        subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+        shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+        subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+        subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+        subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:367:32: warning: This simp argument is unused:
+  subst_of_closed0 hT2
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵2̵,̵shift_of_closed0 hT3, subst_of_closed0 hT3, shift_of_closed0 closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:368:10: warning: This simp argument is unused:
+  shift_of_closed0 hT3
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵3̵,̵ ̵subst_of_closed0 hT3, shift_of_closed0 closed_nilL,
+        subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+        shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+        subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+        subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+        subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:368:32: warning: This simp argument is unused:
+  subst_of_closed0 hT3
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵T̵3̵,̵shift_of_closed0 closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL, subst_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:372:10: warning: This simp argument is unused:
+  shift_of_closed0 closed_conssL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵c̵o̵n̵s̵s̵L̵,̵subst_of_closed0 closed_conssL, shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:373:10: warning: This simp argument is unused:
+  subst_of_closed0 closed_conssL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵c̵o̵n̵s̵s̵L̵,̵shift_of_closed0 closed_incbL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:374:10: warning: This simp argument is unused:
+  shift_of_closed0 closed_incbL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵i̵n̵c̵b̵L̵,̵ ̵subst_of_closed0 closed_incbL, shift_of_closed0 closed_pairSrcL,
+        subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+        subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+        subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:374:41: warning: This simp argument is unused:
+  subst_of_closed0 closed_incbL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        shift_of_closed0 closed_incbL, s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵i̵n̵c̵b̵L̵,̵shift_of_closed0 closed_pairSrcL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:375:10: warning: This simp argument is unused:
+  shift_of_closed0 closed_pairSrcL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        shift_of_closed0 closed_incbL, subst_of_closed0 closed_incbL,
+        s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵p̵a̵i̵r̵S̵r̵c̵L̵,̵subst_of_closed0 closed_pairSrcL, shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:376:10: warning: This simp argument is unused:
+  subst_of_closed0 closed_pairSrcL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        shift_of_closed0 closed_incbL, subst_of_closed0 closed_incbL,
+        shift_of_closed0 closed_pairSrcL, s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵p̵a̵i̵r̵S̵r̵c̵L̵,̵shift_of_closed0 closed_nibsuccL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:377:10: warning: This simp argument is unused:
+  shift_of_closed0 closed_nibsuccL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        shift_of_closed0 closed_incbL, subst_of_closed0 closed_incbL,
+        shift_of_closed0 closed_pairSrcL, subst_of_closed0 closed_pairSrcL,
+        s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵n̵i̵b̵s̵u̵c̵c̵L̵,̵subst_of_closed0 closed_nibsuccL, shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:378:10: warning: This simp argument is unused:
+  subst_of_closed0 closed_nibsuccL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        shift_of_closed0 closed_incbL, subst_of_closed0 closed_incbL,
+        shift_of_closed0 closed_pairSrcL, subst_of_closed0 closed_pairSrcL,
+        shift_of_closed0 closed_nibsuccL, s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵n̵i̵b̵s̵u̵c̵c̵L̵,̵shift_of_closed0 closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:379:10: warning: This simp argument is unused:
+  shift_of_closed0 closed_nibis15L
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        shift_of_closed0 closed_incbL, subst_of_closed0 closed_incbL,
+        shift_of_closed0 closed_pairSrcL, subst_of_closed0 closed_pairSrcL,
+        shift_of_closed0 closed_nibsuccL, subst_of_closed0 closed_nibsuccL,
+        s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵c̵l̵o̵s̵e̵d̵_̵n̵i̵b̵i̵s̵1̵5̵L̵,̵subst_of_closed0 closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:380:10: warning: This simp argument is unused:
+  subst_of_closed0 closed_nibis15L
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incEmitV, emitCells,
+  ̲  ̲ ̲ ̲ ̲ ̲aps, List.foldl, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 h0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h0, shift_of_closed0 h1, subst_of_closed0 h1, shift_of_closed0 h2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 h2, shift_of_closed0 h3, subst_of_closed0 h3, shift_of_closed0 hT0,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT0, shift_of_closed0 hT1, subst_of_closed0 hT1, shift_of_closed0 hT2,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 hT2, shift_of_closed0 hT3, subst_of_closed0 hT3,
+        shift_of_closed0 closed_nilL, subst_of_closed0 closed_nilL, shift_of_closed0 closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 closed_klL, shift_of_closed0 closed_conssL, subst_of_closed0 closed_conssL,
+        shift_of_closed0 closed_incbL, subst_of_closed0 closed_incbL,
+        shift_of_closed0 closed_pairSrcL, subst_of_closed0 closed_pairSrcL,
+        shift_of_closed0 closed_nibsuccL, subst_of_closed0 closed_nibsuccL,
+        shift_of_closed0 c̵l̵o̵s̵e̵d̵_̵n̵i̵b̵i̵s̵1̵5̵L̵,̵
+  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵closed_nibis15L]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+ISAR.LTerm.abs

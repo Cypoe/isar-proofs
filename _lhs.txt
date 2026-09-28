@@ -1,0 +1,106 @@
+⊢ ((foldlL.app
+                ((LTerm.var 0).app
+                      ((LTerm.var 0).app
+                            (((LTerm.var 3).app klL).app
+                                  (((((eqStrL.app (LTerm.var 1)).app lblL).app (lenL.app (LTerm.var 1))).app
+                                            (LTerm.var 7)).app
+                                        ((((((foldlL.app ((conssL.app (LTerm.var 0)).app (LTerm.var 1)).abs.abs).app
+                                                                ((LTerm.var 0).app klL)).app
+                                                            (LTerm.var 10)).abs.app
+                                                      ((e.app (LTerm.var 7)).app (LTerm.var 0))).abs.app
+                                                ((((alookL.app s).app (LTerm.var 0)).app
+                                                        ((((alookL.app
+                                                                      (((((foldlL.app
+                                                                                        (((foldlL.app
+                                                                                                      (((LTerm.var
+                                                                                                                    0).app
+                                                                                                                klL).app
+                                                                                                            (((((eqStrL.app
+                                                                                                                                  (LTerm.var
+                                                                                                                                    1)).app
+                                                                                                                              lblL).app
+                                                                                                                          (lenL.app
+                                                                                                                            (LTerm.var
+                                                                                                                              1))).app
+                                                                                                                      ((LTerm.var
+                                                                                                                            3).app
+                                                                                                                        ((LTerm.var
+                                                                                                                                  0).app
+                                                                                                                              ((pairSrcL.app
+                                                                                                                                        (LTerm.var
+                                                                                                                                          3)).app
+                                                                                                                                    ⋯).abs.abs).abs.abs)).app
+                                                                                                                  ((((LTerm.var
+                                                                                                                                    5).app
+                                                                                                                                ((LTerm.var
+                                                                                                                                          0).app
+                                                                                                                                      ⋯).abs.abs).abs.app
+                                                                                                                          (nib2b4L.app
+                                                                                                                            ((LTerm.var
+                                                                                                                                  0).app
+                                                                                                                              (klL.app
+                                                                                                                                idL)))).abs.app
+                                                                                                                    ((e.app
+                                                                                                                          (LTerm.var
+                                                                                                                            2)).app
+                                                                                                                      z))).abs.abs).abs.abs).app
+                                                                                                  (LTerm.var 0)).app
+                                                                                              (LTerm.var
+                                                                                                1)).abs.abs).app
+                                                                                    p).app
+                                                                                ((pairSrcL.app b4zL).app
+                                                                                  ((pairSrcL.app klL).app klL))).app
+                                                                            (klL.app idL)).app
+                                                                        klL)).app
+                                                                  (LTerm.var 0)).app
+                                                              ((b4subL.app b4zL).app (LTerm.var 1))).app
+                                                          ((b4subL.app (LTerm.var 0)).app (LTerm.var 2)).abs)).app
+                                                    ((b4subL.app (LTerm.var 0)).app (LTerm.var 2)).abs).abs).abs.app
+                                          ((b4addL.app ((b4addL.app b).app (LTerm.var 3))).app
+                                            (LTerm.var 2)))).abs.abs).abs.abs).abs.abs).abs.abs).app
+            (revL.app
+              (((((foldlL.app
+                                (((foldlL.app
+                                              (((LTerm.var 0).app klL).app
+                                                    (((((eqStrL.app (LTerm.var 1)).app lblL).app
+                                                                  (lenL.app (LTerm.var 1))).app
+                                                              ((LTerm.var 3).app
+                                                                ((LTerm.var 0).app
+                                                                      ((pairSrcL.app (LTerm.var 3)).app
+                                                                            ((pairSrcL.app
+                                                                                  ((conssL.app
+                                                                                        ((pairSrcL.app
+                                                                                              (headL.app
+                                                                                                (LTerm.var 4))).app
+                                                                                          ((b4addL.app b).app
+                                                                                            (LTerm.var 3)))).app
+                                                                                    (LTerm.var 1))).app
+                                                                              ((conssL.app
+                                                                                    ((pairSrcL.app (LTerm.var 6)).app
+                                                                                      ((pairSrcL.app (LTerm.var 3)).app
+                                                                                        klL))).app
+                                                                                (LTerm.var 0)))).abs.abs).abs.abs)).app
+                                                          ((((LTerm.var 5).app
+                                                                        ((LTerm.var 0).app
+                                                                              ((pairSrcL.app
+                                                                                        ((b4addL.app (LTerm.var 3)).app
+                                                                                          (LTerm.var 4))).app
+                                                                                    ((pairSrcL.app (LTerm.var 1)).app
+                                                                                      ((conssL.app
+                                                                                            ((pairSrcL.app
+                                                                                                  (LTerm.var 8)).app
+                                                                                              ((pairSrcL.app
+                                                                                                    (LTerm.var 3)).app
+                                                                                                (LTerm.var 4)))).app
+                                                                                        (LTerm.var
+                                                                                          0)))).abs.abs).abs.abs).abs.app
+                                                                  (nib2b4L.app
+                                                                    ((LTerm.var 0).app (klL.app idL)))).abs.app
+                                                            ((e.app (LTerm.var 2)).app z))).abs.abs).abs.abs).app
+                                          (LTerm.var 0)).app
+                                      (LTerm.var 1)).abs.abs).app
+                            p).app
+                        ((pairSrcL.app b4zL).app ((pairSrcL.app klL).app klL))).app
+                    (klL.app idL)).app
+                (klL.app idL)))).app
+        klL 

@@ -1,0 +1,1059 @@
+warning: UnicodeBasic: repository 'C:\Users\fabi0\repos\isar-proofs\.lake/packages\UnicodeBasic' has local changes
+_spec_fixr_work.lean:51:51: warning: This simp argument is unused:
+  ite_false
+
+Hint: Omit it from the simp argument list.
+  simp only [boolLit, aps, List.foldl, ite_true,̵ ̵i̵t̵e̵_̵f̵a̵l̵s̵e̵]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:53:45: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [klL, kilL, hsteps, hstep, subst, shift,̵
+  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵s̵h̵i̵f̵t̵_of_closed0 hx, subst_of_closed0 hx,
+           ̵ ̵ ̵ ̵shift_of_closed0 hy, subst_of_closed0 hy]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:55:33: warning: This simp argument is unused:
+  subst_of_closed0 hy
+
+Hint: Omit it from the simp argument list.
+  simp [klL, kilL, hsteps, hstep, subst, shift, shift_of_closed0 hx, subst_of_closed0 hx,
+          shift_of_closed0 h̵y̵,̵ ̵s̵u̵b̵s̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵hy]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:196:44: warning: This simp argument is unused:
+  List.map
+
+Hint: Omit it from the simp argument list.
+  simp only [incByteN, h, decide_true, decide_false, ite_true, ite_false, F̵u̵n̵c̵t̵i̵o̵n̵.̵u̵n̵c̵u̵r̵r̵y̵,̵ ̵L̵i̵s̵t̵.̵m̵a̵p̵]̵F̲u̲n̲c̲t̲i̲o̲n̲.̲u̲n̲c̲u̲r̲r̲y̲]̲
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:240:41: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [pairLit, hsteps, hstep, subst, shift,̵ ̵s̵h̵i̵f̵t̵_zero,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵shift_of_closed0 ha, subst_of_closed0 ha,
+         ̵ ̵ ̵ ̵shift_of_closed0 hb, subst_of_closed0 hb]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:241:10: warning: This simp argument is unused:
+  shift_of_closed0 ha
+
+Hint: Omit it from the simp argument list.
+  simp [pairLit, hsteps, hstep, subst, shift, shift_zero, s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵a̵,̵ ̵subst_of_closed0 ha,
+        shift_of_closed0 hb, subst_of_closed0 hb]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:242:10: warning: This simp argument is unused:
+  shift_of_closed0 hb
+
+Hint: Omit it from the simp argument list.
+  simp [pairLit, hsteps, hstep, subst, shift, shift_zero, shift_of_closed0 ha,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_of_closed0 ha, s̵h̵i̵f̵t̵_̵o̵f̵_̵c̵l̵o̵s̵e̵d̵0̵ ̵h̵b̵,̵ ̵subst_of_closed0 hb]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:362:5: warning: Variable name `hT3` is not explicitly referenced.
+
+The binding can be removed (if unused) or named `_` (if used implicitly).
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+_spec_fixr_work.lean:363:5: warning: Variable name `hT2` is not explicitly referenced.
+
+The binding can be removed (if unused) or named `_` (if used implicitly).
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+_spec_fixr_work.lean:364:5: warning: Variable name `hT1` is not explicitly referenced.
+
+The binding can be removed (if unused) or named `_` (if used implicitly).
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+_spec_fixr_work.lean:371:34: warning: This simp argument is unused:
+  List.map
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, L̵i̵s̵t̵.̵m̵a̵p̵,̵ ̵List.range, List.range', hsteps, hstep, subst, shift, shift_zero,
+        shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_nilL, closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_conssL, closed_incbL, closed_pairSrcL, closed_nibsuccL, closed_nibis15L, h0, h1, h2,
+  ̲  ̲ ̲ ̲ ̲ ̲h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:371:44: warning: This simp argument is unused:
+  List.range
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, L̵i̵s̵t̵.̵r̵a̵n̵g̵e̵,̵ ̵List.range', hsteps, hstep, subst, shift, shift_zero,
+        shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_nilL, closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_conssL, closed_incbL, closed_pairSrcL, closed_nibsuccL, closed_nibis15L, h0, h1, h2,
+  ̲  ̲ ̲ ̲ ̲ ̲h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:371:56: warning: This simp argument is unused:
+  List.range'
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, List.range, L̵i̵s̵t̵.̵r̵a̵n̵g̵e̵'̵,̵hsteps, hstep, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_nilL, closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_conssL, closed_incbL, closed_pairSrcL, closed_nibsuccL, closed_nibis15L, h0, h1, h2,
+  ̲  ̲ ̲ ̲ ̲ ̲h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:373:46: warning: This simp argument is unused:
+  closed
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, List.range, List.range', hsteps, hstep, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_zero, shift_of_closed0, subst_of_closed0, c̵l̵o̵s̵e̵d̵,̵ ̵closed_app, closed_mono, closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_klL, closed_conssL, closed_incbL, closed_pairSrcL, closed_nibsuccL, closed_nibis15L,
+  ̲  ̲ ̲ ̲ ̲ ̲h0, h1, h2, h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:373:54: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, List.range, List.range', hsteps, hstep, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_zero, shift_of_closed0, subst_of_closed0, closed, c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵closed_mono, closed_nilL, closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_conssL, closed_incbL, closed_pairSrcL, closed_nibsuccL, closed_nibis15L, h0, h1, h2,
+  ̲  ̲ ̲ ̲ ̲ ̲h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:374:10: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, List.range, List.range', hsteps, hstep, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_zero, shift_of_closed0, subst_of_closed0, closed, closed_app, c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_nilL, closed_klL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_conssL, closed_incbL, closed_pairSrcL, closed_nibsuccL, closed_nibis15L, h0, h1, h2,
+  ̲  ̲ ̲ ̲ ̲ ̲h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:375:24: warning: This simp argument is unused:
+  closed_pairSrcL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, List.range, List.range', hsteps, hstep, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_zero, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_klL, closed_conssL, closed_incbL, c̵l̵o̵s̵e̵d̵_̵p̵a̵i̵r̵S̵r̵c̵L̵,̵ ̵closed_nibsuccL, closed_nibis15L, h0, h1, h2, h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:375:41: warning: This simp argument is unused:
+  closed_nibsuccL
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, List.range, List.range', hsteps, hstep, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_zero, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_klL, closed_conssL, closed_incbL, closed_pairSrcL, c̵l̵o̵s̵e̵d̵_̵n̵i̵b̵s̵u̵c̵c̵L̵,̵closed_nibis15L, h0, h1, h2, h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:376:10: warning: This simp argument is unused:
+  closed_nibis15L
+
+Hint: Omit it from the simp argument list.
+  simp [b4incL, scottList, cellLit, b4incMilestone, b4incChainV, b4incK2V, b4incChain0,
+  ̲  ̲ ̲ ̲ ̲ ̲b4incChain1, b4incChain2, b4incChain3, b4incK2, b4incNext3, b4incEmit, emitCells, aps,
+        List.foldl, List.foldr, List.map, List.range, List.range', hsteps, hstep, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲shift_zero, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_nilL,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_klL, closed_conssL, closed_incbL, closed_pairSrcL, closed_nibsuccL, c̵l̵o̵s̵e̵d̵_̵n̵i̵b̵i̵s̵1̵5̵L̵,̵ ̵h0, h1, h2, h3]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:388:17: warning: This simp argument is unused:
+  Bool.cond_true
+
+Hint: Omit it from the simp argument list.
+  simp only [Bool.cond_t̵r̵u̵e̵,̵ ̵B̵o̵o̵l̵.̵c̵o̵n̵d̵_̵false, boolLit]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:388:33: warning: This simp argument is unused:
+  Bool.cond_false
+
+Hint: Omit it from the simp argument list.
+  simp only [Bool.cond_true, B̵o̵o̵l̵.̵c̵o̵n̵d̵_̵f̵a̵l̵s̵e̵,̵ ̵boolLit]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:390:64: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [klL, kilL, aps, List.foldl, hsteps, hstep, subst, shift,̵
+  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵s̵h̵i̵f̵t̵_zero, subst_shift_succ]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:400:59: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [b4incK2V, aps, List.foldl, hsteps, hstep, subst, shift,̵
+  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵s̵h̵i̵f̵t̵_zero, subst_shift_succ]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:401:22: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [b4incK2V, aps, List.foldl, hsteps, hstep, subst, shift, s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵]̵s̲h̲i̲f̲t̲_̲z̲e̲r̲o̲]̲
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:667:20: error: overloaded, errors 
+  Application type mismatch: The argument
+    hnf3
+  has type
+    LRed
+      (emitCells
+        [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+          Function.uncurry byteLit (incByteN x2.1 x2.2).1, Function.uncurry byteLit (incByteN x3.1 x3.2).1])
+      (scottList
+        [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+          Function.uncurry byteLit (incByteN x2.1 x2.2).1, Function.uncurry byteLit (incByteN x3.1 x3.2).1])
+  of sort `Prop` but is expected to have type
+    ITerm
+  of sort `Type` in the application
+    ITerm.app hnf3
+  
+  Application type mismatch: The argument
+    hnf3
+  has type
+    LRed
+      (emitCells
+        [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+          Function.uncurry byteLit (incByteN x2.1 x2.2).1, Function.uncurry byteLit (incByteN x3.1 x3.2).1])
+      (scottList
+        [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+          Function.uncurry byteLit (incByteN x2.1 x2.2).1, Function.uncurry byteLit (incByteN x3.1 x3.2).1])
+  of sort `Prop` but is expected to have type
+    SK
+  of sort `Type` in the application
+    SK.app hnf3
+_spec_fixr_work.lean:563:6: error: unsolved goals
+case neg
+x0 x1 x2 x3 : Fin 16 × Fin 16
+hN0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (b4incChainV (byteLit x1.1 x1.2)
+          (b4incK2V
+            (b4incChainV (byteLit x2.1 x2.2)
+              (b4incK2V
+                (b4incChainV (byteLit x3.1 x3.2)
+                  (b4incK2V (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                    (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+                (emitCells [LTerm.var 5, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+            (emitCells [LTerm.var 3, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])))) =
+    b4incChainV (byteLit x1.1 x1.2)
+      (b4incK2V
+        (b4incChainV (byteLit x2.1 x2.2)
+          (b4incK2V
+            (b4incChainV (byteLit x3.1 x3.2)
+              (b4incK2V
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+            (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+hE0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (emitCells [LTerm.var 1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) =
+    emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+h0 : (incByteN x0.1 x0.2).2 = true
+hN1 :
+  subst (boolLit (incByteN x1.1 x1.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+        (b4incChainV (byteLit x2.1 x2.2)
+          (b4incK2V
+            (b4incChainV (byteLit x3.1 x3.2)
+              (b4incK2V
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))) =
+    b4incChainV (byteLit x2.1 x2.2)
+      (b4incK2V
+        (b4incChainV (byteLit x3.1 x3.2)
+          (b4incK2V
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])))
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            LTerm.var 1, byteLit x3.1 x3.2]))
+hE1 :
+  subst (boolLit (incByteN x1.1 x1.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) =
+    emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+h1 : (incByteN x1.1 x1.2).2 = true
+hN2 :
+  subst (boolLit (incByteN x2.1 x2.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x2.1 x2.2).1) 1
+        (b4incChainV (byteLit x3.1 x3.2)
+          (b4incK2V
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])))) =
+    b4incChainV (byteLit x3.1 x3.2)
+      (b4incK2V
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            Function.uncurry byteLit (incByteN x2.1 x2.2).1, LTerm.var 1])
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            Function.uncurry byteLit (incByteN x2.1 x2.2).1, LTerm.var 1]))
+hE2 :
+  subst (boolLit (incByteN x2.1 x2.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x2.1 x2.2).1) 1
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            LTerm.var 1, byteLit x3.1 x3.2])) =
+    emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        Function.uncurry byteLit (incByteN x2.1 x2.2).1, byteLit x3.1 x3.2]
+h2 : ¬(incByteN x2.1 x2.2).2 = true
+⊢ Relation.ReflTransGen LStep
+    (emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        Function.uncurry byteLit (incByteN x2.1 x2.2).1, byteLit x3.1 x3.2])
+    (scottList (List.map (fun p => byteLit p.1 p.2) (incBytes [x0, x1, x2, x3] true)))
+_spec_fixr_work.lean:505:2: error: unsolved goals
+case neg
+x0 x1 x2 x3 : Fin 16 × Fin 16
+hN0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (b4incChainV (byteLit x1.1 x1.2)
+          (b4incK2V
+            (b4incChainV (byteLit x2.1 x2.2)
+              (b4incK2V
+                (b4incChainV (byteLit x3.1 x3.2)
+                  (b4incK2V (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                    (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+                (emitCells [LTerm.var 5, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+            (emitCells [LTerm.var 3, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])))) =
+    b4incChainV (byteLit x1.1 x1.2)
+      (b4incK2V
+        (b4incChainV (byteLit x2.1 x2.2)
+          (b4incK2V
+            (b4incChainV (byteLit x3.1 x3.2)
+              (b4incK2V
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+            (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+hE0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (emitCells [LTerm.var 1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) =
+    emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+h0 : (incByteN x0.1 x0.2).2 = true
+hN1 :
+  subst (boolLit (incByteN x1.1 x1.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+        (b4incChainV (byteLit x2.1 x2.2)
+          (b4incK2V
+            (b4incChainV (byteLit x3.1 x3.2)
+              (b4incK2V
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))) =
+    b4incChainV (byteLit x2.1 x2.2)
+      (b4incK2V
+        (b4incChainV (byteLit x3.1 x3.2)
+          (b4incK2V
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])))
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            LTerm.var 1, byteLit x3.1 x3.2]))
+hE1 :
+  subst (boolLit (incByteN x1.1 x1.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) =
+    emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+h1 : ¬(incByteN x1.1 x1.2).2 = true
+⊢ Relation.ReflTransGen LStep
+    (emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        byteLit x2.1 x2.2, byteLit x3.1 x3.2])
+    (scottList (List.map (fun p => byteLit p.1 p.2) (incBytes [x0, x1, x2, x3] true)))
+_spec_fixr_work.lean:433:52: error: unsolved goals
+case neg
+x0 x1 x2 x3 : Fin 16 × Fin 16
+hN0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (b4incChainV (byteLit x1.1 x1.2)
+          (b4incK2V
+            (b4incChainV (byteLit x2.1 x2.2)
+              (b4incK2V
+                (b4incChainV (byteLit x3.1 x3.2)
+                  (b4incK2V (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                    (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+                (emitCells [LTerm.var 5, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+            (emitCells [LTerm.var 3, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])))) =
+    b4incChainV (byteLit x1.1 x1.2)
+      (b4incK2V
+        (b4incChainV (byteLit x2.1 x2.2)
+          (b4incK2V
+            (b4incChainV (byteLit x3.1 x3.2)
+              (b4incK2V
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+            (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+hE0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (emitCells [LTerm.var 1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) =
+    emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+h0 : ¬(incByteN x0.1 x0.2).2 = true
+⊢ Relation.ReflTransGen LStep
+    (emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2])
+    (scottList (List.map (fun p => byteLit p.1 p.2) (incBytes [x0, x1, x2, x3] true)))
+case pos
+x0 x1 x2 x3 : Fin 16 × Fin 16
+hN0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (b4incChainV (byteLit x1.1 x1.2)
+          (b4incK2V
+            (b4incChainV (byteLit x2.1 x2.2)
+              (b4incK2V
+                (b4incChainV (byteLit x3.1 x3.2)
+                  (b4incK2V (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                    (emitCells [LTerm.var 7, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+                (emitCells [LTerm.var 5, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+            (emitCells [LTerm.var 3, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])))) =
+    b4incChainV (byteLit x1.1 x1.2)
+      (b4incK2V
+        (b4incChainV (byteLit x2.1 x2.2)
+          (b4incK2V
+            (b4incChainV (byteLit x3.1 x3.2)
+              (b4incK2V
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+            (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2]))
+hE0 :
+  subst (boolLit (incByteN x0.1 x0.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x0.1 x0.2).1) 1
+        (emitCells [LTerm.var 1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) =
+    emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, byteLit x1.1 x1.2, byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+h0 : (incByteN x0.1 x0.2).2 = true
+hN1 :
+  subst (boolLit (incByteN x1.1 x1.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+        (b4incChainV (byteLit x2.1 x2.2)
+          (b4incK2V
+            (b4incChainV (byteLit x3.1 x3.2)
+              (b4incK2V
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])
+                (emitCells [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 5, LTerm.var 3, LTerm.var 1])))
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 3, LTerm.var 1, byteLit x3.1 x3.2])))) =
+    b4incChainV (byteLit x2.1 x2.2)
+      (b4incK2V
+        (b4incChainV (byteLit x3.1 x3.2)
+          (b4incK2V
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])))
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            LTerm.var 1, byteLit x3.1 x3.2]))
+hE1 :
+  subst (boolLit (incByteN x1.1 x1.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x1.1 x1.2).1) 1
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, LTerm.var 1, byteLit x2.1 x2.2, byteLit x3.1 x3.2])) =
+    emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        byteLit x2.1 x2.2, byteLit x3.1 x3.2]
+h1 : (incByteN x1.1 x1.2).2 = true
+hN2 :
+  subst (boolLit (incByteN x2.1 x2.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x2.1 x2.2).1) 1
+        (b4incChainV (byteLit x3.1 x3.2)
+          (b4incK2V
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])
+            (emitCells
+              [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+                LTerm.var 3, LTerm.var 1])))) =
+    b4incChainV (byteLit x3.1 x3.2)
+      (b4incK2V
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            Function.uncurry byteLit (incByteN x2.1 x2.2).1, LTerm.var 1])
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            Function.uncurry byteLit (incByteN x2.1 x2.2).1, LTerm.var 1]))
+hE2 :
+  subst (boolLit (incByteN x2.1 x2.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x2.1 x2.2).1) 1
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            LTerm.var 1, byteLit x3.1 x3.2])) =
+    emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        Function.uncurry byteLit (incByteN x2.1 x2.2).1, byteLit x3.1 x3.2]
+h2 : (incByteN x2.1 x2.2).2 = true
+hN3 :
+  subst (boolLit (incByteN x3.1 x3.2).2) 0
+      (subst (Function.uncurry byteLit (incByteN x3.1 x3.2).1) 1
+        (emitCells
+          [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+            Function.uncurry byteLit (incByteN x2.1 x2.2).1, LTerm.var 1])) =
+    emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        Function.uncurry byteLit (incByteN x2.1 x2.2).1, Function.uncurry byteLit (incByteN x3.1 x3.2).1]
+⊢ Relation.ReflTransGen LStep
+    (emitCells
+      [Function.uncurry byteLit (incByteN x0.1 x0.2).1, Function.uncurry byteLit (incByteN x1.1 x1.2).1,
+        Function.uncurry byteLit (incByteN x2.1 x2.2).1, Function.uncurry byteLit (incByteN x3.1 x3.2).1])
+    (scottList (List.map (fun p => byteLit p.1 p.2) (incBytes [x0, x1, x2, x3] true)))
+_spec_fixr_work.lean:484:17: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵List.foldr, List.foldl, Function.uncurry,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵subst,
+  ̲ s̵h̵i̵f̵t̵,̵  ̲ ̲ ̲ ̲shift_zero, subst_shift_succ,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵shift_of_closed0, subst_of_closed0, closed, closed_app,
+         ̵ ̵ ̵ ̵closed_mono, closed_byteLit, closed_boolLit, closed_incbL,
+  ̵  ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵ ̵closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:484:24: warning: This simp argument is unused:
+  shift_zero
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst,
+  ̲  ̲ ̲ ̲ ̲ ̲shift, s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:484:36: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst,
+  ̲  ̲ ̲ ̲ ̲ ̲shift, shift_zero, s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵,̵shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+        closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:485:46: warning: This simp argument is unused:
+  closed
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst,
+  ̲  ̲ ̲ ̲ ̲ ̲shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, c̵l̵o̵s̵e̵d̵,̵ ̵closed_app,
+        closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:485:54: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst,
+  ̲  ̲ ̲ ̲ ̲ ̲shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵closed_mono,
+        closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:486:10: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst,
+  ̲  ̲ ̲ ̲ ̲ ̲shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+        c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:486:39: warning: This simp argument is unused:
+  closed_boolLit
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst,
+  ̲  ̲ ̲ ̲ ̲ ̲shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+        closed_mono, closed_byteLit, c̵l̵o̵s̵e̵d̵_̵b̵o̵o̵l̵L̵i̵t̵,̵ ̵closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:497:17: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, s̵h̵i̵f̵t̵,̵ ̵shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:497:24: warning: This simp argument is unused:
+  shift_zero
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵subst_shift_succ,
+        shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_byteLit,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:497:36: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵,̵shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_byteLit,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:498:54: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵closed_mono, closed_byteLit,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:499:10: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_byteLit,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:499:39: warning: This simp argument is unused:
+  closed_boolLit
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_byteLit, c̵l̵o̵s̵e̵d̵_̵b̵o̵o̵l̵L̵i̵t̵,̵ ̵closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:499:55: warning: This simp argument is unused:
+  closed_incbL
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, c̵l̵o̵s̵e̵d̵_̵i̵n̵c̵b̵L̵,̵closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:541:21: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+            subst, s̵h̵i̵f̵t̵,̵ ̵shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_app, closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:541:28: warning: This simp argument is unused:
+  shift_zero
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+            subst, shift, s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+            closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:541:40: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+            subst, shift, shift_zero, s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵,̵shift_of_closed0, subst_of_closed0, closed, closed_app,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:542:50: warning: This simp argument is unused:
+  closed
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+            subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲c̵l̵o̵s̵e̵d̵,̵ ̵closed_app, closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:542:58: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+            subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:543:14: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+            subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_app, c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:543:43: warning: This simp argument is unused:
+  closed_boolLit
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+            subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_app, closed_mono, closed_byteLit, c̵l̵o̵s̵e̵d̵_̵b̵o̵o̵l̵L̵i̵t̵,̵ ̵closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:556:21: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, s̵h̵i̵f̵t̵,̵ ̵shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:556:28: warning: This simp argument is unused:
+  shift_zero
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:556:40: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵,̵shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono, closed_byteLit,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:557:58: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵closed_mono, closed_byteLit,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:558:14: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_byteLit,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:558:43: warning: This simp argument is unused:
+  closed_boolLit
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_byteLit, c̵l̵o̵s̵e̵d̵_̵b̵o̵o̵l̵L̵i̵t̵,̵ ̵closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:558:59: warning: This simp argument is unused:
+  closed_incbL
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift, shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, c̵l̵o̵s̵e̵d̵_̵i̵n̵c̵b̵L̵,̵closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:593:25: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+                subst, s̵h̵i̵f̵t̵,̵ ̵shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_app, closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:593:32: warning: This simp argument is unused:
+  shift_zero
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+                subst, shift, s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_app, closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:593:44: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+                subst, shift, shift_zero, s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵,̵shift_of_closed0, subst_of_closed0, closed, closed_app,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:594:54: warning: This simp argument is unused:
+  closed
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+                subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲c̵l̵o̵s̵e̵d̵,̵ ̵closed_app, closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:594:62: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+                subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed, c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:595:18: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+                subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed, closed_app, c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:595:47: warning: This simp argument is unused:
+  closed_boolLit
+
+Hint: Omit it from the simp argument list.
+  simp [b4incChainV, b4incK2V, emitCells, aps, List.foldr, List.foldl, Function.uncurry,
+                subst, shift, shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed, closed_app, closed_mono, closed_byteLit, c̵l̵o̵s̵e̵d̵_̵b̵o̵o̵l̵L̵i̵t̵,̵closed_incbL, closed_conssL,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:612:25: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, s̵h̵i̵f̵t̵,̵ ̵shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:612:32: warning: This simp argument is unused:
+  shift_zero
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:612:44: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵,̵shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+                closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:613:62: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵closed_mono,
+                closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:614:18: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+                c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:614:47: warning: This simp argument is unused:
+  closed_boolLit
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+                closed_mono, closed_byteLit, c̵l̵o̵s̵e̵d̵_̵b̵o̵o̵l̵L̵i̵t̵,̵closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:615:18: warning: This simp argument is unused:
+  closed_incbL
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+                closed_mono, closed_byteLit, closed_boolLit, c̵l̵o̵s̵e̵d̵_̵i̵n̵c̵b̵L̵,̵ ̵closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:637:29: warning: This simp argument is unused:
+  shift
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, s̵h̵i̵f̵t̵,̵ ̵shift_zero,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+                    closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:637:36: warning: This simp argument is unused:
+  shift_zero
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲s̵h̵i̵f̵t̵_̵z̵e̵r̵o̵,̵ ̵subst_shift_succ, shift_of_closed0, subst_of_closed0, closed, closed_app,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+                    closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:637:48: warning: This simp argument is unused:
+  subst_shift_succ
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, s̵u̵b̵s̵t̵_̵s̵h̵i̵f̵t̵_̵s̵u̵c̵c̵,̵shift_of_closed0, subst_of_closed0, closed, closed_app, closed_mono,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲closed_byteLit, closed_boolLit, closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:639:22: warning: This simp argument is unused:
+  closed_app
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+                    c̵l̵o̵s̵e̵d̵_̵a̵p̵p̵,̵ ̵closed_mono, closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+                    closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:639:34: warning: This simp argument is unused:
+  closed_mono
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+                    closed_app, c̵l̵o̵s̵e̵d̵_̵m̵o̵n̵o̵,̵ ̵closed_byteLit, closed_boolLit, closed_incbL, closed_conssL,
+                    closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:640:22: warning: This simp argument is unused:
+  closed_boolLit
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+                    closed_app, closed_mono, closed_byteLit, c̵l̵o̵s̵e̵d̵_̵b̵o̵o̵l̵L̵i̵t̵,̵ ̵closed_incbL, closed_conssL, closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:640:38: warning: This simp argument is unused:
+  closed_incbL
+
+Hint: Omit it from the simp argument list.
+  simp [emitCells, aps, List.foldr, List.foldl, Function.uncurry, subst, shift,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲shift_zero, subst_shift_succ, shift_of_closed0, subst_of_closed0, closed,
+                    closed_app, closed_mono, closed_byteLit, closed_boolLit, c̵l̵o̵s̵e̵d̵_̵i̵n̵c̵b̵L̵,̵ ̵closed_conssL,
+                    closed_nilL]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:663:49: warning: This simp argument is unused:
+  ite_true
+
+Hint: Omit it from the simp argument list.
+  simp only [incBytes, h0, h1, h2, i̵t̵e̵_̵t̵r̵u̵e̵,̵ ̵ite_false, ↓reduceIte, List.map_cons, List.map_nil,
+                    Function.uncurry]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:663:59: warning: This simp argument is unused:
+  ite_false
+
+Hint: Omit it from the simp argument list.
+  simp only [incBytes, h0, h1, h2, ite_true, i̵t̵e̵_̵f̵a̵l̵s̵e̵,̵↓reduceIte, List.map_cons, List.map_nil,
+  ̲  ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲ ̲Function.uncurry]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+_spec_fixr_work.lean:692:12: error: unexpected identifier; expected command
+ISAR.LTerm.abs
+  (ISAR.LTerm.abs
+    (ISAR.LTerm.abs
+      (ISAR.LTerm.abs
+        (ISAR.LTerm.abs
+          (ISAR.LTerm.abs
+            (ISAR.LTerm.abs
+              (ISAR.LTerm.abs
+                (ISAR.LTerm.abs
+                  (ISAR.LTerm.abs
+                    (ISAR.LTerm.abs
+                      (ISAR.LTerm.abs
+                        (ISAR.LTerm.abs
+                          (ISAR.LTerm.abs (ISAR.LTerm.abs (ISAR.LTerm.abs (ISAR.LTerm.var 14))))))))))))))))
+ISAR.LTerm.abs
+  (ISAR.LTerm.abs
+    (ISAR.LTerm.abs
+      (ISAR.LTerm.abs
+        (ISAR.LTerm.abs
+          (ISAR.LTerm.abs
+            (ISAR.LTerm.abs
+              (ISAR.LTerm.abs
+                (ISAR.LTerm.abs
+                  (ISAR.LTerm.abs
+                    (ISAR.LTerm.abs
+                      (ISAR.LTerm.abs
+                        (ISAR.LTerm.abs
+                          (ISAR.LTerm.abs (ISAR.LTerm.abs (ISAR.LTerm.abs (ISAR.LTerm.var 14))))))))))))))))
