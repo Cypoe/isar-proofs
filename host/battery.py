@@ -1,7 +1,7 @@
 """
 Registry-driven battery: the run list comes from host/toolchain.json —
-unique obligation suites (registry order) plus selftests — never a
-hand-maintained HOST_SUITES list.
+obligation run units (suite, args) in registry order plus selftests —
+never a hand-maintained HOST_SUITES list.
 
 Suite exit protocol: 0 pass | nonzero fail | 77 whole-suite skip (env).
 A suite exiting 0 whose output has a `SKIP` line is status pass* with
@@ -14,19 +14,28 @@ tools are resolvable.  A suite whose tools are missing is status skip
 as such on the console and NOT recorded in battery_last.json (`skip` is
 reserved for missing tools and exit-77).
 
-Every suite streams: stdout+stderr merged, teed line-by-line to
-seed/build/battery_logs/<suite>.log (fresh each run).  If a suite is
-silent for 60s a heartbeat line is printed.  An optional per-suite
-`timeout_s` (registry field, positive int) kills the process tree and
-records a fail.  --verbose echoes child lines prefixed `  <suite>| `.
+Every unit streams: stdout+stderr merged, teed line-by-line to
+seed/build/battery_logs/<unit>.log (fresh each run, every line
+prefixed `HH:MM:SS `).  If a unit is silent for 60s a heartbeat line
+is printed.  An optional `timeout_s` (registry field, positive int)
+kills the process tree and records a fail.  --verbose echoes child
+lines prefixed `  <unit>| `.
 
-`--only a,b,c` runs just those suites (tier filter ignored; env
-`requires` still enforced) and merges their records into an existing
-battery_last.json.  Every record carries `commit` (HEAD sha, `+dirty`
-if host/seed has uncommitted changes) and `at` (ISO timestamp).
+Run units are (suite, args): obligations sharing one invocation share
+one run; different selector args run separately (log name
+suite__argslug).  Obligations with `"release": true` run only under
+--release; otherwise they print NOT-RUN (release gate).
+
+`--only a,b,c` accepts suite names AND obligation ids (tier filter
+ignored; env `requires` still enforced) and merges their records into
+an existing battery_last.json.  Records live in "suites" (per unit,
+incl. selftests) and "obligations" (per obligation id: status,
+seconds, commit, at, unit).  Every record carries `commit` (HEAD sha,
+`+dirty` if host/seed has uncommitted changes) and `at` (ISO
+timestamp).
 
 Usage: python battery.py [--tier fast|full|all] [--json] [--skip-seed]
-                         [--verbose] [--only suite,suite,...]
+                         [--release] [--verbose] [--only name,id,...]
 """
 from __future__ import annotations
 
@@ -146,7 +155,7 @@ def run_suite(name: str, cmd: list, cwd: str, verbose: bool = False,
             else:
                 lines.append(item)
                 last_line = item.rstrip("\n")
-                log.write(item)
+                log.write(time.strftime("%H:%M:%S ") + item)
                 log.flush()
                 if verbose:
                     print(f"  {name}| {item}", end="")
@@ -179,6 +188,16 @@ def run_suite(name: str, cmd: list, cwd: str, verbose: bool = False,
     return r
 
 
+def _unit_name(suite: str, args) -> str:
+    """Log/record name for a run unit: plain suite name, or
+    suite__argslug so selector runs don't clobber each other's logs
+    (`--gate X` slugifies to just the id — spec_term__G9d)."""
+    if not args:
+        return suite
+    slug = "_".join(a.lstrip("-") for a in args if a != "--gate")
+    return suite + "__" + slug if slug else suite
+
+
 def main() -> int:
     sys.stdout.reconfigure(line_buffering=True, encoding="utf-8",
                            errors="replace")
@@ -191,6 +210,7 @@ def main() -> int:
     want_json = "--json" in sys.argv[1:]
     skip_seed = "--skip-seed" in sys.argv[1:]
     verbose = "--verbose" in sys.argv[1:]
+    release = "--release" in sys.argv[1:]
     only = None
     for i, a in enumerate(sys.argv[1:]):
         if a == "--only":
@@ -202,16 +222,39 @@ def main() -> int:
     print(f"python {sys.version.split()[0]} {sys.executable}  tier={tier}")
 
     obs = toolchain.obligations()
-    suites_order = []
-    for o in obs:
-        if o.suite not in suites_order:
-            suites_order.append(o.suite)
     selftests = toolchain.selftests()
 
-    def suite_items(suite):
-        oi = [o for o in obs if o.suite == suite]
-        si = [s for s in selftests if s.module == suite]
-        return oi, si
+    # run units: obligations grouped by (suite, args) — identical
+    # invocations share one run, different selectors run separately;
+    # selftests are their own units keyed by module name.
+    units = []          # {name, suite, args, obs:[Obligation], sts:[Selftest]}
+    umap = {}
+    release_ids = set()
+
+    def _unit_for(suite, args):
+        key = (suite, tuple(args))
+        if key not in umap:
+            umap[key] = {"name": _unit_name(suite, args), "suite": suite,
+                         "args": tuple(args), "obs": [], "sts": [],
+                         "rec": None}
+            units.append(umap[key])
+        return umap[key]
+
+    ob_unit = {}        # obligation id -> unit (non-release)
+    for o in obs:
+        if o.release and not release:
+            release_ids.add(o.id)
+            continue
+        ob_unit[o.id] = _unit_for(o.suite, o.args)
+        ob_unit[o.id]["obs"].append(o)
+    for s in selftests:
+        _unit_for(s.module, s.args)["sts"].append(s)
+    for u in units:
+        # record key: selftest-only units keep their module name so
+        # suites[module] stays back-compatible; obligation units use the
+        # argslug so selector runs don't collide
+        u["rec"] = (u["sts"][0].module if u["sts"] and not u["obs"]
+                    else u["name"])
 
     def _commit():
         try:
@@ -226,44 +269,53 @@ def main() -> int:
             return "?"
     commit = _commit()
 
-    results = {}
-    not_run = {}
-    for suite in suites_order + [s.module for s in selftests
-                                 if s.module not in suites_order]:
+    def _selected(u):
+        if only is None:
+            return True
+        return u["suite"] in only or any(o.id in only for o in u["obs"]) \
+            or any(s.module in only for s in u["sts"]) \
+            or u["name"] in only
+
+    results = {}        # unit name -> record
+    unit_of = {}        # obligation id -> unit name (ran units only)
+    not_run = {}        # unit name -> tier
+    for u in units:
+        suite, args = u["suite"], u["args"]
         if suite == "seed" and skip_seed:
             continue
-        if only is not None and suite not in only:
+        if not _selected(u):
             continue
-        oi, si = suite_items(suite)
+        oi, si = u["obs"], u["sts"]
         reqs = sorted({r for x in list(oi) + list(si)
                        for r in x.requires})
-        stier = "env" if reqs else max(
+        stier = "env" if reqs else {0: "fast", 1: "full"}[max(
             (TIER_LEVEL[x.tier] for x in list(oi) + list(si)),
-            default=0)
-        stier = "env" if reqs else {0: "fast", 1: "full"}[stier]
+            default=0)]
         missing = [r for r in reqs if not tool_present(r)]
         if missing:
             reason = f"env: missing {' '.join(missing)}"
-            results[suite] = {"status": "skip", "ok": True, "seconds": 0.0,
-                              "skipped": [], "reason": reason,
-                              "commit": commit,
-                              "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-            print(f"SKIP {suite}  {reason}")
+            results[u["rec"]] = {"status": "skip", "ok": True,
+                                 "seconds": 0.0, "skipped": [],
+                                 "reason": reason, "commit": commit,
+                                 "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            for o in oi:
+                unit_of[o.id] = u["rec"]
+            print(f"SKIP {u['name']}  {reason}")
             continue
         if only is None and TIER_LEVEL[stier] > level:  # NOT-RUN
-            not_run[suite] = stier
-            print(f"NOT-RUN {suite}  (tier {stier})")
+            not_run[u["rec"]] = stier
+            print(f"NOT-RUN {u['name']}  (tier {stier})")
             continue
-        args = [a for x in list(oi) + list(si) for a in x.args]
         timeouts = [x.timeout_s for x in list(oi) + list(si)
                     if x.timeout_s]
         timeout = max(timeouts) if timeouts else None
         ids = ",".join(o.id for o in oi) or "-"
-        print(f"RUN  {suite}  [{ids}]  tier={stier}")
+        print(f"RUN  {u['name']}  [{ids}]  tier={stier}")
         if suite == "lake":
-            r = run_suite("lake", ["lake", "build",
-                                   "ISAR.ObservationRegime",
-                                   "ISAR.InvariantLayer", "ISAR.Futamura"],
+            r = run_suite(u["name"], ["lake", "build",
+                                      "ISAR.ObservationRegime",
+                                      "ISAR.InvariantLayer",
+                                      "ISAR.Futamura"],
                           _REPO, verbose=verbose, timeout=timeout)
             if r["status"] in ("pass", "pass*"):
                 miss = _lake_decls(
@@ -271,40 +323,52 @@ def main() -> int:
                 if miss:
                     r["status"], r["ok"] = "fail", False
                     r["reason"] = "lean decls missing: " + ", ".join(miss)
-            results[suite] = r
+            results[u["rec"]] = r
         elif suite == "seed":
-            results[suite] = run_suite(
-                "seed", [sys.executable, "seed.py"] + args, _SEED,
+            results[u["rec"]] = run_suite(
+                u["name"], [sys.executable, "seed.py"] + list(args), _SEED,
                 verbose=verbose, timeout=timeout)
         else:
-            results[suite] = run_suite(
-                suite, [sys.executable, suite + ".py"] + args, _HOST,
-                verbose=verbose, timeout=timeout)
-        r = results[suite]
+            results[u["rec"]] = run_suite(
+                u["name"], [sys.executable, suite + ".py"] + list(args),
+                _HOST, verbose=verbose, timeout=timeout)
+        r = results[u["rec"]]
         r["commit"] = commit
         r["at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        for o in oi:
+            unit_of[o.id] = u["rec"]
         note = f" log={r['log']}" if r["status"] in ("fail", "pass*") else ""
-        print(f"  -> {suite} {r['status']} ({r['seconds']:.1f}s){note}")
+        print(f"  -> {u['name']} {r['status']} ({r['seconds']:.1f}s){note}")
 
     ok = True
+    ob_records = {}
     for o in obs:
-        r = results.get(o.suite)
-        if r is None:
-            status, sec = (f"NOT-RUN (tier {not_run[o.suite]})", 0.0) \
-                if o.suite in not_run else ("·", 0.0)
-        else:
+        if o.id in release_ids:
+            status, sec = "NOT-RUN (release gate)", 0.0
+        elif o.id in unit_of:
+            r = results[unit_of[o.id]]
             status, sec = r["status"].upper(), r["seconds"]
-        if r and r["status"] == "fail":
-            ok = False
-        reg = o.regime or "—"
-        print(f"{o.id:4s} {o.family}/{o.evidence:<10s} {reg:<18s} "
-              f"{status:5s} ({sec:.1f}s)")
+            if r["status"] == "fail":
+                ok = False
+            ob_records[o.id] = {
+                "status": r["status"], "seconds": r["seconds"],
+                "commit": r.get("commit", commit), "at": r.get("at", ""),
+                "unit": unit_of[o.id]}
+        elif o.id in ob_unit and ob_unit[o.id]["rec"] in not_run:
+            status, sec = (f"NOT-RUN (tier "
+                           f"{not_run[ob_unit[o.id]['rec']]})", 0.0)
+        else:
+            status, sec = "·", 0.0
+        print(f"{o.id:4s} {o.family}/{o.evidence:<10s} "
+              f"{(o.regime or '—'):<18s} {status:5s} ({sec:.1f}s)")
     for s in selftests:
-        r = results.get(s.module)
+        u_rec = next((u["rec"] for u in units if s in u["sts"]),
+                     s.module)
+        r = results.get(u_rec)
         if r is None:
-            if s.module in not_run:
+            if u_rec in not_run:
                 print(f"selftest {s.module:30s} NOT-RUN (tier "
-                      f"{not_run[s.module]})")
+                      f"{not_run[u_rec]})")
             continue
         if r["status"] == "fail":
             ok = False
@@ -322,11 +386,12 @@ def main() -> int:
             print(f"--- {name} tail ---\n{r.get('tail', '')}")
     if want_json:
         os.makedirs(os.path.dirname(_JSON_OUT), exist_ok=True)
-        doc = {"python": sys.executable, "suites": {}}
+        doc = {"python": sys.executable, "suites": {}, "obligations": {}}
         if only is not None and os.path.exists(_JSON_OUT):
             try:
                 doc = json.load(open(_JSON_OUT, encoding="utf-8"))
                 doc["python"] = sys.executable
+                doc.setdefault("obligations", {})
             except (OSError, ValueError):
                 pass
         doc["suites"].update({
@@ -334,6 +399,7 @@ def main() -> int:
                 ("status", "ok", "seconds", "skipped", "reason",
                  "commit", "at") if kk in v}
             for k, v in results.items()})
+        doc["obligations"].update(ob_records)
         with open(_JSON_OUT, "w", encoding="utf-8", newline="\n") as f:
             json.dump(doc, f, indent=2)
         print(f"wrote {_JSON_OUT}")

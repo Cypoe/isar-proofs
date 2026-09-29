@@ -2866,9 +2866,62 @@ LO_FUEL = 50_000_000
 CD_FUEL = 300_000
 
 
+VALID_GATES = ("G9a", "G9b", "G9b-emit", "G9c", "G9d", "G9e", "G9f",
+               "G9g", "G9h", "G9p")
+
+
+def _residual_state():
+    """Shared G9b/G9b-emit input: the Futamura-1 residual + its pooled
+    native instantiation.  Computed on demand so G9b-emit doesn't have
+    to drag the G9b legs along."""
+    mix = MixStrategy()
+    prog = _appn(QUERY, T(K.VAR, n=0), T(K.VAR, n=1))
+    residual, s_res, _ = reduce_tree_lo(
+        mix.specialize(prog, {0: SPEC}), LO_FUEL)
+    live = has_var(residual, 1)
+    print(f"RESIDUAL: {term_nodes(residual)} tree nodes "
+          f"(spec {term_nodes(SPEC)}; {s_res} lo steps to build); "
+          f"v1 {'free' if live else 'ABSENT'}")
+    # residual instances are independent roots — the native witness
+    # runs them as ONE packed-IR batch (pool + Merkle cache), the same
+    # seam the emit stages ride; per-name steps collapse to the batch
+    # total (the kernel reports aggregates, not per-root tallies).
+    names = NAMES + [NEGATIVE]
+    insts = [mix.specialize(residual, {1: str_term(name)})
+             for name in names]
+    import emit_chain
+    nfs_nat, steps_nat = emit_chain.reduce_batch_native(insts)
+    print(f"  native batch: {len(insts)} instances, {steps_nat} steps")
+    return residual, live, names, insts, nfs_nat
+
+
 def main() -> int:
     nfail = 0
     n_q = 0
+
+    argv = sys.argv[1:]
+    gates: Optional[set] = None
+    if "--gate" in argv:
+        i = argv.index("--gate")
+        if i + 1 >= len(argv):
+            print("FAIL --gate requires ID[,ID...]")
+            return 2
+        gates = set(argv[i + 1].split(","))
+        unknown = gates - set(VALID_GATES)
+        if unknown:
+            print(f"FAIL unknown gate(s) {sorted(unknown)} "
+                  f"(valid: {', '.join(VALID_GATES)})")
+            return 2
+
+    def want(g: str) -> bool:
+        return gates is None or g in gates
+
+    _res: list = []
+
+    def residual_state():
+        if not _res:
+            _res.append(_residual_state())
+        return _res[0]
 
     # slice-completeness self-checks (the real file has no int/bool/null)
     assert json_to_term(None) == NULL_TAG
@@ -2881,7 +2934,7 @@ def main() -> int:
     print(f"QUERY: {term_nodes(QUERY)} unique T nodes "
           f"(pathOf, Turner-compiled)")
 
-    for name in NAMES + [NEGATIVE]:
+    for name in (NAMES + [NEGATIVE] if want("G9a") else []):
         expected = python_walk(name)
         n_q += 1
         tag = "OK" if expected is not None or name == NEGATIVE else "??"
@@ -2920,8 +2973,8 @@ def main() -> int:
     # expensive witnesses (native token text, cd rounds) run on a
     # representative subset — full sweep behind --resolve-all.
     heavy = set(NAMES[:2] + [NEGATIVE])
-    resolve_all = "--resolve-all" in sys.argv[1:]
-    for name in NAMES + [NEGATIVE]:
+    resolve_all = "--resolve-all" in argv
+    for name in (NAMES + [NEGATIVE] if want("G9c") else []):
         expected = python_resolve(name)
         n_q += 1
         t = resolve_query(name)
@@ -2964,7 +3017,8 @@ def main() -> int:
     # correctness gap.  nf_lo == nf_nat is pinned by the `mini` leg and
     # the resolveOf legs, which exercise the same reduction machinery.
     # ------------------------------------------------------------------
-    for cname, (imports, slots) in SYMS_CASES.items():
+    for cname, (imports, slots) in (
+            SYMS_CASES.items() if want("G9d") else ()):
         expected = python_symbols(imports, slots)
         n_q += 1
         t = symbols_query(imports, slots)
@@ -3005,7 +3059,7 @@ def main() -> int:
     # lo and cd, and nf_lo == nf_nat is pinned by the resolveOf/symbolsOf
     # legs which exercise the same reduction machinery on smaller terms.
     # ------------------------------------------------------------------
-    for cname, R in PROG_CASES.items():
+    for cname, R in (PROG_CASES.items() if want("G9e") else ()):
         expected = python_program(R)
         n_q += 1
         t = program_query(R)
@@ -3041,7 +3095,7 @@ def main() -> int:
     #   oracle; native is not gated (same exe throughput ceiling as
     #   programOf — ~80k+ steps is past the subprocess cap).
     # ------------------------------------------------------------------
-    for insn in ENC_CASES:
+    for insn in (ENC_CASES if want("G9f") else ()):
         want = isa_x86_64_gate_encode(insn)
         n_q += 1
         t = encode_query(insn)
@@ -3055,7 +3109,8 @@ def main() -> int:
             line += f"  expected {want.hex()}"
         print(line)
 
-    for cname, (prog, syms, base) in ASM_CASES.items():
+    for cname, (prog, syms, base) in (
+            ASM_CASES.items() if want("G9f") else ()):
         expected_b, expected_l = python_assemble(prog, syms, base)
         n_q += 1
         t = assemble_query(fraglist_term(prog), syms, base)
@@ -3086,7 +3141,7 @@ def main() -> int:
     # loop).  Native is not gated (the same fixed-fuel-exe throughput
     # ceiling as programOf/assembleOf — the term graph is far past it).
     # ------------------------------------------------------------------
-    for cname, slots in DATA_CASES.items():
+    for cname, slots in (DATA_CASES.items() if want("G9g") else ()):
         want_b, want_s = python_data(slots)
         n_q += 1
         t = data_query(slots)
@@ -3106,7 +3161,7 @@ def main() -> int:
             line += f"  expected {len(want_b)}B/{want_s}"
         print(line)
 
-    for cname, imports in IDATA_CASES.items():
+    for cname, imports in (IDATA_CASES.items() if want("G9g") else ()):
         want_b, want_s = python_idata(imports)
         n_q += 1
         t = idata_query(imports)
@@ -3126,7 +3181,8 @@ def main() -> int:
             line += f"  expected {len(want_b)}B/{want_s}"
         print(line)
 
-    for cname, (text, imports, slots, res) in PACK_CASES.items():
+    for cname, (text, imports, slots, res) in (
+            PACK_CASES.items() if want("G9g") else ()):
         want = python_pack(text, imports, slots, res)
         n_q += 1
         t = pack_query(text, imports, slots, res)
@@ -3164,7 +3220,8 @@ def main() -> int:
     # 027/028 retention pathology, not a correctness question).  The
     # resolver seam keeps its own lo+cd coverage on ASM_CASES.
     # ------------------------------------------------------------------
-    for cname, (imports, slots) in LINK_CASES.items():
+    for cname, (imports, slots) in (
+            LINK_CASES.items() if want("G9h") else ()):
         want = python_link(imports, slots)
         n_q += 1
         t = link_query(imports, slots)
@@ -3186,7 +3243,8 @@ def main() -> int:
                      f"{want[2]}")
         print(line)
 
-    for cname, (text, imports, slots, res) in PACK2_CASES.items():
+    for cname, (text, imports, slots, res) in (
+            PACK2_CASES.items() if want("G9h") else ()):
         want = python_pack(text, imports, slots, res)
         ib, db, _ = python_link(imports, slots)
         n_q += 1
@@ -3205,7 +3263,8 @@ def main() -> int:
             line += f"  expected {len(want)}B"
         print(line)
 
-    for cname, (prog, imports, slots, base) in LINKASM_CASES.items():
+    for cname, (prog, imports, slots, base) in (
+            LINKASM_CASES.items() if want("G9h") else ()):
         _, _, lsyms = python_link(imports, slots)
         want_b, want_l = python_assemble(prog, lsyms, base)
         n_q += 1
@@ -3233,7 +3292,7 @@ def main() -> int:
     # lookahead collapses the ripple's sequential carry chain into
     # independent cones (~270 vs ~424 rounds, ~30% more allocs).
     # ------------------------------------------------------------------
-    for cname, (a, b) in CLA_CASES.items():
+    for cname, (a, b) in (CLA_CASES.items() if want("G9f") else ()):
         n_q += 1
         t_rip = bracket(parse(f"({_B4ADD} {_b4_src(a)} {_b4_src(b)})"))
         t_cla = bracket(parse(f"({_B4CLA} {_b4_src(a)} {_b4_src(b)})"))
@@ -3259,7 +3318,7 @@ def main() -> int:
     # lists; here the host encoding is gated incl. the empty edge).
     # Both parenthesizations are compared against the literal concat.
     # ------------------------------------------------------------------
-    for cname, (a, b, c) in ASSOC_CASES.items():
+    for cname, (a, b, c) in (ASSOC_CASES.items() if want("G9g") else ()):
         n_q += 1
         # all terms through bracket(parse(_bytes_src)) — NF equality is
         # only meaningful inside one compilation convention (Turner
@@ -3293,31 +3352,16 @@ def main() -> int:
     # residual[1 := str_term name] must agree with the direct query on
     # every witness.  See the module docstring for the honest cost note.
     # ------------------------------------------------------------------
-    mix = MixStrategy()
-    prog = _appn(QUERY, T(K.VAR, n=0), T(K.VAR, n=1))
-    residual, s_res, _ = reduce_tree_lo(
-        mix.specialize(prog, {0: SPEC}), LO_FUEL)
-    live = has_var(residual, 1)
-    print(f"RESIDUAL: {term_nodes(residual)} tree nodes "
-          f"(spec {term_nodes(SPEC)}; {s_res} lo steps to build); "
-          f"v1 {'free' if live else 'ABSENT'}")
-    if not live:
+    residual, live, names, insts, nfs_nat = (
+        residual_state() if want("G9b") or want("G9b-emit")
+        else (None, True, (), (), ()))
+    if (want("G9b") or want("G9b-emit")) and not live:
         nfail += 1
         print("FAIL residual has no dynamic input — "
               "the specializer evaluated instead of specializing")
 
-    # residual instances are independent roots — the native witness
-    # runs them as ONE packed-IR batch (pool + Merkle cache), the same
-    # seam the emit stages ride; per-name steps collapse to the batch
-    # total (the kernel reports aggregates, not per-root tallies).
-    names = NAMES + [NEGATIVE]
-    insts = [mix.specialize(residual, {1: str_term(name)})
-             for name in names]
-    import emit_chain
-    nfs_nat, steps_nat = emit_chain.reduce_batch_native(insts)
-    print(f"  native batch: {len(insts)} instances, {steps_nat} steps")
-
-    for name, inst, nf_nat in zip(names, insts, nfs_nat):
+    for name, inst, nf_nat in (
+            zip(names, insts, nfs_nat) if want("G9b") else ()):
         expected = python_walk(name)
 
         nf_lo, steps_lo, _ = reduce_tree_lo(inst, LO_FUEL)
@@ -3346,7 +3390,7 @@ def main() -> int:
     # one packed arg per root.  Cross-check: exe(arg) must equal the
     # pooled instantiation residual[1 := arg] byte-for-byte.
     # ------------------------------------------------------------------
-    if live:
+    if want("G9b-emit") and live:
         import subprocess
         import toolchain as _tc
         import tower as _tw
@@ -3382,38 +3426,59 @@ def main() -> int:
     # (hash-consed on (tag,l,r)); equal terms give identical bytes.
     # ------------------------------------------------------------------
     n_ir = 0
-    ir_cases = [I, app(S, app(KK, I)),
-                _appn(T(K.VAR, n=0), T(K.VAR, n=1)),
-                bytelist_term(b"MZ"),
-                st_query := bracket(parse("(\\x. x (K I))"))]
-    for t in ir_cases:
-        rt = unpack_ir(pack_ir(t))
-        ok = len(rt) == 1 and rt[0] == t
+    if want("G9p"):
+        ir_cases = [I, app(S, app(KK, I)),
+                    _appn(T(K.VAR, n=0), T(K.VAR, n=1)),
+                    bytelist_term(b"MZ"),
+                    st_query := bracket(parse("(\\x. x (K I))"))]
+        for t in ir_cases:
+            rt = unpack_ir(pack_ir(t))
+            ok = len(rt) == 1 and rt[0] == t
+            n_ir += 1
+            if not ok:
+                nfail += 1
+                print(f"FAIL ir roundtrip {t!r:.60}")
+        # multi-root + canonicality: equal-but-distinct trees -> same
+        # bytes
+        a1, a2 = app(S, I), app(S, I)
+        two = unpack_ir(pack_ir(a1, KK))
+        ok = (two[0] == a1 and two[1] == KK
+              and pack_ir(app(S, I)) == pack_ir(a1))
         n_ir += 1
         if not ok:
             nfail += 1
-            print(f"FAIL ir roundtrip {t!r:.60}")
-    # multi-root + canonicality: equal-but-distinct trees -> same bytes
-    a1, a2 = app(S, I), app(S, I)
-    two = unpack_ir(pack_ir(a1, KK))
-    ok = (two[0] == a1 and two[1] == KK
-          and pack_ir(app(S, I)) == pack_ir(a1))
-    n_ir += 1
-    if not ok:
-        nfail += 1
-        print("FAIL ir multi-root/canonical")
-    print(f"OK  ir pack/unpack: {n_ir} cases "
-          f"({len(pack_ir(st_query))}B for a small λ-compiled term)")
+            print("FAIL ir multi-root/canonical")
+        print(f"OK  ir pack/unpack: {n_ir} cases "
+              f"({len(pack_ir(st_query))}B for a small λ-compiled term)")
 
+    parts = []
+    if want("G9a"):
+        parts.append(f"{len(NAMES) + 1} pathOf")
+    if want("G9c"):
+        parts.append(f"{len(NAMES) + 1} resolveOf")
+    if want("G9d"):
+        parts.append(f"{len(SYMS_CASES)} symbolsOf")
+    if want("G9e"):
+        parts.append(f"{len(PROG_CASES)} programOf")
+    if want("G9f"):
+        parts.append(f"{len(ENC_CASES)} encodeOf + "
+                     f"{len(ASM_CASES)} assembleOf + "
+                     f"{len(CLA_CASES)} cla≡rip")
+    if want("G9g"):
+        parts.append(f"{len(DATA_CASES)} dataOf + "
+                     f"{len(IDATA_CASES)} idataOf + "
+                     f"{len(PACK_CASES)} packOf + "
+                     f"{len(ASSOC_CASES)} assoc")
+    if want("G9h"):
+        parts.append(f"{len(LINK_CASES)} linkOf + "
+                     f"{len(PACK2_CASES)} pack2Of + "
+                     f"{len(LINKASM_CASES)} linkasm")
+    if want("G9b") or want("G9b-emit"):
+        parts.append(f"{len(NAMES) + 1} residual instances")
+    if want("G9p"):
+        parts.append(f"{n_ir} ir pack/unpack")
     print(f"{'OK' if not nfail else 'FAIL'} spec_term "
-          f"({len(NAMES) + 1} pathOf + {len(NAMES) + 1} resolveOf + "
-          f"{len(SYMS_CASES)} symbolsOf + {len(PROG_CASES)} programOf + "
-          f"{len(ENC_CASES)} encodeOf + {len(ASM_CASES)} assembleOf + "
-          f"{len(DATA_CASES)} dataOf + {len(IDATA_CASES)} idataOf + "
-          f"{len(PACK_CASES)} packOf + {len(LINK_CASES)} linkOf + "
-          f"{len(PACK2_CASES)} pack2Of + {len(LINKASM_CASES)} linkasm + "
-          f"{len(CLA_CASES)} cla≡rip + {len(ASSOC_CASES)} assoc + "
-          f"{len(NAMES) + 1} residual instances x 4 witnesses: graph.lo, "
+          f"({' + '.join(parts)}; witnesses: graph.lo, "
           "native lo exe, graph.cd full-spec, python walk)")
     return 1 if nfail else 0
 

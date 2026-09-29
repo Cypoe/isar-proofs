@@ -93,6 +93,7 @@ class Obligation:
     lean_decls: Tuple[str, ...] = ()
     label: str = ""
     timeout_s: Optional[int] = None
+    release: bool = False
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,9 @@ def validate(raw: dict) -> List[str]:
         ts = item.get("timeout_s")
         if ts is not None and not (isinstance(ts, int) and ts > 0):
             errs.append(f"{name}: timeout_s must be a positive int")
+        rel = item.get("release")
+        if rel is not None and not isinstance(rel, bool):
+            errs.append(f"{name}: release must be a boolean")
         return req
 
     seen = set()
@@ -257,7 +261,8 @@ def load() -> dict:
                             if o.get("cost_model") else None),
                 lean_decls=tuple(o.get("lean_decls", ())),
                 label=o.get("label", ""),
-                timeout_s=o.get("timeout_s"))
+                timeout_s=o.get("timeout_s"),
+                release=bool(o.get("release", False)))
             for o in raw.get("obligations", [])),
         "selftests": tuple(
             Selftest(module=s["module"], tier=s.get("tier", "fast"),
@@ -393,6 +398,9 @@ def _negative_cases() -> List[Tuple[str, dict]]:
                   mut(lambda r: r["obligations"][0].update(
                       family="quotient", evidence="congruence",
                       regime="nonexistent"))))
+    cases.append(("release not a bool",
+                  mut(lambda r: r["obligations"][0].update(
+                      release="yes"))))
     return cases
 
 

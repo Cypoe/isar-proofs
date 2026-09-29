@@ -34,13 +34,14 @@ GEN_HDR = "<!-- Generated from host/toolchain.json — do not edit. -->"
 def _battery() -> dict:
     try:
         with open(BATTERY_JSON, encoding="utf-8") as f:
-            return json.load(f).get("suites", {})
+            d = json.load(f)
+        return {"suites": d.get("suites", {}),
+                "obligations": d.get("obligations", {})}
     except OSError:
-        return {}
+        return {"suites": {}, "obligations": {}}
 
 
-def _live(suite: str, suites: dict) -> str:
-    cell = suites.get(suite)
+def _live_cell(cell) -> str:
     if cell is None:
         return "·"
     st = cell.get("status")
@@ -50,13 +51,37 @@ def _live(suite: str, suites: dict) -> str:
             "skip": "skip"}.get(st, "·")
 
 
-def _run(suite: str, suites: dict) -> str:
-    cell = suites.get(suite) or {}
+def _live(suite: str, bat: dict) -> str:
+    return _live_cell(bat["suites"].get(suite))
+
+
+def _ob_cell(o: "toolchain.Obligation", bat: dict):
+    # per-obligation record first; the whole-suite record only stands in
+    # for obligations that run AS the whole suite (no args) — an
+    # obligation with its own args (selector, --cold) that never ran
+    # must render `·`, not inherit another unit's result
+    cell = bat["obligations"].get(o.id)
+    if cell is None and not o.args:
+        cell = bat["suites"].get(o.suite)
+    return cell
+
+
+def _live_ob(o: "toolchain.Obligation", bat: dict) -> str:
+    return _live_cell(_ob_cell(o, bat))
+
+
+def _run(suite: str, bat: dict) -> str:
+    cell = bat["suites"].get(suite) or {}
     return cell.get("commit") or "·"
 
 
+def _run_ob(o: "toolchain.Obligation", bat: dict) -> str:
+    return (_ob_cell(o, bat) or {}).get("commit") or "·"
+
+
 def render_gates() -> str:
-    suites = _battery()
+    bat = _battery()
+    suites = bat["suites"]
     lines = [
         GEN_HDR,
         "",
@@ -71,8 +96,8 @@ def render_gates() -> str:
         what = f"[{o.label}] {o.what}" if o.label else o.what
         lines.append(f"| {o.id} | {o.family} | {o.evidence} | "
                      f"{o.regime or '—'} | {o.tier} | {o.suite} | {what} "
-                     f"| {w} | {_live(o.suite, suites)} "
-                     f"| {_run(o.suite, suites)} |")
+                     f"| {w} | {_live_ob(o, bat)} "
+                     f"| {_run_ob(o, bat)} |")
     lines += [
         "",
         "## Selftests",
@@ -84,7 +109,7 @@ def render_gates() -> str:
         lines.append(f"| {s.module} | {s.tier} | "
                      f"{', '.join(s.requires) or '—'} | "
                      f"{' '.join(s.args) or '—'} | "
-                     f"{_live(s.module, suites)} |")
+                     f"{_live(s.module, bat)} |")
     lines += ["", "## Benches", "",
               "| name | module | measures | claim |", "| --- | --- | --- | --- |"]
     for b in toolchain.benches():

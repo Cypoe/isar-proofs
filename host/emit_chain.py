@@ -38,14 +38,17 @@ Measured limits (2026-09-26 box, 128GB):
   the exe pays every occurrence).  A `reclaim`/sharing realization
   is the known next lever, not a correctness gap.
 
-Usage: python host/emit_chain.py [--on-exe]
+Usage: python host/emit_chain.py [--on-exe] [--win64] [--cold]
 """
 from __future__ import annotations
 
+import hashlib
+import inspect
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -295,6 +298,41 @@ def reduce_batch_native(terms: List[T], R: Optional[seed.Realization] = None,
     return [tower.quote_surface(nf) for nf in nfs], steps
 
 
+def _stage_key(*parts) -> str:
+    """Content key for a checkpointed stage: sha256 over the parts'
+    bytes (str -> utf-8, bytes as-is), 16 hex chars — short enough for
+    filenames, collision-proof for a handful of stages per workdir."""
+    h = hashlib.sha256()
+    for p in parts:
+        h.update(p if isinstance(p, bytes) else str(p).encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()[:16]
+
+
+def _src(fn) -> str:
+    """sha256 of a stage function's source — decoder/fold code edits
+    invalidate its checkpoints, unrelated edits don't."""
+    return hashlib.sha256(inspect.getsource(fn).encode("utf-8")).hexdigest()
+
+
+def _ck_keys(R: seed.Realization, imports, slots,
+             text_base: int) -> Dict[str, str]:
+    """Content keys for the four checkpointed artifacts, keyed on the
+    stage INPUTS (the packed-IR digest of each stage's root term, the
+    realization knobs that change it, and the producing code's source)
+    — a stale file can't survive an input or code change."""
+    prog = _stage_key(st.pack_ir_keyed(st.program_query(R))[1][0],
+                      "fuse_s=%d" % R.fuse_s, _src(st.decode_program))
+    link = _stage_key(st.pack_ir_keyed(st.link_query(imports, slots))[1][0],
+                      _src(st.decode_link))
+    text = _stage_key(prog, link, "base=%d" % text_base,
+                      _src(assemble_staged))
+    image = _stage_key(text, link, "stackres=%d" % R.stack_reserve,
+                       _src(pack_staged))
+    return {"program.items": prog, "link.sections": link,
+            "text.bin": text, "image.bin": image}
+
+
 def emit_image(R: seed.Realization,
                imports=rts.IMPORTS, slots=rts.DATA_SLOTS,
                text_base: int = target_pe64.TEXT_RVA,
@@ -352,12 +390,19 @@ def emit_image(R: seed.Realization,
     # `workdir` checkpoints decoded artifacts (items/sections/text)
     # so a dead stage retries without recomputing its ancestors —
     # the data seam is literally persisted.
-    def _ck(name: str, produce, save, load):
-        p = os.path.join(workdir, name) if workdir else None
+    ckpt = [0, 0]  # [hits, misses] — report provenance appended below
+
+    def _ck(name: str, key: str, produce, save, load):
+        p = os.path.join(workdir, f"{name}.{key}") if workdir else None
         if p and os.path.exists(p):
+            ckpt[0] += 1
             if verbose:
-                print(f"    [ckpt] {name}", flush=True)
+                print(f"    [ckpt hit] {name} {key}", flush=True)
             return load(p)
+        if p:
+            ckpt[1] += 1
+            if verbose:
+                print(f"    [ckpt miss] {name} {key}", flush=True)
         v = produce()
         if p:
             save(p, v)
@@ -374,14 +419,17 @@ def emit_image(R: seed.Realization,
             with open(p, "rb") as f:
                 return pickle.load(f)
 
+        keys = _ck_keys(R, imports, slots, text_base) if workdir else {}
+
         t0 = time.time()
-        items = _ck("program.items",
+        items = _ck("program.items", keys.get("program.items", ""),
                     lambda: st.decode_program(_prog_nf()),
                     _dump, _load)
-        ib, db, syms = _ck("link.sections",
+        ib, db, syms = _ck("link.sections", keys.get("link.sections", ""),
                            lambda: st.decode_link(_link_nf()),
                            _dump, _load)
-        text, _loc = _ck("text.bin", lambda: assemble_staged(
+        text, _loc = _ck("text.bin", keys.get("text.bin", ""),
+                         lambda: assemble_staged(
             items, syms, text_base, runs.get("assemble*", run),
             verbose=verbose), _dump, _load)
         report.append(("assemble*", -1, -1))
@@ -392,7 +440,7 @@ def emit_image(R: seed.Realization,
         idata_t, datab_t = st.bytelist_term(ib), st.bytelist_term(db)
         if decompose_pack:
             t0 = time.time()
-            img = _ck("image.bin",
+            img = _ck("image.bin", keys.get("image.bin", ""),
                       lambda: pack_staged(
                           text, ib, db, R.stack_reserve,
                           runs.get("pack*", run), verbose=verbose),
@@ -402,6 +450,7 @@ def emit_image(R: seed.Realization,
             if verbose:
                 print(f"    pack*: decomposed {len(img)}B "
                       f"({time.time()-t0:.0f}s)", flush=True)
+            report.append(("ckpt", ckpt[0], ckpt[1]))
             return img, report
     else:
         link_nf = _link_nf()
@@ -421,6 +470,7 @@ def emit_image(R: seed.Realization,
     if workdir:
         with open(os.path.join(workdir, "image.bin"), "wb") as f:
             f.write(img)
+    report.append(("ckpt", ckpt[0], ckpt[1]))
     return img, report
 
 
@@ -747,6 +797,27 @@ def main() -> int:
                   f"{len(got)}B == {len(want_mini)}B "
                   f"({time.time()-t0:.0f}s)  {stages}", flush=True)
 
+    # keyed-checkpoint refusal: the same R twice must give identical
+    # keys, a different R must give a different PROG key, and a file
+    # planted under another realization's key must NOT be found.
+    with tempfile.TemporaryDirectory() as wd:
+        ka = _ck_keys(seed.Realization(), rts.IMPORTS, rts.DATA_SLOTS,
+                      target_pe64.TEXT_RVA)
+        kb = _ck_keys(seed.Realization(fuel=7), rts.IMPORTS,
+                      rts.DATA_SLOTS, target_pe64.TEXT_RVA)
+        same = ka == _ck_keys(seed.Realization(), rts.IMPORTS,
+                              rts.DATA_SLOTS, target_pe64.TEXT_RVA)
+        with open(os.path.join(wd, f"text.bin.{ka['text.bin']}"),
+                  "wb") as f:
+            f.write(b"stale")
+        stale_hit = os.path.exists(
+            os.path.join(wd, f"text.bin.{kb['text.bin']}"))
+        good = (ka["program.items"] != kb["program.items"]
+                and same and not stale_hit)
+        ok = ok and good
+        print("ok keyed ckpt refuses stale" if good
+              else "FAIL keyed ckpt accepted stale", flush=True)
+
     if "--win64" in sys.argv[1:]:
         # pack's live set is image-construction-sized on LO (the JOIN
         # spine holds all section intermediates); decomposed chunks are
@@ -787,17 +858,29 @@ def main() -> int:
                             fuel=2_000_000, fuse_s=R.fuse_s)))
             t0 = time.time()
             want = emit_native("native.x86_64.pe", R)
-            wd = os.path.join(_HOST, "emit_work", tag)
-            os.makedirs(wd, exist_ok=True)
+            if "--cold" in sys.argv[1:]:
+                # release gate: every staged stage re-derived — a fresh
+                # workdir means zero checkpoint reuse by construction
+                _tmp = tempfile.TemporaryDirectory()
+                wd = _tmp.name
+            else:
+                _tmp = None
+                wd = os.path.join(_HOST, "emit_work", tag)
+                os.makedirs(wd, exist_ok=True)
             got, report = emit_image(R, decompose_asm=True,
                                      decompose_pack=True,
                                      stage_runs=sr, workdir=wd)
+            del _tmp
             good = got == want
             ok = ok and good
-            stages = "  ".join(f"{n}:{s}st/{a}n" for n, s, a in report)
+            stages = "  ".join(f"{n}:{s}st/{a}n" for n, s, a in report
+                               if n != "ckpt")
+            ck = next((r for r in report if r[0] == "ckpt"),
+                      ("ckpt", 0, 0))
             print(f"{'OK ' if good else 'FAIL'} emit_chain {tag}: "
                   f"{len(got)}B == {len(want)}B  "
-                  f"({time.time()-t0:.0f}s)  {stages}", flush=True)
+                  f"({time.time()-t0:.0f}s)  {stages}  "
+                  f"ckpt hits={ck[1]}/{ck[1] + ck[2]}", flush=True)
             if not good:
                 k = next((i for i, (a, b) in enumerate(zip(got, want))
                           if a != b), min(len(got), len(want)))
