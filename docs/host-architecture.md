@@ -67,8 +67,10 @@ Der Host ist ein **kataloggetriebener Realizer**, kein Compiler-Frontend:
 **Konkrete Emit-Realisierung:**
 
 ```
-resolve(tc) → rts.program(R) → opt_peephole → isa.assemble[+_obj] → tgt.pack|pack_obj|c|fasmg
+resolve(tc) → rts.program(R) → [opt_peephole iff R.peephole] → isa.assemble[+_obj] → tgt.pack|pack_obj|c|fasmg
 ```
+
+`R.peephole` ist Default **aus**: die staged Kette hat keine `peepholeOf`-Stufe und verweigert es (`NotRealized`). Sonst bräche der Seam `emit_image(R) == seed.emit(R)` (G10), wie es `99dc32d` passiert war.
 
 **Staged Self-Emit (G9 / `emit_chain`):**  
 `resolveOf` → `programOf` → `linkOf` → `assembleOf`/`encodeOf` → `pack2Of` — je Basis-Term-NF; Python = Plumbing + Seam-Decode. Gate: `emit_image(R) == seed.emit(R)`.
@@ -252,7 +254,7 @@ sequenceDiagram
 
   Spec->>Seed: resolve(tc) → isa,rts,tgt
   Seed->>Seed: rts.program(R)
-  Seed->>Peep: peephole(prog, isa)
+  Seed->>Peep: peephole(prog, isa) iff R.peephole
   Peep->>ISA: assemble(prog, symbols)
   ISA->>Tgt: text + labels
   Tgt->>Exe: image bytes
