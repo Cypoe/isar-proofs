@@ -58,7 +58,7 @@ for _p in (_HOST, _SEED):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from reduce import T, I, KK, app                 # noqa: E402
+from reduce import T, I, KK, B, C, D, app        # noqa: E402
 from graph_runtime import Graph                  # noqa: E402
 from lambda_dialect import parse, bracket        # noqa: E402
 import seed                                      # noqa: E402
@@ -271,6 +271,118 @@ def make_ir_runner(exe: str, timeout: int = 3600,
     return run
 
 
+def _bytes_frames(buf: bytes, expect: int) -> List[bytes]:
+    """[u32le len][bytes]* — the byte-egress frame wire: one frame per
+    root, in root order, across however many streams the batch packed.
+    Newlines/NULs are payload, not structure (that is the point)."""
+    out: List[bytes] = []
+    off = 0
+    while off < len(buf):
+        if off + 4 > len(buf):
+            raise RuntimeError(
+                f"bytes frame: truncated u32 len at {off}/{len(buf)}")
+        n = int.from_bytes(buf[off:off + 4], "little")
+        off += 4
+        if off + n > len(buf):
+            raise RuntimeError(
+                f"bytes frame: {n}B payload at {off} overruns "
+                f"{len(buf)}B of stdout")
+        out.append(buf[off:off + n])
+        off += n
+    if len(out) != expect:
+        raise RuntimeError(
+            f"bytes batch: {len(out)} frames for {expect} roots")
+    return out
+
+
+def make_bytes_runner(exe: str, timeout: int = 3600,
+                      workers: int = 1,
+                      cache_dir: Optional[str] = None
+                      ) -> Callable[[T], Tuple[bytes, int, int]]:
+    """Packed-IR runner over the byte-egress kernel (Realization
+    io=("stdin","bytes")): the exe decodes each root's byte-list NF
+    itself — Python never rebuilds the byte-list term.  Wire out is one
+    [u32le len][bytes] frame per root, order preserved; stderr keeps
+    `steps=`/`alloc=` for the query reductions plus `dec=` for the
+    kernel's own decode probes.
+
+    run(q) -> (bytes, steps, alloc); .batch(qs) -> ([bytes], steps,
+    alloc); .is_bytes marks the runner so byte-producing seams pick the
+    raw-bytes path.  cache_dir is a content-addressed payload store —
+    values are raw bytes, never share a dir with the NF cache."""
+    import concurrent.futures
+
+    if cache_dir is not None:
+        os.makedirs(cache_dir, exist_ok=True)
+    stats = {"dec": 0}
+
+    def _one(blob: bytes, expect: int) -> Tuple[List[bytes], int, int]:
+        cp = subprocess.run([exe], input=blob,
+                            capture_output=True, timeout=timeout)
+        m = re.search(rb"steps=(\d+) alloc=(\d+)", cp.stderr)
+        md = re.search(rb" dec=(\d+)", cp.stderr)
+        if cp.returncode != 0:
+            raise RuntimeError(
+                f"exe bytes batch failed rc={cp.returncode} "
+                f"stderr={cp.stderr!r} "
+                f"(2=fuel exhausted, 3=bad IR, 5=not a byte-list NF "
+                f"— never a silent success)")
+        if md:
+            stats["dec"] += int(md.group(1))
+        frames = _bytes_frames(cp.stdout, expect)
+        return (frames, int(m.group(1)) if m else -1,
+                int(m.group(2)) if m else -1)
+
+    def batch(qs: List[T]) -> Tuple[List[bytes], int, int]:
+        if not qs:
+            return [], 0, -1
+        outs: List[Optional[bytes]] = [None] * len(qs)
+        keys: Optional[List[str]] = None
+        miss_at = list(range(len(qs)))
+        if cache_dir is not None:
+            _, keys = st.pack_ir_keyed(*qs)
+            miss_at = []
+            for i, k in enumerate(keys):
+                try:
+                    with open(os.path.join(cache_dir, k), "rb") as f:
+                        outs[i] = f.read()
+                except OSError:
+                    miss_at.append(i)
+        steps = alloc = 0
+        if miss_at:
+            n = min(max(1, workers), len(miss_at))
+            chunks = [miss_at[j::n] for j in range(n)]
+            blobs = [st.pack_ir(*[qs[i] for i in c]) for c in chunks]
+            if n <= 1:
+                res = [_one(blobs[0], len(chunks[0]))]
+            else:
+                with concurrent.futures.ThreadPoolExecutor(n) as pool:
+                    res = list(pool.map(
+                        _one, blobs, [len(c) for c in chunks]))
+            for c, (fs, s, a) in zip(chunks, res):
+                if s > 0:
+                    steps += s
+                if a > 0:
+                    alloc += a
+                for i, b in zip(c, fs):
+                    outs[i] = b
+                    if keys is not None:
+                        with open(os.path.join(cache_dir, keys[i]),
+                                  "wb") as f:
+                            f.write(b)
+        _audit(f"bytes.batch roots={len(qs)} "
+               f"misses={len(miss_at)} steps={steps} dec={stats['dec']}")
+        return outs, steps, alloc
+
+    def run(t: T) -> Tuple[bytes, int, int]:
+        outs, s, a = batch([t])
+        return outs[0], s, a
+    run.batch = batch
+    run.is_bytes = True                    # byte-producing seams see this
+    run.stats = stats                      # cumulative decode-probe steps
+    return run
+
+
 def ir_exe_for(R: seed.Realization) -> str:
     """The emitted packed-IR kernel for realization R (cached per
     process by seed._exe_for)."""
@@ -338,6 +450,7 @@ def emit_image(R: seed.Realization,
                text_base: int = target_pe64.TEXT_RVA,
                run: Callable[[T], Tuple[T, int, int]] = _graph_run,
                stage_runs: Optional[dict] = None,
+               bytes_run: Optional[Callable] = None,
                decompose_asm: bool = False,
                decompose_pack: bool = False,
                workdir: Optional[str] = None,
@@ -351,6 +464,12 @@ def emit_image(R: seed.Realization,
     pack's growing live set needs graph compaction.  The reduction is
     the same on either host — the choice is an observation regime.
 
+    `bytes_run` is a make_bytes_runner egress pool: byte-producing
+    seams (assemble* encodes, pack* chunks, the monolithic pack root)
+    default to it — the kernel decodes the byte-list NF natively and
+    the seam carries raw bytes, no Python _decode_bytecells.  Explicit
+    stage_runs entries still win per stage.
+
     Returns (image_bytes, stage_report) where stage_report lists
     (stage, steps, arena_nodes) per reduction.
     """
@@ -358,7 +477,11 @@ def emit_image(R: seed.Realization,
         raise seed.NotRealized(
             "peephole: staged chain has no peepholeOf stage")
     report: List[tuple] = []
-    runs = stage_runs or {}
+    runs = dict(stage_runs or {})
+    if bytes_run is not None:
+        runs.setdefault("assemble*", bytes_run)
+        runs.setdefault("pack*", bytes_run)
+        runs.setdefault("pack", bytes_run)
 
     def _stage(name, q):
         t0 = time.time()
@@ -462,11 +585,14 @@ def emit_image(R: seed.Realization,
         idata_t = app(app(link_nf, KK), KK)
         datab_t = app(app(link_nf, KK), KI)
 
-    # stage 4 — pack2Of text idata datab stackres: the image
-    img_nf = _stage("pack", st.pack2_query_t(
+    # stage 4 — pack2Of text idata datab stackres: the image.  A bytes
+    # runner decodes the byte-list NF in the kernel — the stage result
+    # IS the image; term mode decodes the NF as before.
+    img_out = _stage("pack", st.pack2_query_t(
         text_t, idata_t, datab_t, R.stack_reserve))
 
-    img = st._decode_bytecells(img_nf)
+    img = img_out if isinstance(img_out, bytes) \
+        else st._decode_bytecells(img_out)
     if workdir:
         with open(os.path.join(workdir, "image.bin"), "wb") as f:
             f.write(img)
@@ -529,6 +655,17 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     t0 = time.time()
     n_red = 0
     batch = getattr(run, "batch", None)
+    bytes_mode = getattr(run, "is_bytes", False)
+
+    def _enc_q(it, resv=None):
+        q = st.encode_query(it, resv)
+        # bytes egress: decode_encode's `nf KK` projection moves INSIDE
+        # the query so the root NF itself is the byte list — the kernel
+        # decodes it natively, no Python _l0_nf/_decode_bytecells
+        return app(q, KK) if bytes_mode else q
+
+    def _enc_b(x):
+        return x if bytes_mode else st.decode_encode(x)
     # pass 1 — ZRESV encodes (resv never consulted: rel fields emit
     # four zero cells — byte COUNT is correct) give per-insn lengths;
     # labels record base+pos exactly as assembleOf's label_case.
@@ -540,16 +677,16 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
             uniq[it] = None
     uq = list(uniq)
     if batch is not None:
-        nfs, _, _ = batch([st.encode_query(it) for it in uq])
+        nfs, _, _ = batch([_enc_q(it) for it in uq])
         for it, nf in zip(uq, nfs):
-            uniq[it] = st.decode_encode(nf)
+            uniq[it] = _enc_b(nf)
         n_red += len(uq)
         if verbose:
             print(f"      pass1: {n_red} encodes (1 batch) "
                   f"({time.time()-t0:.0f}s)", flush=True)
     else:
         for it in uq:
-            uniq[it] = st.decode_encode(run(st.encode_query(it))[0])
+            uniq[it] = _enc_b(run(_enc_q(it))[0])
             n_red += 1
             if verbose and n_red % 50 == 0:
                 print(f"      pass1: {n_red} encodes "
@@ -572,13 +709,13 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     if rel:
         if batch is not None:
             nfs, _, _ = batch([
-                st.encode_query(it, st._appn(
+                _enc_q(it, st._appn(
                     _resvmk(), sym_t, loc_t,
                     st.bytelist_term(
                         (base + prep[i][1] + prep[i][2]).to_bytes(
                             4, "little"))))
                 for i, it in rel])
-            rel_bytes = [st.decode_encode(nf) for nf in nfs]
+            rel_bytes = [_enc_b(nf) for nf in nfs]
             n_red += len(rel)
             if verbose:
                 print(f"      pass2: {n_red} encodes (1 batch) "
@@ -590,8 +727,7 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
                         4, "little"))
                 resv_t = st._appn(_resvmk(), sym_t, loc_t, e4)
                 rel_bytes.append(
-                    st.decode_encode(
-                        run(st.encode_query(it, resv_t))[0]))
+                    _enc_b(run(_enc_q(it, resv_t))[0]))
                 n_red += 1
                 if verbose and n_red % 50 == 0:
                     print(f"      pass2: {n_red} encodes "
@@ -627,11 +763,28 @@ def pack_staged(text: bytes, idata: bytes, datab: bytes,
     def b4(v: int) -> T:
         return st.bytelist_term(v.to_bytes(4, "little"))
 
-    def r1(q: T) -> T:
-        return run(q)[0]
+    # bytes-mode runner (io=("stdin","bytes")): r1's results are raw
+    # bytes already — dec is identity; a value that re-enters a query
+    # as a term (bytes4 intermediates feeding ALIGN512/B4ADD/PADLIST)
+    # re-wraps via bytelist_term — construction, not NF decode.
+    if getattr(run, "is_bytes", False):
+        def r1(q: T):
+            return run(q)[0]
 
-    def dec(t: T) -> bytes:
-        return st._decode_bytecells(t)
+        def dec(b) -> bytes:
+            return b
+
+        def tm(b) -> T:
+            return st.bytelist_term(b)
+    else:
+        def r1(q: T) -> T:
+            return run(q)[0]
+
+        def dec(t: T) -> bytes:
+            return st._decode_bytecells(t)
+
+        def tm(t: T) -> T:
+            return t
 
     # the lets — ALIGN/B4ADD/U64/PADLIST/ZEROFILL as standalone
     # reductions over bytes4/Church numerals (tiny terms; section
@@ -645,14 +798,14 @@ def pack_staged(text: bytes, idata: bytes, datab: bytes,
     lt = r1(b4(len(text)))
     li = r1(b4(len(idata)))
     ld = r1(b4(len(datab)))
-    traw = r1(st._appn(K_("_ALIGN512"), lt))
-    iraw = r1(st._appn(K_("_ALIGN512"), li))
-    draw = r1(st._appn(K_("_ALIGN512"), ld))
-    iptr = r1(st._appn(K_("_B4ADD"), b4(0x200), traw))
-    dptr = r1(st._appn(K_("_B4ADD"), iptr, iraw))
-    iddr = r1(st._appn(K_("_B4ADD"), iraw, draw))
+    traw = r1(st._appn(K_("_ALIGN512"), tm(lt)))
+    iraw = r1(st._appn(K_("_ALIGN512"), tm(li)))
+    draw = r1(st._appn(K_("_ALIGN512"), tm(ld)))
+    iptr = r1(st._appn(K_("_B4ADD"), b4(0x200), tm(traw)))
+    dptr = r1(st._appn(K_("_B4ADD"), tm(iptr), tm(iraw)))
+    iddr = r1(st._appn(K_("_B4ADD"), tm(iraw), tm(draw)))
     img = r1(st._appn(K_("_ALIGN4096"),
-                      st._appn(K_("_B4ADD"), b4(0x3000), ld)))
+                      st._appn(K_("_B4ADD"), b4(0x3000), tm(ld))))
     u64 = r1(st._appn(K_("_U64"), b4(stackres)))
 
     def zf(n: int) -> bytes:
@@ -694,7 +847,7 @@ def pack_staged(text: bytes, idata: bytes, datab: bytes,
         struct.pack("<I", 0x3000), dec(draw), dec(dptr), z12,
         struct.pack("<I", 0xC0000040),
         zf(0x200 - 448),
-        text, pad(lt), idata, pad(li), datab, pad(ld),
+        text, pad(tm(lt)), idata, pad(tm(li)), datab, pad(tm(ld)),
     ]
     return b"".join(chunks)
 
@@ -742,11 +895,12 @@ def emit_mini_image(run: Callable[[T], Tuple[T, int, int]],
         img = pack_staged(tb, ib, db, sr, runs.get("pack*", run))
         report.append(("pack*", -1, -1))
         return img, report
-    img_nf, s, n = runs.get("pack", run)(st.pack2_query_t(
+    img_out, s, n = runs.get("pack", run)(st.pack2_query_t(
         text_t, app(app(link_nf, KK), KK),
         app(app(link_nf, KK), KI), sr))
     report.append(("pack", s, n))
-    return st._decode_bytecells(img_nf), report
+    return (img_out if isinstance(img_out, bytes)
+            else st._decode_bytecells(img_out)), report
 
 
 def _mini_oracle() -> bytes:
@@ -756,7 +910,135 @@ def _mini_oracle() -> bytes:
                           64 << 20)
 
 
+def _nf_cons(h: T, t: T) -> T:
+    """`_CONS h t` spelled as its fixed kernel NF —
+    K (D ((B (C (D ((B (C I)) (K h)))) (K t)))) — the exact spine
+    _cell_parts dereferences (verified: structural path returns
+    (h, t)).  S-free, so it is the kernel-space NF directly."""
+    return app(KK, app(D, app(app(B, app(C, app(D, app(
+        app(B, app(C, I)), app(KK, h))))), app(KK, t))))
+
+
+def _g16_egress() -> bool:
+    """G16 — native byte egress: the io=("stdin","bytes") IR kernel
+    decodes each root's byte-list NF itself and frames raw bytes
+    ([u32le len][bytes] per root, root order kept) — Python never
+    rebuilds the byte-list term.
+
+    Corpus: kernel-space NF roots (cons spines built directly — the
+    naive kernel's own reduction of a >512B bytelist term exceeds the
+    2GB arena before egress even runs, so big payloads arrive as NF
+    roots, which is exactly the egress contract) plus small QUERY
+    roots the exe reduces first.  Expected = graph.lo NF ->
+    _decode_bytecells; cross-checked against the term-mode kernel's NF
+    lines byte-for-byte.  Negative legs: non-byte-list NF -> exit5,
+    truncated PIR -> exit3, fuel -> exit2."""
+    ok = True
+    exe_t = ir_exe_for(seed.Realization())
+    exe_b = ir_exe_for(seed.Realization(io=("stdin", "bytes")))
+
+    # kernel-space byte-cell NFs: the term-mode kernel itself produces
+    # them — depack expands S into the ds tree, so the emitted NF is
+    # the shape emit_bytes sees (no S leaves anywhere)
+    cp = subprocess.run(
+        [exe_t],
+        input=st.pack_ir(*[st.byte_term(v) for v in range(256)]),
+        capture_output=True, timeout=600)
+    if cp.returncode != 0:
+        print(f"FAIL egress setup: byte-cell batch "
+              f"rc={cp.returncode} {cp.stderr[:200]!r}", flush=True)
+        return False
+    byte_nf = [seed._parse_native_out(ln)
+               for ln in cp.stdout.decode().splitlines()]
+
+    def nf_list(bs):
+        t = KK
+        for b in reversed(bs):
+            t = _nf_cons(byte_nf[b], t)
+        return t
+
+    corpus = [
+        b"", b"\x00", b"\xff", bytes(range(256)),
+        bytes(((i * 31) ^ (i >> 3)) & 0xFF for i in range(1024)),
+        bytes(((i * 131) ^ (i >> 5)) & 0xFF for i in range(4096)),
+    ]
+    roots = [nf_list(bs) for bs in corpus]
+    # query roots: the exe reduces then decodes (a small bytelist and
+    # real encodeOf projections — the assemble* seam shape)
+    qroots = [st.bytelist_term(b"\x01\x02\x03"),
+              st.bytelist_term(bytes(range(32))),
+              app(st.encode_query(("i", "ret")), KK),
+              app(st.encode_query(
+                  ("i", "mov_m8_r8", ("m", "rsi", 0), "al")), KK)]
+    all_roots = roots + qroots
+
+    t0 = time.time()
+    wants = [st._decode_bytecells(_graph_run(q)[0]) for q in all_roots]
+    good = wants[:len(corpus)] == corpus
+    print(f"{'OK ' if good else 'FAIL'} egress nf corpus sanity: "
+          f"graph decode == payloads", flush=True)
+    ok = ok and good
+
+    blob = st.pack_ir(*all_roots)
+    brun = make_bytes_runner(exe_b)
+    got, steps, alloc = brun.batch(all_roots)
+    good = list(got) == wants
+    ok = ok and good
+    print(f"{'OK ' if good else 'FAIL'} egress corpus: "
+          f"{len(all_roots)} roots, {sum(len(b) for b in got)}B, "
+          f"steps={steps} alloc={alloc} dec={brun.stats['dec']} "
+          f"(graph {time.time()-t0:.0f}s)", flush=True)
+
+    # term-mode kernel on the same blob: NF lines decoded by Python
+    # must equal the framed bytes — the two egress modes agree
+    cp = subprocess.run([exe_t], input=blob, capture_output=True,
+                        timeout=600)
+    want_t = [st._decode_bytecells(seed._parse_native_out(ln))
+              for ln in cp.stdout.decode().splitlines()]
+    good = cp.returncode == 0 and want_t == list(got)
+    ok = ok and good
+    print(f"{'OK ' if good else 'FAIL'} egress vs term-mode: "
+          f"byte-identical across {len(all_roots)} roots", flush=True)
+
+    def _rc(exe, data):
+        return subprocess.run([exe], input=data,
+                              capture_output=True, timeout=600)
+
+    # non-byte-list NF (bare I) -> exit5; the runner must refuse too
+    bad = _rc(exe_b, st.pack_ir(I))
+    good = bad.returncode == 5
+    try:
+        brun(I)
+        good = False
+    except RuntimeError:
+        pass
+    ok = ok and good
+    print(f"{'OK ' if good else 'FAIL'} egress not-a-list: "
+          f"rc={bad.returncode} (want 5), runner raised",
+          flush=True)
+
+    # truncated packed-IR stream -> exit3
+    bad = _rc(exe_b, blob[:-3])
+    good = bad.returncode == 3
+    ok = ok and good
+    print(f"{'OK ' if good else 'FAIL'} egress truncated PIR: "
+          f"rc={bad.returncode} (want 3)", flush=True)
+
+    # fuel=0 kernel: any reducing root hits the per-root cap -> exit2
+    exe_f = ir_exe_for(seed.Realization(io=("stdin", "bytes"), fuel=0))
+    bad = _rc(exe_f, st.pack_ir(app(I, I)))
+    good = bad.returncode == 2
+    ok = ok and good
+    print(f"{'OK ' if good else 'FAIL'} egress fuel cap: "
+          f"rc={bad.returncode} (want 2)", flush=True)
+    return ok
+
+
 def main() -> int:
+    if "--help" in sys.argv[1:]:
+        print("usage: emit_chain.py [--on-exe] [--win64] "
+              "[--insns-on-exe] [--ir] [--cold] [--egress]")
+        return 0
     ok = True
 
     # mini chain on graph.lo — the fast regression leg (decomposed:
@@ -855,8 +1137,30 @@ def main() -> int:
                                    else os.path.join(_HOST, "emit_work",
                                                      "nf_cache", tag)),
                         fuse_s=R.fuse_s)
-                    sr["assemble*"] = ir_runner
-                    sr["pack*"] = ir_runner
+                    # byte-producing seams ride the egress kernel
+                    # (io=("stdin","bytes")): the emitted exe decodes
+                    # each byte-list NF itself and the wire carries
+                    # [u32le len][bytes] frames — no Python rebuild.
+                    bytes_runner = make_bytes_runner(
+                        seed._exe_for(
+                            seed.Realization(fuel=2_000_000,
+                                             fuse_s=R.fuse_s,
+                                             audit=_AUDIT,
+                                             io=("stdin", "bytes")),
+                            tc=toolchain.by_name(
+                                "native.x86_64.pe.ir")),
+                        workers=os.cpu_count() or 4,
+                        cache_dir=(None if _nf_tmp
+                                   else os.path.join(
+                                       _HOST, "emit_work",
+                                       "bytes_cache", tag)))
+                    sr["assemble*"] = bytes_runner
+                    sr["pack*"] = bytes_runner
+                    # program/link stay on graph.lo: measured on the
+                    # naive exe they blow a 48GB arena (no DAG sharing —
+                    # the kernel pays every occurrence; W1b doesn't fit
+                    # this kernel).  Their term seams + checkpoints keep
+                    # them off the critical path.
                 else:
                     sr["assemble*"] = make_exe_runner(
                         seed._exe_for(seed.Realization(
@@ -891,6 +1195,9 @@ def main() -> int:
                           if a != b), min(len(got), len(want)))
                 print(f"  first diff at {k}: "
                       f"{got[k:k+8].hex()} vs {want[k:k+8].hex()}")
+
+    if "--egress" in sys.argv[1:]:
+        ok = _g16_egress() and ok
 
     try:
         emit_image(seed.Realization(peephole=True))

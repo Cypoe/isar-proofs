@@ -64,6 +64,17 @@ MEM_DECOMMIT = 0x4000                # VirtualFree MEM_DECOMMIT
 MEM_RELEASE = 0x8000                 # VirtualFree MEM_RELEASE
 IR_DS_AREA = 1 << 12                 # permanent region for build_ds output
 
+# byte-egress mode (io=("stdin","bytes")): the kernel decodes the
+# byte-list NF itself — spec_term._decode_bytecells mirrored in asm.
+EG_MARK = 9     # marker leaf tag — never a term tag (depack refuses
+                # >=7), head-inert under every rule, l=k payload.
+                # sel·m0..m15 -> m_k reads the nibble off .l
+EG_PROBE_FUEL = 2048        # per-probe step cap; a legit decode probe is
+                            # <100 steps — exhaustion -> exit5
+EG_OUT_BYTES = 16 << 20     # committed stdout frame buffer; also the
+                            # malformed-spine bound (each iteration
+                            # writes a byte or exits) — overflow -> exit5
+
 VA_COMMIT_RESERVE = 0x3000
 PAGE_RW = 4
 STK_TAG = 7   # native-internal parse-stack cons cell tag (never a term node;
@@ -280,6 +291,12 @@ def r_stats(R: Realization, ctx: Ctx) -> Program:
             _stats_str(p, "," + tag)
             p += [I("mov_r64_rip", "rdi", ("p", slot)),
                   I("call_rel32", ("l", "itoa"))]
+    if R.io[1] == "bytes":
+        # decode-probe step total, reported separately — `steps=`
+        # stays the query reduction count (term-mode comparable)
+        _stats_str(p, " dec=")
+        p += [I("mov_r64_rip", "rdi", ("p", "eb_dec")),
+              I("call_rel32", ("l", "itoa"))]
     p += [
         I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
         I("mov_r64_rip", "rcx", ("p", "herr")),
@@ -293,14 +310,19 @@ def r_stats(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_exits(R: Realization, ctx: Ctx) -> Program:
-    """exit 0; exit2 fuel exhausted, exit3 bad input, exit4 OOM."""
+    """exit 0; exit2 fuel exhausted, exit3 bad input, exit4 OOM,
+    exit5 (bytes mode) malformed byte-list NF / decode probe."""
     iat = ctx["iat"]
-    return [
+    p: Program = [
         I("xor_r32_r32", "ecx", "ecx"), I("call_mrip", iat("ExitProcess")),
         LBL("exit2"), I("mov_r32_imm32", "ecx", 2), I("call_mrip", iat("ExitProcess")),
         LBL("exit3"), I("mov_r32_imm32", "ecx", 3), I("call_mrip", iat("ExitProcess")),
         LBL("exit4"), I("mov_r32_imm32", "ecx", 4), I("call_mrip", iat("ExitProcess")),
     ]
+    if R.io[1] == "bytes":
+        p += [LBL("exit5"), I("mov_r32_imm32", "ecx", 5),
+              I("call_mrip", iat("ExitProcess"))]
+    return p
 
 
 def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
@@ -737,6 +759,58 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
             I("mov_r64_rip", "rbx", ("p", "irarena")),
             I("mov_r64_r64", "rbp", "rbx"),
         ]
+    if R.io[1] == "bytes":
+        # egress vocab (permanent region): I/K leaves, the KI cell,
+        # and 16 inert marker leaves {tag EG_MARK, l=k} — every decode
+        # probe references them, so they must outlive arena resets
+        p += [
+            I("xor_r32_r32", "ecx", "ecx"),
+            I("mov_r32_imm32", "edx", IR_DS_AREA),
+            I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+            I("mov_r64_r64", "rbx", "rax"),
+            I("lea_r64_m64", "rbp", ("m", "rax", IR_DS_AREA)),
+            I("mov_r64_rip", "rax", ("p", "nalloc")),    # vocab allocs
+            I("mov_rip_r64", ("p", "scratch"), "rax"),   # uncounted
+            I("mov_r32_imm32", "edx", Tag.norm),
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_rip_r64", ("p", "eb_i"), "rax"),
+            I("mov_r32_imm32", "edx", Tag.konst),
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_rip_r64", ("p", "eb_k"), "rax"),
+            I("mov_r64_r64", "rdi", "rax"),
+            I("mov_r64_rip", "rsi", ("p", "eb_i")),
+            I("call_rel32", ("l", "mkapp")),             # KI = (K I)
+            I("mov_rip_r64", ("p", "eb_ki"), "rax"),
+            I("mov_rip_r64", ("p", "eb_marks"), "rbx"),  # contiguous below
+            I("xor_r32_r32", "r15d", "r15d"),
+            LBL("eb_mkloop"),
+            I("mov_r32_imm32", "edx", EG_MARK),
+            I("call_rel32", ("l", "mkleaf")),
+            I("mov_m64_r64", ("m", "rax", 8), "r15"),    # l = k
+            I("inc_r64", "r15"),
+            I("cmp_r64_imm", "r15", 16),
+            I("jl_rel32", ("l", "eb_mkloop")),
+            I("mov_r64_rip", "rax", ("p", "scratch")),
+            I("mov_rip_r64", ("p", "nalloc"), "rax"),
+            I("mov_r64_rip", "rbx", ("p", "irarena")),
+            I("mov_r64_r64", "rbp", "rbx"),
+            # committed frame buffer: [bytes] per root (u32 len prefix
+            # lives in .data — no 32-bit store in the ISA), cap doubles
+            # as the malformed-spine termination bound
+            I("xor_r32_r32", "ecx", "ecx"),
+            I("mov_r64_imm", "rdx", EG_OUT_BYTES),
+            I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+            I("mov_rip_r64", ("p", "eb_out"), "rax"),
+            I("mov_r64_imm", "rdx", EG_OUT_BYTES),
+            I("add_r64_r64", "rax", "rdx"),
+            I("mov_rip_r64", ("p", "eb_lim"), "rax"),
+        ]
     return p
 
 
@@ -974,29 +1048,39 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         p += [I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2"))]
     p += [
         I("jmp_rel32", ("l", "ir_rloop")),
-        # ---- per-root NF line (same emit block as the token path) ----
+        # ---- per-root output: NF line (term) or byte frame (bytes) ----
         LBL("ir_red_done"),
         I("mov_r64_rip", "rax", ("p", "irsteps")),
         I("add_r64_r64", "rax", "r15"),
         I("mov_rip_r64", ("p", "irsteps"), "rax"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
-        I("lea_r64_m64", "rdx", ("m", "rax", 0)), I("add_r64_r64", "rdx", "rdx"),
-        I("add_r64_imm", "rdx", 16),
-        I("xor_r32_r32", "ecx", "ecx"),
-        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-        I("mov_r32_imm32", "r9d", PAGE_RW),
-        I("call_mrip", iat("VirtualAlloc")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-        I("mov_r64_r64", "r14", "rax"),
-        I("mov_r64_r64", "rsi", "rax"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "emit_nf")),
-        I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
-        I("mov_r64_rip", "rcx", ("p", "hout")),
-        I("mov_r64_r64", "rdx", "r14"),
-        I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "r14"),
-        I("lea_r64_rip", "r9", ("p", "nw")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("WriteFile")),
+    ]
+    if R.io[1] == "bytes":
+        # the kernel decodes the byte-list NF itself: one
+        # [u32le len][bytes] frame per root, in root order
+        p += [I("call_rel32", ("l", "emit_bytes"))]
+    else:
+        p += [
+            I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
+            I("lea_r64_m64", "rdx", ("m", "rax", 0)),
+            I("add_r64_r64", "rdx", "rdx"),
+            I("add_r64_imm", "rdx", 16),
+            I("xor_r32_r32", "ecx", "ecx"),
+            I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+            I("mov_r64_r64", "r14", "rax"),
+            I("mov_r64_r64", "rsi", "rax"),
+            I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "emit_nf")),
+            I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
+            I("mov_r64_rip", "rcx", ("p", "hout")),
+            I("mov_r64_r64", "rdx", "r14"),
+            I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "r14"),
+            I("lea_r64_rip", "r9", ("p", "nw")),
+            I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+            I("call_mrip", iat("WriteFile")),
+        ]
+    p += [
         I("mov_r64_rip", "rax", ("p", "irj")), I("inc_r64", "rax"),
         I("mov_rip_r64", ("p", "irj"), "rax"),
         I("jmp_rel32", ("l", "ir_bloop")),
@@ -1300,6 +1384,212 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
     ]
 
 
+# ======================================================================
+# BYTE EGRESS (io=("stdin","bytes"))
+#
+# emit_bytes walks the root NF exactly as spec_term._decode_bytecells
+# does: `while tag(s) != KONST` the cell is a cons.  _cell_parts'
+# structural path is the fixed NF shape `K (D ((B (C (D ((B (C I))
+# (K h))))) (K t)))` — head at s.r.r.l.r.r.r.r.r, tail at s.r.r.r.r —
+# with the same probe fallback (`s I K` -> head, `s I KI` -> tail) for
+# any other-but-equal NF.  A byte cell decodes as `b K` -> lo sel,
+# `b KI` -> hi sel, each sel applied to the 16 permanent tag-9 markers
+# -> m_k.  Probes are ordinary LO reductions (peval wraps the step
+# loop) allocating in the main arena — freed by the next root's reset;
+# nalloc is snapshot/restored so `alloc=` stays the query's (like
+# `steps=`).  Frame wire: [u32le len][bytes] per root, order preserved.
+# Malformed spine/byte, non-terminating probe, or frame overflow ->
+# exit5 (the kernel has no exception channel — decode failure IS rc5).
+# ======================================================================
+
+def r_peval(R: Realization, ctx: Ctx) -> Program:
+    """peval: rdi=term -> rax=NF — the red loop as a subroutine.
+    r13=cur, r15=fuel (EG_PROBE_FUEL cap -> exit5); steps accumulate
+    into [eb_dec] — `dec=` on stderr, kept out of `steps=`."""
+    return [
+        LBL("peval"),
+        I("sub_r64_imm", "rsp", 8),                # call-site parity
+        I("mov_r64_r64", "r13", "rdi"),
+        I("mov_r32_imm32", "r15d", EG_PROBE_FUEL),
+        LBL("pe_loop"),
+        I("mov_r64_r64", "rdi", "r13"),
+        I("call_rel32", ("l", "step")),
+        I("test_r64_r64", "rax", "rax"),
+        I("je_rel32", ("l", "pe_done")),
+        I("mov_r64_r64", "r13", "rax"),
+        I("dec_r64", "r15"),
+        I("je_rel32", ("l", "exit2")),             # probe fuel exhausted
+        I("jmp_rel32", ("l", "pe_loop")),
+        LBL("pe_done"),
+        I("mov_r32_imm32", "eax", EG_PROBE_FUEL),
+        I("sub_r64_r64", "rax", "r15"),
+        I("mov_r64_rip", "rcx", ("p", "eb_dec")),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_rip_r64", ("p", "eb_dec"), "rax"),
+        I("mov_r64_r64", "rax", "r13"),
+        I("add_r64_imm", "rsp", 8),
+        I("ret"),
+    ]
+
+
+def r_selidx(R: Realization, ctx: Ctx) -> Program:
+    """selidx: rdi=selector term -> rax=k — sel m0..m15 peval'd; the NF
+    must BE a tag-9 marker leaf (a real 16-way selector returns one of
+    its args), anything else means the head wasn't a selector -> exit5."""
+    p: Program = [
+        LBL("selidx"),
+        I("sub_r64_imm", "rsp", 8),
+        I("mov_r64_r64", "r13", "rdi"),
+    ]
+    for k in range(16):
+        p += [I("mov_r64_rip", "rsi", ("p", "eb_marks"))]
+        if k:
+            p += [I("add_r64_imm", "rsi", 24 * k)]
+        p += [
+            I("mov_r64_r64", "rdi", "r13"),
+            I("call_rel32", ("l", "mkapp")),
+            I("mov_r64_r64", "r13", "rax"),
+        ]
+    p += [
+        I("mov_r64_r64", "rdi", "r13"),
+        I("call_rel32", ("l", "peval")),
+        I("cmp_m64_imm", ("m", "rax", 0), EG_MARK),
+        I("jne_rel32", ("l", "exit5")),
+        I("mov_r64_m64", "rax", ("m", "rax", 8)),
+        I("cmp_r64_imm", "rax", 16),
+        I("jge_rel32", ("l", "exit5")),
+        I("add_r64_imm", "rsp", 8),
+        I("ret"),
+    ]
+    return p
+
+
+def r_emit_bytes(R: Realization, ctx: Ctx) -> Program:
+    """emit_bytes: r12=NF -> WriteFile one [u32le len][bytes] frame.
+    r12=s (spine cursor), r14=out cursor; h/lo/hi live at [rsp+0..16].
+    Null-deref on the structural path = malformed spine -> exit5."""
+    iat = ctx["iat"]
+    p: Program = [
+        LBL("emit_bytes"),
+        I("sub_r64_imm", "rsp", 0x28),
+        # probes allocate out of the arena like any reduction; snapshot
+        # nalloc so `alloc=` reports the query's nodes only
+        I("mov_r64_rip", "rax", ("p", "nalloc")),
+        I("mov_rip_r64", ("p", "eb_save"), "rax"),
+        I("mov_r64_rip", "r14", ("p", "eb_out")),
+        LBL("eb_loop"),
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.konst),
+        I("je_rel32", ("l", "eb_flush")),            # nil -> flush frame
+        # --- _cell_parts fast path: s = K (D (B(C(DW)) (K t))) ---
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.APP),
+        I("jne_rel32", ("l", "eb_pcons")),
+        I("mov_r64_m64", "rax", ("m", "r12", 8)),    # s.l
+        I("cmp_m64_imm", ("m", "rax", 0), Tag.konst),
+        I("jne_rel32", ("l", "eb_pcons")),
+        I("mov_r64_m64", "rcx", ("m", "r12", 16)),   # s.r
+        I("cmp_m64_imm", ("m", "rcx", 0), Tag.APP),
+        I("jne_rel32", ("l", "eb_pcons")),
+        I("mov_r64_m64", "rax", ("m", "rcx", 8)),    # s.r.l
+        I("cmp_m64_imm", ("m", "rax", 0), Tag.dup),
+        I("jne_rel32", ("l", "eb_pcons")),
+        I("mov_r64_m64", "rcx", ("m", "rcx", 16)),   # s.r.r
+        I("test_r64_r64", "rcx", "rcx"),
+        I("je_rel32", ("l", "eb_pcons")),
+        I("mov_r64_m64", "rax", ("m", "rcx", 8)),    # s.r.r.l
+        I("test_r64_r64", "rax", "rax"),
+        I("je_rel32", ("l", "eb_pcons")),
+        I("mov_r64_m64", "rdx", ("m", "rcx", 16)),   # s.r.r.r (same guard
+        I("test_r64_r64", "rdx", "rdx"),             # as _cell_parts)
+        I("je_rel32", ("l", "eb_pcons")),
+    ]
+    # head = s.r.r.l .r .r .r .r .r (five derefs into the fixed spine)
+    for _ in range(5):
+        p += [
+            I("mov_r64_m64", "rax", ("m", "rax", 16)),
+            I("test_r64_r64", "rax", "rax"),
+            I("je_rel32", ("l", "exit5")),
+        ]
+    p += [
+        I("mov_m64_r64", ("m", "rsp", 0), "rax"),    # h
+        # tail = s.r.r .r .r
+        I("mov_r64_m64", "r12", ("m", "rcx", 16)),
+        I("test_r64_r64", "r12", "r12"),
+        I("je_rel32", ("l", "exit5")),
+        I("mov_r64_m64", "r12", ("m", "r12", 16)),
+        I("test_r64_r64", "r12", "r12"),
+        I("je_rel32", ("l", "exit5")),
+        I("jmp_rel32", ("l", "eb_cell")),
+        # --- probe fallback: h = (s I) K, t = (s I) KI ---
+        LBL("eb_pcons"),
+        I("mov_r64_r64", "rdi", "r12"),
+        I("mov_r64_rip", "rsi", ("p", "eb_i")),
+        I("call_rel32", ("l", "mkapp")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("mov_r64_rip", "rsi", ("p", "eb_k")),
+        I("call_rel32", ("l", "mkapp")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("call_rel32", ("l", "peval")),
+        I("mov_m64_r64", ("m", "rsp", 0), "rax"),    # h
+        I("mov_r64_r64", "rdi", "r12"),
+        I("mov_r64_rip", "rsi", ("p", "eb_i")),
+        I("call_rel32", ("l", "mkapp")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("mov_r64_rip", "rsi", ("p", "eb_ki")),
+        I("call_rel32", ("l", "mkapp")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("call_rel32", ("l", "peval")),
+        I("mov_r64_r64", "r12", "rax"),              # s := t
+        # --- byte cell h: lo = sel(h K), hi = sel(h KI) ---
+        LBL("eb_cell"),
+        I("mov_r64_m64", "rdi", ("m", "rsp", 0)),
+        I("mov_r64_rip", "rsi", ("p", "eb_k")),
+        I("call_rel32", ("l", "mkapp")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("call_rel32", ("l", "peval")),
+        I("mov_m64_r64", ("m", "rsp", 8), "rax"),    # lo sel
+        I("mov_r64_m64", "rdi", ("m", "rsp", 0)),
+        I("mov_r64_rip", "rsi", ("p", "eb_ki")),
+        I("call_rel32", ("l", "mkapp")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("call_rel32", ("l", "peval")),
+        I("mov_r64_r64", "rdi", "rax"),
+        I("call_rel32", ("l", "selidx")),
+        I("shl_r64_imm8", "rax", 4),                 # hi nibble
+        I("mov_m64_r64", ("m", "rsp", 16), "rax"),
+        I("mov_r64_m64", "rdi", ("m", "rsp", 8)),
+        I("call_rel32", ("l", "selidx")),            # rax = lo nibble
+        I("mov_r64_m64", "rcx", ("m", "rsp", 16)),
+        I("add_r64_r64", "rax", "rcx"),              # byte = hi<<4 | lo
+        I("mov_r64_rip", "rcx", ("p", "eb_lim")),
+        I("cmp_r64_r64", "r14", "rcx"),
+        I("jge_rel32", ("l", "exit5")),              # frame overflow
+        I("mov_m8_r8", ("m", "r14", 0), "al"),
+        I("inc_r64", "r14"),
+        I("jmp_rel32", ("l", "eb_loop")),
+        # ---- flush: u32le len (in .data — no 32-bit store form) + bytes
+        LBL("eb_flush"),
+        I("mov_r64_rip", "rax", ("p", "eb_out")),
+        I("mov_r64_r64", "rdx", "r14"), I("sub_r64_r64", "rdx", "rax"),
+        I("mov_rip_r64", ("p", "eb_len"), "rdx"),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("lea_r64_rip", "rdx", ("p", "eb_len")),
+        I("mov_r32_imm32", "r8d", 4),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("mov_r64_rip", "rdx", ("p", "eb_out")),
+        I("mov_r64_r64", "r8", "r14"), I("sub_r64_r64", "r8", "rdx"),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        I("mov_r64_rip", "rax", ("p", "eb_save")),
+        I("mov_rip_r64", ("p", "nalloc"), "rax"),    # probe cells uncounted
+        I("add_r64_imm", "rsp", 0x28), I("ret"),
+    ]
+    return p
+
+
 # Ordered routine names = emission order.  "st_s" emits iff R.fuse_s,
 # "build_ds" iff not R.fuse_s (handled in program()).
 ROUTINES: Tuple[str, ...] = (
@@ -1319,7 +1609,30 @@ ROUTINES_IR: Tuple[str, ...] = (
     "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
 
+# bytes egress adds the NF->bytes decoder (emit_bytes + its two probe
+# helpers); emit_nf stays — a bytes-mode kernel could still serve term
+# frames if a future io mode asked for it
+ROUTINES_IR_BYTES: Tuple[str, ...] = ROUTINES_IR + (
+    "emit_bytes", "peval", "selidx",
+)
+
 IMPORTS_IR: Tuple[str, ...] = IMPORTS + ("VirtualFree",)
+
+# egress .data (bytes mode only — callable below keeps term-mode .data
+# byte-identical): probe vocab ptrs, frame buffer bounds, u32 len slot,
+# nalloc snapshot, decode-step counter
+DATA_SLOTS_EB: Tuple[Tuple[str, int], ...] = (
+    ("eb_i", 8), ("eb_k", 8), ("eb_ki", 8), ("eb_marks", 8),
+    ("eb_out", 8), ("eb_lim", 8), ("eb_len", 8), ("eb_save", 8),
+    ("eb_dec", 8),
+)
+
+
+def data_slots_ir(R: Realization) -> tuple:
+    """IR slots; io=("stdin","bytes") appends the egress block."""
+    if R.io[1] == "bytes":
+        return DATA_SLOTS_IR + DATA_SLOTS_EB
+    return DATA_SLOTS_IR
 
 _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
     name[2:]: fn for name, fn in list(globals().items())
@@ -1342,14 +1655,21 @@ def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
 def program(R: Realization) -> Program:
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.io != ("stdin", "stdout"):
+        raise NotRealized(f"io={R.io!r} not realized by {ROUTINES}")
     return _emit(R, ROUTINES)
 
 
 def program_ir(R: Realization) -> Program:
     """Packed-IR batch kernel: depack replaces the token parse; the
-    reducer core is shared verbatim."""
+    reducer core is shared verbatim.  io=("stdin","bytes") swaps the
+    per-root NF line for a decoded [u32le len][bytes] frame."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.io == ("stdin", "bytes"):
+        return _emit(R, ROUTINES_IR_BYTES)
+    if R.io != ("stdin", "stdout"):
+        raise NotRealized(f"io={R.io!r} not realized by {ROUTINES_IR}")
     return _emit(R, ROUTINES_IR)
 
 
@@ -1363,6 +1683,7 @@ class Routines:
     program: Callable  # program(R) -> Program
     imports: tuple
     data_slots: tuple
+    ios: tuple = (("stdin", "stdout"),)   # io modes the record realizes
 
 
 X86_64_WIN64 = Routines(
@@ -1385,7 +1706,8 @@ X86_64_WIN64_IR = Routines(
     routines=ROUTINES_IR,
     program=program_ir,
     imports=IMPORTS_IR,
-    data_slots=DATA_SLOTS_IR,
+    data_slots=data_slots_ir,
+    ios=(("stdin", "stdout"), ("stdin", "bytes")),
 )
 
 
@@ -1417,6 +1739,8 @@ def program_res(R: Realization) -> Program:
     """Residual-application kernel: graft loop + shared reducer core."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.io != ("stdin", "stdout"):
+        raise NotRealized(f"io={R.io!r} not realized by {ROUTINES_RES}")
     return _emit(R, ROUTINES_RES)
 
 
@@ -1478,6 +1802,17 @@ def main() -> int:
         if has_ds != (not R.fuse_s) or has_s != R.fuse_s:
             print(f"  FAIL {tag}.ir: build_ds={has_ds} st_s={has_s}")
             ok = False
+    # byte-egress IR kernel: emits the decoder routines, keeps the
+    # reducer core identical
+    Rb = Realization(io=("stdin", "bytes"))
+    prog_b = program_ir(Rb)
+    text_b, labels_b = _isa.assemble(
+        prog_b, _dummy_symbols(data_slots_ir(Rb), IMPORTS_IR))
+    has = "emit_bytes" in labels_b and "peval" in labels_b
+    print(f"  bytes.ir: {len(text_b)}B text "
+          f"(emit_bytes={'y' if has else 'MISSING'})")
+    if not has:
+        ok = False
     print(f"{'OK' if ok else 'FAIL'} routines_x86_64_win64")
     return 0 if ok else 1
 
