@@ -6,7 +6,7 @@ runs as staged basis-term reductions (the G9a..G9h stage functions).
 Each stage's NF serializes across the boundary as a TERM — either an
 exported graph tree, or the surface token stream itself
 (bc_decompile / _parse_native_out — the same wire the exes speak).
-That is the staged model _probe_g9g_e2e_staged established: stages
+That is the staged model attic/host/_probe_g9g_e2e_staged established: stages
 hand off DATA, not heaps; single-arena composition is retention-bound
 (>50GB measured, the 027/028 pathology).
 
@@ -835,6 +835,10 @@ def main() -> int:
                 # just around it.  --ir: the seam carries packed IR
                 # batches (ADR-005) instead of per-encode token marshal.
                 if "--ir" in sys.argv[1:]:
+                    # --cold bypasses the NF cache too: the release gate
+                    # re-derives every reduction, not just the files
+                    _nf_tmp = (tempfile.TemporaryDirectory()
+                               if "--cold" in sys.argv[1:] else None)
                     ir_runner = make_ir_runner(
                         seed._exe_for(
                             seed.Realization(fuel=2_000_000,
@@ -847,8 +851,9 @@ def main() -> int:
                         # is realization-dependent (fuse_s reduces tag-3
                         # primitively) — namespace per realization or
                         # cross-leg hits serve the wrong NF
-                        cache_dir=os.path.join(_HOST, "emit_work",
-                                               "nf_cache", tag),
+                        cache_dir=(_nf_tmp.name if _nf_tmp
+                                   else os.path.join(_HOST, "emit_work",
+                                                     "nf_cache", tag)),
                         fuse_s=R.fuse_s)
                     sr["assemble*"] = ir_runner
                     sr["pack*"] = ir_runner
