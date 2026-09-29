@@ -178,6 +178,8 @@
     "stack":   {"machine": "realized", "explicit": "declared"},
     "io":      {"stdin/stdout": "realized", "memory": "declared"},
     "fuel":    {"None": "realized", "int": "realized"},
+    "peephole": {"False": "realized — default, both routes",
+                 "True": "realized — seed route only; staged chain NotRealized (no peepholeOf stage)"},
     "geometry": ["chunk_bytes", "stack_reserve", "read_buf_bytes", "node_bytes"]
   },
   "regimes": {
@@ -287,7 +289,28 @@
      "lean_decls": ["ISAR.futamura_first", "ISAR.futamura_second",
                     "ISAR.futamura_third",
                     "ISAR.futamura_square_all_pathways_commute"],
-     "witnesses": []}
+     "witnesses": []},
+    {"id": "G10", "suite": "emit_chain", "family": "staging", "evidence": "seam",
+     "regime": "bytes", "tier": "full", "args": ["--win64"],
+     "what": "emit_image(R) == seed.emit(R) byte-for-byte — staged self-emit vs seed construction route",
+     "witnesses": ["graph.lo", "native.x86_64.pe"]},
+    {"id": "G11", "suite": "cross_verify", "family": "quotient", "evidence": "congruence",
+     "regime": "stdout+stderr+rc", "tier": "env", "requires": ["clang"],
+     "what": "PE<->C byte-identical stdout+stderr+rc; graph.lo<->C NF (+steps on default build)",
+     "witnesses": ["native.x86_64.pe", "native.c", "graph.lo"]},
+    {"id": "G9b-emit", "suite": "spec_term", "family": "staging", "evidence": "congruence",
+     "regime": "operEq", "tier": "full",
+     "what": "Futamura-2 residual exe (native.x86_64.res): exe(arg) NF == pooled instantiation residual[1:=arg] NF on the 20-name batch",
+     "witnesses": ["native.x86_64.res", "native.x86_64.pe"]},
+    {"id": "G12", "suite": "xisa_gate", "family": "quotient", "evidence": "congruence",
+     "regime": "stdout+stderr+rc", "tier": "env",
+     "requires": ["wsl", "wsl:qemu-aarch64-static", "wsl:qemu-riscv64-static"],
+     "what": "cross-ISA reducer parity: identical stdout+stderr+rc across x86_64/aarch64/riscv64 linux.lo (plain, fuse_s, audit rules=, fuel rc2, invalid rc3)",
+     "witnesses": ["x86_64.linux.lo", "aarch64.linux.lo", "riscv64.linux.lo"]},
+    {"id": "G13", "suite": "elfo_gate", "family": "staging", "evidence": "seam",
+     "regime": "bytes", "tier": "fast",
+     "what": "ET_REL .o: relocation-patched .text == executable .text for all three ISAs (symtab/rela vs exec layout)",
+     "witnesses": ["x86_64.linux.o", "aarch64.linux.o", "riscv64.linux.o"]}
   ],
   "selftests": [
     {"module": "bytecode_dialect", "tier": "fast"},

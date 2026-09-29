@@ -188,37 +188,71 @@ def _pass_once(prog: List[Item], isa: str):
     return out, changed
 
 
+def _label_refs(prog: List[Item]) -> set:
+    out = set()
+    for it in prog:
+        if it[0] != "i":
+            continue
+        for o in it[2:]:
+            if isinstance(o, tuple) and len(o) == 2 \
+                    and o[0] in ("l", "p") and isinstance(o[1], str):
+                out.add(o[1])
+    return out
+
+
 def main() -> int:
-    """Self-test: run the pass over every realized program, check it
-    assembles to byte-identical-or-smaller text and that NFs still
-    match (assembly is the cheap in-process check; execution gates
-    live in the cross-ISA harness)."""
+    """Self-test: for each realized toolchain's program (default and
+    fuse_s), check (a) idempotence, (b) no dangling label refs,
+    (c) assembled text no longer than the original via the resolved
+    toolchain's own assemble/symbols path, (d) insn count does not
+    increase.  Execution gates live in the cross-ISA harness."""
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
                                     "seed"))
     import seed
-    import routines_x86_64_win64 as w64
-    import routines_x86_64_linux_lo as x64
-    import routines_aarch64_linux_lo as a64
-    import routines_riscv64_linux_lo as r64
+    import toolchain
 
-    cases = [
-        ("x86_64", "win64", w64.program, seed.Realization(abi="win64")),
-        ("x86_64", "linux", x64.program, seed.Realization(abi="linux")),
-        ("aarch64", "linux", a64.program, seed.Realization(abi="linux")),
-        ("riscv64", "linux", r64.program, seed.Realization(abi="linux")),
-    ]
     nfail = 0
-    for isaname, abiname, mkprog, R in cases:
-        prog = mkprog(R)
-        opt = optimize(prog, isaname)
-        ni = sum(1 for x in prog if x[0] == "i")
-        no = sum(1 for x in opt if x[0] == "i")
-        print(f"{isaname}.{abiname}: {ni} insns -> {no} "
-              f"(-{ni - no}), labels "
-              f"{sum(1 for x in prog if x[0]=='label')} -> "
-              f"{sum(1 for x in opt if x[0]=='label')}")
-    return nfail
+    for tc_name in ("native.x86_64.pe", "x86_64.linux.lo",
+                    "aarch64.linux.lo", "riscv64.linux.lo"):
+        isa, rts, tgt = toolchain.resolve(toolchain.by_name(tc_name))
+        for fuse in (False, True):
+            R = seed.Realization(abi=rts.abi, fuse_s=fuse)
+            case = f"{tc_name}{'/fuse_s' if fuse else ''}"
+            prog = rts.program(R)
+            opt = optimize(prog, isa.name)
+            bad = []
+            # (a) idempotent
+            if optimize(opt, isa.name) != opt:
+                bad.append("not idempotent")
+            # (b) no dangling refs to names that are program labels
+            # (data/IAT syms resolve via symbols(), not the label set)
+            prog_labels = {x[1] for x in prog if x[0] == "label"}
+            labels = {x[1] for x in opt if x[0] == "label"}
+            dangling = (_label_refs(opt) & prog_labels) - labels
+            if dangling:
+                bad.append(f"dangling refs {sorted(dangling)[:4]}")
+            # (c) assembles; not longer
+            slots = rts.data_slots(R) if callable(rts.data_slots) \
+                else rts.data_slots
+            syms = tgt.symbols(rts.imports, slots)
+            orig_text, _ = isa.assemble(prog, syms, base=tgt.text_base)
+            opt_text, _ = isa.assemble(opt, syms, base=tgt.text_base)
+            if len(opt_text) > len(orig_text):
+                bad.append(f"grew {len(orig_text)} -> {len(opt_text)}")
+            # (d) insn count non-increasing
+            ni = sum(1 for x in prog if x[0] == "i")
+            no = sum(1 for x in opt if x[0] == "i")
+            if no > ni:
+                bad.append(f"insns {ni} -> {no}")
+            if bad:
+                nfail += 1
+                print(f"FAIL {case}: {'; '.join(bad)}")
+            else:
+                print(f"ok {case}: {ni} insns -> {no}, "
+                      f"{len(orig_text)}B -> {len(opt_text)}B")
+    print(f"{'OK' if nfail == 0 else 'FAIL'} opt_peephole")
+    return 0 if nfail == 0 else 1
 
 
 if __name__ == "__main__":

@@ -92,6 +92,7 @@ class Obligation:
     cost_model: Optional[Tuple[Tuple[str, str], ...]] = None
     lean_decls: Tuple[str, ...] = ()
     label: str = ""
+    timeout_s: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class Selftest:
     tier: str = "fast"
     requires: Tuple[str, ...] = ()
     args: Tuple[str, ...] = ()
+    timeout_s: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,9 @@ def validate(raw: dict) -> List[str]:
         req = item.get("requires", ())
         if (tier == "env") != bool(req):
             errs.append(f"{name}: tier env <=> requires non-empty violated")
+        ts = item.get("timeout_s")
+        if ts is not None and not (isinstance(ts, int) and ts > 0):
+            errs.append(f"{name}: timeout_s must be a positive int")
         return req
 
     seen = set()
@@ -251,12 +256,14 @@ def load() -> dict:
                 cost_model=(tuple(sorted(o["cost_model"].items()))
                             if o.get("cost_model") else None),
                 lean_decls=tuple(o.get("lean_decls", ())),
-                label=o.get("label", ""))
+                label=o.get("label", ""),
+                timeout_s=o.get("timeout_s"))
             for o in raw.get("obligations", [])),
         "selftests": tuple(
             Selftest(module=s["module"], tier=s.get("tier", "fast"),
                      requires=tuple(s.get("requires", ())),
-                     args=tuple(s.get("args", ())))
+                     args=tuple(s.get("args", ())),
+                     timeout_s=s.get("timeout_s"))
             for s in raw.get("selftests", [])),
         "benches": tuple(
             Bench(name=b["name"], module=b["module"],

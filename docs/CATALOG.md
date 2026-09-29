@@ -85,6 +85,7 @@
 - **stack**: machine=realized, explicit=declared
 - **io**: stdin/stdout=realized, memory=declared
 - **fuel**: None=realized, int=realized
+- **peephole**: False=realized — default, both routes, True=realized — seed route only; staged chain NotRealized (no peepholeOf stage)
 - **geometry**: chunk_bytes, stack_reserve, read_buf_bytes, node_bytes
 
 ## Paths

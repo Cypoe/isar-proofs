@@ -221,6 +221,8 @@ if _SEED not in sys.path:
     sys.path.insert(0, _SEED)
 
 sys.setrecursionlimit(1_000_000)   # cons-spine depth ~ #nibble cells
+if hasattr(sys.stdout, "reconfigure"):   # ≡/✓ survive cp1252 pipes
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from reduce import T, K, I, KK, B, S, C, D, app  # noqa: E402
 from quotient_map import QuotientMap             # noqa: E402

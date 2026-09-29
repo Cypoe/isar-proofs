@@ -50,6 +50,11 @@ def _live(suite: str, suites: dict) -> str:
             "skip": "skip"}.get(st, "·")
 
 
+def _run(suite: str, suites: dict) -> str:
+    cell = suites.get(suite) or {}
+    return cell.get("commit") or "·"
+
+
 def render_gates() -> str:
     suites = _battery()
     lines = [
@@ -58,15 +63,16 @@ def render_gates() -> str:
         "# Obligations (gates)",
         "",
         "| id | family | evidence | regime | tier | suite | what "
-        "| witnesses | live |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| witnesses | live | run |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for o in toolchain.obligations():
         w = ", ".join(o.witnesses) if o.witnesses else "—"
         what = f"[{o.label}] {o.what}" if o.label else o.what
         lines.append(f"| {o.id} | {o.family} | {o.evidence} | "
                      f"{o.regime or '—'} | {o.tier} | {o.suite} | {what} "
-                     f"| {w} | {_live(o.suite, suites)} |")
+                     f"| {w} | {_live(o.suite, suites)} "
+                     f"| {_run(o.suite, suites)} |")
     lines += [
         "",
         "## Selftests",
@@ -91,7 +97,10 @@ def render_gates() -> str:
     lines += [
         "",
         "live column: `✓` pass, `✓*` pass with skipped legs, `✗` fail, "
-        "`skip` whole-suite skip (env/tier), `·` no battery record",
+        "`skip` whole-suite skip (env missing / exit 77), "
+        "`·` not run in last battery; "
+        "`run` = commit the suite record was produced on "
+        "(`+dirty` = uncommitted host/seed changes, `·` = no record)",
         f"(battery_last.json: {os.path.basename(BATTERY_JSON)})",
         "",
     ]

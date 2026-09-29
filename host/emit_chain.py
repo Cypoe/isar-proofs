@@ -316,6 +316,9 @@ def emit_image(R: seed.Realization,
     Returns (image_bytes, stage_report) where stage_report lists
     (stage, steps, arena_nodes) per reduction.
     """
+    if getattr(R, "peephole", False):
+        raise seed.NotRealized(
+            "peephole: staged chain has no peepholeOf stage")
     report: List[tuple] = []
     runs = stage_runs or {}
 
@@ -800,6 +803,13 @@ def main() -> int:
                           if a != b), min(len(got), len(want)))
                 print(f"  first diff at {k}: "
                       f"{got[k:k+8].hex()} vs {want[k:k+8].hex()}")
+
+    try:
+        emit_image(seed.Realization(peephole=True))
+        print("FAIL peephole leg emitted silently")
+        ok = False
+    except seed.NotRealized as e:
+        print(f"ok refused peephole (staged): {e}")
 
     print(f"{'OK' if ok else 'FAIL'} emit_chain "
           f"(seed emits its own host)")
