@@ -1,7 +1,7 @@
 """Emit Lean LTerm source for the assemble-stage combinators by
 parsing the Python seed templates with atomic placeholders."""
-import sys
-sys.path.insert(0, r'C:\Users\fabi0\repos\isar-proofs\host')
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'host'))
 from lambda_dialect import parse, NAbs, NApp, NVar, NComb
 from reduce import K, I, KK, S, B, C, D
 

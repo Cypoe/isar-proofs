@@ -163,7 +163,7 @@ target end4`.  All addresses/positions/rel32 are bytes4 ripple ops.
 The gate covers fwd/bwd rel32, rip-symbol operands, mem disp8, symbol
 shadowing, multi-fragment and a nonzero base on lo+cd vs the
 isa.assemble oracle; the full 26-form encode sweep lives in
-_probe_g9f_enc.py.  Native is deferred (same exe throughput ceiling).
+attic/host/_probe_g9f_enc.py.  Native is deferred (same exe throughput ceiling).
 
 G9g — `dataOf`/`idataOf`/`packOf`: `target_pe64`'s container writer at
 term level (emit stage 5, the last of the chain).  `dataOf` folds the
@@ -197,7 +197,7 @@ end-to-end on lo+oracle (composed-stage cd deferred — the link
 stage's sequential emission inside the same fixpoint measured >50GB,
 the 027/028 retention pathology, not a correctness question).  The win64-scale link→assemble→pack chain is
 arena-bound in one graph like G9g's — the staged probe
-(_probe_g9g_e2e_staged.py) is the honest model: serialize the NF at
+(attic/host/_probe_g9g_e2e_staged.py) is the honest model: serialize the NF at
 each stage boundary, fresh arena per stage.
 
 Usage: python host/spec_term.py
@@ -2364,7 +2364,7 @@ ASM_CASES = {"link": (ASM_LINK, {}, 0x1000),
              "shadow": (ASM_SHADOW, ASM_SYMS, 0x2000)}
 
 # encode spot-checks — one form per field-shape class not covered by
-# the mini program (full 26-instance sweep: _probe_g9f_enc.py).
+# the mini program (full 26-instance sweep: attic/host/_probe_g9f_enc.py).
 ENC_CASES = [
     ("i", "mov_r64_imm", "rax", 0x1122334455),       # oprd + imm64
     ("i", "add_r64_imm", "rcx", 300),                # ext + i32 alt
@@ -2380,7 +2380,7 @@ ENC_CASES = [
 # aligned-edge case (len(text) ≡ 0 mod FILE_ALIGN exercises the
 # PADLIST rem=0 guard — no pad bytes emitted).  The real win64 pack
 # (1991B text -> 3584B image, ~2.1M lo steps) is probe-verified,
-# heavyweight-only — see _probe_g9g_pack.py.
+# heavyweight-only — see attic/host/_probe_g9g_pack.py.
 DATA_CASES = {
     "mini": (("x", 8),),
     "win64": routines_x86_64_win64.DATA_SLOTS,
@@ -3086,7 +3086,7 @@ def main() -> int:
     # G9f: encodeOf + assembleOf — emit stage 4 at term level.
     #   ENC spot-checks cover one form per field-shape class the mini
     #   program misses (the 26-instance sweep lives in
-    #   _probe_g9f_enc.py — each encode is ~3.5k steps / ~70s, so the
+    #   attic/host/_probe_g9f_enc.py — each encode is ~3.5k steps / ~70s, so the
     #   full sweep does not belong in the suite loop).  cd only — the
     #   same term witnesses lo equality inside assembleOf below.
     #   assembleOf runs the two-pass fold end-to-end on the mini

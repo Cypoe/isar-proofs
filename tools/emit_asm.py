@@ -1,7 +1,7 @@
 """Emit asmL (assembleOf) as a Lean LTerm by parsing the seed's own
 _assemble_src() with library combinators patched to atomic placeholders."""
-import sys
-sys.path.insert(0, r'C:\Users\fabi0\repos\isar-proofs\host')
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'host'))
 from lambda_dialect import parse, NAbs, NApp, NVar, NComb
 from reduce import K, I, KK, S, B, C, D
 import spec_term as st

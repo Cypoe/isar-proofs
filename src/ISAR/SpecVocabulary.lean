@@ -30,7 +30,7 @@ namespace ISAR
 
 open Relation LTerm
 
--- infrastructure (shared shape with _spec_assoc_work.lean) --------------
+-- infrastructure (shared shape with wip/lean/_spec_assoc_work.lean) --------------
 
 /-- Head-only β: step the leftmost head redex down the function spine;
     never descends into arguments; identity where no head redex. -/
@@ -415,7 +415,7 @@ def b4bsL : LTerm :=
                 [.var 2, aps nibAddL [.var 0, .var 1]]))))))))))
   -- BODY (λhh): PAIR lo (NIBADD hh cn2);  hh=0 cn2=1 lo=2
 
--- fold machinery (same encoding as _spec_assoc_work.lean) ----------------------
+-- fold machinery (same encoding as wip/lean/_spec_assoc_work.lean) ----------------------
 
 /-- fold step `s = \a.\h. CONSS·h·a` (shared by `_REV`). -/
 def stepConsL : LTerm :=
@@ -10620,7 +10620,7 @@ theorem b4sub_eval_scott (as bs : List (Fin 16 × Fin 16))
 
 -- ============================================================
 -- Batch M layer 3: EQSTR (bounded nibble-string equality) + ALOOK
--- Terms machine-emitted from the seed's own LC parser (_emit_lc.py).
+-- Terms machine-emitted from the seed's own LC parser (tools/emit_lc.py).
 -- ============================================================
 
 /-- `λk2. k2·a·b·O` state cell — args sit literally under the abs
@@ -10674,7 +10674,7 @@ theorem isNil_eval (bs : List LTerm)
             hb _ (List.mem_cons_of_mem _ hc)))).trans
       (isNilK_apply2 h (scottList t))
 
-/-- `_STEP_E` — emitted from the seed source (see _emit_lc.py):
+/-- `_STEP_E` — emitted from the seed source (see tools/emit_lc.py):
     `λacc. acc (λla.λlb.λo. o (la nilArm consArm) falseArm)`. -/
 def stepEL : LTerm :=
   let kiApp := aps klL [idL]
@@ -11477,7 +11477,7 @@ theorem alook_eval (key : List (Fin 16)) (keyT : LTerm)
 
 -- ============================================================
 -- Batch M layer 4a: assembleOf port — machine-emitted from the
--- seed's own LC parser (_emit_asm.py), combinator leaves mapped
+-- seed's own LC parser (tools/emit_asm.py), combinator leaves mapped
 -- to module defs, literals as standalone lblL/b4zL.
 -- ============================================================
 

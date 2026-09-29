@@ -7,7 +7,7 @@ Scratch: bytes4 adder-vocabulary equivalence as `Join` —
 `Join (B4ADD a b) (B4CLA a b)` for the λ-encoded spec vocabulary
 (spec_term.py `_B4ADD` zip-ripple vs `_B4CLA` carry-lookahead).
 
-Architecture (extends `_spec_assoc_work.lean`):
+Architecture (extends `wip/lean/_spec_assoc_work.lean`):
   - nibLit/pairLit/boolLit/byteLit/b4Lit literal encodings.
   - Nibble ops are Scott-16 dispatch TABLES: for symbolic `i : Fin 16`,
     `nibLit i`'s var index `15-i` is symbolic, so `subst`/`shift` get
@@ -24,7 +24,7 @@ namespace ISAR
 
 open Relation LTerm
 
--- infrastructure (shared shape with _spec_assoc_work.lean) --------------
+-- infrastructure (shared shape with wip/lean/_spec_assoc_work.lean) --------------
 
 /-- Head-only β: step the leftmost head redex down the function spine;
     never descends into arguments; identity where no head redex. -/
@@ -409,7 +409,7 @@ def b4bsL : LTerm :=
                 [.var 2, aps nibAddL [.var 0, .var 1]]))))))))))
   -- BODY (λhh): PAIR lo (NIBADD hh cn2);  hh=0 cn2=1 lo=2
 
--- fold machinery (same encoding as _spec_assoc_work.lean) ----------------------
+-- fold machinery (same encoding as wip/lean/_spec_assoc_work.lean) ----------------------
 
 /-- fold step `s = \a.\h. CONSS·h·a` (shared by `_REV`). -/
 def stepConsL : LTerm :=

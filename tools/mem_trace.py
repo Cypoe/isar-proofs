@@ -7,8 +7,9 @@
 # For each run: alloc sites (who allocated), intern outcomes (the
 # quotient leaking or holding), retention (forwarded dead vs live
 # reps vs semantically reachable set), and the dict residency.
-import sys, time
-sys.path.insert(0, ".")
+import os, sys, time
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "host"))
 import spec_term as st
 from lambda_dialect import parse, bracket
 from graph_runtime import Graph
