@@ -1,8 +1,14 @@
-Lean work files with declarations not yet folded into src/ISAR.
-_hdev_total_work.lean: HDev_total totality (target: HeapDev.lean before
-HDevChain, per its header). _decide_probe.lean: nibble add/carry table lemmas
-(license for a fused nibble-add rule). _spec_adder_work.lean: fold_read_sc.
+# wip/lean — folded
 
-_spec_assoc_work.lean: fully folded, kept as the shape reference cited by
-src/ISAR/SpecVocabulary.lean and _spec_adder_work.lean.
-All four files type-check green against the current tree (lake env lean).
+All work files have been folded into `src/ISAR/`:
+
+- `_hdev_total_work.lean` → `HeapDev.lean`, before `HDevChain`
+  (`HSteps`/`oldSub` measure machinery; `HDev_total` itself remains
+  the open target per decision 028).
+- `_decide_probe.lean` → `SpecVocabulary.lean` (`nibadd_table`,
+  `nibcarry_table` — the license for a fused nibble-add rule).
+- `_spec_adder_work.lean` → `SpecVocabulary.lean` (`fold_read` was
+  `fold_read_sc`; `b4add_b4cla_basis`).
+
+Kept: `_spec_assoc_work.lean` — fully folded, kept as the shape
+reference cited by `src/ISAR/SpecVocabulary.lean`.

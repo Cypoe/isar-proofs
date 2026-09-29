@@ -1156,11 +1156,16 @@ def main() -> int:
                                        "bytes_cache", tag)))
                     sr["assemble*"] = bytes_runner
                     sr["pack*"] = bytes_runner
-                    # program/link stay on graph.lo: measured on the
-                    # naive exe they blow a 48GB arena (no DAG sharing —
-                    # the kernel pays every occurrence; W1b doesn't fit
-                    # this kernel).  Their term seams + checkpoints keep
-                    # them off the critical path.
+                    # program/link stay on graph.lo: on the naive exe
+                    # they blow a 48GB arena; on the fuse_s exe the
+                    # arena holds (~1.1GB RSS — the ds-expansion class
+                    # WAS the retention) but `program` still exceeds a
+                    # 15min timeout vs ~53s on graph.lo.  The residual
+                    # gap is shared-redex re-reduction: the kernel
+                    # rewrites tree-style and pays every occurrence,
+                    # while graph.lo consumes a collapsed redex once.
+                    # The principled fix is in-place consume+free /
+                    # join reduction (W3), not a bigger arena.
                 else:
                     sr["assemble*"] = make_exe_runner(
                         seed._exe_for(seed.Realization(
