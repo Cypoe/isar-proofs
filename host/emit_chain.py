@@ -1156,16 +1156,35 @@ def main() -> int:
                                        "bytes_cache", tag)))
                     sr["assemble*"] = bytes_runner
                     sr["pack*"] = bytes_runner
-                    # program/link stay on graph.lo: on the naive exe
-                    # they blow a 48GB arena; on the fuse_s exe the
-                    # arena holds (~1.1GB RSS — the ds-expansion class
-                    # WAS the retention) but `program` still exceeds a
-                    # 15min timeout vs ~53s on graph.lo.  The residual
-                    # gap is shared-redex re-reduction: the kernel
-                    # rewrites tree-style and pays every occurrence,
-                    # while graph.lo consumes a collapsed redex once.
-                    # The principled fix is in-place consume+free /
-                    # join reduction (W3), not a bigger arena.
+                    if "--ir-redir" in sys.argv[1:]:
+                        # W3: reclaim="redirect" kernel — consume-on-
+                        # collapse + persist zone.  program/link ride
+                        # the native exe: the shared-input-redex class
+                        # that kept them on graph.lo collapses once.
+                        # NFs are byte-identical to naive (84506 steps
+                        # on `program`, = graph.lo), ~5x slower per
+                        # step than graph.lo — memory is bounded
+                        # instead of >48GB.
+                        red_runner = make_ir_runner(
+                            seed._exe_for(
+                                seed.Realization(fuel=2_000_000,
+                                                 fuse_s=R.fuse_s,
+                                                 reclaim="redirect",
+                                                 audit=_AUDIT),
+                                tc=toolchain.by_name(
+                                    "native.x86_64.pe.ir")),
+                            workers=os.cpu_count() or 4,
+                            cache_dir=(None if _nf_tmp
+                                       else os.path.join(
+                                           _HOST, "emit_work",
+                                           "nf_cache", tag + "red")),
+                            fuse_s=R.fuse_s)
+                        sr["program"] = red_runner
+                        sr["link"] = red_runner
+                    # else program/link stay on graph.lo: on the naive
+                    # exe they blow a 48GB arena — reclaim="none"
+                    # retains every redex forever; --ir-redir is the
+                    # consume-on-collapse leg.
                 else:
                     sr["assemble*"] = make_exe_runner(
                         seed._exe_for(seed.Realization(
