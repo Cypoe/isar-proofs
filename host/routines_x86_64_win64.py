@@ -42,6 +42,11 @@ AUDIT_SLOTS: Tuple[Tuple[str, int], ...] = (
 DATA_SLOTS: Tuple[Tuple[str, int], ...] = (
     ("hin", 8), ("hout", 8), ("herr", 8), ("nread", 8), ("nw", 8),
     ("nalloc", 8), ("ds", 8), ("scratch", 64),
+    # redirect store: era-ordered arena — cells below permend are
+    # immutable template/vocab (never a write target), cells at or
+    # above are writable; depacked input cells occupy [permend,
+    # irstart) and survive per-root arena resets (pay-once).
+    ("permend", 8), ("irstart", 8),
 ) + AUDIT_SLOTS
 
 # packed-IR batch front end (ADR-005): extra .data slots.
@@ -53,6 +58,10 @@ DATA_SLOTS_IR: Tuple[Tuple[str, int], ...] = DATA_SLOTS + (
     ("irroots", 8), ("irarena", 8), ("irj", 8), ("irsteps", 8),
     ("irnstreams", 8),
 )
+# redirect-only: persist zone cursor+limit — cells in [pcur0, pend)
+# sit below irstart so input cells may FWD/write-back into them
+# (pay-once for shared input redexes)
+DATA_SLOTS_PS: Tuple[Tuple[str, int], ...] = (("pcur", 8), ("pend", 8))
 
 # packed-IR constants — pinned by docs/adr/0005; keep in sync with
 # spec_term.IR_MAGIC / IR_VERSION / IR_VAR.
@@ -80,6 +89,10 @@ PAGE_RW = 4
 STK_TAG = 7   # native-internal parse-stack cons cell tag (never a term node;
               # tags 1..6 are atoms generated from SIGNATURE); excluded from
               # nalloc so `alloc=` counts term nodes only
+FWD_TAG = 10  # redirect store (R.reclaim="redirect"): a collapsed redex
+              # cell becomes {tag=FWD, l=reduct} — the heap model of
+              # HeapDev.lean (`redirect`/`repr`).  Native-internal like
+              # STK_TAG/IR_HOLE/EG_MARK: never on the wire.
 
 # ctx shared by builders: iat operand helper for kernel32 imports.
 Ctx = Dict[str, object]
@@ -112,12 +125,33 @@ def r_entry(R: Realization, ctx: Ctx) -> Program:
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
         I("mov_r64_r64", "r12", "rax"),          # read buffer base
         I("xor_r32_r32", "r14d", "r14d"),        # r14 = parse stack top (0)
-        # first heap chunk (sets rbx=bump, rbp=end)
-        I("call_rel32", ("l", "grow_heap")),
     ]
+    if R.reclaim == "redirect":
+        p += [
+            # one reserved arena (commit-ahead): era ordering needs all
+            # cells in a single address-ordered region
+            I("xor_r32_r32", "ecx", "ecx"),
+            I("mov_r64_imm", "rdx", R.ir_arena_bytes),
+            I("mov_r32_imm32", "r8d", MEM_RESERVE),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+            I("mov_r64_r64", "rbx", "rax"),
+            I("mov_r64_r64", "rbp", "rax"),
+        ]
+    else:
+        # first heap chunk (sets rbx=bump, rbp=end)
+        p += [I("call_rel32", ("l", "grow_heap"))]
     if not R.fuse_s:
         # build the shared derived_s template (L0-only tree); `S` tokens push it
         p += [I("call_rel32", ("l", "build_ds"))]
+    p += [
+        # immutable prefix ends here — everything allocated after this
+        # point is a writable redirect target; token mode never resets,
+        # so irstart == permend (no input tier)
+        I("mov_rip_r64", ("p", "permend"), "rbx"),
+        I("mov_rip_r64", ("p", "irstart"), "rbx"),
+    ]
     return p
 
 
@@ -326,8 +360,26 @@ def r_exits(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
-    """grow_heap: rbx=bump, rbp=chunk end (chunked VirtualAlloc)."""
+    """grow_heap: rbx=bump, rbp=chunk end.  reclaim="redirect" commits
+    inside the one reserved arena (allocation order must equal address
+    order for the v<C acyclicity check); "none" keeps per-chunk VAs."""
     iat = ctx["iat"]
+    if R.reclaim == "redirect":
+        return [
+            LBL("grow_heap"),
+            I("sub_r64_imm", "rsp", 0x28),
+            I("mov_r64_r64", "rcx", "rbp"),
+            I("mov_r64_imm", "rdx", R.chunk_bytes),
+            I("mov_r32_imm32", "r8d", MEM_COMMIT),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "grow_fail")),
+            I("mov_r64_imm", "rax", R.chunk_bytes),
+            I("add_r64_r64", "rbp", "rax"),
+            I("add_r64_imm", "rsp", 0x28), I("ret"),
+            LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
+            I("call_mrip", iat("ExitProcess")),
+        ]
     return [
         LBL("grow_heap"),
         I("sub_r64_imm", "rsp", 0x28),
@@ -380,6 +432,32 @@ def r_mkapp(R: Realization, ctx: Ctx) -> Program:
     ]
 
 
+def r_mkapp_p(R: Realization, ctx: Ctx) -> Program:
+    """mkapp_p: rdi=f, rsi=x -> rax node in the persist zone
+    [pcur, pend) — survives arena resets, so input cells (below
+    irstart) may point at it.  IR builds bump pcur bounded by pend;
+    token mode never resets so it aliases the ordinary bump (mkapp).
+    Counted in nalloc."""
+    if ctx.get("ir") and R.reclaim == "redirect":
+        return [
+            LBL("mkapp_p"),
+            I("mov_r64_rip", "r9", ("p", "pcur")),
+            I("lea_r64_m64", "rax", ("m", "r9", R.node_bytes)),
+            I("mov_r64_rip", "r8", ("p", "pend")),
+            I("cmp_r64_r64", "rax", "r8"),
+            I("jbe_rel32", ("l", "mkp_ok")),
+            I("jmp_rel32", ("l", "exit4")),         # persist zone full
+            LBL("mkp_ok"),
+            I("mov_rip_r64", ("p", "pcur"), "rax"),
+            I("mov_r64_r64", "rax", "r9"),
+            I("mov_m64_imm32", ("m", "rax", 0), Tag.APP),
+            I("mov_m64_r64", ("m", "rax", 8), "rdi"),
+            I("mov_m64_r64", ("m", "rax", 16), "rsi"),
+            I("inc_mrip", ("p", "nalloc")), I("ret"),
+        ]
+    return [LBL("mkapp_p"), I("jmp_rel32", ("l", "mkapp"))]
+
+
 def r_mkstk(R: Realization, ctx: Ctx) -> Program:
     """mkstk: rdi=value -> rax cons cell, r14=new stack top.
     Parse-stack cells share the dynamic heap; NOT counted in nalloc."""
@@ -398,23 +476,90 @@ def r_mkstk(R: Realization, ctx: Ctx) -> Program:
     ]
 
 
+def r_repr(R: Realization, ctx: Ctx) -> Program:
+    """repr(rdi=t) -> rax: resolve a FWD chain (redirect store only).
+    `Heap.repr` — every reader resolves on entry.  FWD cells always
+    store a rep at creation, so chains only grow when a rep later
+    collapses itself; clobbers rax+rdi only (rcx holds `fr` across the
+    step dispatch)."""
+    return [
+        LBL("repr"),
+        I("mov_r64_r64", "rax", "rdi"),
+        LBL("repr_l"),
+        I("cmp_m64_imm", ("m", "rax", 0), FWD_TAG),
+        I("jne_rel32", ("l", "repr_d")),
+        I("mov_r64_m64", "rax", ("m", "rax", 8)),
+        I("jmp_rel32", ("l", "repr_l")),
+        LBL("repr_d"), I("ret"),
+    ]
+
+
 def r_step(R: Realization, ctx: Ctx) -> Program:
     """step(rdi=t) -> rax: LO single-step dispatch, Lean IStepBasis order
-    (normβ, konstβ, dupβ, compβ, swapβ, [sβ], then congruence)."""
+    (normβ, konstβ, dupβ, compβ, swapβ, [sβ], then congruence).
+
+    reclaim="redirect": every node fetched for a tag check is resolved
+    first (`repr`) and parent slots get the rep written back — a child
+    that collapsed since it was stored is seen through once."""
+    fwd = R.reclaim == "redirect"
+
+    def rep(reg: str) -> Program:
+        return [I("mov_r64_r64", "rdi", reg),
+                I("call_rel32", ("l", "repr")),
+                I("mov_r64_r64", reg, "rax")]
+
     p: Program = [
         LBL("step"),
         I("push_r64", "r12"), I("push_r64", "r13"), I("push_r64", "r14"),
         I("mov_r64_r64", "r12", "rdi"),
+    ]
+    if fwd:
+        p += rep("r12")
+    p += [
         I("cmp_m64_imm", ("m", "r12", 0), Tag.APP),
         I("jne_rel32", ("l", "st_none")),
         I("mov_r64_m64", "r13", ("m", "r12", 8)),    # f
         I("mov_r64_m64", "r14", ("m", "r12", 16)),   # x
+    ]
+    if fwd:
+        p += rep("r13") + [
+            # O.l := rep(f) when the write survives its root — a FWD
+            # rep below irstart may also land in an input cell
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_wb_f")),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jge_rel32", ("l", "st_wb_w")),
+            I("cmp_r64_r64", "r13", "r9"),
+            I("jge_rel32", ("l", "st_wb_f")),
+            LBL("st_wb_w"),
+            I("mov_m64_r64", ("m", "r12", 8), "r13"),
+            LBL("st_wb_f"),
+        ]
+    p += [
         I("cmp_m64_imm", ("m", "r13", 0), Tag.norm),
         I("je_rel32", ("l", "st_norm")),
         I("cmp_m64_imm", ("m", "r13", 0), Tag.APP),
         I("jne_rel32", ("l", "st_left")),
         I("mov_r64_m64", "rax", ("m", "r13", 8)),    # fl
         I("mov_r64_m64", "rcx", ("m", "r13", 16)),   # fr
+    ]
+    if fwd:
+        p += rep("rax") + [
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r13", "r9"),
+            I("jb_rel32", ("l", "st_wb_fl")),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r13", "r9"),
+            I("jge_rel32", ("l", "st_wb_w2")),
+            I("cmp_r64_r64", "rax", "r9"),
+            I("jge_rel32", ("l", "st_wb_fl")),
+            LBL("st_wb_w2"),
+            I("mov_m64_r64", ("m", "r13", 8), "rax"),
+            LBL("st_wb_fl"),
+        ]
+    p += [
         I("cmp_m64_imm", ("m", "rax", 0), Tag.konst),
         I("je_rel32", ("l", "st_konst")),
         I("cmp_m64_imm", ("m", "rax", 0), Tag.dup),
@@ -423,6 +568,23 @@ def r_step(R: Realization, ctx: Ctx) -> Program:
         I("jne_rel32", ("l", "st_left")),
         I("mov_r64_m64", "rdx", ("m", "rax", 8)),    # fll
         I("mov_r64_m64", "rsi", ("m", "rax", 16)),   # flr
+    ]
+    if fwd:
+        p += [I("mov_r64_r64", "r8", "rax")]   # repr clobbers rax; keep fl
+        p += rep("rdx") + [
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r8", "r9"),
+            I("jb_rel32", ("l", "st_wb_fll")),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r8", "r9"),
+            I("jge_rel32", ("l", "st_wb_w3")),
+            I("cmp_r64_r64", "rdx", "r9"),
+            I("jge_rel32", ("l", "st_wb_fll")),
+            LBL("st_wb_w3"),
+            I("mov_m64_r64", ("m", "r8", 8), "rdx"),
+            LBL("st_wb_fll"),
+        ]
+    p += [
         I("cmp_m64_imm", ("m", "rdx", 0), Tag.comp),
         I("je_rel32", ("l", "st_comp")),
         I("cmp_m64_imm", ("m", "rdx", 0), Tag.swap),
@@ -448,10 +610,31 @@ def _bump(slot: str) -> Program:
 
 
 def r_st_norm(R: Realization, ctx: Ctx) -> Program:
-    """normβ: I x -> x."""
+    """normβ: I x -> x.  redirect: the redex root becomes FWD→rep(x)
+    (the reduct is an existing cell — indirection, HeapDev `redirect`)."""
     p = [LBL("st_norm")]
     if R.audit:
         p += _bump("c_norm")
+    if R.reclaim == "redirect":
+        return p + [
+            I("mov_r64_r64", "rdi", "r14"),
+            I("call_rel32", ("l", "repr")),          # rax = rep(x)
+            # consume O iff the FWD's rep outlives its root: always for
+            # a reduction cell, only for a rep below irstart otherwise
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_out")),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jge_rel32", ("l", "st_n_fwd")),
+            I("cmp_r64_r64", "rax", "r9"),
+            I("jge_rel32", ("l", "st_out")),
+            LBL("st_n_fwd"),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "st_out")),
+        ]
     return p + [
         I("mov_r64_r64", "rax", "r14"),
         I("jmp_rel32", ("l", "st_out")),
@@ -459,10 +642,29 @@ def r_st_norm(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_st_konst(R: Realization, ctx: Ctx) -> Program:
-    """konstβ (fused macro): K x y -> x."""
+    """konstβ (fused macro): K x y -> x.  redirect: root -> FWD→rep(x)
+    with the same rep-lifetime guard as st_norm."""
     p = [LBL("st_konst")]
     if R.audit:
         p += _bump("c_konst")
+    if R.reclaim == "redirect":
+        return p + [
+            I("mov_r64_r64", "rdi", "rcx"),          # rcx = fr = x
+            I("call_rel32", ("l", "repr")),          # rax = rep(x)
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_out")),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jge_rel32", ("l", "st_k_fwd")),
+            I("cmp_r64_r64", "rax", "r9"),
+            I("jge_rel32", ("l", "st_out")),
+            LBL("st_k_fwd"),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "st_out")),
+        ]
     return p + [
         I("mov_r64_r64", "rax", "rcx"),
         I("jmp_rel32", ("l", "st_out")),
@@ -470,10 +672,40 @@ def r_st_konst(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_st_dup(R: Realization, ctx: Ctx) -> Program:
-    """dupβ: W f x -> f x x."""
+    """dupβ: W f x -> f x x.  redirect: the ROOT cell is rewritten to
+    the reduct shape — one mkapp for (f x), two stores — never a spine
+    cell (a shared inner cell must keep its term for every referrer).
+    Consumption only when O is a reduction cell (>= irstart): a fresh
+    reduct would dangle inside an input or perm cell."""
     p = [LBL("st_dup")]                                # W f x -> f x x
     if R.audit:
         p += _bump("c_dup")
+    if R.reclaim == "redirect":
+        return p + [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_dup_fr")),         # O below irstart
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),           # rax = (f x)
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),    # O.l := (f x)
+            I("mov_m64_r64", ("m", "r12", 16), "r14"),   # O.r := x
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_dup_fr"),                           # O < irstart:
+            I("mov_r64_r64", "rdi", "rcx"),               # persist-zone
+            I("mov_r64_r64", "rsi", "r14"),               # reduct + FWD
+            I("call_rel32", ("l", "mkapp_p")),            # for input O
+            I("mov_r64_r64", "rdi", "rax"),
+            I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),           # rax = (f x) x
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_out")),              # perm: unconsumed
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "st_out")),
+        ]
     return p + [
         I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
         I("call_rel32", ("l", "mkapp")),               # rax = (f x)
@@ -484,10 +716,35 @@ def r_st_dup(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_st_swap(R: Realization, ctx: Ctx) -> Program:
-    """swapβ: C f x y -> f y x."""
+    """swapβ: C f x y -> f y x.  redirect: root rewritten to
+    ((f y) x) — 1 alloc, 2 stores — only when O >= irstart."""
     p = [LBL("st_swap")]                               # C f x y -> f y x
     if R.audit:
         p += _bump("c_swap")
+    if R.reclaim == "redirect":
+        return p + [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_swap_fr")),
+            I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),           # rax = (f y)
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),    # O.l := (f y)
+            I("mov_m64_r64", ("m", "r12", 16), "rcx"),   # O.r := x
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_swap_fr"),
+            I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),           # rax = (f y)
+            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "rcx"),
+            I("call_rel32", ("l", "mkapp_p")),           # rax = (f y) x
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_out")),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "st_out")),
+        ]
     return p + [
         I("push_r64", "rcx"), I("sub_r64_imm", "rsp", 8),  # save fr (=y-side)
         I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
@@ -500,10 +757,39 @@ def r_st_swap(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_st_comp(R: Realization, ctx: Ctx) -> Program:
-    """compβ: B f g x -> f (g x)."""
+    """compβ: B f g x -> f (g x).  redirect: root rewritten to
+    (f (g x)) — 1 alloc, 2 stores — only when O >= irstart."""
     p = [LBL("st_comp")]                               # B f g x -> f (g x)
     if R.audit:
         p += _bump("c_comp")
+    if R.reclaim == "redirect":
+        return p + [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_comp_fr")),
+            I("push_r64", "rsi"), I("sub_r64_imm", "rsp", 8),
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),           # rax = (g x)
+            I("add_r64_imm", "rsp", 8), I("pop_r64", "rsi"),
+            I("mov_m64_r64", ("m", "r12", 8), "rsi"),    # O.l := f
+            I("mov_m64_r64", ("m", "r12", 16), "rax"),   # O.r := (g x)
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_comp_fr"),
+            I("push_r64", "rsi"),                         # save f — rsi is
+            I("mov_r64_r64", "rdi", "rcx"),                #   reused for x
+            I("mov_r64_r64", "rsi", "r14"),                #   below
+            I("call_rel32", ("l", "mkapp_p")),            # rax = (g x)
+            I("pop_r64", "rdi"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp_p")),            # rax = f (g x)
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_out")),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "st_out")),
+        ]
     return p + [
         I("push_r64", "rcx"), I("push_r64", "rsi"),
         I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
@@ -516,10 +802,56 @@ def r_st_comp(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_st_s(R: Realization, ctx: Ctx) -> Program:
-    """sβ (fuse_s=True only): S f g x -> (f x)(g x)."""
+    """sβ (fuse_s=True only): S f g x -> (f x)(g x).  redirect: the
+    root is rewritten to the reduct pair — 2 allocs, 2 stores — only
+    when O >= irstart; below it a fully fresh pair (nothing consumed)."""
     p = [LBL("st_s")]                            # S f g x -> (f x)(g x)
     if R.audit:
         p += _bump("c_s")
+    if R.reclaim == "redirect":
+        return p + [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jl_rel32", ("l", "st_s_fr")),
+            I("push_r64", "rcx"),                        # g
+            I("push_r64", "rsi"),                        # f
+            I("mov_r64_r64", "rdi", "rsi"),
+            I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),             # rax = (f x)
+            I("pop_r64", "rsi"),                         # f (dead)
+            I("pop_r64", "rcx"),                         # g
+            I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
+            I("mov_r64_r64", "rdi", "rcx"),
+            I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),             # rax = (g x)
+            I("add_r64_imm", "rsp", 8), I("pop_r64", "rcx"),  # (f x)
+            I("mov_m64_r64", ("m", "r12", 8), "rcx"),    # O.l := (f x)
+            I("mov_m64_r64", ("m", "r12", 16), "rax"),   # O.r := (g x)
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_s_fr"),                           # O < irstart:
+            I("push_r64", "rcx"),                        #   persist pair +
+            I("push_r64", "rsi"),                        #   FWD for input O
+            I("mov_r64_r64", "rdi", "rsi"),
+            I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),            # rax = (f x)
+            I("pop_r64", "rsi"),
+            I("pop_r64", "rcx"),
+            I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
+            I("mov_r64_r64", "rdi", "rcx"),
+            I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),            # rax = (g x)
+            I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
+            I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp_p")),            # rax = (f x)(g x)
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_out")),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "st_out")),
+        ]
     return p + [
         I("push_r64", "rcx"), I("push_r64", "rsi"),  # [rsp]=flr,[rsp+8]=fr
         I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
@@ -537,24 +869,102 @@ def r_st_s(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_step_congr(R: Realization, ctx: Ctx) -> Program:
-    """appL/appR congruence + st_none/st_out epilogue."""
+    """appL/appR congruence + st_none/st_out epilogue.  redirect: the
+    parent slot takes the child's rep — one store, no spine churn; a
+    shared subtree's collapse is paid once by every referrer.  A perm
+    parent can't be rewritten: its one-step result is a fresh node with
+    rep-resolved children and nothing is consumed."""
     p = [LBL("st_left")]
     if R.audit:
         p += _bump("c_left")
     p += [
         I("mov_r64_r64", "rdi", "r13"), I("call_rel32", ("l", "step")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "st_right")),
-        I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
-        I("call_rel32", ("l", "mkapp")), I("jmp_rel32", ("l", "st_out")),
-        LBL("st_right"),
     ]
+    if R.reclaim == "redirect":
+        p += [
+            # in-place iff O survives the write: reduction cell, or an
+            # input cell whose new child stays below irstart
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_l_fr")),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jge_rel32", ("l", "st_l_ip")),
+            I("cmp_r64_r64", "rax", "r9"),
+            I("jge_rel32", ("l", "st_l_fr")),
+            LBL("st_l_ip"),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_l_fr"),
+            I("push_r64", "rax"),
+            I("mov_r64_r64", "rdi", "r14"),
+            I("call_rel32", ("l", "repr")),
+            I("mov_r64_r64", "rsi", "rax"),
+            I("pop_r64", "rdi"),
+            # persist the copy when both children live below irstart —
+            # an input parent may store it; reduction children force rbx
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "rdi", "r9"),
+            I("jge_rel32", ("l", "st_l_rb")),
+            I("cmp_r64_r64", "rsi", "r9"),
+            I("jge_rel32", ("l", "st_l_rb")),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_l_rb"),
+            I("call_rel32", ("l", "mkapp")),           # app(l', rep(r))
+            I("jmp_rel32", ("l", "st_out")),
+        ]
+    else:
+        p += [
+            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")), I("jmp_rel32", ("l", "st_out")),
+        ]
+    p += [LBL("st_right")]
     if R.audit:
         p += _bump("c_right")
-    return p + [
+    p += [
         I("mov_r64_r64", "rdi", "r14"), I("call_rel32", ("l", "step")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "st_none")),
-        I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "rax"),
-        I("call_rel32", ("l", "mkapp")), I("jmp_rel32", ("l", "st_out")),
+    ]
+    if R.reclaim == "redirect":
+        p += [
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "st_r_fr")),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jge_rel32", ("l", "st_r_ip")),
+            I("cmp_r64_r64", "rax", "r9"),
+            I("jge_rel32", ("l", "st_r_fr")),
+            LBL("st_r_ip"),
+            I("mov_m64_r64", ("m", "r12", 16), "rax"),
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_r_fr"),
+            I("push_r64", "rax"),
+            I("mov_r64_r64", "rdi", "r13"),
+            I("call_rel32", ("l", "repr")),
+            I("mov_r64_r64", "rdi", "rax"),
+            I("pop_r64", "rsi"),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "rdi", "r9"),
+            I("jge_rel32", ("l", "st_r_rb")),
+            I("cmp_r64_r64", "rsi", "r9"),
+            I("jge_rel32", ("l", "st_r_rb")),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("jmp_rel32", ("l", "st_out")),
+            LBL("st_r_rb"),
+            I("call_rel32", ("l", "mkapp")),           # app(rep(l), r')
+            I("jmp_rel32", ("l", "st_out")),
+        ]
+    else:
+        p += [
+            I("mov_r64_r64", "rdi", "r13"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")), I("jmp_rel32", ("l", "st_out")),
+        ]
+    return p + [
         LBL("st_none"), I("xor_r32_r32", "eax", "eax"),
         LBL("st_out"),
         I("pop_r64", "r14"), I("pop_r64", "r13"), I("pop_r64", "r12"), I("ret"),
@@ -563,10 +973,16 @@ def r_step_congr(R: Realization, ctx: Ctx) -> Program:
 
 def r_count_nodes(R: Realization, ctx: Ctx) -> Program:
     """count_nodes(rdi) -> rax."""
-    return [
+    p: Program = [
         LBL("count_nodes"),
         I("push_r64", "r12"), I("push_r64", "r13"), I("sub_r64_imm", "rsp", 8),
-        I("mov_r64_r64", "r12", "rdi"),
+    ]
+    if R.reclaim == "redirect":
+        p += [I("call_rel32", ("l", "repr")),
+              I("mov_r64_r64", "r12", "rax")]
+    else:
+        p += [I("mov_r64_r64", "r12", "rdi")]
+    return p + [
         I("cmp_m64_imm", ("m", "r12", 0), Tag.APP),
         I("jne_rel32", ("l", "cn_leaf")),
         I("mov_r64_m64", "rdi", ("m", "r12", 8)),
@@ -584,9 +1000,16 @@ def r_count_nodes(R: Realization, ctx: Ctx) -> Program:
 
 
 def r_emit_nf(R: Realization, ctx: Ctx) -> Program:
-    """emit_nf(rdi=node, rsi=cur) -> rsi: postfix decompile I K S B W C @."""
-    return [
+    """emit_nf(rdi=node, rsi=cur) -> rsi: postfix decompile I K S B W C @.
+    redirect: resolve on entry — a slot may still hold a consumed
+    cell; its rep is the NF node."""
+    p: Program = [
         LBL("emit_nf"),
+    ]
+    if R.reclaim == "redirect":
+        p += [I("call_rel32", ("l", "repr")),
+              I("mov_r64_r64", "rdi", "rax")]
+    return p + [
         I("mov_r64_m64", "rax", ("m", "rdi", 0)),
         I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "en_leaf")),
         I("push_r64", "rdi"),
@@ -744,34 +1167,15 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
         I("mov_rip_r64", ("p", "irj"), "rax"),
     ]
     if not R.fuse_s:
-        # permanent derived-S region: tag-3 cells alias its root across
-        # the whole run, so it must outlive the per-stream regions
-        p += [
-            I("xor_r32_r32", "ecx", "ecx"),
-            I("mov_r32_imm32", "edx", IR_DS_AREA),
-            I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-            I("mov_r32_imm32", "r9d", PAGE_RW),
-            I("call_mrip", iat("VirtualAlloc")),
-            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-            I("mov_r64_r64", "rbx", "rax"),
-            I("lea_r64_m64", "rbp", ("m", "rax", IR_DS_AREA)),
-            I("call_rel32", ("l", "build_ds")),
-            I("mov_r64_rip", "rbx", ("p", "irarena")),
-            I("mov_r64_r64", "rbp", "rbx"),
-        ]
+        # derived-S template: oldest arena cells (below permend), so a
+        # reclaim="redirect" step can never rewrite it in place; tag-3
+        # nodes still copy its root triple and alias the template
+        p += [I("call_rel32", ("l", "build_ds"))]
     if R.io[1] == "bytes":
-        # egress vocab (permanent region): I/K leaves, the KI cell,
-        # and 16 inert marker leaves {tag EG_MARK, l=k} — every decode
-        # probe references them, so they must outlive arena resets
+        # egress vocab in the same permanent prefix: I/K leaves, the KI
+        # cell, and 16 inert marker leaves {tag EG_MARK, l=k} — every
+        # decode probe references them, so they sit below permend too
         p += [
-            I("xor_r32_r32", "ecx", "ecx"),
-            I("mov_r32_imm32", "edx", IR_DS_AREA),
-            I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-            I("mov_r32_imm32", "r9d", PAGE_RW),
-            I("call_mrip", iat("VirtualAlloc")),
-            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-            I("mov_r64_r64", "rbx", "rax"),
-            I("lea_r64_m64", "rbp", ("m", "rax", IR_DS_AREA)),
             I("mov_r64_rip", "rax", ("p", "nalloc")),    # vocab allocs
             I("mov_rip_r64", ("p", "scratch"), "rax"),   # uncounted
             I("mov_r32_imm32", "edx", Tag.norm),
@@ -795,8 +1199,6 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
             I("jl_rel32", ("l", "eb_mkloop")),
             I("mov_r64_rip", "rax", ("p", "scratch")),
             I("mov_rip_r64", ("p", "nalloc"), "rax"),
-            I("mov_r64_rip", "rbx", ("p", "irarena")),
-            I("mov_r64_r64", "rbp", "rbx"),
             # committed frame buffer: [bytes] per root (u32 len prefix
             # lives in .data — no 32-bit store in the ISA), cap doubles
             # as the malformed-spine termination bound
@@ -811,6 +1213,12 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
             I("add_r64_r64", "rax", "rdx"),
             I("mov_rip_r64", ("p", "eb_lim"), "rax"),
         ]
+    p += [
+        # end of the immutable prefix — depacked input cells occupy
+        # [permend, irstart), the reduction bump starts at irstart
+        I("mov_rip_r64", ("p", "permend"), "rbx"),
+        I("mov_rip_r64", ("p", "irstart"), "rbx"),
+    ]
     return p
 
 
@@ -910,25 +1318,58 @@ def _mul24() -> Program:
 
 
 def r_ir_depack(R: Realization, ctx: Ctx) -> Program:
-    """ir_depack: cells live inside the per-stream region — r13 = irbuf
-    + 4*nr + 9*nn, root-ptr table at r13 + 24*nn.  One forward pass
-    over the postorder records; tag-3 cells copy the permanent ds root
-    triple (built once in entry, children alias it — stable across
-    streams and arena resets); fuse_s keeps tag-3 a primitive leaf.
-    Tags >= 7 (STK/VAR/junk) and forward/out-of-range indices -> exit3."""
+    """ir_depack: cells live in the arena input prefix — r13 = permend,
+    root-ptr table at r13 + 24*nn, irstart = r13 + 24*nn + 8*nr.
+    One forward pass over the postorder records (children before
+    parents, so address order = allocation era); tag-3 cells copy the
+    permanent ds root triple (built once in entry, children alias it —
+    stable across streams and arena resets); fuse_s keeps tag-3 a
+    primitive leaf.  Tags >= 7 (STK/VAR/junk) and forward/out-of-range
+    indices -> exit3."""
     iat = ctx["iat"]
     p: Program = [
         LBL("ir_depack"),
-        # r13 = cells base = irbuf + 4*nr + 9*nn
+        # r13 = cells base = arena input prefix
+        I("mov_r64_rip", "r13", ("p", "permend")),
+        # rax = r13 + 24*nn + 8*nr = end of input cells + root table.
+        # redirect: the persist zone [pcur, pend) sits here — cells
+        # allocated for input-tier reducts, then irstart = pagealign
+        # (pend).  Otherwise irstart = pagealign(rax).  DECOMMIT at an
+        # unaligned boundary rounds down and would free the page
+        # holding the input tail, hence the page align.
         I("mov_r64_rip", "rax", ("p", "irnodes")),
-        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rax", 3),
-        I("add_r64_r64", "rax", "rdx"),                      # 9*nn
+    ] + _mul24() + [
         I("mov_r64_rip", "rcx", ("p", "irnroots")),
-        I("shl_r64_imm8", "rcx", 2),
-        I("add_r64_r64", "rax", "rcx"),                      # +4*nr
-        I("mov_r64_rip", "rcx", ("p", "irbuf")),
+        I("shl_r64_imm8", "rcx", 3),
         I("add_r64_r64", "rax", "rcx"),
-        I("mov_r64_r64", "r13", "rax"),
+        I("add_r64_r64", "rax", "r13"),
+    ] + ([
+        I("add_r64_imm", "rax", R.node_bytes - 1),
+        I("and_r64_imm", "rax", -R.node_bytes),
+        I("mov_rip_r64", ("p", "pcur"), "rax"),        # pcur = align24(end)
+        I("mov_r64_r64", "rcx", "rax"),
+        I("add_r64_imm", "rcx", R.persist_bytes),
+        I("mov_rip_r64", ("p", "pend"), "rcx"),        # pend = pcur + cap
+        I("mov_r64_r64", "rax", "rcx"),
+    ] if R.reclaim == "redirect" else []) + [
+        I("add_r64_imm", "rax", 0xfff),
+        I("and_r64_imm", "rax", -4096),
+        I("mov_rip_r64", ("p", "irstart"), "rax"),
+        # commit the input span [rbp, irstart) — depack writes cells
+        # directly, bypassing grow_heap's commit-ahead.  No rsp adjust:
+        # depack is jumped into, _start's 0x28 shadow frame covers the call
+        I("cmp_r64_r64", "rax", "rbp"),
+        I("jbe_rel32", ("l", "ir_d_comm")),
+        I("mov_r64_r64", "rcx", "rbp"),
+        I("mov_r64_r64", "rdx", "rax"),
+        I("sub_r64_r64", "rdx", "rbp"),
+        I("mov_r32_imm32", "r8d", MEM_COMMIT),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_rip", "rbp", ("p", "irstart")),
+        LBL("ir_d_comm"),
+        I("mov_r64_rip", "rbx", ("p", "irstart")),
         # irroots = r13 + 24*nn
         I("mov_r64_rip", "rax", ("p", "irnodes")),
     ] + _mul24() + [
@@ -1025,14 +1466,16 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rax", ("p", "irj")),
         I("mov_r64_rip", "rcx", ("p", "irnroots")),
         I("cmp_r64_r64", "rax", "rcx"), I("jge_rel32", ("l", "ir_bdone")),
-        # arena reset: decommit the used span (VA retained)
-        I("mov_r64_rip", "rcx", ("p", "irarena")),
+        # arena reset: decommit the used span past the input prefix
+        # (depacked cells + root table in [permend, irstart) persist —
+        # a shared subtree's collapse is paid once per stream)
+        I("mov_r64_rip", "rcx", ("p", "irstart")),
         I("cmp_r64_r64", "rbp", "rcx"), I("jbe_rel32", ("l", "ir_nofree")),
         I("mov_r64_r64", "rdx", "rbp"), I("sub_r64_r64", "rdx", "rcx"),
         I("mov_r32_imm32", "r8d", MEM_DECOMMIT),
         I("call_mrip", iat("VirtualFree")),
         LBL("ir_nofree"),
-        I("mov_r64_rip", "rbx", ("p", "irarena")),
+        I("mov_r64_rip", "rbx", ("p", "irstart")),
         I("mov_r64_r64", "rbp", "rbx"),
         # r12 = roots[j]; r15 = this root's step counter
         I("mov_r64_rip", "rax", ("p", "irj")), I("shl_r64_imm8", "rax", 3),
@@ -1406,7 +1849,7 @@ def r_peval(R: Realization, ctx: Ctx) -> Program:
     """peval: rdi=term -> rax=NF — the red loop as a subroutine.
     r13=cur, r15=fuel (EG_PROBE_FUEL cap -> exit5); steps accumulate
     into [eb_dec] — `dec=` on stderr, kept out of `steps=`."""
-    return [
+    p: Program = [
         LBL("peval"),
         I("sub_r64_imm", "rsp", 8),                # call-site parity
         I("mov_r64_r64", "r13", "rdi"),
@@ -1426,10 +1869,18 @@ def r_peval(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rcx", ("p", "eb_dec")),
         I("add_r64_r64", "rax", "rcx"),
         I("mov_rip_r64", ("p", "eb_dec"), "rax"),
+    ]
+    if R.reclaim == "redirect":
+        # the returned root may be a consumed cell — hand back its rep
+        p += [I("mov_r64_r64", "rdi", "r13"),
+              I("call_rel32", ("l", "repr")),
+              I("mov_r64_r64", "r13", "rax")]
+    p += [
         I("mov_r64_r64", "rax", "r13"),
         I("add_r64_imm", "rsp", 8),
         I("ret"),
     ]
+    return p
 
 
 def r_selidx(R: Realization, ctx: Ctx) -> Program:
@@ -1478,8 +1929,23 @@ def r_emit_bytes(R: Realization, ctx: Ctx) -> Program:
         I("mov_rip_r64", ("p", "eb_save"), "rax"),
         I("mov_r64_rip", "r14", ("p", "eb_out")),
         LBL("eb_loop"),
+    ]
+    if R.reclaim == "redirect":
+        # s may be a consumed cell; resolve, then take the probe path —
+        # peval resolves internally, the structural path's derefs could
+        # land on FWD cells mid-spine
+        p += [
+            I("mov_r64_r64", "rdi", "r12"),
+            I("call_rel32", ("l", "repr")),
+            I("mov_r64_r64", "r12", "rax"),
+        ]
+    p += [
         I("cmp_m64_imm", ("m", "r12", 0), Tag.konst),
         I("je_rel32", ("l", "eb_flush")),            # nil -> flush frame
+    ]
+    if R.reclaim == "redirect":
+        p += [I("jmp_rel32", ("l", "eb_pcons"))]
+    p += [
         # --- _cell_parts fast path: s = K (D (B(C(DW)) (K t))) ---
         I("cmp_m64_imm", ("m", "r12", 0), Tag.APP),
         I("jne_rel32", ("l", "eb_pcons")),
@@ -1594,7 +2060,7 @@ def r_emit_bytes(R: Realization, ctx: Ctx) -> Program:
 # "build_ds" iff not R.fuse_s (handled in program()).
 ROUTINES: Tuple[str, ...] = (
     "entry", "parse", "reduce", "stats", "exits",
-    "grow_heap", "mkleaf", "mkapp", "mkstk",
+    "grow_heap", "mkleaf", "mkapp", "mkapp_p", "mkstk", "repr",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
     "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
@@ -1604,7 +2070,7 @@ ROUTINES: Tuple[str, ...] = (
 # entry/parse/reduce.  "ir_reduce" is the batch loop.
 ROUTINES_IR: Tuple[str, ...] = (
     "ir_entry", "ir_read", "ir_depack", "ir_reduce", "stats", "exits",
-    "grow_heap_ir", "mkleaf", "mkapp",
+    "grow_heap_ir", "mkleaf", "mkapp", "mkapp_p", "repr",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
     "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
@@ -1630,9 +2096,12 @@ DATA_SLOTS_EB: Tuple[Tuple[str, int], ...] = (
 
 def data_slots_ir(R: Realization) -> tuple:
     """IR slots; io=("stdin","bytes") appends the egress block."""
+    s = DATA_SLOTS_IR
+    if R.reclaim == "redirect":
+        s = s + DATA_SLOTS_PS
     if R.io[1] == "bytes":
-        return DATA_SLOTS_IR + DATA_SLOTS_EB
-    return DATA_SLOTS_IR
+        s = s + DATA_SLOTS_EB
+    return s
 
 _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
     name[2:]: fn for name, fn in list(globals().items())
@@ -1642,6 +2111,7 @@ _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
 
 def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
     ctx = _ctx()
+    ctx["ir"] = any(n.startswith("ir_") for n in names)
     p: Program = []
     for name in names:
         if name == "st_s" and not R.fuse_s:
@@ -1655,6 +2125,8 @@ def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
 def program(R: Realization) -> Program:
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.reclaim not in ("none", "redirect"):
+        raise NotRealized(f"reclaim={R.reclaim!r} not realized")
     if R.io != ("stdin", "stdout"):
         raise NotRealized(f"io={R.io!r} not realized by {ROUTINES}")
     return _emit(R, ROUTINES)
@@ -1666,6 +2138,8 @@ def program_ir(R: Realization) -> Program:
     per-root NF line for a decoded [u32le len][bytes] frame."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.reclaim not in ("none", "redirect"):
+        raise NotRealized(f"reclaim={R.reclaim!r} not realized")
     if R.io == ("stdin", "bytes"):
         return _emit(R, ROUTINES_IR_BYTES)
     if R.io != ("stdin", "stdout"):
@@ -1737,6 +2211,9 @@ def data_slots_res(R: Realization) -> tuple:
 
 def program_res(R: Realization) -> Program:
     """Residual-application kernel: graft loop + shared reducer core."""
+    if R.reclaim != "none":
+        raise NotRealized(
+            f"reclaim={R.reclaim!r} not realized by {ROUTINES_RES}")
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
     if R.io != ("stdin", "stdout"):

@@ -174,7 +174,7 @@
     "abi":     {"win64": "realized", "linux": "realized", "uefi": "declared"},
     "fuse_s":  {"False": "realized", "True": "realized"},
     "alloc":   {"bump-chunked": "realized", "arena": "declared"},
-    "reclaim": {"none": "realized", "refcount": "declared", "mark-sweep": "declared"},
+    "reclaim": {"none": "realized", "redirect": "realized", "refcount": "declared", "mark-sweep": "declared"},
     "stack":   {"machine": "realized", "explicit": "declared"},
     "io":      {"stdin/stdout": "realized", "memory": "declared"},
     "fuel":    {"None": "realized", "int": "realized"},

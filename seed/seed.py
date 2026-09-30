@@ -324,11 +324,23 @@ class Realization:
                                     # chunk-by-chunk; total input is unbounded
     ir_arena_bytes: int = 2 << 30     # IR mode: single reserved heap region,
                                     # commit-ahead + DECOMMIT reset per root
+    persist_bytes: int = 1 << 28      # redirect+IR: persist zone below irstart —
+                                    # input-tier reducts live here so shared
+                                    # input redexes pay once across a stream
     io: tuple = ("stdin", "stdout")
     abi: str = "win64"
     fuse_s: bool = False              # False: `S` token instantiates derived_s
                                       # (IStepBasis only); True: primitive sβ
-    reclaim: str = "none"             # GC slot — explicitly none this wave
+    reclaim: str = "none"             # "none" = bump-arena, every step allocs
+                                      # fresh spine cells and shared redexes
+                                      # re-reduce per occurrence.  "redirect"
+                                      # = heap model (HeapDev): a collapsed
+                                      # redex cell becomes FWD→reduct, so a
+                                      # shared redex pays once and every
+                                      # referrer resolves the rep; congruence
+                                      # rewrites child slots in place (no
+                                      # spine churn).  Same IStep semantics —
+                                      # the Lean heap formalization.
     audit: bool = False               # emit per-rule counters; stats gains a
                                       # `rules=` histogram (redex classes +
                                       # congruence descents) — the instrumented
