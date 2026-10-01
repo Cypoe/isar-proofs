@@ -167,6 +167,12 @@ def main() -> int:
     blob = st.pack_ir(*terms)
     leg("xisa/plain", cuda, native, blob, len(terms))
     leg("xisa/fuse_s", cuda_f, native_f, blob, len(terms))
+    # per-root slab allocator: same observable contract, private
+    # bump cursors instead of the shared stream counter
+    leg("xisa/plain+per_root", cuda, native, blob, len(terms),
+        cuda_env={"IR_CUDA_PER_ROOT": "1"})
+    leg("xisa/fuse_s+per_root", cuda_f, native_f, blob, len(terms),
+        cuda_env={"IR_CUDA_PER_ROOT": "1"})
 
     # --- G9b instantiation batch --------------------------------------
     # the real Futamura instance queries — the batch shape the fork
@@ -183,6 +189,13 @@ def main() -> int:
             cuda_env={"IR_CUDA_HEAP_MB": "8192"})
         leg("g9b/fuse_s", cuda_f, native_f, iblob, len(insts),
             cuda_env={"IR_CUDA_HEAP_MB": "8192"})
+        # same stream under the per-root slab allocator — the
+        # retake model; roots claim slabs on demand so uneven roots
+        # are capped by the stream total only, never an equal share
+        leg("g9b/plain+per_root", cuda, native, iblob, len(insts),
+            cuda_env={"IR_CUDA_HEAP_MB": "8192", "IR_CUDA_PER_ROOT": "1"})
+        leg("g9b/fuse_s+per_root", cuda_f, native_f, iblob, len(insts),
+            cuda_env={"IR_CUDA_HEAP_MB": "8192", "IR_CUDA_PER_ROOT": "1"})
 
     # --- fuel: heavy towers must die at rc 2 --------------------------
     ft = [_tok(tower(24)), _tok(tower(28))]
@@ -193,6 +206,12 @@ def main() -> int:
     ok = ok and good
     print(f"{'ok ' if good else 'FAIL'} fuel/t24+28: "
           f"rc {a.returncode}/{b.returncode} (want 2)", flush=True)
+    a = _run(cuda, fblob, env_extra={"IR_CUDA_FUEL": "10",
+                                   "IR_CUDA_PER_ROOT": "1"})
+    good = a.returncode == 2
+    ok = ok and good
+    print(f"{'ok ' if good else 'FAIL'} fuel/t24+28+per_root: "
+          f"rc {a.returncode} (want 2)", flush=True)
 
     # --- malformed legs: both readers refuse with rc 3 -----------------
     one = st.pack_ir(terms[0])

@@ -74,11 +74,35 @@ __device__ uint32_t g_top;
 __device__ uint32_t g_cap;
 
 /* mkapp, counted: every allocated cell bumps the caller's alloc —
- * the same unit the kernel's `alloc=` stat reports. */
-__device__ uint32_t mkapp(uint32_t f, uint32_t x, uint64_t* alloc) {
-    uint32_t i = atomicAdd(&g_top, 1u);
+ * the same unit the kernel's `alloc=` stat reports.  bump==NULL uses
+ * the shared stream bump counter (atomicAdd); non-NULL is the
+ * per-root retake model — the thread owns a private bump cursor and
+ * claims SLAB_CELLS-sized slabs from a shared pool on demand, so a
+ * root's cells stay contiguous and heavy roots simply claim more
+ * slabs; only the stream total is capped (g_slabtop vs g_cap), not
+ * any per-root share — the GPU analog of the native kernel's
+ * reserve-big / commit-on-touch / per-root DECOMMIT arena. */
+#define SLAB_CELLS (1u << 20)
+__device__ uint32_t g_slabtop;          /* slab pool high-water */
+
+__device__ uint32_t mkapp(uint32_t f, uint32_t x, uint32_t* bump,
+                          uint32_t* bend, uint64_t* alloc) {
+    uint32_t i;
     *alloc += 1;
-    if (i >= g_cap) return 0xFFFFFFFFu;
+    if (bump) {
+        if (*bump == *bend) {                    /* slab exhausted */
+            uint32_t base = atomicAdd(&g_slabtop, SLAB_CELLS);
+            *bump = base;
+            *bend = base + SLAB_CELLS;
+            if (*bend > g_cap) *bend = g_cap;
+            if (*bump >= *bend) return 0xFFFFFFFFu;
+        }
+        i = (*bump)++;
+        if (i >= *bend) return 0xFFFFFFFFu;
+    } else {
+        i = atomicAdd(&g_top, 1u);
+        if (i >= g_cap) return 0xFFFFFFFFu;
+    }
     g_cells[i].tag = TAG_APP;
     g_cells[i].l = f;
     g_cells[i].r = x;
@@ -88,9 +112,12 @@ __device__ uint32_t mkapp(uint32_t f, uint32_t x, uint64_t* alloc) {
 /* One LO step on the term at t: returns new root index, or 0xFFFFFFFF
  * if t is already in normal form.  Mirrors the kernel's step(): root
  * redex check, else left congruence, else right — with the zipper
- * rebuilt through fresh mkapp cells on the way up. */
+ * rebuilt through fresh mkapp cells on the way up.  bump/bend select
+ * the allocator: NULL,NULL = shared stream arena; per-root = the
+ * thread's private slab cursor (see ir_reduce_kernel). */
 __device__ uint32_t step_one(uint32_t t, Frame* st, uint32_t fcap,
-                             uint32_t* deep, uint64_t* alloc) {
+                             uint32_t* deep, uint64_t* alloc,
+                             uint32_t* bump, uint32_t* bend) {
     uint32_t top = 0, cur = t;
     for (;;) {
         Cell c = g_cells[cur];
@@ -104,22 +131,22 @@ __device__ uint32_t step_one(uint32_t t, Frame* st, uint32_t fcap,
                 if (fl.tag == TAG_K) {
                     v = f.r;                                 /* K a b -> a */
                 } else if (fl.tag == TAG_D) {          /* W f x -> f x x */
-                    uint32_t fx = mkapp(f.r, c.r, alloc);
-                    if (fx != 0xFFFFFFFFu) v = mkapp(fx, c.r, alloc);
+                    uint32_t fx = mkapp(f.r, c.r, bump, bend, alloc);
+                    if (fx != 0xFFFFFFFFu) v = mkapp(fx, c.r, bump, bend, alloc);
                 } else if (fl.tag == TAG_APP) {
                     Cell fll = g_cells[fl.l];
                     if (fll.tag == TAG_B) {            /* B f g x -> f(g x) */
-                        uint32_t gx = mkapp(f.r, c.r, alloc);
-                        if (gx != 0xFFFFFFFFu) v = mkapp(fl.r, gx, alloc);
+                        uint32_t gx = mkapp(f.r, c.r, bump, bend, alloc);
+                        if (gx != 0xFFFFFFFFu) v = mkapp(fl.r, gx, bump, bend, alloc);
                     } else if (fll.tag == TAG_C) {   /* C f g x -> f x g */
-                        uint32_t fx = mkapp(fl.r, c.r, alloc);
-                        if (fx != 0xFFFFFFFFu) v = mkapp(fx, f.r, alloc);
+                        uint32_t fx = mkapp(fl.r, c.r, bump, bend, alloc);
+                        if (fx != 0xFFFFFFFFu) v = mkapp(fx, f.r, bump, bend, alloc);
 #ifdef FUSE_S
                     } else if (fll.tag == TAG_S) { /* S f g x -> (fx)(gx) */
-                        uint32_t fx = mkapp(fl.r, c.r, alloc);
-                        uint32_t gx = mkapp(f.r, c.r, alloc);
+                        uint32_t fx = mkapp(fl.r, c.r, bump, bend, alloc);
+                        uint32_t gx = mkapp(f.r, c.r, bump, bend, alloc);
                         if (fx != 0xFFFFFFFFu && gx != 0xFFFFFFFFu)
-                            v = mkapp(fx, gx, alloc);
+                            v = mkapp(fx, gx, bump, bend, alloc);
 #endif
                     }
                 }
@@ -131,8 +158,8 @@ __device__ uint32_t step_one(uint32_t t, Frame* st, uint32_t fcap,
             while (top) {
                 Frame fr = st[--top];
                 Cell p = g_cells[fr.node];
-                v = fr.side == 0 ? mkapp(v, p.r, alloc)
-                                 : mkapp(p.l, v, alloc);
+                v = fr.side == 0 ? mkapp(v, p.r, bump, bend, alloc)
+                                 : mkapp(p.l, v, bump, bend, alloc);
                 if (v == 0xFFFFFFFFu) return 0xFFFFFFFEu;   /* OOM mid-step */
             }
             return v;
@@ -194,14 +221,26 @@ __device__ uint32_t emit_nf(uint32_t root, char* out, uint32_t cap,
 __global__ void ir_reduce_kernel(uint32_t n_roots, const uint32_t* roots,
                                  uint64_t fuel, Res* res,
                                  Frame* frames, uint32_t fcap,
-                                 char* nfbuf, uint32_t nfcap) {
+                                 char* nfbuf, uint32_t nfcap,
+                                 uint32_t per_root) {
     uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n_roots) return;
     Frame* st = frames + (size_t)tid * fcap;
     Res r = {roots[tid], 0, ST_OK, 0, 0, 0};
     uint32_t deep = 0;
+    /* allocator selection: shared = the stream's single bump counter;
+     * per_root = a private [base, base+slice) region per root — the
+     * same boundedness model as the native kernel's per-root
+     * DECOMMIT reset (g_top is top0 here: input cells + ds template
+     * are shared read-only below the slab pool, reduction cells are
+     * per-root slabs). */
+    uint32_t mytop = 0, myend = 0;   /* empty range -> claim on 1st mkapp */
+    uint32_t* bump = NULL;
+    uint32_t* bend = NULL;
+    if (per_root) { bump = &mytop; bend = &myend; }
     while (fuel == 0 || r.steps < fuel) {
-        uint32_t v = step_one(r.nf, st, fcap, &deep, &r.alloc);
+        uint32_t v = step_one(r.nf, st, fcap, &deep, &r.alloc,
+                              bump, bend);
         if (v == 0xFFFFFFFFu) break;                    /* normal form */
         if (v == 0xFFFFFFFEu) { r.status = deep ? ST_DEEP : ST_OOM; break; }
         r.nf = v;
@@ -267,12 +306,21 @@ int main(void) {
     if (const char* s = getenv("IR_CUDA_FUEL"))    fuel    = strtoull(s, 0, 0);
     if (const char* s = getenv("IR_CUDA_NFCAP"))   nfcap   = strtoul(s, 0, 0);
     if (const char* s = getenv("IR_CUDA_FRAMES"))  fcap    = strtoul(s, 0, 0);
+    uint32_t per_root = getenv("IR_CUDA_PER_ROOT") ? 1u : 0u;
+    int managed = getenv("IR_CUDA_MANAGED") ? 1 : 0;
 
     size_t cap = ((size_t)heap_mb << 20) / sizeof(Cell);
     Cell* h_cells = (Cell*)xmalloc(cap * sizeof(Cell));
 
     Cell* d_cells;
-    if (cudaMalloc(&d_cells, cap * sizeof(Cell)) != cudaSuccess) {
+    /* managed = demand-paged UVM: the GPU analog of the native
+     * kernel's reserve-huge/commit-on-touch arena — heap_mb may
+     * exceed VRAM (pages fault between device and host on access);
+     * plain cudaMalloc is eager. */
+    cudaError_t e0 = managed
+        ? cudaMallocManaged(&d_cells, cap * sizeof(Cell))
+        : cudaMalloc(&d_cells, cap * sizeof(Cell));
+    if (e0 != cudaSuccess) {
         fprintf(stderr, "ir_cuda: device arena %lluMB alloc failed\n",
                 (unsigned long long)heap_mb);
         return 4;
@@ -367,6 +415,7 @@ int main(void) {
                    cudaMemcpyHostToDevice);
         cudaMemcpy(d_roots, roots, 4 * n_roots, cudaMemcpyHostToDevice);
         cudaMemcpyToSymbol(g_top, &top0, sizeof(uint32_t));
+        cudaMemcpyToSymbol(g_slabtop, &top0, sizeof(uint32_t));
 
         uint32_t tpb = 128, nblk = (n_roots + tpb - 1) / tpb;
         if (getenv("IR_CUDA_DEBUG")) {
@@ -374,7 +423,8 @@ int main(void) {
             cudaDeviceSynchronize();
         }
         ir_reduce_kernel<<<nblk, tpb>>>(n_roots, d_roots, fuel, d_res,
-                                        d_frames, fcap, d_nf, nfcap);
+                                        d_frames, fcap, d_nf, nfcap,
+                                        per_root);
         cudaError_t e = cudaDeviceSynchronize();
         if (e != cudaSuccess) {
             fprintf(stderr, "ir_cuda: reduce: %s\n",

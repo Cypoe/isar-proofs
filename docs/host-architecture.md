@@ -77,6 +77,37 @@ resolve(tc) → rts.program(R) → [opt_peephole iff R.peephole] → isa.assembl
 
 **IR-Transport:** Token-Stream (`bc_compile`/`bc_decompile`) oder packed IR (`pack_ir` / `pack_ir_keyed`, `"PIR\0"` + roots + 9B nodes) → `make_ir_runner` / `ir_cuda`.
 
+### 3a. Kanonischer Packed-IR-Pfad (Handoff)
+
+**Ein Vertrag, mehrere Realisierungen.** Das packed IR ist die einzige
+semantische Transportgrenze; der Ausführungsmodus ist Realisierungs-/Scheduling-
+Daten, nicht Sprachsemantik:
+
+| Modus | Realisierung | Vertrag |
+|-------|--------------|---------|
+| single-thread | `native.x86_64.pe.ir` (bump, `reclaim=none`) | NF-Bytes + steps/alloc + rc |
+| CPU-MT | `run.batch`-Workerpool, Root = Task, Ordnung stabil | identisch |
+| GPU | `ir_cuda.cu`, ein Thread = ein Root | identisch (G17) |
+| caps-reduziert | jeder Modus ohne Batch-/SIMD-ISA | identisch — Batching ist Scheduler-Wahl, keine ISA-Voraussetzung |
+
+- **Kein SIMD-Postulat:** Batch-Ausführung ist eine Scheduler-Eigenschaft
+  (Caps), kein ISA-Erweiterungszwang. Caps-reduzierte Ziele laufen 1:1
+  über denselben PIR-Stream, nur sequentiell.
+- **Dynamische Dispatch** eines Programms: Root-Batches sind die
+  Dispatch-Einheit; dieselbe `.pir`-Blob kann je nach Cap/Workload an
+  single / CPU-MT / GPU gehen — gemischte Modi innerhalb eines Programms
+  sind nur die Vereinigung mehrerer Batches/Phasen.
+- **Per-root reset:** Referenzmodell ist der native Kernel —
+  `MEM_RESERVE` groß + Commit-on-touch + `MEM_DECOMMIT` je Root. CUDA
+  trägt das mit `IR_CUDA_PER_ROOT=1` (private Slab-Cursor, Claims via
+  `g_slabtop`) nach; G17-`+per_root`-Legs sind stat-gleich.
+- **Dynamische Allokation, kein inhärentes Cap:** `ir_arena_bytes` /
+  `IR_CUDA_HEAP_MB` sind VA-/Geräte-Schranken der Realisierung, nicht
+  Sprachgrenzen. Nativ = großreserviert, lazy committed (Bend-Analog
+  der ~8TB-VA). CUDA: `IR_CUDA_MANAGED=1` = UVM-Oversubscription
+  (16GB-Arena auf 12GB-Karte verifiziert); Slab-Claims machen
+  Root-Shares dynamisch statt `HEAP_MB/n_roots` statisch.
+
 ---
 
 ## 4. Witness-Matrix (Tip)
@@ -90,7 +121,7 @@ resolve(tc) → rts.program(R) → [opt_peephole iff R.peephole] → isa.assembl
 | `riscv64.linux.lo` | ELF (+ `.o`) + qemu-riscv64 | dito (`687e385`). **Korrektur:** nicht im `congruence`-Set — Cross-ISA-Parität lief ad hoc (Shell), bis sie als Gate G12 registriert ist |
 | `native.c` | `.c` → cc | PE↔C, graph↔C |
 | fasmg | Source → PE | Encoder-Orakel |
-| `ir_cuda` | device worker | Funktionale PIR-Parität vs IR-Kernel; **nicht** in `toolchain.json` / GATES-Timing |
+| `ir_cuda` | device worker | Funktionale PIR-Parität vs IR-Kernel (G17: shared + `IR_CUDA_PER_ROOT` Slabs + `IR_CUDA_MANAGED` UVM); **nicht** in `toolchain.json` / GATES-Timing |
 
 **Declared / refuses:** aarch64 win64/PE; UEFI; Mach-O; flat; macho routines.  
 **QEMU-Wallzeiten** = TCG-Rauschen, kein Speed-Claim.
@@ -101,7 +132,7 @@ resolve(tc) → rts.program(R) → [opt_peephole iff R.peephole] → isa.assembl
 
 1. **1993 polyvariant mix / Futamura P2–P3** — `futamura_cube` DECLARED; `MixStrategy` subst-only; `emit(R)` hand-written generating extension, nicht β-`specTerm`-Self-App.
 2. **Retention / reclaim** — `reclaim: none` realisiert; arena/refcount declared; win64 monolithic assemble/pack >85GB-Klasse → decomposed + IR pool Workaround.
-3. **CUDA** — Parallelität = Root; funktionale Kongruenz ja; **kein** benanntes GATES-Tempo-Obligation.
+3. **CUDA** — Parallelität = Root; funktionale Kongruenz ja (inkl. `IR_CUDA_PER_ROOT` Slab-Allocator); **kein** benanntes GATES-Tempo-Obligation. CPU-MT-Worker sind Host-Pool, kein eigener Kernel.
 4. **Catalog drift** — `docs/CATALOG.md` hinter Tip möglich.
 5. **Native-path coverage** — nur `xdu.json` heute.
 6. **G9 native/cd deferrals** — exe throughput / arena retention.
