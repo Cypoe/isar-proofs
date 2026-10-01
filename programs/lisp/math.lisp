@@ -1,0 +1,21 @@
+;;; math.lisp — adapted from isa-physics runtime/native/tinylisp/math.lisp
+;;; (Church numerals: no negatives, - saturates at 0, / is integer)
+
+(define (gcd n m)
+  (if (= m 0) n (gcd m (mod n m))))
+(define (lcm n m) (/ (* n m) (gcd n m)))
+(define (even? n) (= (mod n 2) 0))
+(define (odd? n) (= (mod n 2) 1))
+
+(assert (= (gcd 12 18) 6) "gcd")
+(assert (= (gcd 17 5) 1) "gcd coprime")
+(assert (= (lcm 4 6) 12) "lcm")
+(assert (even? 10) "even?")
+(assert (odd? 7) "odd?")
+(assert (not (even? 3)) "not even")
+(assert (= (/ 20 4) 5) "div exact")
+(assert (= (/ 17 5) 3) "div floor")
+(assert (= (mod 17 5) 2) "mod")
+(assert (= (- 3 5) 0) "saturating sub")
+(assert (= (+ 0 0) 0) "add zero")
+(assert (= (* 0 99) 0) "mul zero")

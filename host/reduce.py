@@ -19,7 +19,7 @@ class K(Enum):
     APP = auto()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class T:
     k: K
     n: int = 0

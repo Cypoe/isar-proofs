@@ -211,7 +211,7 @@ import struct
 import sys
 import time
 from types import SimpleNamespace
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -242,6 +242,28 @@ def _appn(*xs: T) -> T:
     for x in xs[1:]:
         t = app(t, x)
     return t
+
+
+# Lazy giants — the emit-stage constants below (RESOLVE, _ENCODE_OF,
+# _ASSEMBLE, _PEEPHOLE_*) cost ~77s of bracket abstraction at import
+# while pure consumers (pack_ir/unpack_ir, corpus runners) never touch
+# them.  PEP 562 __getattr__ resolves them on first real use — both
+# `st.X` and intra-module global refs — so import stays cheap and the
+# term is still computed exactly once, memoized into globals().
+_LAZY: Dict[str, Callable[[], T]] = {}
+
+
+def _lazy(name: str, fn: Callable[[], T]) -> None:
+    _LAZY[name] = fn
+
+
+def __getattr__(name: str):
+    fn = _LAZY.get(name)
+    if fn is None:
+        raise AttributeError(name)
+    v = fn()
+    globals()[name] = v
+    return v
 
 
 # ---------------------------------------------------------------------------
@@ -1125,7 +1147,7 @@ def python_resolve(name: str, raw: Optional[dict] = None) -> Optional[list]:
     return out
 
 
-RESOLVE = build_resolve(_RAW)
+_lazy("RESOLVE", lambda: build_resolve(_RAW))
 
 
 def resolve_query(name: str) -> T:
@@ -1760,8 +1782,8 @@ def _encode_src() -> str:
 _Z4 = bytelist_term(b"\x00\x00\x00\x00")
 _ZRESV = bracket(NAbs("nm", NComb(_Z4)))
 
-_ENCODE_OF = _appn(bracket_abstract0(parse(_encode_src())),
-                   _ENCS_TRIE, _REG_TRIE, _OPTAG_TRIE)
+_lazy("_ENCODE_OF", lambda: _appn(bracket_abstract0(
+    parse(_encode_src())), _ENCS_TRIE, _REG_TRIE, _OPTAG_TRIE))
 
 
 def encode_query(item, resv: Optional[T] = None) -> T:
@@ -1855,8 +1877,8 @@ def _assemble_src() -> str:
     return "(\\ENC. \\ZRV. \\prog. \\sym. \\base. " + body + ")"
 
 
-_ASSEMBLE = _appn(bracket_abstract0(parse(_assemble_src())),
-                  _ENCODE_OF, _ZRESV)
+_lazy("_ASSEMBLE", lambda: _appn(bracket_abstract0(
+    parse(_assemble_src())), _ENCODE_OF, _ZRESV))
 
 
 def symtab_term(symbols: Dict[str, int]) -> T:
@@ -2648,14 +2670,18 @@ def _peephole_pass_src() -> str:
             + _lets([("passt", passt)], "(passt p)") + ")")
 
 
-_PEEPHOLE_OF = bracket_abstract0(parse(_peephole_src()))
-_PEEPHOLE_PASS = bracket_abstract0(parse(_peephole_pass_src()))
+_lazy("_PEEPHOLE_OF", lambda: bracket_abstract0(parse(_peephole_src())))
+_lazy("_PEEPHOLE_PASS",
+      lambda: bracket_abstract0(parse(_peephole_pass_src())))
 # decomposed-seam vocabulary — the same term text the pass inlines,
 # exposed so the host can feed one item per reduction (decompose_asm
 # precedent: same quotient map, fold bookkeeping at the boundary)
-_PEEPHOLE_STEP = bracket_abstract0(parse(_peephole_step_src()))
-_PEEPHOLE_LATSTEP = bracket_abstract0(parse(_peephole_latstep_src()))
-_PEEPHOLE_LATPROBE = bracket_abstract0(parse(_peephole_latprobe_src()))
+_lazy("_PEEPHOLE_STEP",
+      lambda: bracket_abstract0(parse(_peephole_step_src())))
+_lazy("_PEEPHOLE_LATSTEP",
+      lambda: bracket_abstract0(parse(_peephole_latstep_src())))
+_lazy("_PEEPHOLE_LATPROBE",
+      lambda: bracket_abstract0(parse(_peephole_latprobe_src())))
 _PEEP_LAT0 = bracket_abstract0(parse(_prs(_num_src(0), "K")))
 # (\\r. cons r K) — the monolith's own output wrap; produced in-term
 # so the NF is the runner's canonical cons shape, not a host probe

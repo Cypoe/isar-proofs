@@ -47,7 +47,7 @@ Der Host ist ein **kataloggetriebener Realizer**, kein Compiler-Frontend:
 | Meta (Lean) | Obligations, nicht Hot Path | `src/ISAR/**`, `Main.lean` |
 | Catalog | Single declarations source | `host/toolchain.json`, `toolchain.py` (`load`/`resolve` → `NotRealized`) |
 | Observation | Regime + QuotientMap | `observation_regime.py`, `quotient_map.py` |
-| Dialects | Surface ↔ Term unter \(\mathcal O\) | `bytecode_dialect`, `lambda_dialect`, `xdu_dialect`, `fasm_dialect`, `tower` |
+| Dialects | Surface ↔ Term unter \(\mathcal O\) | `bytecode_dialect`, `lambda_dialect`, `lisp_dialect` (s-expr → lambda IR, tagged values, corpus in `programs/lisp/`), `xdu_dialect`, `fasm_dialect`, `tower` |
 | Spec-as-term / PIR | G9 stages; `PIR\0` wire | `spec_term.py` (ADR-004/005) |
 | Seed | Realization + `emit` Treiber | `seed/seed.py` (§0–§2 ohne host; §3 nur toolchain) |
 | Strategy / CoGen | choose → LoaderPlan → emit → HostPiece; adopt nur bei OperEq | `strategy.py`, `cogen.py`, `mine_adopt.py`, `host_pieces.py` |

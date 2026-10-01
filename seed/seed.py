@@ -373,6 +373,20 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
     path `runtime` assembles the routines' program from R alone.
     A routines record whose abi differs from R.abi is refused
     (NotRealized) — never emitted under the wrong ABI."""
+    # The staged chain allocates tens of millions of immutable T nodes —
+    # acyclic by construction, so cyclic GC only ever scans them: every
+    # collection is pure overhead and grows with live-node count, which
+    # is what makes emission time vary wildly between draws.  Disable it
+    # for the emit's duration.
+    import gc
+    gc.disable()
+    try:
+        return _emit(R, tc, program)
+    finally:
+        gc.enable()
+
+
+def _emit(R: Realization, tc, program) -> bytes:
     tc = tc or toolchain.by_name("native.x86_64.pe")
     isa, rts, tgt = toolchain.resolve(tc)
     if getattr(rts, "abi", R.abi) != R.abi:
@@ -415,8 +429,10 @@ def build_pe(R: Realization = DEFAULT) -> bytes:
 
 def write_exe(path: str, R: Realization = DEFAULT) -> str:
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
         f.write(build_pe(R))
+    os.replace(tmp, path)
     return path
 
 
@@ -461,27 +477,130 @@ _EXE_CACHE: Dict[str, str] = {}
 
 
 def _exe_for(R: Realization = DEFAULT, tc=None) -> str:
+    import hashlib
+    import json
     key = repr(R) + ("|" + tc.name if tc is not None else "")
     if key not in _EXE_CACHE:
         tag = "default" if R == DEFAULT and tc is None else \
-            f"v{abs(hash(key)) & 0xFFFF:x}"
-        ext = ".exe"
+            "v" + hashlib.sha256(key.encode()).hexdigest()[:8]
+        # resolve() imports the routines/isa/target modules (~tens of
+        # seconds of module-level work); on a cache-hit path we must not
+        # pay it just to learn the file extension — sidecar it.
+        ext_path = os.path.join(
+            BUILD_DIR, f".ext_{'default' if tc is None else tc.name}")
         tgt = None
-        if tc is not None:
+        if tc is None:
+            ext = ".exe"
+        elif os.path.exists(ext_path):
+            ext = open(ext_path).read().strip()
+        else:
             _, _, tgt = toolchain.resolve(tc)
             ext = tgt.ext
+            os.makedirs(BUILD_DIR, exist_ok=True)
+            with open(ext_path, "w") as fh:
+                fh.write(ext)
         path = os.path.join(BUILD_DIR, f"reducer_{tag}{ext}")
-        if tc is None:
-            _EXE_CACHE[key] = write_exe(path, R)
-        else:
-            # explicit toolchain (e.g. the cd routines module)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "wb") as f:
-                f.write(emit(R, tc=tc))
-            if tgt.os == "linux":
-                import target_elf64
-                target_elf64.prepare(path)     # chmod +x via wsl
-            _EXE_CACHE[key] = path
+        # emit is a pure function of R + the modules emit loads:
+        # seed.py, toolchain.py + toolchain.json, the resolved
+        # isa/routines/target modules, opt_peephole — and their
+        # transitive in-repo imports (e.g. lambda_dialect via
+        # spec_term).  Fingerprint exactly that static closure:
+        # edits to modules emit never touches (e.g. a dialect under
+        # test) do NOT force a minutes-long re-emission; an edit to
+        # anything in the closure always does.
+        fp_path = path + ".fp"
+        hdir = os.path.normpath(os.path.join(SEED_DIR, "..", "host"))
+
+        def _mod_file(name: str) -> Optional[str]:
+            for d in (SEED_DIR, hdir):
+                fp = os.path.join(d, name.replace(".", os.sep) + ".py")
+                if os.path.isfile(fp):
+                    return os.path.normpath(fp)
+            return None
+
+        def _dep_closure(roots: List[str]) -> List[str]:
+            import ast
+            seen: List[str] = []
+            stack = list(roots)
+            while stack:
+                fp = stack.pop()
+                if fp in seen or not os.path.isfile(fp):
+                    continue
+                seen.append(fp)
+                try:
+                    tree = ast.parse(open(fp, encoding="utf-8").read())
+                except (SyntaxError, OSError, UnicodeDecodeError):
+                    continue
+                for node in ast.walk(tree):
+                    names: List[str] = []
+                    if isinstance(node, ast.Import):
+                        names = [a.name.split(".")[0] for a in node.names]
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        names = [node.module.split(".")[0]]
+                    for nm in names:
+                        dep = _mod_file(nm)
+                        if dep is not None:
+                            stack.append(dep)
+            return seen
+
+        def _emit_inputs() -> List[str]:
+            # module names from the catalog — importing the resolved
+            # modules (toolchain.resolve) is the heavy step we are
+            # trying to avoid on the cache-hit path
+            tj = os.path.join(hdir, "toolchain.json")
+            cat = json.load(open(tj))
+            name = tc.name if tc is not None else "native.x86_64.pe"
+            ent = next(t for t in cat["toolchains"]
+                       if t["name"] == name)
+            modnames = [
+                cat["dialects"][ent["dialect"]]["module"],
+                cat["isas"][ent["isa"]]["module"],
+                cat["routines"][ent["routines"]]["module"],
+                cat["targets"][ent["target"]]["module"],
+                "seed", "toolchain", "opt_peephole"]
+            roots = [fp for fp in (_mod_file(n) for n in modnames)
+                     if fp]
+            files = _dep_closure(roots)
+            files.append(tj)
+            return files
+
+        def _fp_now() -> str:
+            h = hashlib.sha256()
+            for fp in sorted(_emit_inputs()):
+                try:
+                    with open(fp, "rb") as fh:
+                        h.update(fp.encode() + fh.read())
+                except OSError:
+                    h.update(b"\x00missing\x00" + fp.encode())
+            return h.hexdigest()
+
+        stale = True
+        if os.path.exists(path):
+            try:
+                stale = open(fp_path).read().strip() != _fp_now()
+            except OSError:
+                pass
+        if stale:
+            if tc is None:
+                write_exe(path, R)
+            else:
+                # explicit toolchain (e.g. the cd routines module) —
+                # write to a temp then os.replace so a killed emit can
+                # never leave a partial image that freshness checks
+                # would later mistake for complete
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp = path + ".tmp"
+                with open(tmp, "wb") as f:
+                    f.write(emit(R, tc=tc))
+                os.replace(tmp, path)
+                if tgt is None:
+                    _, _, tgt = toolchain.resolve(tc)
+                if tgt.os == "linux":
+                    import target_elf64
+                    target_elf64.prepare(path)     # chmod +x via wsl
+            with open(fp_path, "w") as fh:
+                fh.write(_fp_now())
+        _EXE_CACHE[key] = path
     return _EXE_CACHE[key]
 
 

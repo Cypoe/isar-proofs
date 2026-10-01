@@ -38,18 +38,18 @@ def show(t: T) -> str:
 # Mixed lexical IR
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class V:
     name: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class A:
     left: "X"
     right: "X"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Atom:
     t: T
 
@@ -109,24 +109,24 @@ def abs_(x: str, b: X, _m: Optional[Dict[int, Set[str]]] = None) -> X:
 # Surface AST
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NVar:
     name: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NAbs:
     param: str
     body: "NExpr"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NApp:
     left: "NExpr"
     right: "NExpr"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NComb:
     atom: T
 
