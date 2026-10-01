@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -57,11 +57,21 @@ class Atom:
 X = Union[V, A, Atom]
 
 
-def fv(e: X) -> Set[str]:
+def fv(e: X, _m: Optional[Dict[int, Set[str]]] = None) -> Set[str]:
     if isinstance(e, V):
         return {e.name}
     if isinstance(e, A):
-        return fv(e.left) | fv(e.right)
+        if _m is None:
+            return fv(e.left) | fv(e.right)
+        # identity memo for one abstraction descent — the X tree is
+        # immutable and held by the caller, so ids are stable for the
+        # lifetime of _m (never stored across compiles)
+        i = id(e)
+        r = _m.get(i)
+        if r is None:
+            r = fv(e.left, _m) | fv(e.right, _m)
+            _m[i] = r
+        return r
     return set()
 
 
@@ -73,23 +83,25 @@ def to_closed(e: X) -> T:
     return app(to_closed(e.left), to_closed(e.right))
 
 
-def abs_(x: str, b: X) -> X:
+def abs_(x: str, b: X, _m: Optional[Dict[int, Set[str]]] = None) -> X:
+    if _m is None:
+        _m = {}
     if isinstance(b, V) and b.name == x:
         return Atom(I)
-    if x not in fv(b):
+    if x not in fv(b, _m):
         return A(Atom(KK), b)
     if isinstance(b, A):
         e1, e2 = b.left, b.right
-        in1, in2 = x in fv(e1), x in fv(e2)
+        in1, in2 = x in fv(e1, _m), x in fv(e2, _m)
         if not in1 and not in2:
             return A(Atom(KK), A(e1, e2))
         if not in1 and isinstance(e2, V) and e2.name == x:
             return e1
         if not in1:
-            return A(A(Atom(B), e1), abs_(x, e2))
+            return A(A(Atom(B), e1), abs_(x, e2, _m))
         if not in2:
-            return A(A(Atom(C), abs_(x, e1)), e2)
-        return A(A(Atom(S), abs_(x, e1)), abs_(x, e2))
+            return A(A(Atom(C), abs_(x, e1, _m)), e2)
+        return A(A(Atom(S), abs_(x, e1, _m)), abs_(x, e2, _m))
     return A(Atom(KK), b)
 
 
@@ -141,13 +153,16 @@ def bracket(e: NExpr) -> T:
 # abstract0 — Lean LambdaFragment shape (no η / no C/B special cases)
 # ---------------------------------------------------------------------------
 
-def abs0_(x: str, b: X) -> X:
+def abs0_(x: str, b: X, _m: Optional[Dict[int, Set[str]]] = None) -> X:
+    if _m is None:
+        _m = {}
     if isinstance(b, V) and b.name == x:
         return Atom(I)
-    if x not in fv(b):
+    if x not in fv(b, _m):
         return A(Atom(KK), b)
     if isinstance(b, A):
-        return A(A(Atom(S), abs0_(x, b.left)), abs0_(x, b.right))
+        return A(A(Atom(S), abs0_(x, b.left, _m)),
+                   abs0_(x, b.right, _m))
     return A(Atom(KK), b)
 
 

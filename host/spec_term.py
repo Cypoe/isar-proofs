@@ -229,7 +229,8 @@ from quotient_map import QuotientMap             # noqa: E402
 from observation_regime import encoding_regime   # noqa: E402
 from lambda_dialect import (parse, bracket, bracket_abstract0,  # noqa: E402
                             NAbs, NApp, NComb, NExpr, NVar)
-from graph_runtime import reduce_tree_lo, reduce_tree_cd     # noqa: E402
+from graph_runtime import (reduce_tree_lo, reduce_tree_cd,   # noqa: E402
+                           fmt_dur, Graph)
 from strategy import MixStrategy                             # noqa: E402
 import seed                                                  # noqa: E402
 
@@ -2418,6 +2419,470 @@ LINKASM_PROG = [
 LINKASM_CASES = {
     "mini": (LINKASM_PROG, ("ExitProcess",), (("x", 8),), 0x1000),
 }
+
+# ---------------------------------------------------------------------------
+# G9i: peepholeOf — opt_peephole.optimize at term level (the H'
+# modification test).
+#
+# Oracle: host/opt_peephole.optimize(prog, isa) — a fixpoint of
+# single passes over the flat item list.  Each pass folds
+# (out_rev, skip_dead, changed, index) and consults a label->index
+# map REBUILT ON THAT PASS'S LIST for jump threading (the oracle's
+# label_at lives inside _pass); the rules mirror verbatim:
+#
+#   label        -> emit, clear skip_dead
+#   skip_dead    -> drop insn (changed)
+#   ujmp tgt     -> chase tgt while label_at[tgt]+1 is a fresh ujmp
+#                   (seen-set breaks jmp cycles — the oracle's
+#                   ret-check always breaks anyway); fallthrough to
+#                   `label tgt` drops the jmp; else emit — retargeted
+#                   iff the chase hopped — and set skip_dead
+#   ret          -> emit, set skip_dead
+#   selfmove     -> drop (changed)
+#   else         -> emit
+#
+# The term consumes programOf's fragment-list shape and emits ONE
+# fragment (the flat optimized list), so assembleOf and
+# decode_program see the same rep either side of the stage.
+#
+# Normal-order only: the fixpoint `ch (g g l2) l2` defers the
+# recursive call into the taken branch; applicative evaluation would
+# not terminate.  Every emit stage before this is lo-routed anyway.
+#
+# Reps: indices are Church numerals (NTH walk + SUCC only, never
+# arithmetic); label_at is a cons-prepend assoc — first occurrence
+# wins under ALOOK last-match, mirroring setdefault.  The ISACLASS
+# tables (UJMP/RET/SELFMOVE) arrive as term parameters — the class
+# table is data, like every other strategy choice.  OPEQ compares
+# op cells fieldwise for the 2-field ops the SELFMOVE class fixes
+# (mem-ops can't occur in it), matching Python tuple equality there.
+# ---------------------------------------------------------------------------
+
+# string member: MEMB s l -> bool (s in l)
+_P_MEMBER = ("(\\s. \\l. " + _FOLDL
+             + " (\\a. \\e. (" + EQSTR + " s e (" + _LEN + " s)) K a)"
+             + " l (K I))")
+
+# last ("l"|"p") operand's name of an op list -> maybe string
+_P_LREF = ("(\\ops. " + _FOLDL
+           + " (\\a. \\o. o K (\\ot. \\orr. (" + EQSTR + " ot "
+           + _prefix_src("l", "K") + " (" + _LEN + " ot)) (\\n5. \\j5. j5 ("
+           + _HEAD + " orr)) ((" + EQSTR + " ot " + _prefix_src("p", "K")
+           + " (" + _LEN + " ot)) (\\n5. \\j5. j5 (" + _HEAD
+           + " orr)) a))) ops K)")
+
+# fold step for _P_WLB: acc = pair(done, out_rev), traversed over
+# REV ops so the LAST label-shaped operand fires first.  Once done,
+# keep o; else an ("l"|"p") cell becomes [tag, tw] and latches done.
+_P_WLBSTEP = (
+    "(\\a. \\o. a (\\dn. \\ou. dn (\\k. k dn "
+    + _conss("o", "ou") + ") (o K (\\ot. \\orr. (" + EQSTR
+    + " ot " + _prefix_src("l", "K") + " (" + _LEN
+    + " ot)) (\\k. k K "
+    + _conss(_conss("ot", _conss("tw", "K")), "ou") + ") ((" + EQSTR
+    + " ot " + _prefix_src("p", "K") + " (" + _LEN + " ot)) (\\k. k K "
+    + _conss(_conss("ot", _conss("tw", "K")), "ou") + ") (\\k. k dn "
+    + _conss("o", "ou") + "))))))")
+
+# the WLB fold itself: ((FOLDL step (REV ops) (done,out)) sel) -> out
+_P_WLBFOLD = ("((" + _FOLDL + " " + _P_WLBSTEP + " (" + _REV + " ops) "
+              + _prs("(K I)", "K") + ") (\\dn. \\ou. ou))")
+
+# rewrite the LAST ("l"|"p") operand's name inside an insn item
+_P_WLB = ("(\\itw. \\tw. itw K (\\tg. \\rr. rr K (\\fm. \\ops. "
+          + _conss("tg", _conss("fm", _P_WLBFOLD)) + ")))")
+
+def _peephole_parts() -> dict:
+    """The shared peephole src pieces — every consumer inlines the
+    same text so the subterms are byte-identical:
+
+      latstep  (\\a. \\it. — the label_at fold step; self-contained)
+      step     (\\acc. \\it. — the per-item transform; free: ujl rtl
+                sml lat prog)
+      passt    (\\p. — one pass; free: ujl rtl sml)"""
+    lbl = _prefix_src("label", "K")
+    itag = _prefix_src("i", "K")
+    is_lbl = "(" + EQSTR + " tg " + lbl + " (" + _LEN + " tg))"
+
+    # step' result record: \k. k flag val sk' ch'
+    #   flag: K=emit val / (K I)=drop;  val: emitted item (possibly
+    #   rewritten);  sk'/ch': the threaded skip_dead/changed flags.
+    #   `out` (list accumulation) and `i` (index) are NOT in the
+    #   record — they're fold bookkeeping; the monolith wrapper and
+    #   the seam driver each supply their own.
+    emit = "(\\k. k K it sk ch)"
+    emitret = "(\\k. k K it K ch)"
+    dropchg = "(\\k. k (K I) K sk K)"
+    skipit = "(\\k. k (K I) K K K)"
+
+    opeq = ("(" + _AND + " (" + EQSTR + " (" + _HEAD + " o1) (" + _HEAD
+            + " o2) (" + _LEN + " (" + _HEAD + " o1))) (" + EQSTR
+            + " (" + _HEAD + " (" + _TAIL + " o1)) (" + _HEAD + " ("
+            + _TAIL + " o2)) (" + _LEN + " (" + _HEAD + " (" + _TAIL
+            + " o1)))))")
+    selfmove = ("ops " + emit + " (\\o1. \\t1. t1 " + emit
+                + " (\\o2. \\t2. t2 (" + opeq + " " + dropchg + " "
+                + emit + ") (\\h3. \\t3. " + emit + ")))")
+    retpath = ("(" + _P_MEMBER + " fm rtl) " + emitret + " (("
+               + _P_MEMBER + " fm sml) (" + selfmove + ") (" + emit
+               + "))")
+
+    # jump threading: tgt := label_at[tgt]'s next item's ujmp target,
+    # while it is an insn, a ujmp, and fresh — seen-set breaks cycles.
+    # lat stores label -> NEXT ITEM directly (K when the label is
+    # last): `nx tg0 cont` behaves exactly like the old
+    # `NTH (SUCC ix) prog tg0 cont` (NTH out-of-range returns K).
+    chase = ("((\\f. f f) (\\g. \\tg0. \\sn. (" + _ALOOK + " lat tg0) tg0 "
+             + "(\\nx. nx tg0 (\\tg2. \\rr2. (" + EQSTR + " tg2 " + itag
+             + " (" + _LEN + " tg2)) (rr2 K (\\fm2. \\ops2. ("
+             + _P_MEMBER + " fm2 ujl) ((" + _P_LREF + " ops2) tg0 (\\t2. ("
+             + _P_MEMBER + " t2 sn) tg0 (g g t2 " + _conss("tg0", "sn")
+             + ")))) tg0)) tg0)))")
+
+    emitjmp = ("(\\k. k K (hops (" + _P_WLB + " it tgt) it) K (ch K "
+               + "hops))")
+    # fallthrough check reads `nx` (the item AFTER this one) — the
+    # monolith wrapper computes it as NTH (SUCC i) prog, the seam
+    # passes items[j+1] (or K) directly; same cells.
+    ujmp = ("(\\tg0. " + _lets([
+        ("tgt", "(" + chase + " tg0 K)"),
+        ("hops", "((" + EQSTR + " tgt tg0 (" + _LEN + " tgt)) (K I) K)"),
+    ], "(nx (" + emitjmp + ") (\\tg2. \\rr2. (" + EQSTR + " tg2 " + lbl
+        + " (" + _LEN + " tg2)) ((" + EQSTR + " (" + _HEAD + " rr2) tgt ("
+        + _LEN + " (" + _HEAD + " rr2))) (" + dropchg + ") (" + emitjmp
+        + ")) (" + emitjmp + ")))") + ")")
+
+    # the shared per-item core: \lat.\sk.\ch.\nx.\it -> st record.
+    # free: ujl rtl sml (bound by every consumer's own prefix)
+    step_ = ("(\\lat. \\sk. \\ch. \\nx. \\it. it K (\\tg. \\rr. "
+             + is_lbl + " (\\k. k K it (K I) ch) (sk " + skipit
+             + " (rr K (\\fm. \\ops. (" + _P_MEMBER + " fm ujl) (("
+             + _P_LREF + " ops) (" + retpath + ") (" + ujmp + ")) ("
+             + retpath + "))))))")
+
+    # monolith's fold step: same 4-field acc (\k. k out sk ch i) as
+    # before, computed by stepping step' and consing the emitted val
+    step = ("(\\acc. \\it. acc (\\out. \\sk. \\ch. \\i. (" + step_
+            + " lat sk ch (" + _NTH + " (" + _SUCC_SRC + " i) prog) it)"
+            " (\\f. \\v. \\s2. \\c2. f (\\k. k " + _conss("v", "out")
+            + " s2 c2 (" + _SUCC_SRC + " i)) (\\k. k out s2 c2 ("
+            + _SUCC_SRC + " i)))))")
+
+    # lat core stores pair(name, next-item); the monolith wrapper
+    # supplies nx = NTH (SUCC i) prog, the seam supplies items[j+1].
+    # latprobe is the option-valued item inspection BOTH sides share:
+    # the monolith's latstep_ inlines it, the seam batch-evaluates it
+    # per item and conses the alist at the boundary.
+    latprobe = ("(\\it. \\nx2. it K (\\tg. \\rr. " + is_lbl
+                + " (\\h. \\mm. h " + _prs("(" + _HEAD + " rr)", "nx2")
+                + ") (\\h. \\mm. mm)))")
+    latstep_ = ("(\\a. \\it. \\nx2. a (\\i. \\m. (" + latprobe
+                + " it nx2) (\\e. \\k. k (" + _SUCC_SRC + " i) "
+                + _conss("e", "m") + ") (\\k. k (" + _SUCC_SRC
+                + " i) m)))")
+    latstep = ("(\\a. \\it. a (\\i. \\m. (" + latstep_ + " a it ("
+               + _NTH + " (" + _SUCC_SRC + " i) prog))))")
+
+    # each pass rebuilds label_at on the CURRENT list — the oracle's
+    # `label_at` lives inside _pass; binding it (or the list) outside
+    # the fixpoint would freeze pass-1 state forever
+    passt = ("(\\p. (\\prog. (\\lat. (" + _FOLDL + " " + step
+             + " prog (\\k2. k2 K (K I) (K I) " + _num_src(0)
+             + ")) (\\out. \\sk. \\ch. \\i. " + _prs("ch", "(" + _REV
+             + " out)") + ")) (" + _FOLDL + " " + latstep + " prog "
+             + _prs(_num_src(0), "K") + " (K I))) p)")
+    return {"latstep": latstep, "latstep_": latstep_, "step": step,
+            "step_": step_, "passt": passt, "latprobe": latprobe}
+
+
+def _peephole_passt_src() -> str:
+    return _peephole_parts()["passt"]
+
+
+def _peephole_step_src() -> str:
+    """One item's transform: \\ujl.\\rtl.\\sml.\\lat.\\sk.\\ch.\\nx.\\it
+    -> \\k. k flag val sk' ch'.  The step' core is the same text the
+    monolith's FOLDL step wraps — the seam threads (sk, ch) and the
+    output list at the boundary, which IS the fold's own evaluation
+    order (acc position is strict).  `nx` is the following item (or
+    K) — what the monolith computes as NTH (SUCC i) prog."""
+    return ("(\\ujl. \\rtl. \\sml. "
+            + _peephole_parts()["step_"] + ")")
+
+
+def _peephole_latstep_src() -> str:
+    """\\a.\\it.\\nx -> acc' — the label-table fold step with the
+    following item as an explicit arg (stores pair(name, nx))."""
+    return _peephole_parts()["latstep_"]
+
+
+def _peephole_latprobe_src() -> str:
+    """\\it.\\nx2 -> entry-or-K — the batched lat probe: the same
+    latprobe piece the monolith's latstep_ inlines, projected to the
+    bare entry (pair(name, nx)) or K.  Fully independent per item —
+    the seam conses the alist at the boundary (pure plumbing)."""
+    return ("(\\it. \\nx2. (" + _peephole_parts()["latprobe"]
+            + " it nx2) (\\e. e) K)")
+
+
+def _peephole_src() -> str:
+    """peepholeOf as ONE term — the in-term `while changed` fixpoint.
+    Normal-order only: the `g g` unfold is guarded by the `changed`
+    flag, which eager engines (cd) cannot see — the spec leg."""
+    passt = _peephole_passt_src()
+    body = _lets([("passt", passt)],
+        "(\\r. " + _conss("r", "K") + ") ((\\f. f f) (\\g. \\p2. "
+        "(passt p2) (\\ch. \\l2. ch (g g l2) l2)) (" + _JOIN + " frags))")
+    return "(\\ujl. \\rtl. \\sml. \\frags. " + body + ")"
+
+
+def _peephole_pass_src() -> str:
+    """One pass as a term: \\ujl.\\rtl.\\sml.\\p -> pair(changed, list).
+
+    The seam-driven leg: a pass is a bounded fold — cd develops the
+    per-item cones in parallel rounds (the fixpoint's `g g` would
+    unroll unconditionally under cd, so iteration moves to the seam,
+    which is exactly the oracle's `while changed` loop)."""
+    passt = _peephole_passt_src()
+    return ("(\\ujl. \\rtl. \\sml. \\p. "
+            + _lets([("passt", passt)], "(passt p)") + ")")
+
+
+_PEEPHOLE_OF = bracket_abstract0(parse(_peephole_src()))
+_PEEPHOLE_PASS = bracket_abstract0(parse(_peephole_pass_src()))
+# decomposed-seam vocabulary — the same term text the pass inlines,
+# exposed so the host can feed one item per reduction (decompose_asm
+# precedent: same quotient map, fold bookkeeping at the boundary)
+_PEEPHOLE_STEP = bracket_abstract0(parse(_peephole_step_src()))
+_PEEPHOLE_LATSTEP = bracket_abstract0(parse(_peephole_latstep_src()))
+_PEEPHOLE_LATPROBE = bracket_abstract0(parse(_peephole_latprobe_src()))
+_PEEP_LAT0 = bracket_abstract0(parse(_prs(_num_src(0), "K")))
+# (\\r. cons r K) — the monolith's own output wrap; produced in-term
+# so the NF is the runner's canonical cons shape, not a host probe
+_PEEP_WRAP = bracket_abstract0(parse(
+    "(\\r. " + _conss("r", "K") + ")"))
+# st-record selectors — the ~5-step projections the seam applies
+# host-side (same class as _cell_parts reads)
+_SEL_F = bracket_abstract0(parse("(\\f. \\v. \\s. \\c. f)"))
+_SEL_V = bracket_abstract0(parse("(\\f. \\v. \\s. \\c. v)"))
+_SEL_S = bracket_abstract0(parse("(\\f. \\v. \\s. \\c. s)"))
+_SEL_C = bracket_abstract0(parse("(\\f. \\v. \\s. \\c. c)"))
+_JOIN_T: Optional[T] = None
+
+
+def _strlist_term(ss) -> T:
+    t = _NIL
+    for s in reversed(list(ss)):
+        t = _appn(_CONS, str_term(s), t)
+    return t
+
+
+def _peephole_cls_terms():
+    import opt_peephole
+    cls = opt_peephole.ISACLASS["x86_64"]
+    return (_strlist_term(cls["UJMP"]), _strlist_term(cls["RET"]),
+            _strlist_term(cls["SELFMOVE"]))
+
+
+def peephole_query(prog: T) -> T:
+    """`peepholeOf UJMP RET SELFMOVE frags` — frags is programOf's NF
+    (or the raw query term; the JOIN forces it either way).  The
+    ISACLASS table comes from the oracle module itself so the data
+    is shared, not duplicated."""
+    ujl, rtl, sml = _peephole_cls_terms()
+    return _appn(_PEEPHOLE_OF, ujl, rtl, sml, prog)
+
+
+def _join_t() -> T:
+    global _JOIN_T
+    if _JOIN_T is None:
+        _JOIN_T = bracket_abstract0(parse(_JOIN))
+    return _JOIN_T
+
+
+def peephole_pass_query(p: T) -> T:
+    """One pass over the FLAT item list p -> pair(changed, list)."""
+    ujl, rtl, sml = _peephole_cls_terms()
+    return _appn(_PEEPHOLE_PASS, ujl, rtl, sml, p)
+
+
+def _scott_cells(lst: T) -> List[T]:
+    """NF list -> python list of cell Ts — _cell_parts destructure,
+    O(1) per cell.  Pure plumbing, no semantics."""
+    out = []
+    while lst.k != K.KONST:
+        h, lst = _cell_parts(lst)
+        out.append(h)
+    return out
+
+
+def peephole_fixpoint_seamed(prog: T, run) -> Tuple[T, int, int]:
+    """Decomposed seam evaluation — the pass's two folds run as
+    PER-ITEM terms on `run`, batched when the runner exposes
+    `.batch` (packed-IR dedups the shared `lat` across roots and the
+    exe's per-root arena reset keeps every query bounded; the
+    monolithic fold OOMs every native host at ~3.9K cells/step):
+
+      1. `latprobe it nx` per item — the option-valued inspection the
+         monolith's latstep_ inlines — all independent, one batch.
+         The seam conses hits into the `lat` alist (FOLDL's own
+         cons-onto-front order — pure plumbing).
+      2. `step' ujl rtl sml lat sk ch nx it` per item — the shared
+         step core the monolith's FOLDL step wraps (`nx` is what the
+         monolith computes as NTH (SUCC i) prog).  Speculated under
+         sk=live/ch=unchanged — sound because the record contract is
+         monotone: ch' = OR(ch, local) on every path, and the label
+         path never consults sk.
+      3. repair round: the seam replays ONLY items whose true sk
+         differed from the guess — dead non-labels re-evaluated with
+         sk=K.  Every emitted/dropped decision is still produced by a
+         real term evaluation; the host schedules guesses, it does
+         not decide.
+      4. `changed` = OR of the returned ch' flags (the same monoid
+         the in-term fold accumulates); emitted vals collect in
+         order — the monolith's cons-then-REV pair of inverses is
+         append + forward iteration at the seam.
+
+    prog is programOf's frag-list NF.  Returns (frag-list NF — the
+    peepholeOf output shape — passes, summed runner metric)."""
+    ujl, rtl, sml = _peephole_cls_terms()
+    # one runner pass over prog so every cell below is the compiled
+    # NF shape (_cell_parts' O(1) path; probing raw cells re-normalizes
+    # the whole tail spine — O(n^2) and pathologically slow)
+    prog2, s0, _ = run(prog)
+    items: List[T] = []
+    for fr in _scott_cells(prog2):
+        items.extend(_scott_cells(fr))
+    total, passes = s0, 0
+    _batch = getattr(run, "batch", None)
+
+    def eval_all(qs: List[T]) -> List[T]:
+        nonlocal total
+        if _batch is not None:
+            nfs, s, _ = _batch(qs)
+            total += s
+            return nfs
+        out = []
+        for q in qs:
+            nf, s, _ = run(q)
+            total += s
+            out.append(nf)
+        return out
+
+    while True:
+        n = len(items)
+        nxs = [items[j + 1] if j + 1 < n else _NIL
+               for j in range(n)]
+        # 1 — label table: independent probes, seam conses `lat`
+        probes = eval_all([_appn(_PEEPHOLE_LATPROBE, it, nx)
+                           for it, nx in zip(items, nxs)])
+        is_lbl = [p.k != K.KONST for p in probes]
+        lat = _NIL
+        for p in probes:
+            if p.k != K.KONST:
+                lat = _appn(_CONS, p, lat)
+        # 2 — the pass under live-speculation: sk=KI ch=KI
+        recs = eval_all([_appn(_PEEPHOLE_STEP, ujl, rtl, sml,
+                               lat, _KI, _KI, nx, it)
+                         for it, nx in zip(items, nxs)])
+        fields = [(_l0_nf(app(r, _SEL_F), 200_000),
+                   _l0_nf(app(r, _SEL_S), 200_000),
+                   _l0_nf(app(r, _SEL_C), 200_000)) for r in recs]
+        # 3 — true-sk scan: a label's record ignores sk (emit +
+        # sk'=live); a dead non-label must be re-evaluated under sk=K
+        # — its skipit verdict comes from the term, not the seam.
+        dead = []
+        sk_dead = False
+        for j in range(n):
+            if is_lbl[j]:
+                sk_dead = False
+            elif sk_dead:
+                dead.append(j)
+            else:
+                sk_dead = fields[j][1].k == K.KONST
+        if dead:
+            rep = eval_all([_appn(_PEEPHOLE_STEP, ujl, rtl, sml,
+                                  lat, KK, _KI, nxs[j], items[j])
+                            for j in dead])
+            for j, r in zip(dead, rep):
+                recs[j] = r
+                fields[j] = (_l0_nf(app(r, _SEL_F), 200_000),
+                             _l0_nf(app(r, _SEL_S), 200_000),
+                             _l0_nf(app(r, _SEL_C), 200_000))
+        emitted: List[T] = []
+        changed = False
+        for j in range(n):
+            f = fields[j][0]
+            if f.k == K.KONST:          # K -> emit val
+                emitted.append(
+                    _l0_nf(app(recs[j], _SEL_V), 200_000))
+            elif f.k != K.APP:
+                raise ValueError(
+                    f"peephole step' returned non-flag: {f}")
+            if fields[j][2].k == K.KONST:   # ch' == K -> changed
+                changed = True
+            elif fields[j][2].k != K.APP:
+                raise ValueError(
+                    f"peephole pass returned non-bool: "
+                    f"{fields[j][2]}")
+        passes += 1
+        items = emitted    # emit-order IS program order — the monolith
+                           # conses onto `out` reversed then REVs; the
+                           # seam's append + forward iteration are that
+                           # same pair of inverses
+        if not changed:
+            flat = _NIL
+            for it in reversed(items):
+                flat = _appn(_CONS, it, flat)
+            # re-wrap as the frag list — peepholeOf's output shape
+            # (and assembleOf's input contract — decode_program too);
+            # the WRAP call's own normalization compiles the raw conses
+            nf, s, _ = run(app(_PEEP_WRAP, flat))
+            return nf, passes, total + s
+
+
+def peephole_fixpoint(prog: T, run) -> Tuple[T, int, int]:
+    """The seam fixpoint: `run` reduces one pass, the caller iterates
+    on the term's own `changed` flag — the oracle's `while changed`
+    loop lifted out so each pass stays a bounded fold (cd-safe).
+    `prog` is programOf's frag-list NF; pass 1 JOINs it.  Returns
+    (frag-list NF — the peepholeOf output shape — passes, metric)."""
+    cur = app(_join_t(), prog)
+    passes = 0
+    total = 0
+    while True:
+        nf, s, _ = run(peephole_pass_query(cur))
+        total += s
+        passes += 1
+        ch = _l0_nf(app(nf, KK), 200_000)
+        cur = _l0_nf(app(nf, _KI), 500_000)
+        if ch.k == K.APP:        # changed == (K I) -> converged
+            nf, s, _ = run(app(_PEEP_WRAP, cur))
+            return nf, passes, total + s
+        if ch.k != K.KONST:      # changed == K -> another pass
+            raise ValueError(f"peephole pass returned non-bool: {ch}")
+
+
+# G9i gate data — exercises all four rules plus their interaction:
+# fallthrough (jmp mid -> label mid), selfmove, threading through
+# `hop:` (jmp hop -> hop: jmp done), unreachable after jmp and ret.
+PEEP_MINI = [
+    [("label", "top"),
+     ("i", "jmp_rel32", ("l", "mid")),
+     ("label", "mid"),
+     ("i", "mov_r64_r64", "rax", "rax"),
+     ("i", "jmp_rel32", ("l", "hop")),
+     ("i", "add_r64_imm", "rcx", 1),
+     ("label", "hop"),
+     ("i", "jmp_rel32", ("l", "done")),
+     ("label", "done"),
+     ("i", "ret"),
+     ("i", "mov_r64_r64", "rbx", "rbx")],
+]
+PEEP_CASES = {
+    "mini": ("term", PEEP_MINI),
+    "win64": ("real", None),
+}
 # Vocabulary congruence — the CLA twin must Join the ripple on the
 # critical carry shapes (full wraparound cascade; mixed carries).
 # Lean proves b4add_b4cla_basis for ALL inputs (SpecVocabulary); this
@@ -2501,9 +2966,10 @@ def _l0_step(t: T) -> Optional[T]:
                 return app(flr, app(fr, x))
             if fll.k == K.SWAP:
                 return app(app(flr, x), fr)
-            if (fll.k == K.APP and fll.l is not None
-                    and fll.l.k == K.S):
-                return app(app(fll.r, x), app(flr, x))
+            # sβ: S f g x -> (f x)(g x) — fll is the S ATOM on the
+            # 3-arg spine, same convention as reduce.step
+            if fll.k == K.S:
+                return app(app(flr, x), app(fr, x))
     sf = _l0_step(f)
     if sf is not None:
         return app(sf, x)
@@ -2867,7 +3333,7 @@ CD_FUEL = 300_000
 
 
 VALID_GATES = ("G9a", "G9b", "G9b-emit", "G9c", "G9d", "G9e", "G9f",
-               "G9g", "G9h", "G9p")
+               "G9g", "G9h", "G9i", "G9p")
 
 
 def _residual_state():
@@ -3285,6 +3751,91 @@ def main() -> int:
         print(line)
 
     # ------------------------------------------------------------------
+    # G9i: peepholeOf — opt_peephole.optimize at term level.
+    #   mini exercises all four rules + their interaction on a hand-cut
+    #   fragment list and proves the whole square at once: in-term
+    #   fixpoint on lo ≡ seam-driven passes on lo ≡ the per-item
+    #   decomposed driver ≡ the oracle.  win64 runs the real
+    #   program(R) — 553 items — through the decomposed driver on the
+    #   emitted IR exe: the per-item queries batch (packed-IR dedups
+    #   the shared `lat` across roots; the kernel's per-root arena
+    #   reset bounds each query — the chase-heaviest item measured
+    #   ~3G cells under reclaim=none, everything else MB-scale).
+    #   sk/ch speculation + repair is how the batch parallelizes a
+    #   nominally sequential fold; every verdict still comes from a
+    #   term evaluation.  Measured end-to-end: 2 passes / 167M
+    #   exe-steps / ~6min vs the monolith's ~40M+ lo steps at ~6.5K
+    #   st/s (hours); the naive exe OOMs the monolithic fold at ~3.9K
+    #   cells/step; redirect exe ~250 steps/s; cd has no cones here —
+    #   MEMB/ALOOK/NTH are sequential scans (~10min on the 11-item
+    #   mini alone).  Per-item seam calls are the decompose_asm
+    #   pattern: same terms, fold bookkeeping at the boundary.
+    # ------------------------------------------------------------------
+    for cname, (kind, prog) in (
+            PEEP_CASES.items() if want("G9i") else ()):
+        import opt_peephole
+        if kind == "term":
+            items = [it for fr in prog for it in fr]
+            frags = fraglist_term(prog)
+        else:
+            R = seed.Realization()
+            items = python_program(R)
+            frags = None
+        expected = opt_peephole.optimize(items, "x86_64")
+        n_q += 1
+
+        if frags is not None:
+            # spec anchor: the in-term fixpoint under normal order.
+            nf_lo, steps_lo, _ = reduce_tree_lo(
+                peephole_query(frags), LO_FUEL)
+            val_lo = decode_program(nf_lo)
+            # seam congruence on the same case: the pass-level driver
+            # and the per-item decomposed driver must land the
+            # identical list NF.
+            nf_slo, np_slo, s_slo = peephole_fixpoint(
+                frags, lambda t: reduce_tree_lo(t, LO_FUEL))
+            nf_sdc, np_sdc, s_sdc = peephole_fixpoint_seamed(
+                frags, lambda t: reduce_tree_lo(t, LO_FUEL))
+            extra = (f" | seam {np_slo}p/{s_slo} decomp "
+                     f"{np_sdc}p/{s_sdc}")
+            seam_ok = (decode_program(nf_slo) == val_lo
+                       and decode_program(nf_sdc) == val_lo)
+        else:
+            # program stage NF on graph.lo first (~85K steps — the
+            # cheap stage), then the decomposed driver on the emitted
+            # IR exe: each item is a small bounded native reduction
+            # (~10-80K steps, MB-scale arena) — the monolithic fold
+            # OOM'd every native host at ~3.9K cells/step.
+            prog_nf, s_prog, _ = reduce_tree_lo(
+                program_query(R), LO_FUEL)
+            t0 = time.time()
+            import emit_chain as _ec
+            import toolchain as _tc
+            exe_run = _ec.make_ir_runner(
+                seed._exe_for(
+                    seed.Realization(fuel=8_000_000,
+                                     ir_arena_bytes=8 << 30),
+                    tc=_tc.by_name("native.x86_64.pe.ir")),
+                workers=4,
+                cache_dir=os.path.join(
+                    _HOST, "emit_work", "nf_cache", "peepitem"))
+            nf_lo, npass, tot = peephole_fixpoint_seamed(
+                prog_nf, exe_run)
+            val_lo = decode_program(nf_lo)
+            extra = (f" | program {s_prog} lo; {npass} passes/"
+                     f"{tot} exe steps in {fmt_dur(time.time()-t0)}")
+            seam_ok = True
+
+        ok = val_lo == expected and seam_ok
+        line = (f"{'OK ' if ok else 'FAIL'} {cname:18s} peephole -> "
+                f"{len(val_lo)} items (from {len(items)}) "
+                f"[oracle {len(expected)}{extra}]")
+        if not ok:
+            nfail += 1
+            line += f"  got {val_lo} expected {expected}"
+        print(line)
+
+    # ------------------------------------------------------------------
     # Vocabulary congruence: _B4CLA must Join _B4ADD — both reduce to
     # the b4_src literal of (a+b) mod 2^32.  Lean proves the Join for
     # all inputs (ISAR.b4add_b4cla_basis); here the host encoding is
@@ -3408,7 +3959,7 @@ def main() -> int:
                             timeout=600)
         res_lines = cp.stdout.decode().splitlines()
         print(f"  res exe: rc={cp.returncode} {len(res_lines)} lines "
-              f"in {time.time()-t0:.1f}s  {cp.stderr.decode().strip()}")
+              f"in {fmt_dur(time.time()-t0)}  {cp.stderr.decode().strip()}")
         if cp.returncode != 0 or len(res_lines) != len(names):
             nfail += 1
             print("FAIL residual exe contract "

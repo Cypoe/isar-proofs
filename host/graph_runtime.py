@@ -22,6 +22,18 @@ from reduce import K, T, I, KK, B, S, D, C, app as tree_app  # noqa: E402
 from tower import translate_to_basis, quote_surface  # noqa: E402
 
 
+def fmt_dur(s: float) -> str:
+    """Wall-clock render: us/ms below a second, seconds above —
+    `(0s)` lied about work that took 900ms."""
+    if s < 1e-3:
+        return f"{s * 1e6:.0f}us"
+    if s < 1:
+        return f"{s * 1e3:.0f}ms"
+    if s < 100:
+        return f"{s:.1f}s"
+    return f"{s:.0f}s"
+
+
 class Graph:
     __slots__ = (
         "kind", "varn", "left", "right", "fwd",
@@ -794,10 +806,11 @@ class Graph:
             self._tail_queue = []
 
 
-def reduce_tree_lo(t: T, fuel: int = 100_000) -> Tuple[T, int, int]:
+def reduce_tree_lo(t: T, fuel: int = 100_000,
+                   compact_every: int = 0) -> Tuple[T, int, int]:
     g = Graph()
     root = g.import_tree(t)
-    nf, steps = g.reduce(root, fuel=fuel)
+    nf, steps = g.reduce(root, fuel=fuel, compact_every=compact_every)
     return g.export_tree(nf), steps, g.alloc_count()
 
 

@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import os
 import re
 import subprocess
@@ -59,7 +60,7 @@ for _p in (_HOST, _SEED):
         sys.path.insert(0, _p)
 
 from reduce import T, I, KK, B, C, D, app        # noqa: E402
-from graph_runtime import Graph                  # noqa: E402
+from graph_runtime import Graph, fmt_dur         # noqa: E402
 from lambda_dialect import parse, bracket        # noqa: E402
 import seed                                      # noqa: E402
 import spec_term as st                           # noqa: E402
@@ -72,8 +73,9 @@ KI = app(KK, I)                                  # \a.\b.b — snd selector
 
 def _nf_to_text(nf: T) -> str:
     """NF term -> surface token stream (the wire the exes speak —
-    the same rep a serialized stage boundary carries)."""
-    return seed.bc_decompile(seed.t_from_host(nf))
+    space-separated postfix, the same rep a serialized stage
+    boundary carries and _parse_native_out reads back)."""
+    return " ".join(seed.bc_decompile(seed.t_from_host(nf)))
 
 
 def _nf_from_text(text: str) -> T:
@@ -91,6 +93,79 @@ def _graph_run(t: T, fuel: int = st.LO_FUEL,
     nf_i, steps = g.reduce(g.import_tree(t), fuel=fuel,
                            compact_every=compact_every)
     return g.export_tree(nf_i), steps, g.alloc_count()
+
+
+def make_graph_runner(fuel: int = st.LO_FUEL,
+                      compact_every: int = 200_000,
+                      cache_dir: Optional[str] = None
+                      ) -> Callable[[T], Tuple[T, int, int]]:
+    """graph.lo stage runner in the same (T)->(T, steps, nodes) seam
+    shape as the exe pools — the pinned host for deep sequential
+    folds (the exes' immutable-cell rebuild model OOMs on them;
+    measured: 735K-step peephole term needs >2.8G cells).
+
+    cache_dir content-addresses stage NFs by the query term's
+    packed-IR Merkle digest — the same digest the exe seam uses, so
+    an NF derived once (by ANY host writing this format) is served
+    to every later run: the serialized stage boundary as a store."""
+    if cache_dir is not None:
+        os.makedirs(cache_dir, exist_ok=True)
+
+    def run(t: T) -> Tuple[T, int, int]:
+        p = None
+        if cache_dir is not None:
+            p = os.path.join(cache_dir,
+                             st.pack_ir_keyed(t)[1][0] + ".nf")
+            try:
+                with open(p) as f:
+                    return _nf_from_text(f.read()), -1, -1
+            except OSError:
+                pass
+        nf, s, n = _graph_run(t, fuel=fuel,
+                              compact_every=compact_every)
+        if p is not None:
+            with open(p, "w") as f:
+                f.write(_nf_to_text(nf))
+        return nf, s, n
+
+    def batch(qs: List[T]) -> Tuple[List[T], int, int]:
+        """Sequential batch — same queries, same cache keys; the
+        batch seam is transport, not scheduling (this runner has no
+        parallel streams to fill)."""
+        nfs, tot = [], 0
+        for q in qs:
+            nf, s, _ = run(q)
+            nfs.append(nf)
+            tot += s
+        return nfs, tot, -1
+    run.batch = batch
+    return run
+
+
+_PEEP_ITEM_RUN = None
+
+
+def _peephole_item_runner():
+    """The per-item exe runner for the decomposed peephole stage —
+    each `step acc it` call is a small bounded term that fits the
+    emitted kernel's arena (the monolithic fold OOMs it).  Lazily
+    built: the leg emits the exe on first use."""
+    global _PEEP_ITEM_RUN
+    if _PEEP_ITEM_RUN is None:
+        _PEEP_ITEM_RUN = make_ir_runner(
+            seed._exe_for(
+                seed.Realization(fuel=8_000_000, audit=_AUDIT,
+                                 # chase-heavy single items legitimately
+                                 # reach ~3G cells under reclaim=none
+                                 # (commit-ahead: untouched pages free);
+                                 # per-root DECOMMIT reset keeps the
+                                 # batch footprint at the worst root
+                                 ir_arena_bytes=8 << 30),
+                tc=toolchain.by_name("native.x86_64.pe.ir")),
+            workers=4,
+            cache_dir=os.path.join(_HOST, "emit_work", "nf_cache",
+                                   "peepitem"))
+    return _PEEP_ITEM_RUN
 
 
 def _graph_cd_run(t: T, rounds: int = st.CD_FUEL
@@ -253,9 +328,9 @@ def make_ir_runner(exe: str, timeout: int = 3600,
             f"ir.batch roots={len(qs)} hits={hits} "
             f"misses={len(miss_at)} "
             f"workers={min(max(1, workers), max(1, len(miss_at)))} "
-            f"pack_s={pack_s:.2f} wire={wire / 1e6:.2f}MB "
-            f"exe_s={exe_s:.2f} pool_wall_s={pool_wall:.2f} "
-            f"steps={steps} wall_s={time.time() - t_all:.2f}{rule_str}")
+            f"pack={fmt_dur(pack_s)} wire={wire / 1e6:.2f}MB "
+            f"exe={fmt_dur(exe_s)} pool_wall={fmt_dur(pool_wall)} "
+            f"steps={steps} wall={fmt_dur(time.time() - t_all)}{rule_str}")
         outs = [seed._parse_native_out(ln) for ln in lines]
         if fuse_s:
             # fuse_s NFs keep primitive-S leaves; lower to the
@@ -427,22 +502,55 @@ def _src(fn) -> str:
     return hashlib.sha256(inspect.getsource(fn).encode("utf-8")).hexdigest()
 
 
+def _ck_label(R: seed.Realization, host_name: str) -> str:
+    """Readable key prefix: host triplet + the strategy knobs that
+    change artifacts — `x86_64.pe.peephole.<hash>` beats an opaque
+    buildstamp; the content hash stays the uniqueness, the label is
+    the provenance."""
+    flags: List[str] = []
+    if getattr(R, "fuse_s", False):
+        flags.append("fuse_s")
+    if getattr(R, "peephole", False):
+        flags.append("peephole")
+    if R.order != "lo":
+        flags.append(str(R.order))
+    if getattr(R, "io", ("stdin", "stdout")) != ("stdin", "stdout"):
+        flags.append("io_" + "-".join(R.io))
+    if getattr(R, "reclaim", "none") not in (None, "none"):
+        flags.append(str(R.reclaim))
+    if R.fuel is not None:
+        flags.append("fuel%d" % R.fuel)
+    base = (host_name or "host").replace("native.", "").replace(".", "-")
+    return base + "." + (".".join(flags) if flags else "plain")
+
+
 def _ck_keys(R: seed.Realization, imports, slots,
-             text_base: int) -> Dict[str, str]:
+             text_base: int, host_name: str = "") -> Dict[str, str]:
     """Content keys for the four checkpointed artifacts, keyed on the
     stage INPUTS (the packed-IR digest of each stage's root term, the
     realization knobs that change it, and the producing code's source)
-    — a stale file can't survive an input or code change."""
-    prog = _stage_key(st.pack_ir_keyed(st.program_query(R))[1][0],
+    — a stale file can't survive an input or code change.  Keys carry
+    a readable <triplet>.<strategy>. prefix so `ls emit_work` says who
+    built what; the 16-hex suffix is still the content proof."""
+    pre = _ck_label(R, host_name)
+    prog_q = st.program_query(R)
+    if getattr(R, "peephole", False):
+        # the program.items checkpoint holds the OPTIMIZED items for a
+        # peephole realization — key on the stage's real input term or
+        # an unpeepholed run's file would be served
+        prog_q = st.peephole_query(prog_q)
+    prog = _stage_key(pre, st.pack_ir_keyed(prog_q)[1][0],
                       "fuse_s=%d" % R.fuse_s, _src(st.decode_program))
-    link = _stage_key(st.pack_ir_keyed(st.link_query(imports, slots))[1][0],
+    link = _stage_key(pre,
+                      st.pack_ir_keyed(st.link_query(imports, slots))[1][0],
                       _src(st.decode_link))
     text = _stage_key(prog, link, "base=%d" % text_base,
                       _src(assemble_staged))
     image = _stage_key(text, link, "stackres=%d" % R.stack_reserve,
                        _src(pack_staged))
-    return {"program.items": prog, "link.sections": link,
-            "text.bin": text, "image.bin": image}
+    return {"program.items": f"{pre}.{prog}",
+            "link.sections": f"{pre}.{link}",
+            "text.bin": f"{pre}.{text}", "image.bin": f"{pre}.{image}"}
 
 
 def emit_image(R: seed.Realization,
@@ -454,6 +562,7 @@ def emit_image(R: seed.Realization,
                decompose_asm: bool = False,
                decompose_pack: bool = False,
                workdir: Optional[str] = None,
+               label: str = "",
                verbose: bool = True) -> Tuple[bytes, List[tuple]]:
     """Emit the host image for R via the staged term chain.
 
@@ -473,9 +582,6 @@ def emit_image(R: seed.Realization,
     Returns (image_bytes, stage_report) where stage_report lists
     (stage, steps, arena_nodes) per reduction.
     """
-    if getattr(R, "peephole", False):
-        raise seed.NotRealized(
-            "peephole: staged chain has no peepholeOf stage")
     report: List[tuple] = []
     runs = dict(stage_runs or {})
     if bytes_run is not None:
@@ -489,7 +595,7 @@ def emit_image(R: seed.Realization,
         report.append((name, s, n))
         if verbose:
             print(f"    {name}: {s} steps / {n} nodes "
-                  f"({time.time()-t0:.0f}s)", flush=True)
+                  f"({fmt_dur(time.time()-t0)})", flush=True)
         return nf
 
     # stages 1/2 are lazy — a resumed run whose seams are already
@@ -499,6 +605,21 @@ def emit_image(R: seed.Realization,
     def _prog_nf() -> T:
         if "program" not in _nfs:
             _nfs["program"] = _stage("program", st.program_query(R))
+            if getattr(R, "peephole", False):
+                # G9i: peepholeOf staged as SEAM-DECOMPOSED per-item
+                # reductions — decompose_asm's contract (same term,
+                # fold bookkeeping at the boundary).  Each `step`/
+                # `latstep` call is a small bounded term that fits
+                # the emitted kernel's arena; the monolithic fold
+                # OOM'd every native host at ~3.9K cells/step and
+                # cd replays the sequential scan chains at a worse
+                # constant — measured, not theorized.
+                runs.setdefault("peephole", lambda p: (
+                    lambda r: (r[0], r[2], r[1]))(
+                        st.peephole_fixpoint_seamed(
+                            p, runs.get("peephole_item")
+                            or _peephole_item_runner())))
+                _nfs["program"] = _stage("peephole", _nfs["program"])
         return _nfs["program"]
 
     def _link_nf() -> T:
@@ -529,6 +650,18 @@ def emit_image(R: seed.Realization,
         v = produce()
         if p:
             save(p, v)
+            # provenance sidecar — the content key says WHAT it is,
+            # the meta says who/when (the hash alone is opaque)
+            try:
+                with open(p + ".meta", "w") as mf:
+                    json.dump({
+                        "artifact": name, "key": key,
+                        "created_utc": time.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "realization": repr(R),
+                    }, mf)
+            except OSError:
+                pass
         return v
 
     if decompose_asm:
@@ -542,7 +675,8 @@ def emit_image(R: seed.Realization,
             with open(p, "rb") as f:
                 return pickle.load(f)
 
-        keys = _ck_keys(R, imports, slots, text_base) if workdir else {}
+        keys = _ck_keys(R, imports, slots, text_base,
+                        host_name=label) if workdir else {}
 
         t0 = time.time()
         items = _ck("program.items", keys.get("program.items", ""),
@@ -558,7 +692,7 @@ def emit_image(R: seed.Realization,
         report.append(("assemble*", -1, -1))
         if verbose:
             print(f"    assemble*: decomposed {len(items)} items "
-                  f"({time.time()-t0:.0f}s)", flush=True)
+                  f"({fmt_dur(time.time()-t0)})", flush=True)
         text_t = st.bytelist_term(text)
         idata_t, datab_t = st.bytelist_term(ib), st.bytelist_term(db)
         if decompose_pack:
@@ -572,7 +706,7 @@ def emit_image(R: seed.Realization,
             report.append(("pack*", -1, -1))
             if verbose:
                 print(f"    pack*: decomposed {len(img)}B "
-                      f"({time.time()-t0:.0f}s)", flush=True)
+                      f"({fmt_dur(time.time()-t0)})", flush=True)
             report.append(("ckpt", ckpt[0], ckpt[1]))
             return img, report
     else:
@@ -683,14 +817,14 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
         n_red += len(uq)
         if verbose:
             print(f"      pass1: {n_red} encodes (1 batch) "
-                  f"({time.time()-t0:.0f}s)", flush=True)
+                  f"({fmt_dur(time.time()-t0)})", flush=True)
     else:
         for it in uq:
             uniq[it] = _enc_b(run(_enc_q(it))[0])
             n_red += 1
             if verbose and n_red % 50 == 0:
                 print(f"      pass1: {n_red} encodes "
-                      f"({time.time()-t0:.0f}s)", flush=True)
+                      f"({fmt_dur(time.time()-t0)})", flush=True)
     pos = 0
     for it in items:
         if it[0] == "label":
@@ -719,7 +853,7 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
             n_red += len(rel)
             if verbose:
                 print(f"      pass2: {n_red} encodes (1 batch) "
-                      f"({time.time()-t0:.0f}s)", flush=True)
+                      f"({fmt_dur(time.time()-t0)})", flush=True)
         else:
             for i, it in rel:
                 e4 = st.bytelist_term(
@@ -731,7 +865,7 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
                 n_red += 1
                 if verbose and n_red % 50 == 0:
                     print(f"      pass2: {n_red} encodes "
-                          f"({time.time()-t0:.0f}s)", flush=True)
+                          f"({fmt_dur(time.time()-t0)})", flush=True)
     out = bytearray()
     for i, (it, off, ln, b0) in enumerate(prep):
         out += b0
@@ -987,7 +1121,7 @@ def _g16_egress() -> bool:
     print(f"{'OK ' if good else 'FAIL'} egress corpus: "
           f"{len(all_roots)} roots, {sum(len(b) for b in got)}B, "
           f"steps={steps} alloc={alloc} dec={brun.stats['dec']} "
-          f"(graph {time.time()-t0:.0f}s)", flush=True)
+          f"(graph {fmt_dur(time.time()-t0)})", flush=True)
 
     # term-mode kernel on the same blob: NF lines decoded by Python
     # must equal the framed bytes — the two egress modes agree
@@ -1050,7 +1184,7 @@ def main() -> int:
     good = got == want_mini
     ok = ok and good
     print(f"{'OK ' if good else 'FAIL'} mini on graph.lo: "
-          f"{len(got)}B == {len(want_mini)}B ({time.time()-t0:.0f}s) "
+          f"{len(got)}B == {len(want_mini)}B ({fmt_dur(time.time()-t0)}) "
           + "  ".join(f"{n}:{s}st" for n, s, _ in report), flush=True)
 
     if "--on-exe" in sys.argv[1:]:
@@ -1077,7 +1211,7 @@ def main() -> int:
             stages = "  ".join(f"{n}:{s}st" for n, s, _ in report)
             print(f"{'OK ' if good else 'FAIL'} on-exe[{tag}] mini: "
                   f"{len(got)}B == {len(want_mini)}B "
-                  f"({time.time()-t0:.0f}s)  {stages}", flush=True)
+                  f"({fmt_dur(time.time()-t0)})  {stages}", flush=True)
 
     # keyed-checkpoint refusal: the same R twice must give identical
     # keys, a different R must give a different PROG key, and a file
@@ -1105,8 +1239,14 @@ def main() -> int:
         # spine holds all section intermediates); decomposed chunks are
         # small enough for the default LO runner.  cd+compact is the
         # monolithic alternative ("pack": _graph_cd_run).
-        for tag, R in (("default", seed.Realization()),
-                       ("fuse_s", seed.Realization(fuse_s=True))):
+        legs = [("default", seed.Realization()),
+                ("fuse_s", seed.Realization(fuse_s=True))]
+        if "--peephole" in sys.argv[1:]:
+            # G9i/G10 leg: staged peepholeOf vs the seed route's
+            # opt_peephole — the images must be byte-equal.
+            legs.append(("peephole",
+                         seed.Realization(peephole=True)))
+        for tag, R in legs:
             # per-realization stage runners — a fuse_s leg must run on
             # the fuse_s kernel (derived-S view differs), not just when
             # checkpoints happen to be cold
@@ -1181,6 +1321,11 @@ def main() -> int:
                             fuse_s=R.fuse_s)
                         sr["program"] = red_runner
                         sr["link"] = red_runner
+                        # the peephole item runner stays on the naive
+                        # exe even under --ir-redir: per-item calls
+                        # are small bounded terms (the deep-fold OOM
+                        # profile doesn't apply) — redirect's ~250
+                        # steps/s is pure cost there.
                     # else program/link stay on graph.lo: on the naive
                     # exe they blow a 48GB arena — reclaim="none"
                     # retains every redex forever; --ir-redir is the
@@ -1202,7 +1347,8 @@ def main() -> int:
                 os.makedirs(wd, exist_ok=True)
             got, report = emit_image(R, decompose_asm=True,
                                      decompose_pack=True,
-                                     stage_runs=sr, workdir=wd)
+                                     stage_runs=sr, workdir=wd,
+                                     label="native.x86_64.pe")
             del _tmp
             good = got == want
             ok = ok and good
@@ -1212,7 +1358,7 @@ def main() -> int:
                       ("ckpt", 0, 0))
             print(f"{'OK ' if good else 'FAIL'} emit_chain {tag}: "
                   f"{len(got)}B == {len(want)}B  "
-                  f"({time.time()-t0:.0f}s)  {stages}  "
+                  f"({fmt_dur(time.time()-t0)})  {stages}  "
                   f"ckpt hits={ck[1]}/{ck[1] + ck[2]}", flush=True)
             if not good:
                 k = next((i for i, (a, b) in enumerate(zip(got, want))
@@ -1222,13 +1368,6 @@ def main() -> int:
 
     if "--egress" in sys.argv[1:]:
         ok = _g16_egress() and ok
-
-    try:
-        emit_image(seed.Realization(peephole=True))
-        print("FAIL peephole leg emitted silently")
-        ok = False
-    except seed.NotRealized as e:
-        print(f"ok refused peephole (staged): {e}")
 
     print(f"{'OK' if ok else 'FAIL'} emit_chain "
           f"(seed emits its own host)")

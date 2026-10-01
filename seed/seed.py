@@ -345,10 +345,10 @@ class Realization:
                                       # `rules=` histogram (redex classes +
                                       # congruence descents) — the instrumented
                                       # baseline for evaluator audits
-    peephole: bool = False            # Program-level peephole (host/opt_peephole)
-                                      # — seed route only; the staged chain has
-                                      # no peepholeOf stage yet, so emit_chain
-                                      # refuses it
+    peephole: bool = False            # Program-level peephole (host/opt_peephole
+                                      # on the seed route, spec_term.peepholeOf
+                                      # on the staged chain — G9i gates them
+                                      # equal)
     payload: bytes = b""              # residual programs: packed-IR blob baked
                                       # into .data as initialized bytes —
                                       # the specialized program's static part
@@ -385,8 +385,8 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
     # self-move) — generic over ISAs via per-ISA classification data in
     # host/opt_peephole.  The resid kernel's graft loop is specialized
     # separately at the routine-builder level (res_remap inlined,
-    # invariants hoisted).  Seed route only: the staged chain has no
-    # peepholeOf stage — emit_chain refuses it.
+    # invariants hoisted).  On the staged chain peepholeOf runs the same
+    # rewrites as a term-level stage (emit_chain, G9i).
     if R.peephole:
         import opt_peephole
         prog = opt_peephole.optimize(prog, isa.name)
