@@ -524,23 +524,48 @@ def _ck_label(R: seed.Realization, host_name: str) -> str:
     return base + "." + (".".join(flags) if flags else "plain")
 
 
+def _pass_src(passes) -> str:
+    """Key material for a per-routine pass chain — the pass names plus
+    the generating source of any term built from code, so editing the
+    pass invalidates the fragments that ran it."""
+    parts = list(passes)
+    if "peephole" in passes:
+        parts.append(st._peephole_pass_src())
+    return "|".join(parts)
+
+
 def _ck_keys(R: seed.Realization, imports, slots,
-             text_base: int, host_name: str = "") -> Dict[str, str]:
-    """Content keys for the four checkpointed artifacts, keyed on the
-    stage INPUTS (the packed-IR digest of each stage's root term, the
+             text_base: int, host_name: str = "",
+             routines=None, passes=()) -> Dict[str, str]:
+    """Content keys for the checkpointed artifacts, keyed on the stage
+    INPUTS (the packed-IR digest of each stage's root term, the
     realization knobs that change it, and the producing code's source)
     — a stale file can't survive an input or code change.  Keys carry
     a readable <triplet>.<strategy>. prefix so `ls emit_work` says who
-    built what; the 16-hex suffix is still the content proof."""
+    built what; the 16-hex suffix is still the content proof.
+
+    Per-routine `program.<name>` keys are the query-engine
+    invalidation unit: editing one builder changes one digest, so one
+    fragment re-reduces while the rest hit.  `program.items` keys on
+    the joined routine keys (plus the whole-program peephole marker
+    when set — that pass runs on the frag-list, after the per-frag
+    stage, so it doesn't disturb the per-frag keys)."""
+    routines = rts.ROUTINES if routines is None else routines
     pre = _ck_label(R, host_name)
-    prog_q = st.program_query(R)
-    if getattr(R, "peephole", False):
-        # the program.items checkpoint holds the OPTIMIZED items for a
-        # peephole realization — key on the stage's real input term or
-        # an unpeepholed run's file would be served
-        prog_q = st.peephole_query(prog_q)
-    prog = _stage_key(pre, st.pack_ir_keyed(prog_q)[1][0],
-                      "fuse_s=%d" % R.fuse_s, _src(st.decode_program))
+    psrc = _pass_src(passes)
+    keys: Dict[str, str] = {}
+    rkeys = []
+    for name in routines:
+        rk = _stage_key(pre, st.pack_ir_keyed(
+            st.routine_query(name, R, passes))[1][0],
+                        "fuse_s=%d" % R.fuse_s,
+                        _src(rts._BUILDERS[name]), psrc,
+                        _src(st.decode_frag))
+        rkeys.append(rk)
+        keys[f"program.{name}"] = f"{pre}.{rk}"
+    prog = _stage_key(pre, *rkeys,
+                      "peephole=%d" % getattr(R, "peephole", False),
+                      _src(st.decode_program))
     link = _stage_key(pre,
                       st.pack_ir_keyed(st.link_query(imports, slots))[1][0],
                       _src(st.decode_link))
@@ -548,9 +573,11 @@ def _ck_keys(R: seed.Realization, imports, slots,
                       _src(assemble_staged))
     image = _stage_key(text, link, "stackres=%d" % R.stack_reserve,
                        _src(pack_staged))
-    return {"program.items": f"{pre}.{prog}",
-            "link.sections": f"{pre}.{link}",
-            "text.bin": f"{pre}.{text}", "image.bin": f"{pre}.{image}"}
+    keys.update({"program.items": f"{pre}.{prog}",
+                 "link.sections": f"{pre}.{link}",
+                 "text.bin": f"{pre}.{text}",
+                 "image.bin": f"{pre}.{image}"})
+    return keys
 
 
 def emit_image(R: seed.Realization,
@@ -560,6 +587,8 @@ def emit_image(R: seed.Realization,
                stage_runs: Optional[dict] = None,
                bytes_run: Optional[Callable] = None,
                term_run: Optional[Callable] = None,
+               routines=None,
+               passes: Tuple[str, ...] = (),
                decompose_asm: bool = False,
                decompose_pack: bool = False,
                workdir: Optional[str] = None,
@@ -608,6 +637,13 @@ def emit_image(R: seed.Realization,
             f"emit_image: programOf realizes only fs/fuel/rbb/cb/nb/"
             f"stack_reserve/peephole; non-default {sorted(_bad)} needs "
             f"an extended programOf or a different routines record")
+    if (passes or (routines is not None
+                   and tuple(routines) != tuple(rts.ROUTINES))) \
+            and not decompose_asm:
+        raise toolchain.NotRealized(
+            "emit_image: `passes`/`routines` are per-routine stage "
+            "parameters — the monolithic assemble path has no chain "
+            "entry point; set decompose_asm=True")
     if text_base is None:
         # .text is emitted last in the image — its RVA is a function of
         # the (already fixed) idata/data layout, not a constant.
@@ -680,6 +716,7 @@ def emit_image(R: seed.Realization,
                 print(f"    [ckpt miss] {name} {key}", flush=True)
         v = produce()
         if p:
+            os.makedirs(workdir, exist_ok=True)
             save(p, v)
             # provenance sidecar — the content key says WHAT it is,
             # the meta says who/when (the hash alone is opaque)
@@ -707,12 +744,57 @@ def emit_image(R: seed.Realization,
                 return pickle.load(f)
 
         keys = _ck_keys(R, imports, slots, text_base,
-                        host_name=label) if workdir else {}
+                        host_name=label, routines=routines,
+                        passes=passes) if workdir else {}
+        routines = rts.ROUTINES if routines is None else routines
+
+        def _frag_items(name: str) -> list:
+            """one routine query -> decoded frag items."""
+            nf, s, n = runs.get("program", run)(
+                st.routine_query(name, R, passes))
+            report.append((f"program.{name}", s, n))
+            if verbose:
+                print(f"      program.{name}: {s} steps / {n} nodes",
+                      flush=True)
+            return st.decode_frag(nf)
+
+        def _prog_items() -> list:
+            if getattr(R, "peephole", False):
+                # the whole-program pass needs the frag-LIST NF —
+                # cons the per-routine frag NFs back into
+                # programOf's shape and run the seamed fixpoint.
+                # Per-frag ckpts hold the PRE-pass items (the pass's
+                # real input), so they stay valid under either
+                # peephole setting.
+                fragl: T = KK
+                for name in reversed(routines):
+                    q = st.routine_query(name, R, passes)
+                    t0r = time.time()
+                    nf, s, n = runs.get("program", run)(q)
+                    report.append((f"program.{name}", s, n))
+                    if verbose:
+                        print(f"      program.{name}: {s} steps / "
+                              f"{n} nodes ({fmt_dur(time.time()-t0r)})",
+                              flush=True)
+                    fragl = app(app(st._CONS, nf), fragl)
+                prog_nf, npass, met = st.peephole_fixpoint_seamed(
+                    fragl, runs.get("peephole_item")
+                    or _peephole_item_runner())
+                report.append(("peephole", met, npass))
+                if verbose:
+                    print(f"    peephole: {npass} passes", flush=True)
+                return st.decode_program(prog_nf)
+            out: List[tuple] = []
+            for name in routines:
+                out.extend(_ck(f"program.{name}",
+                               keys.get(f"program.{name}", ""),
+                               lambda name=name: _frag_items(name),
+                               _dump, _load))
+            return out
 
         t0 = time.time()
         items = _ck("program.items", keys.get("program.items", ""),
-                    lambda: st.decode_program(_prog_nf()),
-                    _dump, _load)
+                    _prog_items, _dump, _load)
         ib, db, syms = _ck("link.sections", keys.get("link.sections", ""),
                            lambda: st.decode_link(_link_nf()),
                            _dump, _load)

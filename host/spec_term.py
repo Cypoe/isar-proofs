@@ -211,7 +211,7 @@ import struct
 import sys
 import time
 from types import SimpleNamespace
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -1410,6 +1410,96 @@ def program_query(R) -> T:
     return _appn(PROGRAM_OF, TRUE_T if R.fuse_s else FALSE_T, fuel,
                  _le8(R.read_buf_bytes), _le8(R.chunk_bytes),
                  _le8(R.node_bytes))
+
+
+def routine_expr(name: str) -> NExpr:
+    """λfs λfuel λrbb λcb λnb. <routine frag> — one routine's emission
+    unit, the query-engine fragment: the same sentinel-diff splices as
+    program_expr, scoped to a single routine so the term (and its
+    checkpoint) is per-routine.  The NF is the frag itself — the
+    routine's item list — so concat of per-routine decodes is exactly
+    decode_program's output.  fs-conditional routines (st_s emits iff
+    fuse_s, build_ds iff not) keep that selection in-term: they
+    produce their frag or NIL, never a different signature."""
+    rts = routines_x86_64_win64
+    ctx = rts._ctx()
+    R_def = seed.Realization(**_R_SENT)
+    R_fs = seed.Realization(fuse_s=True, **_R_SENT)
+    R_fu = seed.Realization(fuel=-0x4444, **_R_SENT)
+    b = rts._BUILDERS[name]
+    f_def, f_fs, f_fu = b(R_def, ctx), b(R_fs, ctx), b(R_fu, ctx)
+    if name == "st_s":                            # emits iff fuse_s
+        body: NExpr = NApp(
+            NApp(NVar("fs"),
+                 _nlist([_item_expr(i) for i in f_fs])), _NIL_E)
+    elif name == "build_ds":                      # emits iff not fuse_s
+        body = NApp(
+            NApp(NVar("fs"), _NIL_E),
+            _nlist([_item_expr(i) for i in f_def]))
+    else:
+        regs = (_regions(f_def, f_fs), _regions(f_def, f_fu))
+        body = _splice(f_def, regs, _NIL_E)
+    return NAbs("fs", NAbs("fuel", NAbs("rbb", NAbs("cb",
+                                                  NAbs("nb", body)))))
+
+
+_ROUTINE_OF: Dict[str, T] = {}
+
+
+def routine_of(name: str) -> T:
+    """bracket(routine_expr(name)) memoized per routine — the fragment
+    constants are built lazily and independently, so editing one
+    routine's builder never rebuilds the others' terms."""
+    t = _ROUTINE_OF.get(name)
+    if t is None:
+        t = _ROUTINE_OF[name] = bracket(routine_expr(name))
+    return t
+
+
+def _peephole_frag_term() -> T:
+    """frag→frag pass term: λf. snd(PEEPHOLE_PASS ujl rtl sml f) —
+    the pass's pair(changed, items) projected to the item list so it
+    composes in a frag-level chain.  `changed` is reported separately
+    by the fixpoint driver, not needed inside the chain."""
+    ujl, rtl, sml = _peephole_cls_terms()
+    snd = bracket_abstract0(parse("\\p. p (\\a. \\b. b)"))
+    return app(app(B, snd), _appn(_g("_PEEPHOLE_PASS"), ujl, rtl, sml))
+
+
+_PASS_BUILDERS: Dict[str, Callable[[], T]] = {
+    "id": lambda: I,
+    "peephole": _peephole_frag_term,
+}
+_PASS_TERMS: Dict[str, T] = {}
+
+
+def pass_term(name: str) -> T:
+    """PASS_TABLE — named frag→frag passes as data.  Unknown names
+    refuse explicitly; a misspelled pass must not silently become
+    identity."""
+    t = _PASS_TERMS.get(name)
+    if t is None:
+        b = _PASS_BUILDERS.get(name)
+        if b is None:
+            raise ValueError(f"unknown pass {name!r} "
+                             f"(have {sorted(_PASS_BUILDERS)})")
+        t = _PASS_TERMS[name] = b()
+    return t
+
+
+def routine_query(name: str, R, passes: Tuple[str, ...] = ()) -> T:
+    """`routineOf_<name> fs fuel rbb cb nb` wrapped in the routine's
+    pass chain: passes listed in pipeline order, each applied to the
+    routine's frag — `chain [p1,p2] f = p2(p1(f))`.  Every pass is a
+    real term reduction on the frag; the spine is data at the
+    boundary."""
+    fuel = KK if R.fuel is None else app(_JUST, _le8(R.fuel))
+    q = _appn(routine_of(name), TRUE_T if R.fuse_s else FALSE_T,
+              fuel, _le8(R.read_buf_bytes), _le8(R.chunk_bytes),
+              _le8(R.node_bytes))
+    for p in passes:
+        q = app(pass_term(p), q)
+    return q
 
 
 # ---------------------------------------------------------------------------
@@ -3219,27 +3309,34 @@ def _decode_op(op: T):
     raise ValueError(f"bad operand tag {tag!r}")
 
 
+def decode_frag(nf: T) -> list:
+    """frag NF (one routine's item list) -> "label"/"i" tuples."""
+    out = []
+    while nf.k != K.KONST:
+        item, nf = _cell_parts(nf)
+        tag_t, rest = _cell_parts(item)
+        tag = _decode_str(tag_t)
+        if tag == "label":
+            out.append(("label", _decode_str(_cell_parts(rest)[0])))
+            continue
+        if tag != "i":
+            raise ValueError(f"bad item tag {tag!r}")
+        form_t, ops_l = _cell_parts(rest)
+        ops = []
+        while ops_l.k != K.KONST:
+            op, ops_l = _cell_parts(ops_l)
+            ops.append(_decode_op(op))
+        out.append(tuple(["i", _decode_str(form_t)] + ops))
+    return out
+
+
 def decode_program(nf: T) -> list:
     """NF -> the flat program item list ("label"/"i" tuples); the term
     emits a list of routine fragments — decoded by flattening."""
     out = []
     while nf.k != K.KONST:
         frag, nf = _cell_parts(nf)
-        while frag.k != K.KONST:
-            item, frag = _cell_parts(frag)
-            tag_t, rest = _cell_parts(item)
-            tag = _decode_str(tag_t)
-            if tag == "label":
-                out.append(("label", _decode_str(_cell_parts(rest)[0])))
-                continue
-            if tag != "i":
-                raise ValueError(f"bad item tag {tag!r}")
-            form_t, ops_l = _cell_parts(rest)
-            ops = []
-            while ops_l.k != K.KONST:
-                op, ops_l = _cell_parts(ops_l)
-                ops.append(_decode_op(op))
-            out.append(tuple(["i", _decode_str(form_t)] + ops))
+        out.extend(decode_frag(frag))
     return out
 
 
