@@ -3637,7 +3637,7 @@ def _pack_ir_all(*roots: T, pinned: Optional[Dict[int, tuple]] = None):
                 pn = pinned.get(tid)
                 if pn is not None:
                     stack.pop()
-                    nblob, nn, rt_i, rd = pn
+                    nblob, nn, rt_i, rd = pn[:4]  # pn[4] = owner ref
                     base = len(digs)
                     nodes += _rebase_ir_nodes(nblob, nn, base)
                     digs.extend([rd] * nn)
@@ -3700,12 +3700,16 @@ def pack_ir_keyed(*roots: T, pinned: Optional[Dict[int, tuple]] = None):
 def pin_term(t: T, pinned: Optional[Dict[int, tuple]] = None):
     """One canonical pack of `t`; registers id(t) in `pinned` so every
     later _pack_ir_all splices the blob instead of re-walking the
-    subgraph.  Returns (node_stream, root_index, root_digest_bytes) —
+    subgraph.  The entry OWNS `t` — the pin table is keyed by object
+    identity, so dropping the reference would let a fresh term reuse
+    the address and a wrong blob would splice into an unrelated
+    query (observed: resolver misses → 0-end rel32s; at scale, exe
+    OOM).  Returns (node_stream, root_index, root_digest_bytes) —
     callers truncate for display; the splice needs all 32 bytes."""
     nodes, idx, digs = _pack_ir_all(t)
     if pinned is not None:
         pinned[id(t)] = (bytes(nodes), len(digs), idx[0],
-                         digs[idx[0]])
+                         digs[idx[0]], t)
     return bytes(nodes), idx[0], digs[idx[0]]
 
 

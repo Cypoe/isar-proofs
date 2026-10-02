@@ -539,7 +539,7 @@ class BlobStore:
             with open(path, "rb") as f:
                 blob, nn, root = st.unpack_ir_pin(f.read())
             self.pins[id(t)] = (blob, nn, root,
-                                bytes.fromhex(meta["digest"]))
+                                bytes.fromhex(meta["digest"]), t)
             self.hits += 1
             return meta["digest"][:32]
         blob, root, rd = st.pin_term(t, self.pins)
@@ -562,6 +562,22 @@ class BlobStore:
         """Ephemeral pin — register for splice, no disk."""
         _b, _r, rd = st.pin_term(t, self.pins)
         return rd.hex()[:32]
+
+    def digest_of(self, key: str, build) -> str:
+        """Root digest of a lazily-built term, content-addressed by
+        `key`.  Disk hit: reads the .meta sidecar only — no term is
+        built, no walk is paid (the key must cover everything that
+        determines the term: builder source, axes, pass material).
+        Miss: builds via thunk, pins, stores, returns the digest."""
+        tok = "b" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        mp = os.path.join(self.dir, tok + ".ir.meta") if self.dir \
+            else None
+        if mp and os.path.exists(mp):
+            with open(mp) as f:
+                self.hits += 1
+                return json.load(f)["digest"][:32]
+        self.misses += 1
+        return self.pin_named(key, build())
 
 
 def _stage_key(*parts) -> str:
@@ -617,7 +633,8 @@ def _ck_keys(R: seed.Realization, imports, slots,
              text_base: int, host_name: str = "",
              routines=None, passes=(), fixed=None,
              ir_ctx: bool = False,
-             pinned: Optional[Dict[int, tuple]] = None) -> Dict[str, str]:
+             pinned: Optional[Dict[int, tuple]] = None,
+             store=None) -> Dict[str, str]:
     """Content keys for the checkpointed artifacts, keyed on the stage
     INPUTS (the packed-IR digest of each stage's root term, the
     realization knobs that change it, and the producing code's source)
@@ -637,10 +654,26 @@ def _ck_keys(R: seed.Realization, imports, slots,
     keys: Dict[str, str] = {}
     rkeys = []
     for name in routines:
-        rk = _stage_key(pre, st.pack_ir_keyed(
-            st.routine_query(name, R, passes, fixed=fixed,
-                             ir_ctx=ir_ctx), pinned=pinned)[1][0],
-                        "fuse_s=%d" % R.fuse_s,
+        # the query's root digest IS the content key — via the blob
+        # store a warm emit reads it from the .meta sidecar and never
+        # rebuilds the term.  (Ambient-state drift a builder could
+        # commit unseen by source hash is the residual risk — the
+        # trade is recorded in decision 052.)
+        qkey = "|".join((
+            "q.program." + name, pre,
+            st.routine_pin_key(name, fixed, ir_ctx),
+            _src(st.routine_query),
+            "fuse_s=%d" % R.fuse_s, psrc,
+            _src(rts._BUILDERS[name])))
+        if store is not None:
+            rdig = store.digest_of(
+                qkey, lambda name=name: st.routine_query(
+                    name, R, passes, fixed=fixed, ir_ctx=ir_ctx))
+        else:
+            rdig = st.pack_ir_keyed(
+                st.routine_query(name, R, passes, fixed=fixed,
+                                 ir_ctx=ir_ctx), pinned=pinned)[1][0]
+        rk = _stage_key(pre, rdig,
                         _src(rts._BUILDERS[name]), psrc,
                         _src(st.decode_frag))
         rkeys.append(rk)
@@ -648,13 +681,33 @@ def _ck_keys(R: seed.Realization, imports, slots,
     prog = _stage_key(pre, *rkeys,
                       "peephole=%d" % getattr(R, "peephole", False),
                       _src(st.decode_program))
-    link = _stage_key(pre,
-                      st.pack_ir_keyed(st.idata_query(imports),
-                                       st.data_query(
-                                           slots,
-                                           target_pe64.data_rva(
-                                               imports)),
-                                       pinned=pinned),
+    if store is not None:
+        # the digest cache key covers the section-constant source,
+        # the query constructor, and the arg VALUES (imports/slots/
+        # drva) — a generator edit or a different symtab rotates it.
+        ldig = (
+            store.digest_of(
+                "|".join(("q.idata", pre, _src(st.idata_query),
+                          repr(list(imports)),
+                          st.const_pin_key(
+                              "idata.%d" % len(imports),
+                              st.idata_src(len(imports))))),
+                lambda: st.idata_query(imports)) + "|" +
+            store.digest_of(
+                "|".join(("q.data", pre, _src(st.data_query),
+                          repr(list(slots)),
+                          repr(target_pe64.data_rva(imports)),
+                          st.const_pin_key(
+                              "data.%d" % len(slots),
+                              st.data_src(len(slots))))),
+                lambda: st.data_query(
+                    slots, target_pe64.data_rva(imports))))
+    else:
+        ldig = "|".join(st.pack_ir_keyed(
+            st.idata_query(imports),
+            st.data_query(slots, target_pe64.data_rva(imports)),
+            pinned=pinned)[1])
+    link = _stage_key(pre, ldig,
                       _src(st.decode_bytesyms),
                       _src(link_staged))
     text = _stage_key(prog, link, "base=%d" % text_base,
@@ -801,6 +854,9 @@ def emit_image(R: seed.Realization,
         if term_run is None:
             term_run = make_ir_runner(
                 ir_exe_for(seed.Realization(reclaim="redirect")),
+                # 4 exe processes stride a miss batch — each reserves
+                # the full ir_arena (2GB) so this stays bounded.
+                workers=4,
                 pinned=store.pins,
                 cache_dir=(os.path.join(workdir, "nf_terms")
                            if workdir else None))
@@ -918,7 +974,8 @@ def emit_image(R: seed.Realization,
                         host_name=label, routines=routines,
                         passes=passes, fixed=fixed,
                         ir_ctx=_ir_ctx,
-                        pinned=store.pins) if workdir else {}
+                        pinned=store.pins,
+                        store=store) if workdir else {}
 
         prog_run = runs.get("program", run)
 
@@ -1014,7 +1071,7 @@ def emit_image(R: seed.Realization,
         text, _loc = _ck("text.bin", keys.get("text.bin", ""),
                          lambda: assemble_staged(
             items, syms, text_base, runs.get("assemble*", run),
-            verbose=verbose), _dump, _load)
+            store=store, verbose=verbose), _dump, _load)
         report.append(("assemble*", -1, -1))
         if verbose:
             print(f"    assemble*: decomposed {len(items)} items "
@@ -1157,6 +1214,7 @@ def link_staged(imports, slots,
 
 def assemble_staged(items: List[tuple], syms: dict, base: int,
                     run: Callable[[T], Tuple[T, int, int]],
+                    store=None,
                     verbose: bool = False) -> Tuple[bytes, dict]:
     """assembleOf decomposed at insn granularity — the boundary seam
     drops below the stage function.
@@ -1179,6 +1237,14 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     Returns (text_bytes, local_map) matching isa.assemble / assembleOf.
     """
     sym_t = st.symtab_term(syms)
+    if store is not None:
+        # every pass-2 query re-carries sym_t/loc_t (plus the resv
+        # closure) — pin once, every pack splices instead of walking.
+        store.pin_named(
+            st.const_pin_key(
+                "symtab.%d" % len(syms), repr(sorted(syms.items()))),
+            sym_t)
+        store.pin(_resvmk())
     loc: dict = {}
     prep: List[tuple] = []          # (item, off, len, zero_bytes)
     t0 = time.time()
@@ -1232,6 +1298,11 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     # (same term as assembleOf's insn_emit calls); all others reuse
     # the pass-1 bytes — their resv is never applied.
     loc_t = st.symtab_term(loc)
+    if store is not None:
+        # loc is rebuilt per emit (positions), so this is an ephemeral
+        # pin — same effect, no disk entry that could alias a
+        # different layout
+        store.pin(loc_t)
     rel = [(i, it) for i, (it, off, ln, b0) in enumerate(prep)
            if _is_rel_item(it)]
     rel_bytes: List[bytes] = []
