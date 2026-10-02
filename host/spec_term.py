@@ -2468,16 +2468,46 @@ def _slots3_term(slots) -> T:
     return t
 
 
+# section-builder constants — memoized; emit_chain pins them so
+# query packs splice the stored blob instead of re-walking.
+
+_STAGE_TERMS: Dict[tuple, T] = {}
+
+
+def data_term(n_slot: int) -> T:
+    t = _STAGE_TERMS.get(("data", n_slot))
+    if t is None:
+        t = _STAGE_TERMS[("data", n_slot)] = \
+            bracket(parse(data_src(n_slot)))
+    return t
+
+
+def idata_term(n_imp: int) -> T:
+    t = _STAGE_TERMS.get(("idata", n_imp))
+    if t is None:
+        t = _STAGE_TERMS[("idata", n_imp)] = \
+            bracket(parse(idata_src(n_imp)))
+    return t
+
+
+def link_term(n_imp: int, n_slot: int) -> T:
+    t = _STAGE_TERMS.get(("link", n_imp, n_slot))
+    if t is None:
+        t = _STAGE_TERMS[("link", n_imp, n_slot)] = \
+            bracket(parse(link_src(n_imp, n_slot)))
+    return t
+
+
 def data_query(slots, drva: int) -> T:
     """`dataOf DRVA SLOTS` — build_data at term level."""
-    return _appn(bracket(parse(data_src(len(slots)))),
+    return _appn(data_term(len(slots)),
                  bytelist_term(drva.to_bytes(4, "little")),
                  _slots3_term(slots))
 
 
 def idata_query(imports) -> T:
     """`idataOf IMPORTS` — build_idata at term level."""
-    return _appn(bracket(parse(idata_src(len(imports)))),
+    return _appn(idata_term(len(imports)),
                  json_to_term(list(imports)))
 
 
@@ -2556,7 +2586,7 @@ def link_src(n_imp: int, n_slot: int) -> str:
 
 def link_query(imports, slots) -> T:
     """`linkOf IMPORTS SLOTS` — sections + merged symtab at term level."""
-    return _appn(bracket(parse(link_src(len(imports), len(slots)))),
+    return _appn(link_term(len(imports), len(slots)),
                  json_to_term(list(imports)), _slots3_term(slots))
 
 
@@ -2568,18 +2598,25 @@ def pack2_query(text: bytes, idata: bytes, datab: bytes,
                  bytelist_term(stackres.to_bytes(4, "little")))
 
 
+def pack2_term() -> T:
+    t = _STAGE_TERMS.get(("pack2",))
+    if t is None:
+        t = _STAGE_TERMS[("pack2",)] = bracket(parse(pack2_src()))
+    return t
+
+
 def pack2_query_t(text: T, idata: T, datab: T, stackres: int) -> T:
     """`pack2Of` with all section inputs already terms — the staged
     seam: text is an assembleOf-NF projection, idata/datab linkOf
     projections."""
-    return _appn(bracket(parse(pack2_src())), text, idata, datab,
+    return _appn(pack2_term(), text, idata, datab,
                  bytelist_term(stackres.to_bytes(4, "little")))
 
 
 def linkasm_query(prog: T, imports, slots, base: int) -> T:
     """`assembleOf PROG (linkOf … (K I)) base` — the resolver seam fed
     by the link stage's merged symtab instead of an injected table."""
-    link_t = _appn(bracket(parse(link_src(len(imports), len(slots)))),
+    link_t = _appn(link_term(len(imports), len(slots)),
                    json_to_term(list(imports)), _slots3_term(slots))
     return _appn(_g("_ASSEMBLE"), prog, app(link_t, _KI),
                  bytelist_term(base.to_bytes(4, "little")))
@@ -3533,7 +3570,37 @@ _IR_LEAF = {1: I, 2: KK, 3: S, 4: B, 5: D, 6: C}
 _IR_NODE = struct.Struct("<BII")
 
 
-def _pack_ir_all(*roots: T):
+def _rebase_ir_nodes(blob: bytes, n_nodes: int, base: int) -> bytes:
+    """node-stream splice helper: child indices in app records shift
+    by `base` (the stream position the blob is inlined at).  Leaf and
+    var records carry values, not indices — verbatim."""
+    if base == 0 or n_nodes == 0:
+        return blob
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    if np is not None:
+        a = np.frombuffer(blob, dtype=np.uint8) \
+            .reshape(n_nodes, 9).copy()
+        m = a[:, 0] == 0
+        if m.any():
+            lcol = a[:, 1:5].copy().view("<u4").reshape(-1)
+            rcol = a[:, 5:9].copy().view("<u4").reshape(-1)
+            lcol[m] += base
+            rcol[m] += base
+            a[:, 1:5] = lcol.view(np.uint8).reshape(-1, 4)
+            a[:, 5:9] = rcol.view(np.uint8).reshape(-1, 4)
+        return a.tobytes()
+    out = bytearray(blob)
+    for off in range(0, len(blob), 9):
+        if blob[off] == 0:
+            l, r = struct.unpack_from("<II", blob, off + 1)
+            struct.pack_into("<II", out, off + 1, l + base, r + base)
+    return bytes(out)
+
+
+def _pack_ir_all(*roots: T, pinned: Optional[Dict[int, tuple]] = None):
     """One walk -> (node bytes, root indices, per-node Merkle digests).
 
     Iterative postorder; `done` memoizes by object identity (shared T
@@ -3541,7 +3608,16 @@ def _pack_ir_all(*roots: T):
     pack identically regardless of object graph.  The digest of a node
     is sha256 over its own record with child INDICES replaced by child
     digests — position-independent, so a root's digest is the content
-    key of the term in any surrounding graph."""
+    key of the term in any surrounding graph.
+
+    `pinned` maps id(term) -> (blob_nodes, n_nodes, root_idx,
+    root_digest): a subgraph already packed (see pin_term/BlobStore)
+    is inlined — its node stream rebased + digests repeated — instead
+    of re-walked.  Splice is digests-compatible: parent records hash
+    the pinned term's canonical digest, so keyed packs produce the
+    same content keys a full walk does.  Pinning trades intra-blob
+    dedup for walk elimination — pin constants appearing once per
+    query, never subgraphs shared across a multi-root stream."""
     import hashlib
     memo: Dict[tuple, int] = {}
     done: Dict[int, int] = {}
@@ -3557,6 +3633,16 @@ def _pack_ir_all(*roots: T):
             if tid in done:
                 stack.pop()
                 continue
+            if pinned:
+                pn = pinned.get(tid)
+                if pn is not None:
+                    stack.pop()
+                    nblob, nn, rt_i, rd = pn
+                    base = len(digs)
+                    nodes += _rebase_ir_nodes(nblob, nn, base)
+                    digs.extend([rd] * nn)
+                    done[tid] = base + rt_i
+                    continue
             if t.k == K.APP:
                 li = done.get(id(t.l))
                 ri = done.get(id(t.r))
@@ -3572,7 +3658,10 @@ def _pack_ir_all(*roots: T):
                        else (_IR_TAG[t.k], 0, 0))
             i = memo.get(key)
             if i is None:
-                i = len(memo)
+                # len(digs), not len(memo): pinned splices extend the
+                # node stream without touching the hash-cons table —
+                # the emitted index must track the stream, not memo.
+                i = len(digs)
                 memo[key] = i
                 nodes += pack_node(*key)
                 digs.append(hashlib.sha256(
@@ -3583,9 +3672,11 @@ def _pack_ir_all(*roots: T):
     return nodes, idx, digs
 
 
-def pack_ir(*roots: T) -> bytes:
-    """terms -> canonical packed-IR bytes (multi-root, arg order)."""
-    nodes, idx, digs = _pack_ir_all(*roots)
+def pack_ir(*roots: T, pinned: Optional[Dict[int, tuple]] = None
+            ) -> bytes:
+    """terms -> canonical packed-IR bytes (multi-root, arg order).
+    `pinned` splices stored blob subgraphs — see _pack_ir_all."""
+    nodes, idx, digs = _pack_ir_all(*roots, pinned=pinned)
     out = bytearray(struct.pack("<IIII", IR_MAGIC, IR_VERSION,
                                 len(digs), len(roots)))
     for i in idx:
@@ -3593,16 +3684,103 @@ def pack_ir(*roots: T) -> bytes:
     return bytes(out) + bytes(nodes)
 
 
-def pack_ir_keyed(*roots: T):
+def pack_ir_keyed(*roots: T, pinned: Optional[Dict[int, tuple]] = None):
     """(blob, [sha256 hex digest per root]) — digests are the Merkle
     content keys of each root term; the blob is the same canonical
-    multi-root stream pack_ir emits."""
-    nodes, idx, digs = _pack_ir_all(*roots)
+    multi-root stream pack_ir emits (pinned splices keep digests
+    identical to a full walk)."""
+    nodes, idx, digs = _pack_ir_all(*roots, pinned=pinned)
     out = bytearray(struct.pack("<IIII", IR_MAGIC, IR_VERSION,
                                 len(digs), len(roots)))
     for i in idx:
         out += struct.pack("<I", i)
     return bytes(out) + bytes(nodes), [digs[i].hex()[:32] for i in idx]
+
+
+def pin_term(t: T, pinned: Optional[Dict[int, tuple]] = None):
+    """One canonical pack of `t`; registers id(t) in `pinned` so every
+    later _pack_ir_all splices the blob instead of re-walking the
+    subgraph.  Returns (node_stream, root_index, root_digest_bytes) —
+    callers truncate for display; the splice needs all 32 bytes."""
+    nodes, idx, digs = _pack_ir_all(t)
+    if pinned is not None:
+        pinned[id(t)] = (bytes(nodes), len(digs), idx[0],
+                         digs[idx[0]])
+    return bytes(nodes), idx[0], digs[idx[0]]
+
+
+def unpack_ir_pin(data: bytes):
+    """packed-IR file -> (node stream, n_nodes, root_index).
+    The root digest travels in the caller's sidecar — the walk that
+    would recompute it is exactly what pinning skips."""
+    magic, ver, nn, nr = struct.unpack_from("<IIII", data, 0)
+    if magic != IR_MAGIC:
+        raise ValueError(f"bad packed-IR magic {magic:#x}")
+    if ver != IR_VERSION:
+        raise ValueError(f"packed-IR version {ver}")
+    if nr != 1:
+        raise ValueError("blob pins are single-root")
+    root = struct.unpack_from("<I", data, 16)[0]
+    return data[16 + 4 * nr:], nn, root
+
+
+def _pin_src(fn) -> str:
+    """sha256 of a function's source — same convention as
+    emit_chain._src (kept local so spec_term has no emit dep)."""
+    import hashlib
+    import inspect
+    try:
+        src = inspect.getsource(fn)
+    except (OSError, TypeError):
+        src = repr(fn)
+    return hashlib.sha256(src.encode("utf-8")).hexdigest()
+
+
+def routine_pin_key(name: str, fixed: Optional[dict],
+                    ir_ctx: bool) -> str:
+    """Content token for a pinned routine constant: the builder's
+    source + the routine_expr/bracket generation machinery + the
+    pinned axes.  A code change that regenerates a different term
+    rotates the key; a hit on a rotated-out key is impossible —
+    stale blobs orphan, they never alias."""
+    import hashlib
+    import routines_x86_64_win64
+    h = hashlib.sha256()
+    h.update(name.encode())
+    h.update(repr(_fix_key(fixed)).encode())
+    h.update(b"\x01" if ir_ctx else b"\x00")
+    h.update(repr(sorted(_SENT_VARS.items())).encode())
+    for fn in (routines_x86_64_win64._BUILDERS[name],
+               routine_expr, _val_expr, bracket, parse):
+        h.update(_pin_src(fn).encode())
+    return h.hexdigest()[:32]
+
+
+def const_pin_key(tag: str, src: str) -> str:
+    """Content token for a pinned stage constant (link/data/idata):
+    the generated λ-source plus the term machinery that turns it
+    into a T — generator changes that emit identical source keep
+    the pin (the term is identical)."""
+    import hashlib
+    h = hashlib.sha256()
+    h.update(tag.encode())
+    h.update(src.encode())
+    for fn in (bracket, parse):
+        h.update(_pin_src(fn).encode())
+    return h.hexdigest()[:32]
+
+
+def program_pin_key() -> str:
+    """Content token for the pinned PROGRAM_OF constant — the
+    program_expr generator + machinery; same regime as
+    routine_pin_key."""
+    import hashlib
+    h = hashlib.sha256()
+    h.update(b"program")
+    h.update(repr(sorted(_SENT_VARS.items())).encode())
+    for fn in (program_expr, _val_expr, bracket, parse):
+        h.update(_pin_src(fn).encode())
+    return h.hexdigest()[:32]
 
 
 def unpack_ir(data: bytes) -> List[T]:

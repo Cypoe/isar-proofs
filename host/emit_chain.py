@@ -47,6 +47,7 @@ import inspect
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -89,10 +90,14 @@ def _graph_run(t: T, fuel: int = st.LO_FUEL,
     arena nodes).  Fresh arena per stage IS the staged model; the
     between-step compact pass keeps the live-set bounded inside a
     stage (retention is residue, not load — decisions 028/030)."""
+    _graph_run.calls += 1          # unified-runtime gate counts these
     g = Graph()
     nf_i, steps = g.reduce(g.import_tree(t), fuel=fuel,
                            compact_every=compact_every)
     return g.export_tree(nf_i), steps, g.alloc_count()
+
+
+_graph_run.calls = 0
 
 
 def make_graph_runner(fuel: int = st.LO_FUEL,
@@ -218,7 +223,8 @@ def _audit(msg: str) -> None:
 def make_ir_runner(exe: str, timeout: int = 3600,
                    workers: int = 1,
                    cache_dir: Optional[str] = None,
-                   fuse_s: bool = False
+                   fuse_s: bool = False,
+                   pinned: Optional[Dict[int, tuple]] = None
                    ) -> Callable[[T], Tuple[T, int, int]]:
     """Packed-IR exe runner (ADR-005): the exe seam carries the term
     graph itself.  One `pack_ir_keyed` walk produces the canonical
@@ -273,7 +279,7 @@ def make_ir_runner(exe: str, timeout: int = 3600,
         if cache_dir is not None:
             # one keyed walk: Merkle digest per root = content key
             t0 = time.time()
-            _, keys = st.pack_ir_keyed(*qs)
+            _, keys = st.pack_ir_keyed(*qs, pinned=pinned)
             pack_s += time.time() - t0
             for i, k in enumerate(keys):
                 try:
@@ -295,7 +301,8 @@ def make_ir_runner(exe: str, timeout: int = 3600,
             n = min(max(1, workers), len(miss_at))
             chunks_idx = [miss_at[j::n] for j in range(n)]
             t0 = time.time()
-            blobs = [st.pack_ir(*[qs[i] for i in c])
+            blobs = [st.pack_ir(*[qs[i] for i in c],
+                                pinned=pinned)
                      for c in chunks_idx]
             pack_s += time.time() - t0
             wire = sum(len(b) for b in blobs)
@@ -372,7 +379,8 @@ def _bytes_frames(buf: bytes, expect: int) -> List[bytes]:
 
 def make_bytes_runner(exe: str, timeout: int = 3600,
                       workers: int = 1,
-                      cache_dir: Optional[str] = None
+                      cache_dir: Optional[str] = None,
+                      pinned: Optional[Dict[int, tuple]] = None
                       ) -> Callable[[T], Tuple[bytes, int, int]]:
     """Packed-IR runner over the byte-egress kernel (Realization
     io=("stdin","bytes")): the exe decodes each root's byte-list NF
@@ -415,7 +423,7 @@ def make_bytes_runner(exe: str, timeout: int = 3600,
         keys: Optional[List[str]] = None
         miss_at = list(range(len(qs)))
         if cache_dir is not None:
-            _, keys = st.pack_ir_keyed(*qs)
+            _, keys = st.pack_ir_keyed(*qs, pinned=pinned)
             miss_at = []
             for i, k in enumerate(keys):
                 try:
@@ -427,7 +435,8 @@ def make_bytes_runner(exe: str, timeout: int = 3600,
         if miss_at:
             n = min(max(1, workers), len(miss_at))
             chunks = [miss_at[j::n] for j in range(n)]
-            blobs = [st.pack_ir(*[qs[i] for i in c]) for c in chunks]
+            blobs = [st.pack_ir(*[qs[i] for i in c],
+                                pinned=pinned) for c in chunks]
             if n <= 1:
                 res = [_one(blobs[0], len(chunks[0]))]
             else:
@@ -485,6 +494,76 @@ def reduce_batch_native(terms: List[T], R: Optional[seed.Realization] = None,
     return [tower.quote_surface(nf) for nf in nfs], steps
 
 
+class BlobStore:
+    """Content-addressed packed-IR constants — workdir/blobs/<tok>.ir.
+
+    `pin_named(key, t)`: the key names the INPUTS that generated t
+    (builder source + pinned axes — see st.routine_pin_key /
+    st.const_pin_key).  A hit loads the stored node stream and
+    registers id(t) for splice-packing — the pack walk that produced
+    the blob is never repeated.  A miss packs once and writes the
+    blob + a .meta sidecar (root digest, key) for the next process.
+
+    Trust regime: the same content-keyed trust the _ck artifacts
+    already use — a stale blob can only exist under a rotated key
+    (regeneration with unchanged inputs is deterministic), and even
+    a corrupt blob can't smuggle: emitted digests derive from the
+    actual blob content, so downstream checkpoint keys describe
+    exactly what was reduced.
+
+    `pin(t)` is the ephemeral form — same registration, no disk;
+    for constants only reused inside one emit (symtab terms and
+    friends are deliberately NOT pinned: they recur across multi-
+    root streams where pack-time dedup is the better sharing).
+
+    The blob format is exactly the packed-IR file a kernel depacks —
+    blobs/ is a query-fragment store readable by anything that
+    speaks IR (the .plex v3 BYTES payload later).
+    """
+
+    def __init__(self, dir: Optional[str] = None):
+        self.dir = dir
+        self.pins: Dict[int, tuple] = {}
+        self.hits = 0
+        self.misses = 0
+        if dir:
+            os.makedirs(dir, exist_ok=True)
+
+    def pin_named(self, key: str, t: T) -> str:
+        tok = "b" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        path = os.path.join(self.dir, tok + ".ir") if self.dir \
+            else None
+        if path and os.path.exists(path):
+            with open(path + ".meta") as f:
+                meta = json.load(f)
+            with open(path, "rb") as f:
+                blob, nn, root = st.unpack_ir_pin(f.read())
+            self.pins[id(t)] = (blob, nn, root,
+                                bytes.fromhex(meta["digest"]))
+            self.hits += 1
+            return meta["digest"][:32]
+        blob, root, rd = st.pin_term(t, self.pins)
+        if path:
+            with open(path, "wb") as f:
+                f.write(struct.pack("<IIII", st.IR_MAGIC,
+                                    st.IR_VERSION,
+                                    len(blob) // 9, 1))
+                f.write(struct.pack("<I", root))
+                f.write(blob)
+            with open(path + ".meta", "w") as f:
+                json.dump({"digest": rd.hex(), "key": key,
+                           "created_utc": time.strftime(
+                               "%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                          f)
+        self.misses += 1
+        return rd.hex()[:32]
+
+    def pin(self, t: T) -> str:
+        """Ephemeral pin — register for splice, no disk."""
+        _b, _r, rd = st.pin_term(t, self.pins)
+        return rd.hex()[:32]
+
+
 def _stage_key(*parts) -> str:
     """Content key for a checkpointed stage: sha256 over the parts'
     bytes (str -> utf-8, bytes as-is), 16 hex chars — short enough for
@@ -537,7 +616,8 @@ def _pass_src(passes) -> str:
 def _ck_keys(R: seed.Realization, imports, slots,
              text_base: int, host_name: str = "",
              routines=None, passes=(), fixed=None,
-             ir_ctx: bool = False) -> Dict[str, str]:
+             ir_ctx: bool = False,
+             pinned: Optional[Dict[int, tuple]] = None) -> Dict[str, str]:
     """Content keys for the checkpointed artifacts, keyed on the stage
     INPUTS (the packed-IR digest of each stage's root term, the
     realization knobs that change it, and the producing code's source)
@@ -559,7 +639,7 @@ def _ck_keys(R: seed.Realization, imports, slots,
     for name in routines:
         rk = _stage_key(pre, st.pack_ir_keyed(
             st.routine_query(name, R, passes, fixed=fixed,
-                             ir_ctx=ir_ctx))[1][0],
+                             ir_ctx=ir_ctx), pinned=pinned)[1][0],
                         "fuse_s=%d" % R.fuse_s,
                         _src(rts._BUILDERS[name]), psrc,
                         _src(st.decode_frag))
@@ -569,8 +649,14 @@ def _ck_keys(R: seed.Realization, imports, slots,
                       "peephole=%d" % getattr(R, "peephole", False),
                       _src(st.decode_program))
     link = _stage_key(pre,
-                      st.pack_ir_keyed(st.link_query(imports, slots))[1][0],
-                      _src(st.decode_link))
+                      st.pack_ir_keyed(st.idata_query(imports),
+                                       st.data_query(
+                                           slots,
+                                           target_pe64.data_rva(
+                                               imports)),
+                                       pinned=pinned),
+                      _src(st.decode_bytesyms),
+                      _src(link_staged))
     text = _stage_key(prog, link, "base=%d" % text_base,
                       _src(assemble_staged))
     image = _stage_key(text, link, "stackres=%d" % R.stack_reserve,
@@ -593,9 +679,10 @@ def emit_image(R: seed.Realization,
                passes: Tuple[str, ...] = (),
                rt=None,
                decompose_asm: bool = False,
-               decompose_pack: bool = False,
+               decompose_pack: Optional[bool] = None,
                workdir: Optional[str] = None,
                label: str = "",
+               exe_default: bool = False,
                verbose: bool = True) -> Tuple[bytes, List[tuple]]:
     """Emit the host image for R via the staged term chain.
 
@@ -618,12 +705,28 @@ def emit_image(R: seed.Realization,
     query + 436K-step fold), while `program` is pack-bound (its query
     embeds the ~12M-node generated constant; pack_ir dominates at
     ~392s vs 62.9s) and stays on `run` until packed stage blobs are
-    persisted.
+    persisted.  With the blob store populated (decompose + workdir)
+    the pack cost splices away — program on the exe is the default
+    there.
+
+    `exe_default` — unified-runtime mode: byte seams default to the
+    emitted redirect+bytes kernel (`ir_exe_for`), term-NF seams to
+    the packed-IR kernel; `run=` remains the oracle path.  Opt-in
+    this phase — flipping the default waits on Phase 4's manifest
+    runner resolution.  Under exe_default, `decompose_pack=None`
+    resolves True — the chunked pack* seam is the exe-shaped pack;
+    the monolithic pack2 query on a single kernel process crawls
+    (concat-heavy live set, measured >4min vs 4.7s chunked).
 
     Returns (image_bytes, stage_report) where stage_report lists
     (stage, steps, arena_nodes) per reduction.
     """
     report: List[tuple] = []
+    if decompose_pack is None:
+        # exe_default means all stages exe-shaped — pack* chunked is
+        # the designed byte-seam path; monolithic pack2 crawls on a
+        # single kernel process.
+        decompose_pack = bool(exe_default)
     # programOf is generated at sentinel defaults — only fs/fuel/
     # rbb/cb/nb flow in as parameters (stack_reserve enters at pack,
     # peephole is its own stage).  Any other R field left non-default
@@ -667,24 +770,47 @@ def emit_image(R: seed.Realization,
         if R.order != "lo":
             raise toolchain.NotRealized(
                 f"emit_image: order={R.order!r} not realized")
-    if (passes or (routines is not None
-                   and tuple(routines) != tuple(rts.ROUTINES))) \
-            and not decompose_asm:
+    if (routines is not None and tuple(routines) != tuple(rts.ROUTINES)) \
+            or rt is not None:
+        # a non-baked routine selection is itself a request for the
+        # record-driven staged path
+        decompose_asm = True
+    if passes and not decompose_asm:
         raise toolchain.NotRealized(
-            "emit_image: `passes`/`routines` are per-routine stage "
-            "parameters — the monolithic assemble path has no chain "
-            "entry point; set decompose_asm=True")
+            "emit_image: `passes` are per-routine stage parameters — "
+            "the monolithic assemble path has no chain entry point; "
+            "set decompose_asm=True")
     if text_base is None:
         # .text is emitted last in the image — its RVA is a function of
         # the (already fixed) idata/data layout, not a constant.
         text_base = target_pe64.text_rva(imports, slots)
+    store = BlobStore(os.path.join(workdir, "blobs")) if workdir \
+        else BlobStore()
     runs = dict(stage_runs or {})
+    if exe_default:
+        # unified runtime: the emitted kernels ARE the runners —
+        # byte seams on the byte-egress exe, term-NF seams on the
+        # packed-IR exe, both splice-aware via the blob store.
+        if bytes_run is None:
+            bytes_run = make_bytes_runner(
+                ir_exe_for(seed.Realization(
+                    reclaim="redirect", io=("stdin", "bytes"))),
+                workers=os.cpu_count() or 4, pinned=store.pins,
+                cache_dir=(os.path.join(workdir, "nf_bytes")
+                           if workdir else None))
+        if term_run is None:
+            term_run = make_ir_runner(
+                ir_exe_for(seed.Realization(reclaim="redirect")),
+                pinned=store.pins,
+                cache_dir=(os.path.join(workdir, "nf_terms")
+                           if workdir else None))
     if bytes_run is not None:
         runs.setdefault("assemble*", bytes_run)
         runs.setdefault("pack*", bytes_run)
         runs.setdefault("pack", bytes_run)
     if term_run is not None:
         runs.setdefault("link", term_run)
+        runs.setdefault("program", term_run)
 
     def _stage(name, q):
         t0 = time.time()
@@ -701,6 +827,7 @@ def emit_image(R: seed.Realization,
 
     def _prog_nf() -> T:
         if "program" not in _nfs:
+            store.pin_named(st.program_pin_key(), st.PROGRAM_OF)
             _nfs["program"] = _stage("program", st.program_query(R))
             if getattr(R, "peephole", False):
                 # G9i: peepholeOf staged as SEAM-DECOMPOSED per-item
@@ -721,6 +848,11 @@ def emit_image(R: seed.Realization,
 
     def _link_nf() -> T:
         if "link" not in _nfs:
+            store.pin_named(
+                st.const_pin_key(
+                    "link.%d.%d" % (len(imports), len(slots)),
+                    st.link_src(len(imports), len(slots))),
+                st.link_term(len(imports), len(slots)))
             _nfs["link"] = _stage("link", st.link_query(imports, slots))
         return _nfs["link"]
 
@@ -777,16 +909,28 @@ def emit_image(R: seed.Realization,
         # _emit's record-context rule: IR-layout node code iff any
         # routine name is ir_* — same derivation the Python path uses
         _ir_ctx = any(n.startswith("ir_") for n in routines)
+        # packed stage constants as content-addressed blobs: the
+        # per-routine constants and the link section builders are
+        # Pins are a pure splice overlay — registered lazily inside the
+        # miss paths, so a fully-checkpointed warm emit never builds a
+        # constant it won't pack (the pack2 bracket alone is ~22s).
         keys = _ck_keys(R, imports, slots, text_base,
                         host_name=label, routines=routines,
                         passes=passes, fixed=fixed,
-                        ir_ctx=_ir_ctx) if workdir else {}
+                        ir_ctx=_ir_ctx,
+                        pinned=store.pins) if workdir else {}
+
+        prog_run = runs.get("program", run)
+
+        def _frag_query(name: str) -> T:
+            return st.routine_query(name, R, passes, fixed=fixed,
+                                    ir_ctx=_ir_ctx)
 
         def _frag_items(name: str) -> list:
             """one routine query -> decoded frag items."""
-            nf, s, n = runs.get("program", run)(
-                st.routine_query(name, R, passes, fixed=fixed,
-                                 ir_ctx=_ir_ctx))
+            store.pin_named(st.routine_pin_key(name, fixed, _ir_ctx),
+                            st.routine_of(name, fixed, _ir_ctx))
+            nf, s, n = prog_run(_frag_query(name))
             report.append((f"program.{name}", s, n))
             if verbose:
                 print(f"      program.{name}: {s} steps / {n} nodes",
@@ -803,10 +947,8 @@ def emit_image(R: seed.Realization,
                 # peephole setting.
                 fragl: T = KK
                 for name in reversed(routines):
-                    q = st.routine_query(name, R, passes, fixed=fixed,
-                                         ir_ctx=_ir_ctx)
                     t0r = time.time()
-                    nf, s, n = runs.get("program", run)(q)
+                    nf, s, n = prog_run(_frag_query(name))
                     report.append((f"program.{name}", s, n))
                     if verbose:
                         print(f"      program.{name}: {s} steps / "
@@ -821,18 +963,53 @@ def emit_image(R: seed.Realization,
                     print(f"    peephole: {npass} passes", flush=True)
                 return st.decode_program(prog_nf)
             out: List[tuple] = []
-            for name in routines:
+            names = list(routines)
+            # batch the cache-miss fragments — the runner's pool
+            # strides them across exes; hits never reach the reducer.
+            bfn = getattr(prog_run, "batch", None)
+            batched: Dict[str, list] = {}
+            if bfn is not None:
+                miss = [n for n in names if not (
+                    workdir and os.path.exists(os.path.join(
+                        workdir, "program.%s.%s"
+                        % (n, keys.get("program." + n, "")))))]
+                if miss:
+                    for _n in miss:
+                        store.pin_named(
+                            st.routine_pin_key(_n, fixed, _ir_ctx),
+                            st.routine_of(_n, fixed, _ir_ctx))
+                    t0b = time.time()
+                    nfs, s_b, _nb = bfn([_frag_query(n)
+                                         for n in miss])
+                    report.append(("program.batch", s_b, -1))
+                    if verbose:
+                        print(f"      program.batch: {len(miss)} "
+                              f"frags, {s_b} steps "
+                              f"({fmt_dur(time.time()-t0b)})",
+                              flush=True)
+                    for n, nf in zip(miss, nfs):
+                        batched[n] = st.decode_frag(nf)
+
+            def _produce(name: str) -> list:
+                if name in batched:
+                    return batched[name]
+                return _frag_items(name)
+
+            for name in names:
                 out.extend(_ck(f"program.{name}",
                                keys.get(f"program.{name}", ""),
-                               lambda name=name: _frag_items(name),
+                               lambda name=name: _produce(name),
                                _dump, _load))
             return out
 
         t0 = time.time()
         items = _ck("program.items", keys.get("program.items", ""),
                     _prog_items, _dump, _load)
-        ib, db, syms = _ck("link.sections", keys.get("link.sections", ""),
-                           lambda: st.decode_link(_link_nf()),
+        ib, db, syms = _ck("link.sections",
+                           keys.get("link.sections", ""),
+                           lambda: link_staged(
+                               imports, slots, runs.get("link", run),
+                               store=store, verbose=verbose),
                            _dump, _load)
         text, _loc = _ck("text.bin", keys.get("text.bin", ""),
                          lambda: assemble_staged(
@@ -871,6 +1048,8 @@ def emit_image(R: seed.Realization,
     # stage 4 — pack2Of text idata datab stackres: the image.  A bytes
     # runner decodes the byte-list NF in the kernel — the stage result
     # IS the image; term mode decodes the NF as before.
+    store.pin_named(st.const_pin_key("pack2", st.pack2_src()),
+                    st.pack2_term())
     img_out = _stage("pack", st.pack2_query_t(
         text_t, idata_t, datab_t, R.stack_reserve))
 
@@ -925,6 +1104,55 @@ def _batch_bounded(batch, qs):
         return _batch_bounded(batch, qs[:mid]) \
             + _batch_bounded(batch, qs[mid:])
     return nfs
+
+
+def link_staged(imports, slots,
+                run: Callable[[T], Tuple[T, int, int]],
+                store=None,
+                verbose: bool = False) -> Tuple[bytes, bytes, dict]:
+    """linkOf split at the section builders — the nanopass seam drops
+    below linkOf itself: `idataOf IMPORTS` and `dataOf drva SLOTS`
+    run as separate term reductions; drva = align(0x1000 + |idata|)
+    is computed at the boundary (the same arithmetic
+    target_pe64.data_rva performs — boundary glue, identical map);
+    the symtab merge is the seam's dict-join, mirroring linkOf's
+    `APPEND iat_syms data_syms` (data last — dict.update order).
+
+    Both queries are program-independent — they only need imports/
+    slots — so this leg can overlap the program stage entirely, and
+    each query is small enough for the emitted kernels (the
+    monolithic linkOf fold was the last graph.lo-sized term).
+    Returns (idata, datab, syms) matching decode_link."""
+    t0 = time.time()
+    # drva depends on |idata| only — computable at the seam via the
+    # oracle builder, so both queries ship in ONE batch stream.
+    drva = target_pe64.data_rva(imports)
+    if store is not None:
+        store.pin_named(
+            st.const_pin_key("idata.%d" % len(imports),
+                             st.idata_src(len(imports))),
+            st.idata_term(len(imports)))
+        store.pin_named(
+            st.const_pin_key("data.%d" % len(slots),
+                             st.data_src(len(slots))),
+            st.data_term(len(slots)))
+    bfn = getattr(run, "batch", None)
+    if bfn is not None:
+        nfs, _, _ = bfn([st.idata_query(imports),
+                         st.data_query(slots, drva)])
+        idata, iat_syms = st.decode_bytesyms(nfs[0])
+        datab, data_syms = st.decode_bytesyms(nfs[1])
+    else:
+        idata, iat_syms = st.decode_bytesyms(
+            run(st.idata_query(imports))[0])
+        datab, data_syms = st.decode_bytesyms(
+            run(st.data_query(slots, drva))[0])
+    syms = dict(iat_syms)
+    syms.update(data_syms)
+    if verbose:
+        print(f"      link*: idata {len(idata)}B + data {len(datab)}B, "
+              f"{len(syms)} syms ({fmt_dur(time.time()-t0)})", flush=True)
+    return idata, datab, syms
 
 
 def assemble_staged(items: List[tuple], syms: dict, base: int,

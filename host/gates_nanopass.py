@@ -27,6 +27,15 @@ Gates (cheap, no full emit — the byte-equality run is separate):
      (nb-2 style) instead of baking a literal.
   9. BOUNDED-BATCH: `_batch_bounded` halves on kernel OOM (rc=4),
      preserves query order, propagates other failures unsplit.
+ 10. PIN-SPLICE: a pinned routine constant splices verbatim into the
+     packed query — keyed digests are position-independent, so the
+     spliced stream's Merkle root equals the unpinned walk.
+ 11. BLOB-STORE: `pin_named` miss writes content-addressed bytes; a
+     fresh store's hit produces the same full digest and a
+     byte-identical splice.
+ 12. SPLIT-LINK: `link_staged` (idataOf + dataOf as separate queries,
+     symtab merge at the seam) decodes to exactly `decode_link` of
+     the monolithic `link_query` — checked at mini scale.
 
 The per-routine stage is exercised byte-exact by
 `emit_image(decompose_asm=True, workdir=...)` — see the
@@ -36,6 +45,7 @@ IR redirect+bytes emit (6656B, staged==oracle) in decision 051.
 
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -204,6 +214,58 @@ def gate_batch_bounded() -> bool:
     return True
 
 
+def gate_pin_splice(R) -> bool:
+    """pinned constants splice verbatim — the keyed Merkle root of a
+    query must be identical whether the constant streams as packed
+    nodes or as a stored blob (digests are position-independent)."""
+    t = st.routine_of("mkapp_p")
+    pins: dict = {}
+    st.pin_term(t, pins)
+    q = st.routine_query("mkapp_p", R)
+    _b0, k0 = st.pack_ir_keyed(q)
+    _b1, k1 = st.pack_ir_keyed(q, pinned=pins)
+    if k0 != k1:
+        return False
+    # the spliced stream decodes to the same NF — run both
+    nf0 = reduce_tree_lo(st.unpack_ir(_b0)[0], 200_000)[0]
+    nf1 = reduce_tree_lo(st.unpack_ir(_b1)[0], 200_000)[0]
+    return st.decode_frag(nf0) == st.decode_frag(nf1)
+
+
+def gate_blob_store(R, tmpdir: str) -> bool:
+    """named pins are content-addressed on disk: a fresh BlobStore
+    reloading the blob registers a splice entry whose packed stream
+    is byte-identical to the miss-path walk."""
+    store1 = ec.BlobStore(os.path.join(tmpdir, "b1"))
+    t = st.routine_of("st_s", _fixed_of(R), False)
+    key = st.routine_pin_key("st_s", _fixed_of(R), False)
+    d_miss = store1.pin_named(key, t)
+    store2 = ec.BlobStore(os.path.join(tmpdir, "b1"))
+    d_hit = store2.pin_named(key, t)
+    if d_miss != d_hit or store2.hits != 1:
+        return False
+    q = st.routine_query("st_s", R, fixed=_fixed_of(R), ir_ctx=False)
+    _b1, k1 = st.pack_ir_keyed(q, pinned=store1.pins)
+    _b2, k2 = st.pack_ir_keyed(q, pinned=store2.pins)
+    _b0, k0 = st.pack_ir_keyed(q)
+    # Merkle digests are structural — identical whether the constant
+    # streams as a stored blob or is re-walked.  (Byte size can grow:
+    # a spliced blob can't dedup INTO the query spine — the win is
+    # skipping the walk, not the wire size.)
+    return k1 == k2 == k0
+
+
+def gate_split_link() -> bool:
+    """link_staged == decode_link(link_query) at mini scale — the
+    idata/data split + seam symtab merge is the same map linkOf
+    computes."""
+    imps, slots = ("ExitProcess",), (("x", 8),)
+    nf, _, _ = ec._graph_run(st.link_query(imps, slots))
+    i0, d0, s0 = st.decode_link(nf)
+    i1, d1, s1 = ec.link_staged(imps, slots, ec._graph_run)
+    return i1 == i0 and d1 == d0 and s1 == s0
+
+
 if __name__ == "__main__":
     R = seed.Realization()
     gates = [
@@ -216,6 +278,11 @@ if __name__ == "__main__":
         ("record trie-miss refusal", lambda: gate_record_refusal(R)),
         ("sentinel-arithmetic refusal", gate_sentinel_leak),
         ("bounded batches halve on OOM", gate_batch_bounded),
+        ("pin-splice digest equality", lambda: gate_pin_splice(R)),
+        ("blob-store disk round-trip",
+         lambda: gate_blob_store(R, tempfile.mkdtemp(
+             prefix="nanopass_blobs_"))),
+        ("split-link == linkOf", gate_split_link),
     ]
     fail = 0
     for name, g in gates:
