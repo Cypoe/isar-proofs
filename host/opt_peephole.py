@@ -236,8 +236,10 @@ def main() -> int:
             slots = rts.data_slots(R) if callable(rts.data_slots) \
                 else rts.data_slots
             syms = tgt.symbols(rts.imports, slots)
-            orig_text, _ = isa.assemble(prog, syms, base=tgt.text_base)
-            opt_text, _ = isa.assemble(opt, syms, base=tgt.text_base)
+            orig_text, _ = isa.assemble(
+                prog, syms, base=tgt.text_rva(rts.imports, slots))
+            opt_text, _ = isa.assemble(
+                opt, syms, base=tgt.text_rva(rts.imports, slots))
             if len(opt_text) > len(orig_text):
                 bad.append(f"grew {len(orig_text)} -> {len(opt_text)}")
             # (d) insn count non-increasing

@@ -266,6 +266,15 @@ def __getattr__(name: str):
     return v
 
 
+def _g(name: str) -> T:
+    """lazy-constant lookup for INTRA-module use — module __getattr__
+    covers `st.X` but not bare globals inside this file's functions."""
+    g = globals()
+    if name not in g:
+        g[name] = _LAZY[name]()
+    return g[name]
+
+
 # ---------------------------------------------------------------------------
 # encoding primitives (the xdu input-map shapes; see module docstring)
 # ---------------------------------------------------------------------------
@@ -975,10 +984,10 @@ _STEP_S = (
 # Computed at source-generation time (n_imp is a known bound) and
 # emitted as a bytes4 literal — never N2B4 over a ~8k numeral.
 SYMS_OF = (
-    "(\\imports. \\slots. (__NIMPB__ (" + _STEP_I + ") "
+    "(\\imports. \\slots. \\drva. (__NIMPB__ (" + _STEP_I + ") "
     "(\\k2. k2 imports __IATB__ K)) "
     "(\\li. \\ai. \\u. (__NSLOT__ (" + _STEP_S + ") "
-    "(\\k2. k2 slots " + _b4_src(0x3000) + " u)) "
+    "(\\k2. k2 slots drva u)) "
     "(\\ls. \\as. \\u2. u2)))"
 )
 
@@ -990,7 +999,7 @@ def symbols_src(n_imp: int, n_slot: int) -> str:
         ("__NIMPB__", _church_src(n_imp)),
         ("__NSLOT__", _church_src(n_slot)),
         ("__IATPFX__", _prefix_src("iat_", "nm")),
-        ("__IATB__", _b4_src(0x2000 + 40 + (n_imp + 1) * 8)),
+        ("__IATB__", _b4_src(0x1000 + 40 + (n_imp + 1) * 8)),
     ):
         src = src.replace(ph, val)
     assert "__" not in src, "uninstantiated placeholder"
@@ -1152,7 +1161,7 @@ _lazy("RESOLVE", lambda: build_resolve(_RAW))
 
 def resolve_query(name: str) -> T:
     """`resolveOf SPEC <name>` — emit stage-1 (resolve) at term level."""
-    return _appn(RESOLVE, SPEC, str_term(name))
+    return _appn(_g("RESOLVE"), SPEC, str_term(name))
 
 
 # ---------------------------------------------------------------------------
@@ -1188,11 +1197,15 @@ def _slots_term(slots) -> T:
 
 
 def symbols_query(imports, slots) -> T:
-    """`symbolsOf IMPORTS SLOTS` — emit stage-2 fragment at term level.
-    Slot sizes are bytes4 (the arithmetic rep) — they feed B4ADD."""
+    """`symbolsOf IMPORTS SLOTS DRVA` — emit stage-2 fragment at term
+    level.  Slot sizes are bytes4 (the arithmetic rep) — they feed
+    B4ADD.  drva is the target's computed .data base (see
+    target_pe64.data_rva — the layout is parameter, not constant)."""
     syms = build_symbols(len(imports), len(slots))
+    drva = target_pe64.data_rva(imports)
     return _appn(syms, json_to_term(list(imports)),
-                 _slots_term(slots))
+                 _slots_term(slots),
+                 bytelist_term(drva.to_bytes(4, "little")))
 
 
 # ---------------------------------------------------------------------------
@@ -1790,7 +1803,7 @@ def encode_query(item, resv: Optional[T] = None) -> T:
     """`encodeOf item resv` — item = ("i", form, *ops) python tuple.
     resv = λname. bytes4; the default is the zero resolver (pass-1 size
     encoding: rel fields emit four zero bytes)."""
-    return _appn(_ENCODE_OF, bracket(_item_expr(item)),
+    return _appn(_g("_ENCODE_OF"), bracket(_item_expr(item)),
                  resv if resv is not None else _ZRESV)
 
 
@@ -1878,7 +1891,7 @@ def _assemble_src() -> str:
 
 
 _lazy("_ASSEMBLE", lambda: _appn(bracket_abstract0(
-    parse(_assemble_src())), _ENCODE_OF, _ZRESV))
+    parse(_assemble_src())), _g("_ENCODE_OF"), _ZRESV))
 
 
 def symtab_term(symbols: Dict[str, int]) -> T:
@@ -1904,14 +1917,14 @@ def fraglist_term(frags) -> T:
 
 def assemble_query(prog: T, symbols: Dict[str, int], base: int) -> T:
     """`assembleOf prog symtab base`."""
-    return _appn(_ASSEMBLE, prog, symtab_term(symbols),
+    return _appn(_g("_ASSEMBLE"), prog, symtab_term(symbols),
                  bytelist_term(base.to_bytes(4, "little")))
 
 
 def assemble_query_t(prog: T, symtab: T, base: int) -> T:
     """`assembleOf` with program and symtab already terms — the staged
     seam: prog is programOf's NF, symtab a linkOf-NF projection."""
-    return _appn(_ASSEMBLE, prog, symtab,
+    return _appn(_g("_ASSEMBLE"), prog, symtab,
                  bytelist_term(base.to_bytes(4, "little")))
 
 
@@ -2024,8 +2037,8 @@ _STEP_D = (
     + " (szn (\\l2. " + _conss(_B0C, "l2") + ") z))))))"
 )
 DATA_OF = (
-    "(\\slots. (__NSLOTD__ (" + _STEP_D + ") "
-    "(\\k2. k2 slots " + _b4_src(0x3000) + " K K)) "
+    "(\\drva. \\slots. (__NSLOTD__ (" + _STEP_D + ") "
+    "(\\k2. k2 slots drva K K)) "
     "(\\l. \\o. \\u. \\z. " + _prs("z", "u") + "))"
 )
 
@@ -2055,7 +2068,7 @@ _STEP_ID = (
         ("rec", "(odd (" + _APPEND + " brec " + _bytes_src(b"\x00")
                 + ") brec)"),
         ("rl2", "(" + _LENB4 + " rec)"),
-        ("hrv", "(" + _B4ADD + " " + _b4_src(0x2000) + " o)"),
+        ("hrv", "(" + _B4ADD + " " + _b4_src(0x1000) + " o)"),
     ], "\\k2. k2 t (" + _B4ADD + " o rl2) (" + _B4ADD + " oi "
        + _b4_src(8) + ") " + _conss("hrv", "rv") + " "
        + _conss("rec", "rc") + " "
@@ -2063,12 +2076,12 @@ _STEP_ID = (
     + "))"
 )
 _IDATA_FIN = _lets([
-    ("drva", "(" + _B4ADD + " " + _b4_src(0x2000) + " o)"),
+    ("drva", "(" + _B4ADD + " " + _b4_src(0x1000) + " o)"),
     ("ilt", "(" + _JOIN + " (" + _REV + " "
             + _conss(_bytes_src(bytes(8)),
                      "(" + _MAP + " " + _U64 + " rv)") + "))"),
     ("idt", _join_src([
-        _b4_src(0x2000 + 40), _b4_src(0), _b4_src(0), "drva",
+        _b4_src(0x1000 + 40), _b4_src(0), _b4_src(0), "drva",
         "__IATRVA4__",
         "(" + _ZEROFILL + " " + _num_src(20) + ")"])),
     ("nams", "(" + _JOIN + " (" + _REV + " rc))"),
@@ -2089,9 +2102,9 @@ def idata_src(n_imp: int) -> str:
     for ph, val in (
         ("__NIMP__", _church_src(n_imp)),
         ("__IATPFX__", _prefix_src("iat_", "nm")),
-        ("__IATB__", _b4_src(0x2000 + iat_off)),
+        ("__IATB__", _b4_src(0x1000 + iat_off)),
         ("__NAMESOFF__", _b4_src(iat_off + ilt_sz)),
-        ("__IATRVA4__", _b4_src(0x2000 + iat_off)),
+        ("__IATRVA4__", _b4_src(0x1000 + iat_off)),
     ):
         src = src.replace(ph, val)
     assert "__" not in src, "uninstantiated placeholder"
@@ -2118,8 +2131,7 @@ def _pack_body() -> str:
                                0x22)),
         _bytes_src(struct.pack("<HBB", 0x20B, 0, 0)),
         "traw", "iddr", _bytes_src(struct.pack("<I", 0)),
-        _bytes_src(struct.pack("<I", 0x1000)),
-        _bytes_src(struct.pack("<I", 0x1000)),
+        "trva", "trva",
         _bytes_src(struct.pack("<Q", 0x140000000)),
         _bytes_src(struct.pack("<II", 0x1000, 0x200)),
         _bytes_src(struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0)),
@@ -2130,23 +2142,27 @@ def _pack_body() -> str:
         _bytes_src(struct.pack("<QQQ", 0x1000, 0x100000, 0x1000)),
         _bytes_src(struct.pack("<II", 0, 16)),
         _bytes_src(struct.pack("<II", 0, 0)),
-        _bytes_src(struct.pack("<I", 0x2000)), "li",
+        _bytes_src(struct.pack("<I", 0x1000)), "li",
         "(" + _ZEROFILL + " " + _num_src(14 * 8) + ")",
-        _bytes_src(b".text\x00\x00\x00"), "lt",
-        _bytes_src(struct.pack("<I", 0x1000)), "traw",
-        _bytes_src(struct.pack("<I", 0x200)), z12,
-        _bytes_src(struct.pack("<I", 0x60000020)),
         _bytes_src(b".idata\x00\x00"), "li",
-        _bytes_src(struct.pack("<I", 0x2000)), "iraw", "iptr", z12,
+        _bytes_src(struct.pack("<I", 0x1000)), "iraw",
+        _bytes_src(struct.pack("<I", 0x200)), z12,
         _bytes_src(struct.pack("<I", 0x40000040)),
         _bytes_src(b".data\x00\x00\x00"), "ld",
-        _bytes_src(struct.pack("<I", 0x3000)), "draw", "dptr", z12,
+        "drva", "draw", "dptr", z12,
         _bytes_src(struct.pack("<I", 0xC0000040)),
+        _bytes_src(b".text\x00\x00\x00"), "lt",
+        "trva", "traw", "tptr", z12,
+        _bytes_src(struct.pack("<I", 0x60000020)),
         "(" + _ZEROFILL + " " + _num_src(0x200 - 448) + ")",
-        "text", "(" + _PADLIST + " lt)",
         "idata", "(" + _PADLIST + " li)",
         "datab", "(" + _PADLIST + " ld)",
+        "text", "(" + _PADLIST + " lt)",
     ]
+    # .idata heads the image at 0x1000; .data and .text follow at
+    # SectionAlignment boundaries — .text LAST so code size is
+    # unbounded (the old text/idata/data fixed-slot layout let a >4KiB
+    # kernel overlap .idata's VA -> loader 193).
     return _lets([
         ("lt", "(" + _LENB4 + " text)"),
         ("li", "(" + _LENB4 + " idata)"),
@@ -2154,18 +2170,23 @@ def _pack_body() -> str:
         ("traw", "(" + _ALIGN512 + " lt)"),
         ("iraw", "(" + _ALIGN512 + " li)"),
         ("draw", "(" + _ALIGN512 + " ld)"),
-        ("iptr", "(" + _B4ADD + " " + _b4_src(0x200) + " traw)"),
-        ("dptr", "(" + _B4ADD + " iptr iraw)"),
+        ("drva", "(" + _ALIGN4096 + " (" + _B4ADD + " "
+                + _b4_src(0x1000) + " li))"),
+        ("trva", "(" + _ALIGN4096 + " (" + _B4ADD + " drva ld))"),
+        ("dptr", "(" + _B4ADD + " " + _b4_src(0x200) + " iraw)"),
+        ("tptr", "(" + _B4ADD + " dptr draw)"),
         ("iddr", "(" + _B4ADD + " iraw draw)"),
-        ("img", "(" + _ALIGN4096 + " (" + _B4ADD + " "
-                + _b4_src(0x3000) + " ld))"),
+        ("img", "(" + _ALIGN4096 + " (" + _B4ADD + " trva lt))"),
     ], _join_src(chunks))
 
 
 def pack_src(n_imp: int, n_slot: int) -> str:
     body = _lets([
         ("idr", "(" + idata_src(n_imp) + " imports)"),
-        ("dat", "(" + data_src(n_slot) + " slots)"),
+        ("li0", "(" + _LENB4 + " (idr K))"),
+        ("drva", "(" + _ALIGN4096 + " (" + _B4ADD + " "
+                + _b4_src(0x1000) + " li0))"),
+        ("dat", "(" + data_src(n_slot) + " drva slots)"),
         ("idata", "(idr K)"), ("datab", "(dat K)"),
     ], _pack_body())
     return "(\\text. \\imports. \\slots. \\stackres. " + body + ")"
@@ -2191,9 +2212,11 @@ def _slots3_term(slots) -> T:
     return t
 
 
-def data_query(slots) -> T:
-    """`dataOf SLOTS` — build_data at term level."""
-    return _appn(bracket(parse(data_src(len(slots)))), _slots3_term(slots))
+def data_query(slots, drva: int) -> T:
+    """`dataOf DRVA SLOTS` — build_data at term level."""
+    return _appn(bracket(parse(data_src(len(slots)))),
+                 bytelist_term(drva.to_bytes(4, "little")),
+                 _slots3_term(slots))
 
 
 def idata_query(imports) -> T:
@@ -2225,9 +2248,9 @@ def decode_bytesyms(nf: T):
     return out, decode_symbols(_l0_nf(app(nf, _KI), 500_000))
 
 
-def python_data(slots):
+def python_data(slots, drva: int):
     """tgt.build_data — the independent oracle."""
-    return target_pe64.build_data(slots)
+    return target_pe64.build_data(slots, drva)
 
 
 def python_idata(imports):
@@ -2260,11 +2283,16 @@ def python_pack(text, imports, slots, stackres) -> bytes:
 
 
 def link_src(n_imp: int, n_slot: int) -> str:
-    """λ-source of `\\imports. \\slots. linkOf` — bounds instantiated."""
+    """λ-source of `\\imports. \\slots. linkOf` — bounds instantiated.
+    dataOf's base cursor is the layout drva (computed from the idata
+    section linkOf itself just emitted — no recomputed count)."""
     return ("(\\imports. \\slots. "
             + _lets([
                 ("idr", "(" + idata_src(n_imp) + " imports)"),
-                ("dat", "(" + data_src(n_slot) + " slots)"),
+                ("li0", "(" + _LENB4 + " (idr K))"),
+                ("drva", "(" + _ALIGN4096 + " (" + _B4ADD + " "
+                        + _b4_src(0x1000) + " li0))"),
+                ("dat", "(" + data_src(n_slot) + " drva slots)"),
             ], _prs(_prs("(idr K)", "(dat K)"),
                     "(" + _APPEND + " (idr (K I)) (dat (K I)))"))
             + ")")
@@ -2297,7 +2325,7 @@ def linkasm_query(prog: T, imports, slots, base: int) -> T:
     by the link stage's merged symtab instead of an injected table."""
     link_t = _appn(bracket(parse(link_src(len(imports), len(slots)))),
                    json_to_term(list(imports)), _slots3_term(slots))
-    return _appn(_ASSEMBLE, prog, app(link_t, _KI),
+    return _appn(_g("_ASSEMBLE"), prog, app(link_t, _KI),
                  bytelist_term(base.to_bytes(4, "little")))
 
 
@@ -2316,7 +2344,7 @@ def python_link(imports, slots):
     """linkOf oracle: build_idata + build_data + the merged table —
     `update` order mirrors ALOOK's last-match."""
     ib, isyms = target_pe64.build_idata(imports)
-    db, dsyms = target_pe64.build_data(slots)
+    db, dsyms = target_pe64.build_data(slots, target_pe64.data_rva(imports))
     syms = dict(isyms)
     syms.update(dsyms)
     return ib, db, syms
@@ -2439,7 +2467,8 @@ LINKASM_PROG = [
      ("i", "ret",)],
 ]
 LINKASM_CASES = {
-    "mini": (LINKASM_PROG, ("ExitProcess",), (("x", 8),), 0x1000),
+    "mini": (LINKASM_PROG, ("ExitProcess",), (("x", 8),),
+             target_pe64.text_rva(("ExitProcess",), (("x", 8),))),
 }
 
 # ---------------------------------------------------------------------------
@@ -2716,7 +2745,7 @@ def peephole_query(prog: T) -> T:
     ISACLASS table comes from the oracle module itself so the data
     is shared, not duplicated."""
     ujl, rtl, sml = _peephole_cls_terms()
-    return _appn(_PEEPHOLE_OF, ujl, rtl, sml, prog)
+    return _appn(_g("_PEEPHOLE_OF"), ujl, rtl, sml, prog)
 
 
 def _join_t() -> T:
@@ -2729,7 +2758,7 @@ def _join_t() -> T:
 def peephole_pass_query(p: T) -> T:
     """One pass over the FLAT item list p -> pair(changed, list)."""
     ujl, rtl, sml = _peephole_cls_terms()
-    return _appn(_PEEPHOLE_PASS, ujl, rtl, sml, p)
+    return _appn(_g("_PEEPHOLE_PASS"), ujl, rtl, sml, p)
 
 
 def _scott_cells(lst: T) -> List[T]:
@@ -2800,7 +2829,7 @@ def peephole_fixpoint_seamed(prog: T, run) -> Tuple[T, int, int]:
         nxs = [items[j + 1] if j + 1 < n else _NIL
                for j in range(n)]
         # 1 — label table: independent probes, seam conses `lat`
-        probes = eval_all([_appn(_PEEPHOLE_LATPROBE, it, nx)
+        probes = eval_all([_appn(_g("_PEEPHOLE_LATPROBE"), it, nx)
                            for it, nx in zip(items, nxs)])
         is_lbl = [p.k != K.KONST for p in probes]
         lat = _NIL
@@ -2808,7 +2837,7 @@ def peephole_fixpoint_seamed(prog: T, run) -> Tuple[T, int, int]:
             if p.k != K.KONST:
                 lat = _appn(_CONS, p, lat)
         # 2 — the pass under live-speculation: sk=KI ch=KI
-        recs = eval_all([_appn(_PEEPHOLE_STEP, ujl, rtl, sml,
+        recs = eval_all([_appn(_g("_PEEPHOLE_STEP"), ujl, rtl, sml,
                                lat, _KI, _KI, nx, it)
                          for it, nx in zip(items, nxs)])
         fields = [(_l0_nf(app(r, _SEL_F), 200_000),
@@ -2827,7 +2856,7 @@ def peephole_fixpoint_seamed(prog: T, run) -> Tuple[T, int, int]:
             else:
                 sk_dead = fields[j][1].k == K.KONST
         if dead:
-            rep = eval_all([_appn(_PEEPHOLE_STEP, ujl, rtl, sml,
+            rep = eval_all([_appn(_g("_PEEPHOLE_STEP"), ujl, rtl, sml,
                                   lat, KK, _KI, nxs[j], items[j])
                             for j in dead])
             for j, r in zip(dead, rep):
@@ -3634,9 +3663,10 @@ def main() -> int:
     # ceiling as programOf/assembleOf — the term graph is far past it).
     # ------------------------------------------------------------------
     for cname, slots in (DATA_CASES.items() if want("G9g") else ()):
-        want_b, want_s = python_data(slots)
+        drva = target_pe64.data_rva(IDATA_CASES[cname])
+        want_b, want_s = python_data(slots, drva)
         n_q += 1
-        t = data_query(slots)
+        t = data_query(slots, drva)
 
         nf_lo, steps_lo, _ = reduce_tree_lo(t, LO_FUEL)
         val_lo = decode_bytesyms(nf_lo)

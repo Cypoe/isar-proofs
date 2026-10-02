@@ -418,7 +418,8 @@ def _emit(R: Realization, tc, program) -> bytes:
             prog, frozenset(s[0] for s in slots))
         return tgt.pack_obj(text, labels, relocs, slots, R)
     text, labels = isa.assemble(
-        prog, tgt.symbols(rts.imports, slots), base=tgt.text_base)
+        prog, tgt.symbols(rts.imports, slots),
+        base=tgt.text_rva(rts.imports, slots))
     return tgt.pack(text, labels, rts.imports, slots, R)
 
 
@@ -712,9 +713,6 @@ assemble = _isa.assemble
 _fasmg = _isa._fasmg
 _FASM_HDR = _isa._FASM_HDR
 FASMG = _isa.FASMG
-TEXT_RVA = _target.TEXT_RVA
-
-
 def reducer_program(R: Realization) -> Program:
     return _routines.program(R)
 
@@ -864,7 +862,9 @@ def _g1() -> bool:
     # rendered listing (rel32 via labels, rip via computed displacements).
     prog = reducer_program(DEFAULT)
     idata, iat_syms = _target.build_idata(_routines.IMPORTS)
-    data, data_syms = _target.build_data(_routines.DATA_SLOTS)
+    drva = _target.data_rva(_routines.IMPORTS)
+    data, data_syms = _target.build_data(_routines.DATA_SLOTS, drva)
+    trva = _target.text_rva(_routines.IMPORTS, _routines.DATA_SLOTS)
     all_syms = dict(iat_syms)
     all_syms.update(data_syms)
     local: Dict[str, int] = {}
@@ -872,7 +872,7 @@ def _g1() -> bool:
     offs = []
     for item in prog:
         if item[0] == "label":
-            local[item[1]] = TEXT_RVA + pos
+            local[item[1]] = trva + pos
         offs.append(pos)
         if item[0] != "label":
             pos += len(encode(item[1:]))
@@ -882,7 +882,7 @@ def _g1() -> bool:
             src_lines.append(f"{item[1]}:")
             continue
         insn = item[1:]
-        end = TEXT_RVA + off + len(encode(insn))
+        end = trva + off + len(encode(insn))
         resolver = lambda name, _e=end: (
             all_syms[name] if name in all_syms else local[name]) - _e
         src_lines.append("  " + render_fasm(insn, resolve=resolver))
@@ -893,7 +893,7 @@ def _g1() -> bool:
             if item[0] == "label":
                 continue
             insn = item[1:]
-            end = TEXT_RVA + off + len(encode(insn))
+            end = trva + off + len(encode(insn))
             resolver = lambda name, _e=end: (
                 all_syms[name] if name in all_syms else local[name]) - _e
             got2 += encode(insn, resolve=resolver)

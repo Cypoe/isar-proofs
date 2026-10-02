@@ -72,7 +72,8 @@ class Target:
     ext: str          # ".c"
     pack: Callable    # pack(text, labels, imports, data_slots, R) -> bytes
     symbols: Callable  # symbols(imports, data_slots) -> {name: ident}
-    text_base: int    # 0 — no load address at this layer
+    text_rva: Callable  # text_rva(imports, data_slots) -> 0 — no load
+                        # address at this layer
 
 
 C = Target(
@@ -82,7 +83,7 @@ C = Target(
     ext=".c",
     pack=pack,
     symbols=symbols,
-    text_base=0,
+    text_rva=lambda _i, _s: 0,
 )
 
 
@@ -139,7 +140,7 @@ def main() -> int:
         _isa.I("end"),
     ]
     syms = symbols(imports, slots)
-    text, labels = _isa.assemble(prog, {}, base=C.text_base)
+    text, labels = _isa.assemble(prog, {}, base=C.text_rva((), ()))
     c_src = C.pack(text, labels, imports, slots, None)
     src = c_src.decode()
     checks = [

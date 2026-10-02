@@ -242,7 +242,7 @@ class Target:
     ext: str          # ".elf"
     pack: Callable    # pack(text, labels, imports, data_slots, R) -> bytes
     symbols: Callable  # symbols(imports, data_slots) -> {name: vaddr}
-    text_base: int    # TEXT_VA — .text load address for assembly
+    text_rva: Callable  # text_rva(imports, data_slots) -> .text load address
     pack_obj: Callable = None  # pack_obj(text, labels, relocs, slots, R)
 
 
@@ -253,7 +253,7 @@ ELF64 = Target(
     ext=".elf",
     pack=pack,
     symbols=symbols,
-    text_base=TEXT_VA,
+    text_rva=lambda _i, _s: TEXT_VA,
 )
 
 
@@ -264,7 +264,7 @@ ELF64_AARCH64 = Target(
     ext=".elf",
     pack=lambda *a: pack(*a, machine=EM_AARCH64),
     symbols=symbols,
-    text_base=TEXT_VA,
+    text_rva=lambda _i, _s: TEXT_VA,
 )
 
 
@@ -275,7 +275,7 @@ ELF64_RISCV64 = Target(
     ext=".elf",
     pack=lambda *a: pack(*a, machine=EM_RISCV),
     symbols=symbols,
-    text_base=TEXT_VA,
+    text_rva=lambda _i, _s: TEXT_VA,
 )
 
 
@@ -291,7 +291,7 @@ ELFO64 = Target(
     pack=lambda *a: (_ for _ in ()).throw(
         NotRealized("elfo64 emits relocatables, not executables")),
     symbols=symbols,
-    text_base=0,
+    text_rva=lambda _i, _s: 0,
     pack_obj=lambda *a: pack_obj(*a, machine=EM_X86_64),
 )
 
@@ -303,7 +303,7 @@ ELFO64_AARCH64 = Target(
     pack=lambda *a: (_ for _ in ()).throw(
         NotRealized("elfo64 emits relocatables, not executables")),
     symbols=symbols,
-    text_base=0,
+    text_rva=lambda _i, _s: 0,
     pack_obj=lambda *a: pack_obj(*a, machine=EM_AARCH64),
 )
 
@@ -315,7 +315,7 @@ ELFO64_RISCV64 = Target(
     pack=lambda *a: (_ for _ in ()).throw(
         NotRealized("elfo64 emits relocatables, not executables")),
     symbols=symbols,
-    text_base=0,
+    text_rva=lambda _i, _s: 0,
     pack_obj=lambda *a: pack_obj(*a, machine=EM_RISCV),
 )
 

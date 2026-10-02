@@ -555,7 +555,7 @@ def _ck_keys(R: seed.Realization, imports, slots,
 
 def emit_image(R: seed.Realization,
                imports=rts.IMPORTS, slots=rts.DATA_SLOTS,
-               text_base: int = target_pe64.TEXT_RVA,
+               text_base: Optional[int] = None,
                run: Callable[[T], Tuple[T, int, int]] = _graph_run,
                stage_runs: Optional[dict] = None,
                bytes_run: Optional[Callable] = None,
@@ -583,6 +583,10 @@ def emit_image(R: seed.Realization,
     (stage, steps, arena_nodes) per reduction.
     """
     report: List[tuple] = []
+    if text_base is None:
+        # .text is emitted last in the image — its RVA is a function of
+        # the (already fixed) idata/data layout, not a constant.
+        text_base = target_pe64.text_rva(imports, slots)
     runs = dict(stage_runs or {})
     if bytes_run is not None:
         runs.setdefault("assemble*", bytes_run)
@@ -935,11 +939,17 @@ def pack_staged(text: bytes, idata: bytes, datab: bytes,
     traw = r1(st._appn(K_("_ALIGN512"), tm(lt)))
     iraw = r1(st._appn(K_("_ALIGN512"), tm(li)))
     draw = r1(st._appn(K_("_ALIGN512"), tm(ld)))
-    iptr = r1(st._appn(K_("_B4ADD"), b4(0x200), tm(traw)))
-    dptr = r1(st._appn(K_("_B4ADD"), tm(iptr), tm(iraw)))
+    # section VAs — .idata fixed at 0x1000, .data and .text computed
+    # (pack2Of's drva/trva lets); .text LAST keeps code size unbounded.
+    drva = r1(st._appn(K_("_ALIGN4096"),
+                       st._appn(K_("_B4ADD"), b4(0x1000), tm(li))))
+    trva = r1(st._appn(K_("_ALIGN4096"),
+                       st._appn(K_("_B4ADD"), tm(drva), tm(ld))))
+    dptr = r1(st._appn(K_("_B4ADD"), b4(0x200), tm(iraw)))
+    tptr = r1(st._appn(K_("_B4ADD"), tm(dptr), tm(draw)))
     iddr = r1(st._appn(K_("_B4ADD"), tm(iraw), tm(draw)))
     img = r1(st._appn(K_("_ALIGN4096"),
-                      st._appn(K_("_B4ADD"), b4(0x3000), tm(ld))))
+                      st._appn(K_("_B4ADD"), tm(trva), tm(lt))))
     u64 = r1(st._appn(K_("_U64"), b4(stackres)))
 
     def zf(n: int) -> bytes:
@@ -949,8 +959,8 @@ def pack_staged(text: bytes, idata: bytes, datab: bytes,
         return dec(r1(st._appn(K_("_PADLIST"), len4)))
 
     sizes = {"lt": lt, "li": li, "ld": ld, "traw": traw,
-             "iraw": iraw, "draw": draw, "iptr": iptr,
-             "dptr": dptr, "iddr": iddr, "img": img}
+             "iraw": iraw, "draw": draw, "drva": drva, "trva": trva,
+             "dptr": dptr, "tptr": tptr, "iddr": iddr, "img": img}
     sects = {"text": text, "idata": idata, "datab": datab}
     z12 = zf(12)
     chunks = [
@@ -958,7 +968,7 @@ def pack_staged(text: bytes, idata: bytes, datab: bytes,
         struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x22),
         struct.pack("<HBB", 0x20B, 0, 0),
         dec(traw), dec(iddr), struct.pack("<I", 0),
-        struct.pack("<I", 0x1000), struct.pack("<I", 0x1000),
+        dec(trva), dec(trva),
         struct.pack("<Q", 0x140000000),
         struct.pack("<II", 0x1000, 0x200),
         struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0),
@@ -968,20 +978,20 @@ def pack_staged(text: bytes, idata: bytes, datab: bytes,
         dec(u64),
         struct.pack("<QQQ", 0x1000, 0x100000, 0x1000),
         struct.pack("<II", 0, 16), struct.pack("<II", 0, 0),
-        struct.pack("<I", 0x2000), dec(li),
+        struct.pack("<I", 0x1000), dec(li),
         zf(14 * 8),
-        b".text\x00\x00\x00", dec(lt),
-        struct.pack("<I", 0x1000), dec(traw),
-        struct.pack("<I", 0x200), z12,
-        struct.pack("<I", 0x60000020),
         b".idata\x00\x00", dec(li),
-        struct.pack("<I", 0x2000), dec(iraw), dec(iptr), z12,
+        struct.pack("<I", 0x1000), dec(iraw),
+        struct.pack("<I", 0x200), z12,
         struct.pack("<I", 0x40000040),
         b".data\x00\x00\x00", dec(ld),
-        struct.pack("<I", 0x3000), dec(draw), dec(dptr), z12,
+        dec(drva), dec(draw), dec(dptr), z12,
         struct.pack("<I", 0xC0000040),
+        b".text\x00\x00\x00", dec(lt),
+        dec(trva), dec(traw), dec(tptr), z12,
+        struct.pack("<I", 0x60000020),
         zf(0x200 - 448),
-        text, pad(tm(lt)), idata, pad(tm(li)), datab, pad(tm(ld)),
+        idata, pad(tm(li)), datab, pad(tm(ld)), text, pad(tm(lt)),
     ]
     return b"".join(chunks)
 
@@ -1004,8 +1014,8 @@ def emit_mini_image(run: Callable[[T], Tuple[T, int, int]],
     terms on the naive exe re-reduce shared redexes without bound
     (assemble/pack measured >20M steps); for exe legs `decompose_asm`
     and per-stage runners keep every reduction inside a small term."""
-    imps, slots, base, sr = ("ExitProcess",), (("x", 8),), 0x1000, \
-        64 << 20
+    imps, slots, base, sr = ("ExitProcess",), (("x", 8),), \
+        target_pe64.text_rva(("ExitProcess",), (("x", 8),)), 64 << 20
     runs = stage_runs or {}
     report: List[tuple] = []
     link_nf, s, n = runs.get("link", run)(st.link_query(imps, slots))
@@ -1039,7 +1049,9 @@ def emit_mini_image(run: Callable[[T], Tuple[T, int, int]],
 
 def _mini_oracle() -> bytes:
     _ib, _db, syms = st.python_link(("ExitProcess",), (("x", 8),))
-    _text, _lm = st.python_assemble(st.ASM_LINK, syms, 0x1000)
+    _text, _lm = st.python_assemble(
+        st.ASM_LINK, syms,
+        target_pe64.text_rva(("ExitProcess",), (("x", 8),)))
     return st.python_pack(_text, ("ExitProcess",), (("x", 8),),
                           64 << 20)
 
@@ -1218,11 +1230,13 @@ def main() -> int:
     # planted under another realization's key must NOT be found.
     with tempfile.TemporaryDirectory() as wd:
         ka = _ck_keys(seed.Realization(), rts.IMPORTS, rts.DATA_SLOTS,
-                      target_pe64.TEXT_RVA)
+                      target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS))
         kb = _ck_keys(seed.Realization(fuel=7), rts.IMPORTS,
-                      rts.DATA_SLOTS, target_pe64.TEXT_RVA)
-        same = ka == _ck_keys(seed.Realization(), rts.IMPORTS,
-                              rts.DATA_SLOTS, target_pe64.TEXT_RVA)
+                      rts.DATA_SLOTS,
+                      target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS))
+        same = ka == _ck_keys(
+            seed.Realization(), rts.IMPORTS, rts.DATA_SLOTS,
+            target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS))
         with open(os.path.join(wd, f"text.bin.{ka['text.bin']}"),
                   "wb") as f:
             f.write(b"stale")
