@@ -2598,6 +2598,15 @@ def pack2_query(text: bytes, idata: bytes, datab: bytes,
                  bytelist_term(stackres.to_bytes(4, "little")))
 
 
+def append_term() -> T:
+    """`APPEND` as a term — symtab merge at the seam is a kernel
+    query over dep blobs, not a Python dict join."""
+    t = _STAGE_TERMS.get(("append",))
+    if t is None:
+        t = _STAGE_TERMS[("append",)] = bracket(parse(_APPEND))
+    return t
+
+
 def pack2_term() -> T:
     t = _STAGE_TERMS.get(("pack2",))
     if t is None:
@@ -3811,20 +3820,18 @@ def unpack_ir(data: bytes) -> List[T]:
     return [cells[i] for i in roots]
 
 
-def digest_ir_blob(data: bytes) -> List[str]:
-    """canonical per-root Merkle digests of a packed-IR stream — the
-    same keys pack_ir_keyed would mint for unpack_ir(data), without
-    building any term.  Digests fold child digests, not stream
-    positions, so identity-deduped kernel output (emit_ir) and
-    hash-consed Python output agree node-for-node wherever subtrees
-    are equal — the blob's shape is free, its content key fixed."""
+def _ir_digests(data: bytes) -> Tuple[List[int], List[bytes]]:
+    """(root indices, per-node raw Merkle digests) of a packed-IR
+    stream — digests fold child digests, not stream positions, so
+    identity-deduped kernel output (emit_ir) and hash-consed Python
+    output agree wherever subtrees are equal."""
     import hashlib
     magic, ver, n_nodes, n_roots = struct.unpack_from("<IIII", data, 0)
     if magic != IR_MAGIC:
         raise ValueError(f"bad packed-IR magic {magic:#x}")
     if ver != IR_VERSION:
         raise ValueError(f"packed-IR version {ver}")
-    roots = struct.unpack_from(f"<{n_roots}I", data, 16)
+    roots = list(struct.unpack_from(f"<{n_roots}I", data, 16))
     digs: List[bytes] = []
     pos = 16 + 4 * n_roots
     for i in range(n_nodes):
@@ -3838,7 +3845,27 @@ def digest_ir_blob(data: bytes) -> List[str]:
                 b"\x00" + digs[l] + digs[r]).digest())
         else:
             digs.append(hashlib.sha256(rec).digest())
+    return roots, digs
+
+
+def digest_ir_blob(data: bytes) -> List[str]:
+    """canonical per-root Merkle digests of a packed-IR stream — the
+    same keys pack_ir_keyed would mint for unpack_ir(data), without
+    building any term."""
+    roots, digs = _ir_digests(data)
     return [digs[i].hex()[:32] for i in roots]
+
+
+def blob_pin_entry(data: bytes, owner: T):
+    """(nodes, nn, root_idx, raw_root_digest, owner) — a pin-table
+    entry for a packed-IR blob that exists as BYTES (kernel-emitted,
+    disk-loaded) rather than a walked term.  The placeholder `owner`
+    is the handle queries embed; it is owned by the entry so the
+    id-keyed splice can never fire on a recycled address.  Blob must
+    be single-root — a multi-root stream needs per-root slices."""
+    nodes, nn, root = unpack_ir_pin(data)
+    roots, digs = _ir_digests(data)
+    return nodes, nn, root, digs[root], owner
 
 
 def ir_map() -> QuotientMap:

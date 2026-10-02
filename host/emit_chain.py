@@ -662,6 +662,19 @@ class BlobStore:
         _b, _r, rd = st.pin_term(t, self.pins)
         return rd.hex()[:32]
 
+    def blob_term(self, data: bytes) -> T:
+        """A stored/kernel-emitted single-root PIR blob as a query
+        argument: returns a placeholder T whose pin entry carries the
+        blob's node bytes + canonical root digest — pack splices it,
+        no term is ever built.  The placeholder is a VAR leaf on
+        purpose: an unpinned pack would encode a var record that the
+        depacker maps to a hole — loud failure, not silent splice.
+        Multi-root frames are per-root blobs already (emit_ir frames
+        nr=1 each), so the single-root pin shape holds."""
+        ph = st.T(st.K.VAR, n=0)
+        self.pins[id(ph)] = st.blob_pin_entry(data, ph)
+        return ph
+
     def digest_of(self, key: str, build) -> str:
         """Root digest of a lazily-built term, content-addressed by
         `key`.  Disk hit: reads the .meta sidecar only — no term is
@@ -934,6 +947,7 @@ def emit_image(R: seed.Realization,
                stage_runs: Optional[dict] = None,
                bytes_run: Optional[Callable] = None,
                term_run: Optional[Callable] = None,
+               blob_run: Optional[Callable] = None,
                routines=None,
                passes: Tuple[str, ...] = (),
                rt=None,
@@ -1067,6 +1081,13 @@ def emit_image(R: seed.Realization,
                 pinned=store.pins,
                 cache_dir=(os.path.join(workdir, "nf_terms")
                            if workdir else None))
+        if blob_run is None:
+            # IR-egress kernel: stage NFs leave as PIR blobs the next
+            # stage splices — the no-decode seam.
+            blob_run = make_blob_runner(
+                ir_exe_for(seed.Realization(
+                    reclaim="redirect", io=("stdin", "ir"))),
+                workers=4, pinned=store.pins)
     if bytes_run is not None:
         runs.setdefault("assemble*", bytes_run)
         runs.setdefault("pack*", bytes_run)
@@ -1273,7 +1294,8 @@ def emit_image(R: seed.Realization,
                            keys.get("link.sections", ""),
                            lambda: link_staged(
                                imports, slots, runs.get("link", run),
-                               store=store, verbose=verbose),
+                               store=store, verbose=verbose,
+                               run_ir=blob_run, run_bytes=bytes_run),
                            _dump, _load)
         text, _loc = _ck("text.bin", keys.get("text.bin", ""),
                          lambda: assemble_staged(
@@ -1387,8 +1409,8 @@ def _batch_bounded(batch, qs):
 
 def link_staged(imports, slots,
                 run: Callable[[T], Tuple[T, int, int]],
-                store=None,
-                verbose: bool = False) -> Tuple[bytes, bytes, dict]:
+                store=None, verbose: bool = False,
+                run_ir=None, run_bytes=None):
     """linkOf split at the section builders — the nanopass seam drops
     below linkOf itself: `idataOf IMPORTS` and `dataOf drva SLOTS`
     run as separate term reductions; drva = align(0x1000 + |idata|)
@@ -1415,6 +1437,33 @@ def link_staged(imports, slots,
             st.const_pin_key("data.%d" % len(slots),
                              st.data_src(len(slots))),
             st.data_term(len(slots)))
+    if (run_ir is not None and run_bytes is not None
+            and store is not None
+            and getattr(run_ir, "batch", None) is not None
+            and getattr(run_bytes, "batch", None) is not None):
+        # blob seam — zero decode_*: section NFs arrive as PIR blobs;
+        # the byte sections are KERNEL projections (pair K -> byte
+        # list -> byte-egress frames), and the merged symtab is a
+        # kernel APPEND over blob args — a PIR blob that downstream
+        # pass-2 queries splice via blob_term.  Python carries bytes
+        # and blob refs only.
+        sec, _, _ = run_ir.batch([st.idata_query(imports),
+                                 st.data_query(slots, drva)])
+        ph_i = store.blob_term(sec[0])
+        ph_d = store.blob_term(sec[1])
+        sects, _, _ = run_bytes.batch([app(ph_i, st.KK),
+                                       app(ph_d, st.KK)])
+        sm, _, _ = run_ir.batch([st._appn(st.append_term(),
+                                        app(ph_i, st._KI),
+                                        app(ph_d, st._KI))])
+        if verbose:
+            print(f"      link*: blob seam — idata+data frames, "
+                  f"symtab {len(sm[0])}B PIR ({fmt_dur(time.time()-t0)})",
+                  flush=True)
+        # (idata_bytes, datab_bytes, symtab_blob) — the blob bytes are
+        # what the checkpoint stores; assemble re-registers via
+        # blob_term so the identity is content, not object.
+        return sects[0], sects[1], sm[0]
     bfn = getattr(run, "batch", None)
     if bfn is not None:
         nfs, _, _ = bfn([st.idata_query(imports),
@@ -1462,14 +1511,25 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
 
     Returns (text_bytes, local_map) matching isa.assemble / assembleOf.
     """
-    sym_t = st.symtab_term(syms)
+    if isinstance(syms, (bytes, bytearray)):
+        # blob seam: the merged symtab arrives as a kernel-emitted PIR
+        # blob — registered as a placeholder, spliced into every
+        # pass-2 query, never decoded Python-side.
+        if store is None:
+            raise NotRealized(
+                "symtab as packed-IR blob needs a BlobStore to splice")
+        sym_t = store.blob_term(bytes(syms))
+    else:
+        sym_t = st.symtab_term(syms)
+        if store is not None:
+            # every pass-2 query re-carries sym_t/loc_t (plus the resv
+            # closure) — pin once, every pack splices instead of
+            # walking.
+            store.pin_named(
+                st.const_pin_key(
+                    "symtab.%d" % len(syms), repr(sorted(syms.items()))),
+                sym_t)
     if store is not None:
-        # every pass-2 query re-carries sym_t/loc_t (plus the resv
-        # closure) — pin once, every pack splices instead of walking.
-        store.pin_named(
-            st.const_pin_key(
-                "symtab.%d" % len(syms), repr(sorted(syms.items()))),
-            sym_t)
         store.pin(_resvmk())
     loc: dict = {}
     prep: List[tuple] = []          # (item, off, len, zero_bytes)

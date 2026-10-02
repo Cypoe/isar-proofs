@@ -47,6 +47,11 @@ Gates (cheap, no full emit — the byte-equality run is separate):
      framed PIR blob — depackable, digest-equal to its own canonical
      re-pack (digest_ir_blob), and observationally identical when fed
      back through the stdout kernel.  Malformed blobs refuse.
+ 16. LINK BLOB SEAM: link_staged under ir+bytes egress produces
+     section bytes via kernel projection and the merged symtab as a
+     kernel APPEND over blob placeholders — zero decode_* at the
+     seam, and the blob symtab resolves byte-identical to the dict
+     join (hit, rip-symbol, and 0-end miss).
 
 The per-routine stage is exercised byte-exact by
 `emit_image(decompose_asm=True, workdir=...)` — see the
@@ -375,6 +380,50 @@ def gate_emit_ir() -> bool:
     return True
 
 
+def gate_link_blob_seam() -> bool:
+    """link* with ir+bytes egress: section NFs arrive as PIR blobs,
+    section bytes are kernel projections (pair K), the merged symtab
+    is a kernel APPEND over blob placeholders — zero decode_* at the
+    seam.  Correctness is behavioral: the blob symtab must resolve
+    identical to the Python dict join — rel hit, rip sym, and the
+    miss path (0-end) included."""
+    import subprocess                                 # noqa: F401
+    from reduce import KK, app
+    imps, slots = ("ExitProcess",), (("x", 8),)
+    store = ec.BlobStore()
+    run_ir = ec.make_blob_runner(ec.ir_exe_for(seed.Realization(
+        reclaim="redirect", io=("stdin", "ir"))), pinned=store.pins)
+    run_bytes = ec.make_bytes_runner(ec.ir_exe_for(seed.Realization(
+        reclaim="redirect", io=("stdin", "bytes"))), pinned=store.pins)
+    dec0 = dict(ec._DECODE_COUNT)
+    ib, db, symblob = ec.link_staged(imps, slots, ec._graph_run,
+                                     store=store,
+                                     run_ir=run_ir, run_bytes=run_bytes)
+    if any(v for k, v in ec._dec_delta(dec0).items()):
+        return False                    # the seam must not decode
+    i0, d0, s0 = st.decode_link(ec._graph_run(
+        st.link_query(imps, slots))[0])
+    if ib != i0 or db != d0:
+        return False
+    # resolver probes: blob symtab vs dict symtab, byte-exact
+    loc_t = st.symtab_term({})
+    e4_t = st.bytelist_term((0x1000).to_bytes(4, "little"))
+    sym_blob = store.blob_term(symblob)
+    sym_dict = st.symtab_term(s0)
+    for it in (("i", "call_rel32", ("l", "x")),
+               ("i", "mov_r64_rip", "rax", ("p", "iat_ExitProcess")),
+               ("i", "call_rel32", ("l", "nope"))):
+        rb = st._appn(ec._resvmk(), sym_blob, loc_t, e4_t)
+        rd = st._appn(ec._resvmk(), sym_dict, loc_t, e4_t)
+        bb = run_bytes.batch(
+            [app(st.encode_query(it, rb), KK)])[0][0]
+        bd = run_bytes.batch(
+            [app(st.encode_query(it, rd), KK)])[0][0]
+        if bb != bd:
+            return False
+    return True
+
+
 if __name__ == "__main__":
     R = seed.Realization()
     gates = [
@@ -396,6 +445,7 @@ if __name__ == "__main__":
             tempfile.mkdtemp(prefix="nanopass_man_"))),
         ("decode-crossing evidence", gate_decode_evidence),
         ("emit_ir blob round-trip", gate_emit_ir),
+        ("link blob seam == dict join", gate_link_blob_seam),
     ]
     fail = 0
     for name, g in gates:
