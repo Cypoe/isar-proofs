@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 _SEED_DIR = os.path.normpath(os.path.join(_HOST, "..", "seed"))
@@ -2132,6 +2132,16 @@ def program(R: Realization) -> Program:
     return _emit(R, ROUTINES)
 
 
+def routine_names_ir(R: Realization) -> Tuple[str, ...]:
+    """the record's routine list for R — the io specialization is the
+    record's own data: bytes egress adds emit_bytes/peval/selidx."""
+    if R.io == ("stdin", "bytes"):
+        return ROUTINES_IR_BYTES
+    if R.io != ("stdin", "stdout"):
+        raise NotRealized(f"io={R.io!r} not realized by {ROUTINES_IR}")
+    return ROUTINES_IR
+
+
 def program_ir(R: Realization) -> Program:
     """Packed-IR batch kernel: depack replaces the token parse; the
     reducer core is shared verbatim.  io=("stdin","bytes") swaps the
@@ -2140,11 +2150,7 @@ def program_ir(R: Realization) -> Program:
         raise NotRealized(f"order={R.order!r} declared but not realized")
     if R.reclaim not in ("none", "redirect"):
         raise NotRealized(f"reclaim={R.reclaim!r} not realized")
-    if R.io == ("stdin", "bytes"):
-        return _emit(R, ROUTINES_IR_BYTES)
-    if R.io != ("stdin", "stdout"):
-        raise NotRealized(f"io={R.io!r} not realized by {ROUTINES_IR}")
-    return _emit(R, ROUTINES_IR)
+    return _emit(R, routine_names_ir(R))
 
 
 @dataclass(frozen=True)
@@ -2158,6 +2164,10 @@ class Routines:
     imports: tuple
     data_slots: tuple
     ios: tuple = (("stdin", "stdout"),)   # io modes the record realizes
+    # routine list as a function of R — records whose routine set
+    # depends on a realization axis (io selects the egress block)
+    # declare it here; None means `routines` for every R.
+    names_for: Optional[Callable] = None
 
 
 X86_64_WIN64 = Routines(
@@ -2182,6 +2192,7 @@ X86_64_WIN64_IR = Routines(
     imports=IMPORTS_IR,
     data_slots=data_slots_ir,
     ios=(("stdin", "stdout"), ("stdin", "bytes")),
+    names_for=routine_names_ir,
 )
 
 

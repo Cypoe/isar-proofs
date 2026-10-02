@@ -536,7 +536,8 @@ def _pass_src(passes) -> str:
 
 def _ck_keys(R: seed.Realization, imports, slots,
              text_base: int, host_name: str = "",
-             routines=None, passes=()) -> Dict[str, str]:
+             routines=None, passes=(), fixed=None,
+             ir_ctx: bool = False) -> Dict[str, str]:
     """Content keys for the checkpointed artifacts, keyed on the stage
     INPUTS (the packed-IR digest of each stage's root term, the
     realization knobs that change it, and the producing code's source)
@@ -557,7 +558,8 @@ def _ck_keys(R: seed.Realization, imports, slots,
     rkeys = []
     for name in routines:
         rk = _stage_key(pre, st.pack_ir_keyed(
-            st.routine_query(name, R, passes))[1][0],
+            st.routine_query(name, R, passes, fixed=fixed,
+                             ir_ctx=ir_ctx))[1][0],
                         "fuse_s=%d" % R.fuse_s,
                         _src(rts._BUILDERS[name]), psrc,
                         _src(st.decode_frag))
@@ -581,7 +583,7 @@ def _ck_keys(R: seed.Realization, imports, slots,
 
 
 def emit_image(R: seed.Realization,
-               imports=rts.IMPORTS, slots=rts.DATA_SLOTS,
+               imports=None, slots=None,
                text_base: Optional[int] = None,
                run: Callable[[T], Tuple[T, int, int]] = _graph_run,
                stage_runs: Optional[dict] = None,
@@ -589,6 +591,7 @@ def emit_image(R: seed.Realization,
                term_run: Optional[Callable] = None,
                routines=None,
                passes: Tuple[str, ...] = (),
+               rt=None,
                decompose_asm: bool = False,
                decompose_pack: bool = False,
                workdir: Optional[str] = None,
@@ -628,15 +631,42 @@ def emit_image(R: seed.Realization,
     # kernel — silent realization downgrade is exactly what the staged
     # chain exists to prevent.
     _d = seed.Realization()
-    _param = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-              "node_bytes", "stack_reserve", "peephole"}
-    _bad = {k: getattr(R, k) for k in vars(_d)
-            if k not in _param and getattr(R, k) != getattr(_d, k)}
-    if _bad:
-        raise toolchain.NotRealized(
-            f"emit_image: programOf realizes only fs/fuel/rbb/cb/nb/"
-            f"stack_reserve/peephole; non-default {sorted(_bad)} needs "
-            f"an extended programOf or a different routines record")
+    # λ-bound program params: fs/fuel/rbb/cb/nb flow into the routine
+    # spine; stack_reserve enters at pack, peephole is its own stage.
+    # Everything else is a GENERATION axis — pinned into the routine
+    # terms via `fixed` so builder-level branches on reclaim/io/payload
+    # emit the declared variant instead of silently defaulting.
+    _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
+                  "node_bytes", "stack_reserve", "peephole"}
+    fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
+    if rt is not None:
+        if R.order not in rt.orders:
+            raise toolchain.NotRealized(
+                f"emit_image: order={R.order!r} not in {rt.orders}")
+        if R.io not in rt.ios:
+            raise toolchain.NotRealized(
+                f"emit_image: io={R.io!r} not realized by {rt.name}")
+        if routines is None:
+            nf = getattr(rt, "names_for", None)
+            routines = nf(R) if nf else rt.routines
+        if imports is None:
+            imports = rt.imports
+        if slots is None:
+            slots = rt.data_slots(R) if callable(rt.data_slots) \
+                else rt.data_slots
+    imports = rts.IMPORTS if imports is None else imports
+    slots = rts.DATA_SLOTS if slots is None else slots
+    if routines is None and rt is None:
+        # the default record's own honesty checks — an io mode or
+        # order the .lo record doesn't realize must be refused, not
+        # baked into routines that can't express it
+        if R.io != ("stdin", "stdout"):
+            raise toolchain.NotRealized(
+                f"emit_image: io={R.io!r} needs a routines record "
+                f"that declares it (ROUTINES has no egress block)")
+        if R.order != "lo":
+            raise toolchain.NotRealized(
+                f"emit_image: order={R.order!r} not realized")
     if (passes or (routines is not None
                    and tuple(routines) != tuple(rts.ROUTINES))) \
             and not decompose_asm:
@@ -743,15 +773,20 @@ def emit_image(R: seed.Realization,
             with open(p, "rb") as f:
                 return pickle.load(f)
 
+        routines = rts.ROUTINES if routines is None else routines
+        # _emit's record-context rule: IR-layout node code iff any
+        # routine name is ir_* — same derivation the Python path uses
+        _ir_ctx = any(n.startswith("ir_") for n in routines)
         keys = _ck_keys(R, imports, slots, text_base,
                         host_name=label, routines=routines,
-                        passes=passes) if workdir else {}
-        routines = rts.ROUTINES if routines is None else routines
+                        passes=passes, fixed=fixed,
+                        ir_ctx=_ir_ctx) if workdir else {}
 
         def _frag_items(name: str) -> list:
             """one routine query -> decoded frag items."""
             nf, s, n = runs.get("program", run)(
-                st.routine_query(name, R, passes))
+                st.routine_query(name, R, passes, fixed=fixed,
+                                 ir_ctx=_ir_ctx))
             report.append((f"program.{name}", s, n))
             if verbose:
                 print(f"      program.{name}: {s} steps / {n} nodes",
@@ -768,7 +803,8 @@ def emit_image(R: seed.Realization,
                 # peephole setting.
                 fragl: T = KK
                 for name in reversed(routines):
-                    q = st.routine_query(name, R, passes)
+                    q = st.routine_query(name, R, passes, fixed=fixed,
+                                         ir_ctx=_ir_ctx)
                     t0r = time.time()
                     nf, s, n = runs.get("program", run)(q)
                     report.append((f"program.{name}", s, n))
@@ -873,6 +909,24 @@ def _is_rel_item(it) -> bool:
                for o in it[2:])
 
 
+def _batch_bounded(batch, qs):
+    """Batch in arena-bounded chunks.  A whole-list batch can exceed
+    the kernel arena (pass-2 queries each re-carry the sym_t/loc_t
+    resolver terms) even though every encode alone is small.  Halve
+    on OOM until chunks fit; non-OOM failures and single-root
+    failures propagate unchanged.  Pure scheduling — every query is
+    independent and chunk order is preserved."""
+    try:
+        nfs, _, _ = batch(qs)
+    except RuntimeError as e:
+        if "rc=4" not in str(e) or len(qs) == 1:
+            raise
+        mid = len(qs) // 2
+        return _batch_bounded(batch, qs[:mid]) \
+            + _batch_bounded(batch, qs[mid:])
+    return nfs
+
+
 def assemble_staged(items: List[tuple], syms: dict, base: int,
                     run: Callable[[T], Tuple[T, int, int]],
                     verbose: bool = False) -> Tuple[bytes, dict]:
@@ -924,12 +978,12 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
             uniq[it] = None
     uq = list(uniq)
     if batch is not None:
-        nfs, _, _ = batch([_enc_q(it) for it in uq])
-        for it, nf in zip(uq, nfs):
+        enc1 = _batch_bounded(batch, [_enc_q(it) for it in uq])
+        for it, nf in zip(uq, enc1):
             uniq[it] = _enc_b(nf)
         n_red += len(uq)
         if verbose:
-            print(f"      pass1: {n_red} encodes (1 batch) "
+            print(f"      pass1: {n_red} encodes (bounded batches) "
                   f"({fmt_dur(time.time()-t0)})", flush=True)
     else:
         for it in uq:
@@ -955,17 +1009,17 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     rel_bytes: List[bytes] = []
     if rel:
         if batch is not None:
-            nfs, _, _ = batch([
-                _enc_q(it, st._appn(
-                    _resvmk(), sym_t, loc_t,
-                    st.bytelist_term(
-                        (base + prep[i][1] + prep[i][2]).to_bytes(
-                            4, "little"))))
-                for i, it in rel])
-            rel_bytes = [_enc_b(nf) for nf in nfs]
+            qs2 = [_enc_q(it, st._appn(
+                       _resvmk(), sym_t, loc_t,
+                       st.bytelist_term(
+                           (base + prep[i][1] + prep[i][2]).to_bytes(
+                               4, "little"))))
+                   for i, it in rel]
+            rel_bytes = [_enc_b(nf)
+                         for nf in _batch_bounded(batch, qs2)]
             n_red += len(rel)
             if verbose:
-                print(f"      pass2: {n_red} encodes (1 batch) "
+                print(f"      pass2: {n_red} encodes (bounded batches) "
                       f"({fmt_dur(time.time()-t0)})", flush=True)
         else:
             for i, it in rel:

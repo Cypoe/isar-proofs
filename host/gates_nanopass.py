@@ -1,4 +1,5 @@
-"""nanopass gate — Phase 1 query-engine program stage.
+"""nanopass gate — Phase 1 query-engine program stage +
+Phase 2 record-driven programOf.
 
 Gates (cheap, no full emit — the byte-equality run is separate):
 
@@ -14,10 +15,23 @@ Gates (cheap, no full emit — the byte-equality run is separate):
      rather than emitting a malformed item list.
   4. ID-CHAIN: passes=('id','id') leaves a frag unchanged — the
      chain spine itself adds no semantics.
+  5. RECORD==MONOLITH: `program_query_rt(ROUTINES)` — routine names
+     arriving as term data through the nibble trie — decodes to
+     exactly `decode_program(program_query)`.
+  6. RECORD IR+BYTES: `routine_names_ir(Rb)` under the redirect+bytes
+     pin decodes to exactly `program_ir(Rb)` — the production kernel
+     is stageable.
+  7. TRIE-MISS: an unknown routine name in the record produces the
+     malformed frag — decode refuses it.
+  8. SENTINEL-LEAK: `_val_expr` refuses unmapped sentinel arithmetic
+     (nb-2 style) instead of baking a literal.
+  9. BOUNDED-BATCH: `_batch_bounded` halves on kernel OOM (rc=4),
+     preserves query order, propagates other failures unsplit.
 
 The per-routine stage is exercised byte-exact by
 `emit_image(decompose_asm=True, workdir=...)` — see the
-`staged==direct: True 3584B` run recorded in decision 050.
+`staged==direct: True 3584B` run recorded in decision 050 and the
+IR redirect+bytes emit (6656B, staged==oracle) in decision 051.
 """
 
 import os
@@ -102,6 +116,94 @@ def gate_id_chain(R) -> bool:
     return a == b
 
 
+_PROG_AXES = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
+             "node_bytes", "stack_reserve", "peephole"}
+
+
+def _fixed_of(R) -> dict:
+    """emit_image's generation-pin rule: every non-λ Realization
+    field pins at generation time."""
+    return {k: getattr(R, k) for k in vars(seed.Realization())
+            if k not in _PROG_AXES}
+
+
+def gate_record_eq_monolith(R) -> bool:
+    """program_rt folded over the ROUTINES record decodes to exactly
+    the monolithic programOf NF — the record is pure projection."""
+    rt = st.decode_program(reduce_tree_lo(
+        st.program_query_rt(rts.ROUTINES, R), 1_000_000)[0])
+    mono = st.decode_program(reduce_tree_lo(st.program_query(R),
+                                            500_000)[0])
+    return rt == mono
+
+
+def gate_record_ir_bytes() -> bool:
+    """the production kernel staged: ROUTINES_IR_BYTES under the
+    redirect+bytes pin decodes to exactly program_ir(R) — the staged
+    chain can now emit the byte-egress kernel itself."""
+    R = seed.Realization(reclaim="redirect", io=("stdin", "bytes"))
+    items = st.decode_program(reduce_tree_lo(
+        st.program_query_rt(rts.routine_names_ir(R), R,
+                            fixed=_fixed_of(R)), 2_000_000)[0])
+    return items == list(rts.program_ir(R))
+
+
+def gate_record_refusal(R) -> bool:
+    """a name the trie doesn't know must produce the malformed frag —
+    decode refuses it rather than skipping a routine."""
+    try:
+        nf, _, _ = reduce_tree_lo(
+            st.program_query_rt(("mkapp_p", "no_such_routine"), R),
+            500_000)
+        st.decode_program(nf)
+        return False
+    except ValueError as e:
+        return "bad item tag" in str(e)
+
+
+def gate_sentinel_leak() -> bool:
+    """a builder doing Python arithmetic on a sentinel (nb-2 style)
+    must refuse at _val_expr, not bake a literal."""
+    try:
+        st._val_expr(-0x3335)          # nb - 2 — unmapped derivation
+        return False
+    except ValueError as e:
+        return "sentinel" in str(e)
+    # derived-but-declared ones pass
+    # (checked implicitly by the IR record gate)
+
+
+def gate_batch_bounded() -> bool:
+    """_batch_bounded halves on kernel OOM (rc=4) and preserves
+    query order; a persistent rc=4 on a single root and any other
+    rc propagate without splitting.  The pass-2 resolver terms are
+    what actually OOM — measured 32 roots OK / 64 OOM, 2026-10."""
+    def oom_above(n):
+        def b(qs):
+            if len(qs) > n:
+                raise RuntimeError(
+                    "exe bytes batch failed rc=4 stderr=b''")
+            return (list(qs), 0, 0)
+        return b
+    got = ec._batch_bounded(oom_above(8), list(range(100)))
+    if got != list(range(100)):
+        return False
+    try:                                # single root that OOMs
+        ec._batch_bounded(oom_above(0), ["x"])
+        return False
+    except RuntimeError as e:
+        if "rc=4" not in str(e):
+            return False
+    try:                                # non-OOM failure: no split
+        def bad_rc(qs):
+            raise RuntimeError("exe bytes batch failed rc=3")
+        ec._batch_bounded(bad_rc, list(range(100)))
+        return False
+    except RuntimeError as e:
+        return "rc=3" in str(e)
+    return True
+
+
 if __name__ == "__main__":
     R = seed.Realization()
     gates = [
@@ -109,6 +211,11 @@ if __name__ == "__main__":
         ("per-routine invalidation", lambda: gate_invalidation(R)),
         ("pass refusal/invariant", lambda: gate_pass_refusal(R)),
         ("id chain transparent", lambda: gate_id_chain(R)),
+        ("record == monolith", lambda: gate_record_eq_monolith(R)),
+        ("record IR+bytes == program_ir", gate_record_ir_bytes),
+        ("record trie-miss refusal", lambda: gate_record_refusal(R)),
+        ("sentinel-arithmetic refusal", gate_sentinel_leak),
+        ("bounded batches halve on OOM", gate_batch_bounded),
     ]
     fail = 0
     for name, g in gates:

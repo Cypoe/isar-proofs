@@ -1252,7 +1252,14 @@ def symbols_query(imports, slots) -> T:
 # program become bound vars, so R is a real parameter, not baked data.
 # ---------------------------------------------------------------------------
 
-_SENT_VARS = {-0x1111: "rbb", -0x2222: "cb", -0x3333: "nb", -0x4444: "fv"}
+_SENT_VARS = {-0x1111: "rbb", -0x2222: "cb", -0x3333: "nb",
+              -0x4444: "fv",
+              # derived numeral params — a builder computing
+              # `R.node_bytes - 1` (ir_depack's page-align) produces
+              # the sentinel-derived literal; it binds a named derived
+              # slot rather than baking a constant
+              -0x3334: "nbm1", 0x3333: "negnb"}
+_SENT_MAGS = (0x1111, 0x2222, 0x3333, 0x4444, 0x3334)
 _R_SENT = dict(read_buf_bytes=-0x1111, chunk_bytes=-0x2222,
                node_bytes=-0x3333)
 
@@ -1287,9 +1294,22 @@ def _le8(v: int) -> T:
 
 
 def _val_expr(v: int) -> NExpr:
-    """Immediate/disp slot: sentinel int -> bound var, else bytes8."""
+    """Immediate/disp slot: sentinel int -> bound var, else bytes8.
+
+    A literal within +-16 of a sentinel magnitude is almost certainly
+    a builder doing Python arithmetic on the sentinel (nb-1, -nb,
+    nb*2...) — the result would bake as a constant and silently
+    despecialize the term.  Refuse: derived values get their own
+    named params in _SENT_VARS so the derivation is explicit at the
+    query boundary."""
     if v in _SENT_VARS:
         return NVar(_SENT_VARS[v])
+    for m in _SENT_MAGS:
+        if 0 < abs(abs(v) - m) <= 16:
+            raise ValueError(
+                f"_val_expr: {v} looks like sentinel arithmetic "
+                f"(near 0x{m:x}) — add a derived sentinel to "
+                f"_SENT_VARS and bind it at the query")
     return NComb(_le8(v))
 
 
@@ -1412,7 +1432,12 @@ def program_query(R) -> T:
                  _le8(R.node_bytes))
 
 
-def routine_expr(name: str) -> NExpr:
+_LAMBDA_AXES = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
+                "node_bytes"}
+
+
+def routine_expr(name: str, fixed: Optional[dict] = None,
+                 ir_ctx: bool = False) -> NExpr:
     """λfs λfuel λrbb λcb λnb. <routine frag> — one routine's emission
     unit, the query-engine fragment: the same sentinel-diff splices as
     program_expr, scoped to a single routine so the term (and its
@@ -1420,12 +1445,27 @@ def routine_expr(name: str) -> NExpr:
     routine's item list — so concat of per-routine decodes is exactly
     decode_program's output.  fs-conditional routines (st_s emits iff
     fuse_s, build_ds iff not) keep that selection in-term: they
-    produce their frag or NIL, never a different signature."""
+    produce their frag or NIL, never a different signature.
+
+    `fixed` pins the record's non-parametric axes (reclaim/io/order/
+    arena sizes/payload/audit...) at GENERATION time — the builder's
+    Python-level branches resolve to the declared variant, so an IR
+    redirect+bytes kernel emits its real routines instead of silently
+    defaulting.  λ-bound axes (fs/fuel/rbb/cb/nb) are rejected in
+    `fixed` — they stay term parameters.  `ir_ctx` mirrors _emit's
+    ctx["ir"] record-level flag (r_mkapp_p's node layout differs
+    under the IR record)."""
+    fixed = dict(fixed or {})
+    clash = _LAMBDA_AXES & set(fixed)
+    if clash:
+        raise ValueError(f"routine_expr: {sorted(clash)} are λ-bound "
+                         f"parameters, not generation axes")
     rts = routines_x86_64_win64
     ctx = rts._ctx()
-    R_def = seed.Realization(**_R_SENT)
-    R_fs = seed.Realization(fuse_s=True, **_R_SENT)
-    R_fu = seed.Realization(fuel=-0x4444, **_R_SENT)
+    ctx["ir"] = ir_ctx
+    R_def = seed.Realization(**{**_R_SENT, **fixed})
+    R_fs = seed.Realization(fuse_s=True, **{**_R_SENT, **fixed})
+    R_fu = seed.Realization(fuel=-0x4444, **{**_R_SENT, **fixed})
     b = rts._BUILDERS[name]
     f_def, f_fs, f_fu = b(R_def, ctx), b(R_fs, ctx), b(R_fu, ctx)
     if name == "st_s":                            # emits iff fuse_s
@@ -1440,19 +1480,30 @@ def routine_expr(name: str) -> NExpr:
         regs = (_regions(f_def, f_fs), _regions(f_def, f_fu))
         body = _splice(f_def, regs, _NIL_E)
     return NAbs("fs", NAbs("fuel", NAbs("rbb", NAbs("cb",
-                                                  NAbs("nb", body)))))
+                                                  NAbs("nb",
+                                                       NAbs("nbm1",
+                                                            NAbs("negnb",
+                                                                 body)))))))
 
 
-_ROUTINE_OF: Dict[str, T] = {}
+def _fix_key(fixed: Optional[dict]) -> tuple:
+    """Canonical hashable key for a generation-pin dict."""
+    return tuple(sorted((fixed or {}).items()))
 
 
-def routine_of(name: str) -> T:
-    """bracket(routine_expr(name)) memoized per routine — the fragment
+_ROUTINE_OF: Dict[Tuple[str, tuple, bool], T] = {}
+
+
+def routine_of(name: str, fixed: Optional[dict] = None,
+               ir_ctx: bool = False) -> T:
+    """bracket(routine_expr(name, fixed, ir_ctx)) memoized per
+    (routine, generation-pin, record context) — the fragment
     constants are built lazily and independently, so editing one
     routine's builder never rebuilds the others' terms."""
-    t = _ROUTINE_OF.get(name)
+    k = (name, _fix_key(fixed), ir_ctx)
+    t = _ROUTINE_OF.get(k)
     if t is None:
-        t = _ROUTINE_OF[name] = bracket(routine_expr(name))
+        t = _ROUTINE_OF[k] = bracket(routine_expr(name, fixed, ir_ctx))
     return t
 
 
@@ -1487,19 +1538,128 @@ def pass_term(name: str) -> T:
     return t
 
 
-def routine_query(name: str, R, passes: Tuple[str, ...] = ()) -> T:
+def routine_query(name: str, R, passes: Tuple[str, ...] = (),
+                  fixed: Optional[dict] = None,
+                  ir_ctx: bool = False) -> T:
     """`routineOf_<name> fs fuel rbb cb nb` wrapped in the routine's
     pass chain: passes listed in pipeline order, each applied to the
     routine's frag — `chain [p1,p2] f = p2(p1(f))`.  Every pass is a
     real term reduction on the frag; the spine is data at the
-    boundary."""
+    boundary.  `fixed` is the generation-pin dict (see routine_expr)
+    — the record's semantic axes."""
     fuel = KK if R.fuel is None else app(_JUST, _le8(R.fuel))
-    q = _appn(routine_of(name), TRUE_T if R.fuse_s else FALSE_T,
+    q = _appn(routine_of(name, fixed, ir_ctx),
+              TRUE_T if R.fuse_s else FALSE_T,
               fuel, _le8(R.read_buf_bytes), _le8(R.chunk_bytes),
-              _le8(R.node_bytes))
+              _le8(R.node_bytes),
+              _le8(R.node_bytes - 1), _le8(-R.node_bytes))
     for p in passes:
         q = app(pass_term(p), q)
     return q
+
+
+# ---------------------------------------------------------------------------
+# record-driven programOf — the routine-name list is term-level data;
+# a name dispatches through a static nibble trie to its fragment term.
+# `program_rt passes rt fs fuel rbb cb nb` folds the record into the
+# frag list the monolith emits.  A trie miss conses a malformed frag —
+# decode_frag refuses it, so a bad record entry fails loudly instead
+# of silently skipping a routine.
+# ---------------------------------------------------------------------------
+
+_ROUTINE_TRIES: Dict[tuple, T] = {}
+
+
+def _routine_trie(fixed: Optional[dict] = None,
+                  ir_ctx: bool = False) -> T:
+    """routine name -> routineOf fragment term, static nibble trie —
+    all builders' names, so a record may name any realized routine."""
+    fk = (_fix_key(fixed), ir_ctx)
+    t = _ROUTINE_TRIES.get(fk)
+    if t is None:
+        t = _ROUTINE_TRIES[fk] = _trie(
+            {n: routine_of(n, fixed, ir_ctx)
+             for n in routines_x86_64_win64._BUILDERS})
+    return t
+
+
+def _bad_frag_term() -> T:
+    """malformed frag — one item whose tag is neither "label" nor
+    "i"; decode_frag raises `bad item tag` on it.  The trie-miss
+    refusal term."""
+    return _appn(_CONS, _appn(_CONS, str_term("bad_routine"), KK), KK)
+
+
+_PROGRAM_RT: Dict[tuple, T] = {}
+
+
+def program_rt(fixed: Optional[dict] = None,
+               ir_ctx: bool = False) -> T:
+    """λps λrt λfs λfuel λrbb λcb λnb. REV(FOLDL step rt NIL) —
+    ps is the frag->frag pass chain as a term list, rt the routine-
+    name record; each name looks its fragment term up in the routine
+    trie and gets the parameter spine plus the chain applied:
+    foldl (λx λp. p x) frag ps."""
+    fk = (_fix_key(fixed), ir_ctx)
+    t = _PROGRAM_RT.get(fk)
+    if t is not None:
+        return t
+    cons = NComb(_CONS)
+    tl = NComb(bracket_abstract0(parse(_TLOOK)))
+    foldl = NComb(bracket_abstract0(parse(_FOLDL)))
+    rev = NComb(bracket_abstract0(parse(_REV)))
+    # λx. λp. p x — apply one pass to the accumulated frag
+    applyp = NAbs("x", NAbs("p", NApp(NVar("p"), NVar("x"))))
+    # λrf. cons (FOLDL applyp ps (rf fs fuel rbb cb nb nbm1 negnb)) acc
+    # — FOLDL st l a: fold the pass list over the routine's frag
+    hit = NAbs("rf", _napp(cons,
+                           _napp(foldl, applyp, NVar("ps"),
+                                 _napp(NVar("rf"), NVar("fs"),
+                                       NVar("fuel"), NVar("rbb"),
+                                       NVar("cb"), NVar("nb"),
+                                       NVar("nbm1"), NVar("negnb"))),
+                           NVar("acc")))
+    miss = _napp(cons, NComb(_bad_frag_term()), NVar("acc"))
+    step = NAbs("acc", NAbs("nm",
+                            _napp(_napp(tl, NComb(_routine_trie(fixed, ir_ctx)),
+                                        NVar("nm")),
+                                  miss, hit)))
+    body = _napp(rev, _napp(foldl, step, NVar("rt"), _NIL_E))
+    t = bracket(NAbs("ps", NAbs("rt", NAbs("fs", NAbs("fuel",
+                     NAbs("rbb", NAbs("cb", NAbs("nb",
+                                                NAbs("nbm1",
+                                                     NAbs("negnb",
+                                                          body))))))))))
+    _PROGRAM_RT[fk] = t
+    return t
+
+
+def routines_record_term(names) -> T:
+    """the routines record as a term: the routine-name list, str
+    cells — stage data the fold consumes without a Python crossing."""
+    return json_to_term(list(names))
+
+
+def program_query_rt(names, R, passes: Tuple[str, ...] = (),
+                     fixed: Optional[dict] = None,
+                     ir_ctx: Optional[bool] = None) -> T:
+    """`program_rt passes rt fs fuel rbb cb nb` — the record-driven
+    program stage: the routine-name list and pass chain arrive as
+    term data; equal to the concat of per-routine routine_query frags
+    (gate: nanopass record-vs-monolith).  ir_ctx defaults to _emit's
+    rule: the record is IR-context iff any routine name is ir_*."""
+    fuel = KK if R.fuel is None else app(_JUST, _le8(R.fuel))
+    if ir_ctx is None:
+        ir_ctx = any(n.startswith("ir_") for n in names)
+    pt: T = KK
+    for p in reversed(passes):
+        pt = app(app(_CONS, pass_term(p)), pt)
+    return _appn(program_rt(fixed, ir_ctx), pt,
+                 routines_record_term(names),
+                 TRUE_T if R.fuse_s else FALSE_T, fuel,
+                 _le8(R.read_buf_bytes), _le8(R.chunk_bytes),
+                 _le8(R.node_bytes),
+                 _le8(R.node_bytes - 1), _le8(-R.node_bytes))
 
 
 # ---------------------------------------------------------------------------
@@ -1568,9 +1728,15 @@ def _trie(entries: Dict[str, T]) -> T:
     return node_term(())
 
 
-# dead trie node: Nothing value, every child K — unreachable on the static
-# tries (present keys only), total if ever descended.
-_TRIE_DEAD = _appn(_PAIR, KK, bracket_abstract0(parse("\\k. K")))
+# dead trie node: Nothing value, every child itself — descending an
+# absent path returns a dead node at every depth, so the probe ends
+# on mv=KK (Nothing) instead of selector garbage.  Self-similar via
+# self-application: M M where M = λx. PAIR KK (λk. x x).
+_TRIE_DEAD = app(
+    bracket_abstract0(parse(
+        "(\\x. (\\a. \\b. \\f. f a b) K (\\k. x x))")),
+    bracket_abstract0(parse(
+        "(\\x. (\\a. \\b. \\f. f a b) K (\\k. x x))")))
 
 # TLOOK trie name -> maybeVal — fold the name's nibble cells descending
 # node = pair(mv, childfn): childfn nib -> child node.
