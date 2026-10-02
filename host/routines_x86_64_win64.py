@@ -1501,6 +1501,11 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         # the kernel decodes the byte-list NF itself: one
         # [u32le len][bytes] frame per root, in root order
         p += [I("call_rel32", ("l", "emit_bytes"))]
+    elif R.io[1] == "ir":
+        # the NF leaves the kernel as its own PIR blob: one
+        # [u32le len][PIR] frame per root — a stage output that the
+        # next stage can depack verbatim, no Python in between
+        p += [I("call_rel32", ("l", "emit_ir"))]
     else:
         p += [
             I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
@@ -2056,6 +2061,199 @@ def r_emit_bytes(R: Realization, ctx: Ctx) -> Program:
     return p
 
 
+# ======================================================================
+# IR EGRESS (io=("stdin","ir"))
+#
+# emit_ir serializes the NF graph itself to a PIR blob (ADR-005):
+# a stage's output IS the next stage's input — no text token line,
+# no Python reparse.  Identity dedup via cell-number table is enough:
+# Merkle digests are dedup-insensitive (dig(node) = sha over child
+# digests), so the blob's canonical root digest equals what Python's
+# structural hash-cons computes — verifiable one linear pass over
+# the records, spec_term.digest_ir_blob.
+
+
+def r_emit_ir(R: Realization, ctx: Ctx) -> Program:
+    """emit_ir: r12=NF -> WriteFile one [u32le len][PIR blob] frame.
+    ei_walk(rdi=node) -> eax=emit idx: repr-resolved postorder
+    left-then-right — the same order _pack_ir_all's stack produces —
+    with ei_tab[cell_no] = idx+1 deduping on cell identity.  Table and
+    output buffer are fresh VirtualAllocs per root: zeroed pages are
+    the dedup-init, and cell addresses legitimately rebind across
+    roots after the arena reset."""
+    iat = ctx["iat"]
+    p: Program = [
+        LBL("emit_ir"),
+        I("sub_r64_imm", "rsp", 0x28),
+    ]
+    if R.reclaim == "redirect":
+        p += [I("mov_r64_r64", "rdi", "r12"),
+              I("call_rel32", ("l", "repr")),
+              I("mov_r64_r64", "r12", "rax")]
+    p += [
+        # ncells = (rbp - irarena)/24 — every NF cell sits in the span
+        I("mov_r64_r64", "rax", "rbp"),
+        I("mov_r64_rip", "rcx", ("p", "irarena")),
+        I("sub_r64_r64", "rax", "rcx"),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "ecx", 24),
+        I("div_r64", "rcx"),
+        I("mov_rip_r64", ("p", "ei_cells"), "rax"),
+        # ei_tab = VA(ncells*8, COMMIT|RESERVE, RW) — zeroed
+        I("shl_r64_imm8", "rax", 3),
+        I("add_r64_imm", "rax", 0xfff), I("and_r64_imm", "rax", -4096),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_r64", "rdx", "rax"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "ei_tab"), "rax"),
+        # ei_out = VA(ncells*9 + 24 rounded, ...) — emitted nodes <=
+        # reachable cells <= span cells
+        I("mov_r64_rip", "rax", ("p", "ei_cells")),
+        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rdx", 3),
+        I("add_r64_r64", "rdx", "rax"),
+        I("add_r64_imm", "rdx", 24 + 0xfff),
+        I("and_r64_imm", "rdx", -4096),
+        I("mov_rip_r64", ("p", "ei_outz"), "rdx"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "ei_out"), "rax"),
+        I("mov_r64_rip", "rcx", ("p", "ei_outz")),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_rip_r64", ("p", "ei_lim"), "rax"),
+        # header: magic|ver qword (buf+0); nn|nroots + root patched
+        # after the walk; records stream from buf+20
+        I("mov_r64_rip", "r14", ("p", "ei_out")),
+        I("mov_r64_imm", "rax", (1 << 32) | IR_MAGIC),
+        I("mov_m64_r64", ("m", "r14", 0), "rax"),
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "ei_idx"), "rax"),
+        I("lea_r64_m64", "rsi", ("m", "r14", 20)),
+        I("mov_r64_r64", "rdi", "r12"),
+        I("call_rel32", ("l", "ei_walk")),
+        # eax = root emit idx — byte stores at buf+16..19 (no dword
+        # reg-store form; div-chain extracts the four bytes)
+        I("mov_r64_r64", "r12", "rax"),
+        I("mov_m8_r8", ("m", "r14", 16), "al"),
+        I("xor_r32_r32", "edx", "edx"), I("mov_r32_imm32", "ecx", 0x100),
+        I("div_r64", "rcx"),
+        I("mov_m8_r8", ("m", "r14", 17), "al"),
+        I("xor_r32_r32", "edx", "edx"), I("mov_r32_imm32", "ecx", 0x100),
+        I("div_r64", "rcx"),
+        I("mov_m8_r8", ("m", "r14", 18), "al"),
+        I("xor_r32_r32", "edx", "edx"), I("mov_r32_imm32", "ecx", 0x100),
+        I("div_r64", "rcx"),
+        I("mov_m8_r8", ("m", "r14", 19), "al"),
+        # qword at buf+8 = nn | (nroots=1 << 32)
+        I("mov_r64_rip", "rcx", ("p", "ei_idx")),
+        I("mov_r64_imm", "rax", 1 << 32),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_m64_r64", ("m", "r14", 8), "rax"),
+        # frame: u32 len (in .data — no dword store) + payload
+        I("mov_r64_r64", "rdx", "rsi"), I("sub_r64_r64", "rdx", "r14"),
+        I("mov_rip_r64", ("p", "ei_len"), "rdx"),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("lea_r64_rip", "rdx", ("p", "ei_len")),
+        I("mov_r32_imm32", "r8d", 4),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("mov_r64_rip", "rdx", ("p", "ei_out")),
+        I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "rdx"),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        # release table + buffer (MEM_RELEASE: size operand is 0)
+        I("mov_r64_rip", "rcx", ("p", "ei_tab")),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "r8d", MEM_RELEASE),
+        I("call_mrip", iat("VirtualFree")),
+        I("mov_r64_rip", "rcx", ("p", "ei_out")),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "r8d", MEM_RELEASE),
+        I("call_mrip", iat("VirtualFree")),
+        I("add_r64_imm", "rsp", 0x28), I("ret"),
+
+        # ---- ei_walk: rdi=node, rsi=cursor -> eax=emit idx ----
+        LBL("ei_walk"),
+    ]
+    if R.reclaim == "redirect":
+        # interior children can be FWD mid-spine (emit_bytes' probe
+        # note) — resolve at every visit, then dedup on the rep
+        p += [I("call_rel32", ("l", "repr")),
+              I("mov_r64_r64", "rdi", "rax")]
+    p += [
+        I("sub_r64_imm", "rsp", 0x28),
+        I("mov_m64_r64", ("m", "rsp", 0), "rdi"),      # node
+        # entry = ei_tab + cell_no*8, cell_no = (node - irarena)/24
+        I("mov_r64_r64", "rax", "rdi"),
+        I("mov_r64_rip", "rcx", ("p", "irarena")),
+        I("sub_r64_r64", "rax", "rcx"),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "ecx", 24),
+        I("div_r64", "rcx"),
+        I("shl_r64_imm8", "rax", 3),
+        I("mov_r64_rip", "rcx", ("p", "ei_tab")),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_m64_r64", ("m", "rsp", 8), "rax"),      # entry ptr
+        I("mov_r32_m32", "ecx", ("m", "rax", 0)),
+        I("test_r64_r64", "rcx", "rcx"),
+        I("jne_rel32", ("l", "ei_hit")),
+        # bound: cursor+9 <= ei_lim else exit4 (OOM class)
+        I("lea_r64_m64", "rax", ("m", "rsi", 9)),
+        I("mov_r64_rip", "rdx", ("p", "ei_lim")),
+        I("cmp_r64_r64", "rax", "rdx"),
+        I("jge_rel32", ("l", "exit4")),
+        I("mov_r64_m64", "rax", ("m", "rdi", 0)),      # tag field
+        I("test_r64_r64", "rax", "rax"),
+        I("jne_rel32", ("l", "ei_leaf")),
+        # app: postorder left then right — _pack_ir_all's order
+        I("mov_r64_m64", "rdi", ("m", "rdi", 8)),
+        I("call_rel32", ("l", "ei_walk")),
+        I("mov_m64_r64", ("m", "rsp", 16), "rax"),     # li
+        I("mov_r64_m64", "rdi", ("m", "rsp", 0)),
+        I("mov_r64_m64", "rdi", ("m", "rdi", 16)),
+        I("call_rel32", ("l", "ei_walk")),             # eax = ri
+        # record at rsi: byte tag=0, u32 li@1, u32 ri@5 — composed as
+        # one qword store at rsi+1 = li | ri<<32 (clean u32 halves)
+        I("mov_r64_r64", "rcx", "rax"),
+        I("shl_r64_imm8", "rcx", 32),
+        I("mov_r64_m64", "rax", ("m", "rsp", 16)),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_m64_r64", ("m", "rsi", 1), "rax"),
+        I("mov_m8_imm8", ("m", "rsi", 0), 0),
+        I("jmp_rel32", ("l", "ei_emit")),
+        LBL("ei_leaf"),
+        # leaf: wire tag = cell tag (1..6); anything else is not an
+        # NF node — STK/FWD/EG_MARK/junk refuse as bad IR
+        I("cmp_r64_imm", "rax", 1), I("jl_rel32", ("l", "exit3")),
+        I("cmp_r64_imm", "rax", 7), I("jge_rel32", ("l", "exit3")),
+        I("mov_m8_r8", ("m", "rsi", 0), "al"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_m64_r64", ("m", "rsi", 1), "rcx"),
+        LBL("ei_emit"),
+        # register: entry = (idx+1); ei_idx++ ; rax = idx
+        I("mov_r64_rip", "rax", ("p", "ei_idx")),
+        I("mov_r64_m64", "rcx", ("m", "rsp", 8)),
+        I("lea_r64_m64", "rdx", ("m", "rax", 1)),
+        I("mov_m64_r64", ("m", "rcx", 0), "rdx"),
+        I("mov_rip_r64", ("p", "ei_idx"), "rdx"),
+        I("add_r64_imm", "rsi", 9),
+        I("add_r64_imm", "rsp", 0x28), I("ret"),
+        LBL("ei_hit"),
+        I("mov_r64_r64", "rax", "rcx"),                # ecx = idx+1
+        I("dec_r64", "rax"),
+        I("add_r64_imm", "rsp", 0x28), I("ret"),
+    ]
+    return p
+
+
 # Ordered routine names = emission order.  "st_s" emits iff R.fuse_s,
 # "build_ds" iff not R.fuse_s (handled in program()).
 ROUTINES: Tuple[str, ...] = (
@@ -2082,6 +2280,10 @@ ROUTINES_IR_BYTES: Tuple[str, ...] = ROUTINES_IR + (
     "emit_bytes", "peval", "selidx",
 )
 
+# IR egress adds the NF->PIR-blob serializer: a stage's output leaves
+# the kernel already depackable (emit_ir only — no probe vocab needed)
+ROUTINES_IR_IR: Tuple[str, ...] = ROUTINES_IR + ("emit_ir",)
+
 IMPORTS_IR: Tuple[str, ...] = IMPORTS + ("VirtualFree",)
 
 # egress .data (bytes mode only — callable below keeps term-mode .data
@@ -2094,13 +2296,23 @@ DATA_SLOTS_EB: Tuple[Tuple[str, int], ...] = (
 )
 
 
+# egress .data (ir mode only): dedup table + blob buffer bounds,
+# emit index, cell count, sizes, u32 len slot
+DATA_SLOTS_EI: Tuple[Tuple[str, int], ...] = (
+    ("ei_tab", 8), ("ei_out", 8), ("ei_lim", 8), ("ei_idx", 8),
+    ("ei_cells", 8), ("ei_len", 8), ("ei_outz", 8),
+)
+
+
 def data_slots_ir(R: Realization) -> tuple:
-    """IR slots; io=("stdin","bytes") appends the egress block."""
+    """IR slots; io=("stdin","bytes"/"ir") appends the egress block."""
     s = DATA_SLOTS_IR
     if R.reclaim == "redirect":
         s = s + DATA_SLOTS_PS
     if R.io[1] == "bytes":
         s = s + DATA_SLOTS_EB
+    if R.io[1] == "ir":
+        s = s + DATA_SLOTS_EI
     return s
 
 _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
@@ -2134,9 +2346,12 @@ def program(R: Realization) -> Program:
 
 def routine_names_ir(R: Realization) -> Tuple[str, ...]:
     """the record's routine list for R — the io specialization is the
-    record's own data: bytes egress adds emit_bytes/peval/selidx."""
+    record's own data: bytes egress adds emit_bytes/peval/selidx, ir
+    egress adds emit_ir."""
     if R.io == ("stdin", "bytes"):
         return ROUTINES_IR_BYTES
+    if R.io == ("stdin", "ir"):
+        return ROUTINES_IR_IR
     if R.io != ("stdin", "stdout"):
         raise NotRealized(f"io={R.io!r} not realized by {ROUTINES_IR}")
     return ROUTINES_IR
@@ -2191,7 +2406,7 @@ X86_64_WIN64_IR = Routines(
     program=program_ir,
     imports=IMPORTS_IR,
     data_slots=data_slots_ir,
-    ios=(("stdin", "stdout"), ("stdin", "bytes")),
+    ios=(("stdin", "stdout"), ("stdin", "bytes"), ("stdin", "ir")),
     names_for=routine_names_ir,
 )
 

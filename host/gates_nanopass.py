@@ -41,7 +41,12 @@ Gates (cheap, no full emit — the byte-equality run is separate):
      refuses on a missing artifact.
  14. DECODE-EVIDENCE: `_decode` counters record per-emit Python
      semantic crossings; bytecells is already 0 under the bytes
-     runner — frag/bytesyms/program remain until `emit_ir` (4c).
+     runner — frag/bytesyms/program remain until stage blobs flow
+     through the ir-egress path end to end.
+ 15. EMIT-IR: the io=("stdin","ir") kernel emits each root's NF as a
+     framed PIR blob — depackable, digest-equal to its own canonical
+     re-pack (digest_ir_blob), and observationally identical when fed
+     back through the stdout kernel.  Malformed blobs refuse.
 
 The per-routine stage is exercised byte-exact by
 `emit_image(decompose_asm=True, workdir=...)` — see the
@@ -319,6 +324,57 @@ def gate_decode_evidence() -> bool:
                  "bytecells": 0}
 
 
+def gate_emit_ir() -> bool:
+    """the kernel writes stage blobs itself: each root's reduced NF
+    leaves as a [u32 len][PIR] frame — a valid packed-IR stream whose
+    canonical digest equals re-packing the depacked term, and whose
+    observable NF (fed back through the stdout kernel) is the same
+    line the input term reduces to.  Order across roots is the input
+    order; truncated/garbage streams refuse in digest_ir_blob."""
+    import struct
+    import subprocess
+    from reduce import I, KK, S, B, C, D, app
+    exe_ir = ec.ir_exe_for(seed.Realization(
+        reclaim="redirect", io=("stdin", "ir")))
+    exe_txt = ec.ir_exe_for(seed.Realization(reclaim="redirect"))
+    shared = app(S, app(KK, I))
+    terms = [I, app(app(S, KK), KK), app(shared, shared),
+             app(app(B, app(C, D)), app(S, I))]
+    run = ec.make_blob_runner(exe_ir)
+    if getattr(run, "kind", None) != "exe.ir":
+        return False
+    blobs, _, _ = run.batch(terms)
+    if len(blobs) != len(terms):
+        return False
+    for b in blobs:
+        # digest equivalence: kernel stream vs canonical re-pack of
+        # the depacked term — same Merkle root by construction
+        if st.digest_ir_blob(b) != st.pack_ir_keyed(
+                st.unpack_ir(b)[0])[1]:
+            return False
+    # observational equivalence at kernel ground truth: each emitted
+    # blob re-reduces (idempotent) to the input's own NF line
+    p = subprocess.run([exe_txt], input=st.pack_ir(*terms),
+                       capture_output=True, timeout=600)
+    if p.returncode != 0:
+        return False
+    lines = [ln for ln in p.stdout.split(b"\n") if ln]
+    for i, b in enumerate(blobs):
+        q = subprocess.run([exe_txt], input=b, capture_output=True,
+                           timeout=600)
+        if [ln for ln in q.stdout.split(b"\n") if ln] != lines[i:i+1]:
+            return False
+    # refusal: truncated record stream and garbage headers raise,
+    # never silently mint a digest
+    for bad in (blobs[1][:-3], b"\x00" * 16, b""):
+        try:
+            st.digest_ir_blob(bad)
+            return False
+        except Exception:                            # noqa: BLE001
+            pass
+    return True
+
+
 if __name__ == "__main__":
     R = seed.Realization()
     gates = [
@@ -339,6 +395,7 @@ if __name__ == "__main__":
         ("manifest replay == emit", lambda: gate_manifest_replay(
             tempfile.mkdtemp(prefix="nanopass_man_"))),
         ("decode-crossing evidence", gate_decode_evidence),
+        ("emit_ir blob round-trip", gate_emit_ir),
     ]
     fail = 0
     for name, g in gates:

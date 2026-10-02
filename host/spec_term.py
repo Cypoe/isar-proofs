@@ -3811,6 +3811,36 @@ def unpack_ir(data: bytes) -> List[T]:
     return [cells[i] for i in roots]
 
 
+def digest_ir_blob(data: bytes) -> List[str]:
+    """canonical per-root Merkle digests of a packed-IR stream — the
+    same keys pack_ir_keyed would mint for unpack_ir(data), without
+    building any term.  Digests fold child digests, not stream
+    positions, so identity-deduped kernel output (emit_ir) and
+    hash-consed Python output agree node-for-node wherever subtrees
+    are equal — the blob's shape is free, its content key fixed."""
+    import hashlib
+    magic, ver, n_nodes, n_roots = struct.unpack_from("<IIII", data, 0)
+    if magic != IR_MAGIC:
+        raise ValueError(f"bad packed-IR magic {magic:#x}")
+    if ver != IR_VERSION:
+        raise ValueError(f"packed-IR version {ver}")
+    roots = struct.unpack_from(f"<{n_roots}I", data, 16)
+    digs: List[bytes] = []
+    pos = 16 + 4 * n_roots
+    for i in range(n_nodes):
+        tag, l, r = struct.unpack_from("<BII", data, pos)
+        rec = data[pos:pos + 9]
+        pos += 9
+        if tag == 0:
+            if l >= i or r >= i:
+                raise ValueError(f"packed-IR node {i} forward ref")
+            digs.append(hashlib.sha256(
+                b"\x00" + digs[l] + digs[r]).digest())
+        else:
+            digs.append(hashlib.sha256(rec).digest())
+    return [digs[i].hex()[:32] for i in roots]
+
+
 def ir_map() -> QuotientMap:
     """Dialect record `packed.ir`: bytes <-> T.  The map-level unit is
     single-root (multi-root batching is a transport concern); decode

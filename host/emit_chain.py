@@ -472,6 +472,74 @@ def make_bytes_runner(exe: str, timeout: int = 3600,
     return run
 
 
+def make_blob_runner(exe: str, timeout: int = 3600,
+                     workers: int = 1,
+                     pinned: Optional[Dict[int, tuple]] = None
+                     ) -> Callable[[T], Tuple[bytes, int, int]]:
+    """Packed-IR runner over the IR-egress kernel (Realization
+    io=("stdin","ir")): each root's reduced NF leaves the kernel as
+    its own PIR blob — the stage's output IS the next stage's input,
+    no term rebuild in between.  Wire out is one
+    [u32le len][PIR blob] frame per root, order preserved.
+
+    run(q) -> (blob, steps, alloc) where blob is a single-root PIR
+    stream; .batch(qs) -> ([blob], steps, alloc).  .blobs marks the
+    runner so stage seams ingest frames as content-addressed IR
+    artifacts (digest_ir_blob keys them) instead of decoding terms.
+    Frames are validated structurally — malformed blobs raise."""
+    import concurrent.futures
+    stats = {"dec": 0}
+
+    def _one(blob: bytes, expect: int) -> Tuple[List[bytes], int, int]:
+        cp = subprocess.run([exe], input=blob,
+                            capture_output=True, timeout=timeout)
+        m = re.search(rb"steps=(\d+) alloc=(\d+)", cp.stderr)
+        if cp.returncode != 0:
+            raise RuntimeError(
+                f"exe ir batch failed rc={cp.returncode} "
+                f"stderr={cp.stderr!r} "
+                f"(2=fuel, 3=bad IR, 4=alloc — never a silent success)")
+        frames = _bytes_frames(cp.stdout, expect)
+        for f in frames:
+            st.digest_ir_blob(f)          # header/root/forward-ref check
+        return (frames, int(m.group(1)) if m else -1,
+                int(m.group(2)) if m else -1)
+
+    def batch(qs: List[T]) -> Tuple[List[bytes], int, int]:
+        if not qs:
+            return [], 0, -1
+        n = min(max(1, workers), len(qs))
+        chunks = [list(range(j, len(qs), n)) for j in range(n)]
+        blobs = [st.pack_ir(*[qs[i] for i in c],
+                            pinned=pinned) for c in chunks]
+        if n <= 1:
+            res = [_one(blobs[0], len(chunks[0]))]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(n) as pool:
+                res = list(pool.map(
+                    _one, blobs, [len(c) for c in chunks]))
+        outs: List[Optional[bytes]] = [None] * len(qs)
+        steps = alloc = 0
+        for c, (fs, s, a) in zip(chunks, res):
+            if s > 0:
+                steps += s
+            if a > 0:
+                alloc += a
+            for i, b in zip(c, fs):
+                outs[i] = b
+        return [b for b in outs if b is not None], steps, alloc
+
+    def run(t: T) -> Tuple[bytes, int, int]:
+        outs, s, a = batch([t])
+        return outs[0], s, a
+    run.batch = batch
+    run.blobs = True                     # stage seams ingest PIR frames
+    run.stats = stats
+    run.kind = "exe.ir"                  # manifest runner label
+    run.exe = exe
+    return run
+
+
 def ir_exe_for(R: seed.Realization) -> str:
     """The emitted packed-IR kernel for realization R (cached per
     process by seed._exe_for)."""
