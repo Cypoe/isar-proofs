@@ -583,6 +583,22 @@ def emit_image(R: seed.Realization,
     (stage, steps, arena_nodes) per reduction.
     """
     report: List[tuple] = []
+    # programOf is generated at sentinel defaults — only fs/fuel/
+    # rbb/cb/nb flow in as parameters (stack_reserve enters at pack,
+    # peephole is its own stage).  Any other R field left non-default
+    # would be silently dropped; refuse rather than emit the wrong
+    # kernel — silent realization downgrade is exactly what the staged
+    # chain exists to prevent.
+    _d = seed.Realization()
+    _param = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
+              "node_bytes", "stack_reserve", "peephole"}
+    _bad = {k: getattr(R, k) for k in vars(_d)
+            if k not in _param and getattr(R, k) != getattr(_d, k)}
+    if _bad:
+        raise toolchain.NotRealized(
+            f"emit_image: programOf realizes only fs/fuel/rbb/cb/nb/"
+            f"stack_reserve/peephole; non-default {sorted(_bad)} needs "
+            f"an extended programOf or a different routines record")
     if text_base is None:
         # .text is emitted last in the image — its RVA is a function of
         # the (already fixed) idata/data layout, not a constant.
