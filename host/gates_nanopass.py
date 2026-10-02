@@ -36,6 +36,12 @@ Gates (cheap, no full emit — the byte-equality run is separate):
  12. SPLIT-LINK: `link_staged` (idataOf + dataOf as separate queries,
      symtab merge at the seam) decodes to exactly `decode_link` of
      the monolithic `link_query` — checked at mini scale.
+ 13. MANIFEST-REPLAY: manifest.json names stage artifacts/runners/
+     deps; `replay_emit` resolves the image by content address and
+     refuses on a missing artifact.
+ 14. DECODE-EVIDENCE: `_decode` counters record per-emit Python
+     semantic crossings; bytecells is already 0 under the bytes
+     runner — frag/bytesyms/program remain until `emit_ir` (4c).
 
 The per-routine stage is exercised byte-exact by
 `emit_image(decompose_asm=True, workdir=...)` — see the
@@ -70,13 +76,13 @@ def gate_frag_concat(R) -> bool:
 
 def gate_invalidation(R) -> bool:
     tb = target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS)
-    k1 = ec._ck_keys(R, rts.IMPORTS, rts.DATA_SLOTS, tb)
+    k1, _ = ec._ck_keys(R, rts.IMPORTS, rts.DATA_SLOTS, tb)
     orig = rts._BUILDERS["itoa"]
     try:
         # swap itoa's builder for a different function object —
         # same effect as editing its source under _src()
         rts._BUILDERS["itoa"] = rts._BUILDERS["repr"]
-        k2 = ec._ck_keys(R, rts.IMPORTS, rts.DATA_SLOTS, tb)
+        k2, _ = ec._ck_keys(R, rts.IMPORTS, rts.DATA_SLOTS, tb)
     finally:
         rts._BUILDERS["itoa"] = orig
     frag_same = all(k1[f"program.{n}"] == k2[f"program.{n}"]
@@ -266,6 +272,53 @@ def gate_split_link() -> bool:
     return i1 == i0 and d1 == d0 and s1 == s0
 
 
+def gate_manifest_replay(tmpdir: str) -> bool:
+    """manifest.json names every stage's keyed artifact, its resolved
+    runner, dep edges, and query blob refs; replay_emit resolves the
+    image by content address alone — a missing artifact refuses
+    (emit, don't replay)."""
+    R = seed.Realization()
+    keys = {"program.a": "h.k1", "program.b": "h.k2",
+            "program.items": "h.k3", "link.sections": "h.k4",
+            "text.bin": "h.k5", "image.bin": "h.k6"}
+    for n, k in keys.items():
+        with open(os.path.join(tmpdir, f"{n}.{k}"), "wb") as f:
+            f.write(b"X")
+    img = b"\x4d\x5agate"
+    with open(os.path.join(tmpdir, "image.bin.h.k6"), "wb") as f:
+        f.write(img)
+    ec._write_manifest(tmpdir, R, "gate", ("a", "b"), keys, {},
+                       {}, ec._graph_run, "pack")
+    out, man = ec.replay_emit(tmpdir)
+    if out != img:
+        return False
+    by_name = {s["name"]: s for s in man["stages"]}
+    if by_name["image.bin"]["deps"] != ["text.bin", "link.sections"]:
+        return False
+    if by_name["program.items"]["deps"] != ["program.a", "program.b"]:
+        return False
+    if not by_name["image.bin"]["runner"]:
+        return False
+    os.remove(os.path.join(tmpdir, "text.bin.h.k5"))
+    try:
+        ec.replay_emit(tmpdir)
+        return False
+    except Exception as e:
+        return "not materialized" in str(e)
+
+
+def gate_decode_evidence() -> bool:
+    """_decode instrumentation counts the remaining Python semantic
+    crossings — the manifest's evidence field; bytecells is already
+    0 under the byte-egress runner (kernel decodes its own NF)."""
+    base = dict(ec._DECODE_COUNT)
+    ec._decode("frag", lambda x: x, "t")
+    ec._decode("frag", lambda x: x, "t")
+    d = ec._dec_delta(base)
+    return d == {"frag": 2, "program": 0, "bytesyms": 0,
+                 "bytecells": 0}
+
+
 if __name__ == "__main__":
     R = seed.Realization()
     gates = [
@@ -283,6 +336,9 @@ if __name__ == "__main__":
          lambda: gate_blob_store(R, tempfile.mkdtemp(
              prefix="nanopass_blobs_"))),
         ("split-link == linkOf", gate_split_link),
+        ("manifest replay == emit", lambda: gate_manifest_replay(
+            tempfile.mkdtemp(prefix="nanopass_man_"))),
+        ("decode-crossing evidence", gate_decode_evidence),
     ]
     fail = 0
     for name, g in gates:

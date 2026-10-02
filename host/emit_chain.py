@@ -98,6 +98,7 @@ def _graph_run(t: T, fuel: int = st.LO_FUEL,
 
 
 _graph_run.calls = 0
+_graph_run.kind = "graph.lo"       # manifest runner label (oracle)
 
 
 def make_graph_runner(fuel: int = st.LO_FUEL,
@@ -350,6 +351,8 @@ def make_ir_runner(exe: str, timeout: int = 3600,
         nfs, s, n = batch([t])
         return nfs[0], s, n
     run.batch = batch
+    run.kind = "exe.term"          # manifest runner label
+    run.exe = exe
     return run
 
 
@@ -464,6 +467,8 @@ def make_bytes_runner(exe: str, timeout: int = 3600,
     run.batch = batch
     run.is_bytes = True                    # byte-producing seams see this
     run.stats = stats                      # cumulative decode-probe steps
+    run.kind = "exe.bytes"                 # manifest runner label
+    run.exe = exe
     return run
 
 
@@ -492,6 +497,32 @@ def reduce_batch_native(terms: List[T], R: Optional[seed.Realization] = None,
                          cache_dir=cache_dir, fuse_s=R.fuse_s)
     nfs, steps, _ = run.batch(list(terms))
     return [tower.quote_surface(nf) for nf in nfs], steps
+
+
+# Phase-4b evidence: decode_* calls on the emit path.  Each entry is
+# a Python semantic crossing the plan wants gone — the manifest
+# records per-emit counts so the remaining seams are auditable data,
+# and gates can refuse regressions (bytecells is already zero under
+# the byte-egress runner; frag/bytesyms/program wait on emit_ir —
+# the kernel-side packed egress routine).
+_DECODE_COUNT: Dict[str, int] = {"frag": 0, "program": 0,
+                                 "bytesyms": 0, "bytecells": 0}
+
+
+def _decode(kind: str, fn, *a):
+    _DECODE_COUNT[kind] += 1
+    return fn(*a)
+
+
+def _dec_delta(dec0: dict) -> dict:
+    return {k: _DECODE_COUNT[k] - dec0.get(k, 0)
+            for k in _DECODE_COUNT}
+
+
+def _blob_tok(key: str) -> str:
+    """Blob filename token for a pin key — the manifest references
+    blobs by this so the directory listing IS the dep store."""
+    return "b" + hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
 class BlobStore:
@@ -530,7 +561,7 @@ class BlobStore:
             os.makedirs(dir, exist_ok=True)
 
     def pin_named(self, key: str, t: T) -> str:
-        tok = "b" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        tok = _blob_tok(key)
         path = os.path.join(self.dir, tok + ".ir") if self.dir \
             else None
         if path and os.path.exists(path):
@@ -569,7 +600,7 @@ class BlobStore:
         built, no walk is paid (the key must cover everything that
         determines the term: builder source, axes, pass material).
         Miss: builds via thunk, pins, stores, returns the digest."""
-        tok = "b" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        tok = _blob_tok(key)
         mp = os.path.join(self.dir, tok + ".ir.meta") if self.dir \
             else None
         if mp and os.path.exists(mp):
@@ -652,6 +683,7 @@ def _ck_keys(R: seed.Realization, imports, slots,
     pre = _ck_label(R, host_name)
     psrc = _pass_src(passes)
     keys: Dict[str, str] = {}
+    qdigs: Dict[str, str] = {}      # stage -> query digest|blob tok
     rkeys = []
     for name in routines:
         # the query's root digest IS the content key — via the blob
@@ -676,8 +708,9 @@ def _ck_keys(R: seed.Realization, imports, slots,
         rk = _stage_key(pre, rdig,
                         _src(rts._BUILDERS[name]), psrc,
                         _src(st.decode_frag))
-        rkeys.append(rk)
         keys[f"program.{name}"] = f"{pre}.{rk}"
+        qdigs[f"program.{name}"] = rdig + "|" + _blob_tok(qkey)
+        rkeys.append(rk)
     prog = _stage_key(pre, *rkeys,
                       "peephole=%d" % getattr(R, "peephole", False),
                       _src(st.decode_program))
@@ -685,23 +718,25 @@ def _ck_keys(R: seed.Realization, imports, slots,
         # the digest cache key covers the section-constant source,
         # the query constructor, and the arg VALUES (imports/slots/
         # drva) — a generator edit or a different symtab rotates it.
-        ldig = (
-            store.digest_of(
-                "|".join(("q.idata", pre, _src(st.idata_query),
-                          repr(list(imports)),
-                          st.const_pin_key(
-                              "idata.%d" % len(imports),
-                              st.idata_src(len(imports))))),
-                lambda: st.idata_query(imports)) + "|" +
-            store.digest_of(
-                "|".join(("q.data", pre, _src(st.data_query),
-                          repr(list(slots)),
-                          repr(target_pe64.data_rva(imports)),
-                          st.const_pin_key(
-                              "data.%d" % len(slots),
-                              st.data_src(len(slots))))),
-                lambda: st.data_query(
-                    slots, target_pe64.data_rva(imports))))
+        ik = "|".join(("q.idata", pre, _src(st.idata_query),
+                       repr(list(imports)),
+                       st.const_pin_key(
+                           "idata.%d" % len(imports),
+                           st.idata_src(len(imports)))))
+        dk = "|".join(("q.data", pre, _src(st.data_query),
+                       repr(list(slots)),
+                       repr(target_pe64.data_rva(imports)),
+                       st.const_pin_key(
+                           "data.%d" % len(slots),
+                           st.data_src(len(slots)))))
+        idig = store.digest_of(ik, lambda: st.idata_query(imports))
+        ddig = store.digest_of(
+            dk, lambda: st.data_query(
+                slots, target_pe64.data_rva(imports)))
+        ldig = idig + "|" + ddig
+        qdigs["link.sections"] = (
+            idig + "|" + _blob_tok(ik) + ";" +
+            ddig + "|" + _blob_tok(dk))
     else:
         ldig = "|".join(st.pack_ir_keyed(
             st.idata_query(imports),
@@ -718,7 +753,110 @@ def _ck_keys(R: seed.Realization, imports, slots,
                  "link.sections": f"{pre}.{link}",
                  "text.bin": f"{pre}.{text}",
                  "image.bin": f"{pre}.{image}"})
-    return keys
+    return keys, qdigs
+
+
+def _runner_label(r) -> str:
+    """Manifest runner identity — 'exe.term:<exe>' / 'exe.bytes:<exe>'
+    / 'graph.lo'.  The label is provenance, not a resolution handle:
+    replay re-enters emit_image, which re-resolves runners."""
+    if r is None:
+        return "?"
+    kind = getattr(r, "kind", None) or getattr(
+        r, "__name__", type(r).__name__)
+    exe = getattr(r, "exe", None)
+    return f"{kind}:{os.path.basename(exe)}" if exe else str(kind)
+
+
+# stage name -> the `runs` slot that serves it (runner resolution as
+# data — the manifest records the resolved identity per stage)
+_STAGE_SLOT = {"program.items": "program", "link.sections": "link",
+               "text.bin": "assemble*", "image.bin": "pack*"}
+
+
+def _stage_deps(name: str, keys: Dict[str, str]) -> List[str]:
+    """DAG edges implicit in the key chain, made explicit."""
+    if name == "program.items":
+        return sorted(n for n in keys
+                      if n.startswith("program.") and n != name)
+    return {"text.bin": ["program.items", "link.sections"],
+            "image.bin": ["text.bin", "link.sections"],
+            }.get(name, [])
+
+
+def _write_manifest(workdir: str, R: seed.Realization, label: str,
+                    routines, keys: Dict[str, str],
+                    qdigs: Dict[str, str], runs: dict, run,
+                    pack_slot: str,
+                    decodes: Optional[dict] = None) -> str:
+    """Phase-4 stage DAG as data: workdir/manifest.json names every
+    stage's artifact (content key), its query blob ref, its resolved
+    runner, and its deps — replayable addressing, not a code path."""
+    slot = dict(_STAGE_SLOT)
+    slot["image.bin"] = pack_slot
+    order = [f"program.{n}" for n in routines] + [
+        "program.items", "link.sections", "text.bin", "image.bin"]
+    stages = []
+    for name in order:
+        if name not in keys:
+            continue
+        q = qdigs.get(name)
+        stages.append({
+            "name": name,
+            "artifact": f"{name}.{keys[name]}",
+            "key": keys[name],
+            "runner": _runner_label(
+                runs.get(slot.get(name, "program"), run)),
+            "deps": _stage_deps(name, keys),
+            # "digest|blobtok" — the blob file that IS the query
+            "queries": ([{"digest": d, "blob": f"blobs/{t}.ir"}
+                         for d, t in (p.split("|")[:2]
+                                      for p in q.split(";"))]
+                        if q else []),
+        })
+    man = {
+        "format": "plex.stage-manifest/1",
+        "label": label,
+        "realization": repr(R),
+        "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                     time.gmtime()),
+        # remaining Python semantic crossings this emit — the audit
+        # trail until emit_ir removes them (Phase 4c)
+        "decodes": decodes,
+        "stages": stages,
+    }
+    p = os.path.join(workdir, "manifest.json")
+    with open(p, "w") as f:
+        json.dump(man, f, indent=1)
+    return p
+
+
+def replay_emit(workdir: str) -> Tuple[bytes, dict]:
+    """Resolve the recorded stage DAG — pure artifact addressing:
+    every stage must already be materialized under its content key;
+    a missing artifact is a refusal, not a recompute (recompute =
+    emit_image, replay = the bundle-loader contract in miniature)."""
+    with open(os.path.join(workdir, "manifest.json")) as f:
+        man = json.load(f)
+    stages = {s["name"]: s for s in man["stages"]}
+    for s in man["stages"]:
+        for d in s.get("deps", []):
+            if d not in stages:
+                raise toolchain.NotRealized(
+                    f"manifest: stage {s['name']} dep {d} "
+                    f"is not a stage")
+        if not os.path.exists(os.path.join(workdir, s["artifact"])):
+            raise toolchain.NotRealized(
+                f"manifest replay: {s['name']} artifact "
+                f"{s['artifact']} not materialized — emit, "
+                f"don't replay")
+    img_stage = stages.get("image.bin")
+    if img_stage is None:
+        raise toolchain.NotRealized(
+            "manifest: no image.bin stage — not an image manifest")
+    with open(os.path.join(workdir, img_stage["artifact"]),
+              "rb") as f:
+        return f.read(), man
 
 
 def emit_image(R: seed.Realization,
@@ -775,6 +913,7 @@ def emit_image(R: seed.Realization,
     (stage, steps, arena_nodes) per reduction.
     """
     report: List[tuple] = []
+    dec0 = dict(_DECODE_COUNT)   # per-emit decode evidence baseline
     if decompose_pack is None:
         # exe_default means all stages exe-shaped — pack* chunked is
         # the designed byte-seam path; monolithic pack2 crawls on a
@@ -970,12 +1109,12 @@ def emit_image(R: seed.Realization,
         # Pins are a pure splice overlay — registered lazily inside the
         # miss paths, so a fully-checkpointed warm emit never builds a
         # constant it won't pack (the pack2 bracket alone is ~22s).
-        keys = _ck_keys(R, imports, slots, text_base,
-                        host_name=label, routines=routines,
-                        passes=passes, fixed=fixed,
-                        ir_ctx=_ir_ctx,
-                        pinned=store.pins,
-                        store=store) if workdir else {}
+        keys, qdigs = _ck_keys(R, imports, slots, text_base,
+                               host_name=label, routines=routines,
+                               passes=passes, fixed=fixed,
+                               ir_ctx=_ir_ctx,
+                               pinned=store.pins,
+                               store=store) if workdir else ({}, {})
 
         prog_run = runs.get("program", run)
 
@@ -992,7 +1131,7 @@ def emit_image(R: seed.Realization,
             if verbose:
                 print(f"      program.{name}: {s} steps / {n} nodes",
                       flush=True)
-            return st.decode_frag(nf)
+            return _decode("frag", st.decode_frag, nf)
 
         def _prog_items() -> list:
             if getattr(R, "peephole", False):
@@ -1018,7 +1157,7 @@ def emit_image(R: seed.Realization,
                 report.append(("peephole", met, npass))
                 if verbose:
                     print(f"    peephole: {npass} passes", flush=True)
-                return st.decode_program(prog_nf)
+                return _decode("program", st.decode_program, prog_nf)
             out: List[tuple] = []
             names = list(routines)
             # batch the cache-miss fragments — the runner's pool
@@ -1045,7 +1184,7 @@ def emit_image(R: seed.Realization,
                               f"({fmt_dur(time.time()-t0b)})",
                               flush=True)
                     for n, nf in zip(miss, nfs):
-                        batched[n] = st.decode_frag(nf)
+                        batched[n] = _decode("frag", st.decode_frag, nf)
 
             def _produce(name: str) -> list:
                 if name in batched:
@@ -1091,6 +1230,10 @@ def emit_image(R: seed.Realization,
                 print(f"    pack*: decomposed {len(img)}B "
                       f"({fmt_dur(time.time()-t0)})", flush=True)
             report.append(("ckpt", ckpt[0], ckpt[1]))
+            if workdir:
+                _write_manifest(workdir, R, label, routines, keys,
+                                qdigs, runs, run, "pack*",
+                                decodes=_dec_delta(dec0))
             return img, report
     else:
         link_nf = _link_nf()
@@ -1111,10 +1254,21 @@ def emit_image(R: seed.Realization,
         text_t, idata_t, datab_t, R.stack_reserve))
 
     img = img_out if isinstance(img_out, bytes) \
-        else st._decode_bytecells(img_out)
+        else _decode("bytecells", st._decode_bytecells, img_out)
     if workdir:
         with open(os.path.join(workdir, "image.bin"), "wb") as f:
             f.write(img)
+        if decompose_asm:
+            # keep the content-keyed name the manifest addresses —
+            # the monolithic pack didn't go through _ck for image
+            kimg = keys.get("image.bin")
+            if kimg:
+                with open(os.path.join(
+                        workdir, "image.bin." + kimg), "wb") as f:
+                    f.write(img)
+            _write_manifest(workdir, R, label, routines, keys,
+                            qdigs, runs, run, "pack",
+                            decodes=_dec_delta(dec0))
     report.append(("ckpt", ckpt[0], ckpt[1]))
     return img, report
 
@@ -1197,12 +1351,16 @@ def link_staged(imports, slots,
     if bfn is not None:
         nfs, _, _ = bfn([st.idata_query(imports),
                          st.data_query(slots, drva)])
-        idata, iat_syms = st.decode_bytesyms(nfs[0])
-        datab, data_syms = st.decode_bytesyms(nfs[1])
+        idata, iat_syms = _decode("bytesyms", st.decode_bytesyms,
+                                  nfs[0])
+        datab, data_syms = _decode("bytesyms", st.decode_bytesyms,
+                                   nfs[1])
     else:
-        idata, iat_syms = st.decode_bytesyms(
+        idata, iat_syms = _decode(
+            "bytesyms", st.decode_bytesyms,
             run(st.idata_query(imports))[0])
-        datab, data_syms = st.decode_bytesyms(
+        datab, data_syms = _decode(
+            "bytesyms", st.decode_bytesyms,
             run(st.data_query(slots, drva))[0])
     syms = dict(iat_syms)
     syms.update(data_syms)
@@ -1691,14 +1849,17 @@ def main() -> int:
     # keys, a different R must give a different PROG key, and a file
     # planted under another realization's key must NOT be found.
     with tempfile.TemporaryDirectory() as wd:
-        ka = _ck_keys(seed.Realization(), rts.IMPORTS, rts.DATA_SLOTS,
-                      target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS))
+        ka = _ck_keys(seed.Realization(), rts.IMPORTS,
+                      rts.DATA_SLOTS,
+                      target_pe64.text_rva(rts.IMPORTS,
+                                           rts.DATA_SLOTS))[0]
         kb = _ck_keys(seed.Realization(fuel=7), rts.IMPORTS,
                       rts.DATA_SLOTS,
-                      target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS))
+                      target_pe64.text_rva(rts.IMPORTS,
+                                           rts.DATA_SLOTS))[0]
         same = ka == _ck_keys(
             seed.Realization(), rts.IMPORTS, rts.DATA_SLOTS,
-            target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS))
+            target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS))[0]
         with open(os.path.join(wd, f"text.bin.{ka['text.bin']}"),
                   "wb") as f:
             f.write(b"stale")
