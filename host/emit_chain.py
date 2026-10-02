@@ -559,6 +559,7 @@ def emit_image(R: seed.Realization,
                run: Callable[[T], Tuple[T, int, int]] = _graph_run,
                stage_runs: Optional[dict] = None,
                bytes_run: Optional[Callable] = None,
+               term_run: Optional[Callable] = None,
                decompose_asm: bool = False,
                decompose_pack: bool = False,
                workdir: Optional[str] = None,
@@ -578,6 +579,14 @@ def emit_image(R: seed.Realization,
     default to it — the kernel decodes the byte-list NF natively and
     the seam carries raw bytes, no Python _decode_bytecells.  Explicit
     stage_runs entries still win per stage.
+
+    `term_run` is a make_ir_runner for term-NF stages whose egress is
+    cheap relative to compute — measured 2026-10: `link` runs 3x
+    faster on the redirect kernel (108.9s vs 326s graph.lo, small
+    query + 436K-step fold), while `program` is pack-bound (its query
+    embeds the ~12M-node generated constant; pack_ir dominates at
+    ~392s vs 62.9s) and stays on `run` until packed stage blobs are
+    persisted.
 
     Returns (image_bytes, stage_report) where stage_report lists
     (stage, steps, arena_nodes) per reduction.
@@ -608,6 +617,8 @@ def emit_image(R: seed.Realization,
         runs.setdefault("assemble*", bytes_run)
         runs.setdefault("pack*", bytes_run)
         runs.setdefault("pack", bytes_run)
+    if term_run is not None:
+        runs.setdefault("link", term_run)
 
     def _stage(name, q):
         t0 = time.time()
