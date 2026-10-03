@@ -782,6 +782,124 @@ def gate_plex_ingest(tmpdir: str) -> bool:
     return True
 
 
+def gate_layer_chain() -> bool:
+    """Phase-8 — kernel composition is declared data (layers.py).
+
+    A kernel image is an ordered sequence of legs, each gated by one
+    realization axis: container <- dialect, driver <- threads, egress
+    <- io, basis tail <- fuse_s, persist <- reclaim.  compose() walks
+    the declared legs; a value with no row refuses naming its axis.
+
+    Asserts: composed routine lists equal the frozen pre-refactor
+    tuples for every record family (ST/MT x text/bytes/ir, plex.v3,
+    fuse_s); data_slots parity incl. the MT corner cases (bytes
+    subset, ir-egress empty); specs/*.json conformance — every
+    realized container/egress leg value has a spec, every realized
+    spec's impl names exist in _BUILDERS; refusals name axis+layer.
+    """
+    import dataclasses
+    import layers
+    R0 = seed.Realization()
+    RR = lambda **kw: dataclasses.replace(R0, **kw)   # noqa: E731
+
+    EXP_ST = ("ir_entry", "ir_read", "ir_depack", "ir_reduce",
+              "stats", "exits", "grow_heap_ir", "mkleaf", "mkapp",
+              "mkapp_p", "repr", "step", "st_norm", "st_konst",
+              "st_dup", "st_swap", "st_comp", "step_congr",
+              "count_nodes", "emit_nf", "itoa", "build_ds")
+    EXP_MT = ("ir_entry", "ir_read", "ir_spawn", "stats", "exits",
+              "mt_worker", "ir_depack", "grow_heap_ir", "mkleaf",
+              "mkapp", "mkapp_p", "repr", "step", "st_norm",
+              "st_konst", "st_dup", "st_swap", "st_comp",
+              "step_congr", "count_nodes", "emit_nf", "itoa",
+              "build_ds")
+    EXP_TOK = ("entry", "parse", "reduce", "stats", "exits",
+               "grow_heap", "mkleaf", "mkapp", "mkapp_p", "mkstk",
+               "repr", "step", "st_norm", "st_konst", "st_dup",
+               "st_swap", "st_comp", "step_congr", "count_nodes",
+               "emit_nf", "itoa", "build_ds")
+    EB = ("emit_bytes", "peval", "selidx")
+    for legs, R, exp in (
+        (rts._LEGS_IR, RR(), EXP_ST),
+        (rts._LEGS_IR, RR(io=("stdin", "bytes")), EXP_ST + EB),
+        (rts._LEGS_IR, RR(io=("stdin", "ir")), EXP_ST + ("emit_ir",)),
+        (rts._LEGS_IR, RR(threads=2), EXP_MT),
+        (rts._LEGS_IR, RR(threads=2, io=("stdin", "bytes")),
+         EXP_MT + EB),
+        (rts._LEGS_IR, RR(threads=2, io=("stdin", "ir")),
+         EXP_MT + ("emit_ir",)),
+        (rts._LEGS_IR, RR(dialect="plex.v3"),
+         ("ir_entry", "plex_read") + EXP_ST[1:]),
+        (rts._LEGS_IR, RR(dialect="plex.v3", threads=2),
+         ("ir_entry", "plex_read") + EXP_MT[1:]),
+        (rts._LEGS_IR, RR(fuse_s=True),
+         EXP_ST[:17] + ("st_s",) + EXP_ST[17:-1]),
+        (rts._LEGS_TOKEN, R0, EXP_TOK),
+        (rts._LEGS_TOKEN, RR(fuse_s=True),
+         EXP_TOK[:17] + ("st_s",) + EXP_TOK[17:-1]),
+    ):
+        if layers.compose(R, legs) != exp:
+            return False
+
+    # slot parity — .data layout is image contract
+    base = rts.DATA_SLOTS_IR
+    exp = base + rts.DATA_SLOTS_PS + rts.DATA_SLOTS_PX + (
+        ("slabtop", 8), ("mtslab", 8),
+        ("mtctxs", 3 * rts.MT_CTX_BYTES), ("mthandles", 16)) + (
+        ("eb_i", 8), ("eb_k", 8), ("eb_ki", 8), ("eb_marks", 8),
+        ("eb_dec", 8))
+    got = rts.data_slots_ir(RR(reclaim="redirect", dialect="plex.v3",
+                               threads=2, io=("stdin", "bytes")))
+    if got != exp:
+        return False
+    # MT + ir egress: all ei_* state is ctx fields — no .data rows
+    got = rts.data_slots_ir(RR(threads=2, io=("stdin", "ir")))
+    if any(n.startswith("ei_") for n, _ in got):
+        return False
+    if rts.data_slots_ir(RR(io=("stdin", "ir")))[-7:] != \
+            rts.DATA_SLOTS_EI:
+        return False
+
+    # specs/*.json — the contract side
+    specs = layers.load_specs()
+    if set(s["name"] for s in specs.values()
+           if s["layer"] == "container") != {"pir", "plex.v3"}:
+        return False
+    if set(s["name"] for s in specs.values()
+           if s["layer"] == "egress") != {"stdout", "bytes", "ir"}:
+        return False
+    for s in specs.values():
+        if s["status"] == "realized":
+            for fam, names in s["impl"].items():
+                if fam.startswith("x86_64.win64") and not all(
+                        n in rts._BUILDERS for n in names):
+                    return False
+    # every realized dialect axis value has a leg row + a spec
+    if layers.leg_values(rts._LEGS_IR, "dialect") != {"pir", "plex.v3"}:
+        return False
+
+    # refusals name axis + layer, never silently default
+    for R, legs, frag in (
+        (RR(dialect="bogus"), rts._LEGS_IR, "dialect"),
+        (RR(dialect="plex.v3"), rts._LEGS_TOKEN, "dialect"),
+        (RR(threads=2), rts._LEGS_TOKEN, "threads"),
+        (RR(io=("stdin", "bytes")), rts._LEGS_TOKEN, "io"),
+        (RR(io=("memory", "stdout")), rts._LEGS_IR, "io"),
+        (RR(reclaim="refcount"), rts._LEGS_IR, "reclaim"),
+    ):
+        try:
+            layers.compose(R, legs)
+            return False
+        except Exception as e:                      # noqa: BLE001
+            if frag not in str(e):
+                return False
+
+    # the emitted programs still build through the composed lists
+    return len(rts.program(R0)) > 0 \
+        and len(rts.program_ir(R0)) > 0 \
+        and len(rts.program_ir_mt(RR(threads=2))) > 0
+
+
 def gate_mt_equiv() -> bool:
     """threads=N == N workers == serial: the MT record's workers
     depack their assigned root range into private slab claims and
@@ -881,6 +999,7 @@ if __name__ == "__main__":
             tempfile.mkdtemp(prefix="nanopass_emitplex_"))),
         ("kernel .plex v3 ingest", lambda: gate_plex_ingest(
             tempfile.mkdtemp(prefix="nanopass_plexin_"))),
+        ("kernel layer composition", gate_layer_chain),
     ]
     fail = 0
     for name, g in gates:

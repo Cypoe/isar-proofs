@@ -1,0 +1,9 @@
+{"name": "stdout",
+ "layer": "egress",
+ "in": "term-graph",
+ "out": "bytes",
+ "axis": "io",
+ "status": "realized",
+ "impl": {"x86_64.win64": ["emit_nf", "itoa"]},
+ "refuses": "root NF that is not a printable term shape",
+ "doc": "text view — each root's normal form leaves the kernel as one token-stream line (the inverse of the token encoding).  Selected by io=(\"stdin\",\"stdout\")."}

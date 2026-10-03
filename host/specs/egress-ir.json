@@ -1,0 +1,9 @@
+{"name": "ir",
+ "layer": "egress",
+ "in": "term-graph",
+ "out": "bytes",
+ "axis": "io",
+ "status": "realized",
+ "impl": {"x86_64.win64": ["emit_ir"]},
+ "refuses": "none beyond reduction refusals — every NF serializes",
+ "doc": "IR view — each root's NF leaves as a framed packed-IR blob, depackable by the next kernel without a text crossing.  The stage-boundary format: the emit chain's symtab crosses this seam opaque.  io=(\"stdin\",\"ir\")."}

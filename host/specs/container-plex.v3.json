@@ -1,0 +1,9 @@
+{"name": "plex.v3",
+ "layer": "container",
+ "in": "bytes",
+ "out": "pir-stream",
+ "axis": "dialect",
+ "status": "realized",
+ "impl": {"x86_64.win64": ["plex_read"]},
+ "refuses": "bad magic, version != 3, hsize misaligned or < directory end, truncated header/directory, cell type not in {1,4,8}, arity 0, length != rows*arity*type, unaligned or sub-hsize offset, missing/duplicate KIND_PIR section, declared span short or past EOF, trailing bytes beyond the span (rc=3)",
+ "doc": ".plex v3 archive — the kernel depacks the container itself: validates header + every 32B directory row, selects the unique KIND_PIR span, hands a bounded-EOF stream to ir_sloop via plexleft (ADR-0006 ingest, gate 22)."}

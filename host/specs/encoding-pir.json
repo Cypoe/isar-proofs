@@ -1,0 +1,9 @@
+{"name": "pir-stream",
+ "layer": "encoding",
+ "in": "pir-stream",
+ "out": "term-graph",
+ "axis": "encoding",
+ "status": "realized",
+ "impl": {"x86_64.win64": ["ir_read", "ir_depack"]},
+ "refuses": "element header not 16B-clean, node/root count inconsistent with body, cell opcode outside the packed-IR vocabulary",
+ "doc": "packed-IR element sequence: [u32 magic PIR0][u16 ver][u16 flags][u32 nroots][u32 nnodes] + node cells, self-describing per element (ADR-0005).  ir_read frames each element's span; ir_depack builds the arena representation."}

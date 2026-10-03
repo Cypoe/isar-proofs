@@ -1,0 +1,9 @@
+{"name": "lambda",
+ "layer": "surface",
+ "in": "bytes",
+ "out": "term-graph",
+ "axis": "surface",
+ "status": "realized-seed",
+ "impl": {"seed": ["lambda_dialect.parse", "lambda_dialect.bracket"]},
+ "refuses": "unbound variable at bracket abstraction, malformed expression",
+ "doc": "mixed lambda/CL surface — NExpr (NVar/NApp/NAbs/NComb) parsed from text, Turner bracket-abstracted to the closed basis.  The canonical seed-side surface every other dialect desugars into."}

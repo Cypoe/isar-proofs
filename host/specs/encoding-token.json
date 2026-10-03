@@ -1,0 +1,9 @@
+{"name": "token",
+ "layer": "encoding",
+ "in": "bytes",
+ "out": "term-graph",
+ "axis": "encoding",
+ "status": "realized",
+ "impl": {"x86_64.win64": ["parse"]},
+ "refuses": "token outside the basis vocabulary, unbalanced application spine, non-numeric atom where a numeral is required",
+ "doc": "token-line surface — the .lo kernel's native front end: one whitespace-separated token sequence per root on stdin, parsed on the parse stack (mkstk) straight into heap cells.  The seed's text format for terms; PIR is its packed sibling."}

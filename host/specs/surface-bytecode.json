@@ -1,0 +1,9 @@
+{"name": "bytecode",
+ "layer": "surface",
+ "in": "bytes",
+ "out": "term-graph",
+ "axis": "surface",
+ "status": "realized-seed",
+ "impl": {"seed": ["bytecode_dialect.parse_prog"]},
+ "refuses": "opcode outside the bytecode vocabulary, stack underflow",
+ "doc": "stack-machine bytecode surface — linear instruction text compiled to basis terms; the lowest-level seed-side surface."}

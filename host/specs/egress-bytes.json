@@ -1,0 +1,9 @@
+{"name": "bytes",
+ "layer": "egress",
+ "in": "term-graph",
+ "out": "bytes",
+ "axis": "io",
+ "status": "realized",
+ "impl": {"x86_64.win64": ["emit_bytes", "peval", "selidx"]},
+ "refuses": "root NF that is not a byte list — exits rc=5, a refused view not a partial decode",
+ "doc": "byte view — each root's NF must be a list of byte-numerals; emitted as a [u32le len][bytes] frame.  The emit-chain's contract: section bodies and pack chunks cross this seam.  io=(\"stdin\",\"bytes\")."}

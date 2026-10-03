@@ -24,6 +24,7 @@ for _p in (_HOST, _SEED_DIR):
         sys.path.insert(0, _p)
 
 import isa_x86_64 as _isa                        # noqa: E402
+import layers                                   # noqa: E402
 from isa_x86_64 import I, LBL, Program, encode  # noqa: E402
 from toolchain import NotRealized               # noqa: E402
 from seed import Tag, Realization               # noqa: E402
@@ -2877,8 +2878,12 @@ def r_emit_ir(R: Realization, ctx: Ctx) -> Program:
     return p
 
 
-# Ordered routine names = emission order.  "st_s" emits iff R.fuse_s,
-# "build_ds" iff not R.fuse_s (handled in program()).
+# Routine vocabulary per kernel family — the catalog of candidates a
+# record's legs compose FROM (both basis variants live here; the
+# fuse_s legs select per-R).  What a given R actually emits is
+# composed below in LEGS_*/routine_names_ir — these tuples are the
+# declared vocabulary used by program_query_rt enumeration, routine
+# size accounting, and the Routines records' `routines` field.
 ROUTINES: Tuple[str, ...] = (
     "entry", "parse", "reduce", "stats", "exits",
     "grow_heap", "mkleaf", "mkapp", "mkapp_p", "mkstk", "repr",
@@ -2887,7 +2892,7 @@ ROUTINES: Tuple[str, ...] = (
 )
 
 # IR variant: same reducer core, different front end — no token parser,
-# no parse stack (mkstk/mkstk unused); entry/read/depack/reduce replace
+# no parse stack (mkstk unused); entry/read/depack/reduce replace
 # entry/parse/reduce.  "ir_reduce" is the batch loop.
 ROUTINES_IR: Tuple[str, ...] = (
     "ir_entry", "ir_read", "ir_depack", "ir_reduce", "stats", "exits",
@@ -2895,17 +2900,6 @@ ROUTINES_IR: Tuple[str, ...] = (
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
     "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
-
-# bytes egress adds the NF->bytes decoder (emit_bytes + its two probe
-# helpers); emit_nf stays — a bytes-mode kernel could still serve term
-# frames if a future io mode asked for it
-ROUTINES_IR_BYTES: Tuple[str, ...] = ROUTINES_IR + (
-    "emit_bytes", "peval", "selidx",
-)
-
-# IR egress adds the NF->PIR-blob serializer: a stage's output leaves
-# the kernel already depackable (emit_ir only — no probe vocab needed)
-ROUTINES_IR_IR: Tuple[str, ...] = ROUTINES_IR + ("emit_ir",)
 
 # MT variant (R.threads>1): ir_reduce's per-root loop becomes
 # ir_spawn (driver) + mt_worker (per-thread depack+reduce+egress);
@@ -2918,10 +2912,6 @@ ROUTINES_IR_MT: Tuple[str, ...] = (
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp",
     "st_s", "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
-ROUTINES_IR_MT_BYTES: Tuple[str, ...] = ROUTINES_IR_MT + (
-    "emit_bytes", "peval", "selidx",
-)
-ROUTINES_IR_MT_IR: Tuple[str, ...] = ROUTINES_IR_MT + ("emit_ir",)
 
 IMPORTS_IR: Tuple[str, ...] = IMPORTS + ("VirtualFree",)
 IMPORTS_IR_MT: Tuple[str, ...] = IMPORTS_IR + (
@@ -2944,6 +2934,117 @@ DATA_SLOTS_EB: Tuple[Tuple[str, int], ...] = (
 DATA_SLOTS_EI: Tuple[Tuple[str, int], ...] = (
     ("ei_tab", 8), ("ei_out", 8), ("ei_lim", 8), ("ei_idx", 8),
     ("ei_cells", 8), ("ei_len", 8), ("ei_outz", 8),
+)
+
+
+# ======================================================================
+# KERNEL LAYER LEGS — the composition contract, declared (layers.py)
+#
+# The kernel image is an ordered sequence of legs, each gated by ONE
+# realization axis.  An axis value with no row refuses — the table is
+# the complete declaration of what this family realizes.  slot_rank
+# orders .data contributions independently of emission position
+# (.data layout is image contract): 10 reclaim, 20 container,
+# 30 threads, 40 egress.
+#
+# MT slot block: ctx fields sized by R.threads — a callable
+# contribution, parameter-shaped data.
+def _slots_mt(R: Realization) -> tuple:
+    return (("slabtop", 8), ("mtslab", 8),
+            ("mtctxs", (R.threads + 1) * MT_CTX_BYTES),
+            ("mthandles", R.threads * 8))
+
+
+# bytes-egress .data under MT: the cursors live in per-thread ctx
+# fields — only the shared probe vocab + counters land in .data
+_DATA_SLOTS_EB_MT: Tuple[Tuple[str, int], ...] = (
+    ("eb_i", 8), ("eb_k", 8), ("eb_ki", 8), ("eb_marks", 8),
+    ("eb_dec", 8),
+)
+
+
+def _slots_eb(R: Realization) -> tuple:
+    return _DATA_SLOTS_EB_MT if R.threads > 1 else DATA_SLOTS_EB
+
+
+# ir-egress .data under MT: all ei_* state is ctx fields (emit_ir's
+# ei_len frame-write path is ST-only — never emitted under threads>1)
+def _slots_ei(R: Realization) -> tuple:
+    return () if R.threads > 1 else DATA_SLOTS_EI
+
+
+_LEGS_IR: Tuple[layers.Leg, ...] = (
+    layers.Leg("head",      None,      ("ir_entry",)),
+    layers.Leg("container", "dialect", {
+        "pir":     layers.Impl(),
+        "plex.v3": layers.Impl(("plex_read",),
+                               slots=DATA_SLOTS_PX, slot_rank=20),
+    }),
+    layers.Leg("encoding",  None,      ("ir_read",)),
+    layers.Leg("driver",    "threads", {
+        "st": layers.Impl(("ir_depack", "ir_reduce")),
+        "mt": layers.Impl(("ir_spawn",),
+                          slots=_slots_mt, slot_rank=30),
+    }),
+    layers.Leg("stats",     None,      ("stats", "exits")),
+    layers.Leg("worker",    "threads", {
+        "st": layers.Impl(), "mt": layers.Impl(("mt_worker",)),
+    }),
+    layers.Leg("depack",    "threads", {
+        "st": layers.Impl(), "mt": layers.Impl(("ir_depack",)),
+    }),
+    layers.Leg("core_a",    None,      (
+        "grow_heap_ir", "mkleaf", "mkapp", "mkapp_p", "repr",
+        "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp",
+    )),
+    layers.Leg("s_prim",    "fuse_s",  {
+        False: layers.Impl(), True: layers.Impl(("st_s",)),
+    }),
+    layers.Leg("core_b",    None,      (
+        "step_congr", "count_nodes", "emit_nf", "itoa",
+    )),
+    layers.Leg("persist",   "reclaim", {
+        "none":     layers.Impl(),
+        "redirect": layers.Impl(slots=DATA_SLOTS_PS, slot_rank=10),
+    }),
+    layers.Leg("basis_tpl", "fuse_s",  {
+        False: layers.Impl(("build_ds",)), True: layers.Impl(),
+    }),
+    layers.Leg("egress",    "io",      {
+        ("stdin", "stdout"): layers.Impl(),
+        ("stdin", "bytes"):  layers.Impl(
+            ("emit_bytes", "peval", "selidx"),
+            slots=_slots_eb, slot_rank=40),
+        ("stdin", "ir"):     layers.Impl(
+            ("emit_ir",), slots=_slots_ei, slot_rank=40),
+    }),
+)
+
+_LEGS_TOKEN: Tuple[layers.Leg, ...] = (
+    layers.Leg("head",      None,      ("entry",)),
+    layers.Leg("container", "dialect", {"pir": layers.Impl()}),
+    layers.Leg("encoding",  None,      ("parse",)),
+    layers.Leg("driver",    "threads", {"st": layers.Impl(("reduce",))}),
+    layers.Leg("stats",     None,      ("stats", "exits")),
+    layers.Leg("core_a",    None,      (
+        "grow_heap", "mkleaf", "mkapp", "mkapp_p", "mkstk", "repr",
+        "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp",
+    )),
+    layers.Leg("s_prim",    "fuse_s",  {
+        False: layers.Impl(), True: layers.Impl(("st_s",)),
+    }),
+    layers.Leg("core_b",    None,      (
+        "step_congr", "count_nodes", "emit_nf", "itoa",
+    )),
+    layers.Leg("persist",   "reclaim", {
+        "none": layers.Impl(), "redirect": layers.Impl(),
+    }),
+    layers.Leg("basis_tpl", "fuse_s",  {
+        False: layers.Impl(("build_ds",)), True: layers.Impl(),
+    }),
+    layers.Leg("egress",    "io",      {
+        ("stdin", "stdout"): layers.Impl(),
+    }),
 )
 
 
@@ -3053,30 +3154,11 @@ EG_MT_OUT = 16 << 20            # per-thread ordered frame buffer
 
 
 def data_slots_ir(R: Realization) -> tuple:
-    """IR slots; io=("stdin","bytes"/"ir") appends the egress block.
-    MT: the egress cursors live in per-thread ctx fields — only the
-    shared vocab pointers (bytes mode) and the spawn bookkeeping land
-    in .data."""
-    s = DATA_SLOTS_IR
-    if R.reclaim == "redirect":
-        s = s + DATA_SLOTS_PS
-    if R.dialect == "plex.v3":
-        s = s + DATA_SLOTS_PX
-    if R.threads > 1:
-        s = s + (
-            ("slabtop", 8), ("mtslab", 8),
-            ("mtctxs", (R.threads + 1) * MT_CTX_BYTES),
-            ("mthandles", R.threads * 8),
-        )
-        if R.io[1] == "bytes":
-            s = s + (("eb_i", 8), ("eb_k", 8), ("eb_ki", 8),
-                     ("eb_marks", 8), ("eb_dec", 8))
-        return s
-    if R.io[1] == "bytes":
-        s = s + DATA_SLOTS_EB
-    if R.io[1] == "ir":
-        s = s + DATA_SLOTS_EI
-    return s
+    """IR base slots + every selected leg's declared contribution,
+    ordered by slot_rank (reclaim, container, threads, egress) —
+    the .data layout is image contract, so it is declared, not
+    derived from leg position."""
+    return layers.compose_slots(R, _LEGS_IR, DATA_SLOTS_IR)
 
 _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
     name[2:]: fn for name, fn in list(globals().items())
@@ -3090,10 +3172,6 @@ def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
     ctx["irnext"] = "ir_spawn" if R.threads > 1 else "ir_depack"
     p: Program = []
     for name in names:
-        if name == "st_s" and not R.fuse_s:
-            continue
-        if name == "build_ds" and R.fuse_s:
-            continue
         prog = _BUILDERS[name](R, ctx)
         if R.threads > 1 and name in _MT_THREADED:
             prog = _mt_xform(prog, _MT_DEPACK_REN if name == "ir_depack"
@@ -3103,51 +3181,21 @@ def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
 
 
 def program(R: Realization) -> Program:
+    """Token-surface kernel: compose the record's legs — every axis
+    with no row refuses at its leg (dialect/io/reclaim are legs now,
+    not ad-hoc checks)."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
-    if R.reclaim not in ("none", "redirect"):
-        raise NotRealized(f"reclaim={R.reclaim!r} not realized")
-    if R.io != ("stdin", "stdout"):
-        raise NotRealized(f"io={R.io!r} not realized by {ROUTINES}")
-    if R.dialect != "pir":
-        raise NotRealized(
-            f"dialect={R.dialect!r} not realized — the token kernel "
-            f"ingests a token stream, not an IR container")
-    return _emit(R, ROUTINES)
+    return _emit(R, layers.compose(R, _LEGS_TOKEN))
 
 
 def routine_names_ir(R: Realization) -> Tuple[str, ...]:
-    """the record's routine list for R — the io specialization is the
-    record's own data: bytes egress adds emit_bytes/peval/selidx, ir
-    egress adds emit_ir.  threads>1 swaps the driver for
-    ir_spawn/mt_worker — the reducer core is the same builders,
-    ctx-rewritten by _mt_xform.  dialect="plex.v3" inserts plex_read
-    after ir_entry — the container depack sits in front of the
-    stream sloop the way ir_spawn sits in front of depack under MT."""
-    if R.dialect not in ("pir", "plex.v3"):
-        raise NotRealized(f"dialect={R.dialect!r} not realized")
-    names: Tuple[str, ...]
-    if R.threads > 1:
-        if R.io == ("stdin", "bytes"):
-            names = ROUTINES_IR_MT_BYTES
-        elif R.io == ("stdin", "ir"):
-            names = ROUTINES_IR_MT_IR
-        elif R.io != ("stdin", "stdout"):
-            raise NotRealized(
-                f"io={R.io!r} not realized by {ROUTINES_IR_MT}")
-        else:
-            names = ROUTINES_IR_MT
-    elif R.io == ("stdin", "bytes"):
-        names = ROUTINES_IR_BYTES
-    elif R.io == ("stdin", "ir"):
-        names = ROUTINES_IR_IR
-    elif R.io != ("stdin", "stdout"):
-        raise NotRealized(f"io={R.io!r} not realized by {ROUTINES_IR}")
-    else:
-        names = ROUTINES_IR
-    if R.dialect == "plex.v3":
-        names = names[:1] + ("plex_read",) + names[1:]
-    return names
+    """the record's routine list for R — composed from _LEGS_IR:
+    container leg picks the ingest front end (plex.v3 inserts
+    plex_read after ir_entry), driver legs pick st/mt, egress leg
+    picks io[1], fuse_s legs pick the basis tail.  Every axis value
+    the family doesn't realize refuses at its leg, named."""
+    return layers.compose(R, _LEGS_IR)
 
 
 def program_ir(R: Realization) -> Program:
@@ -3156,8 +3204,6 @@ def program_ir(R: Realization) -> Program:
     per-root NF line for a decoded [u32le len][bytes] frame."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
-    if R.reclaim not in ("none", "redirect"):
-        raise NotRealized(f"reclaim={R.reclaim!r} not realized")
     if R.threads != 1:
         raise NotRealized(
             f"threads={R.threads} needs record x86_64.win64.ir.mt")
@@ -3169,8 +3215,6 @@ def program_ir_mt(R: Realization) -> Program:
     per-thread world is _mt_xform'd to r10-relative ctx fields."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
-    if R.reclaim not in ("none", "redirect"):
-        raise NotRealized(f"reclaim={R.reclaim!r} not realized")
     if R.threads <= 1:
         raise NotRealized("mt record requires threads>1")
     if R.threads > 64:

@@ -1,0 +1,9 @@
+{"name": "fasm",
+ "layer": "surface",
+ "in": "bytes",
+ "out": "term-graph",
+ "axis": "surface",
+ "status": "realized-seed",
+ "impl": {"seed": ["fasm_dialect.parse_fasm"]},
+ "refuses": "mnemonic outside the dialect subset, unresolved label",
+ "doc": "assembler-listing surface — flat-macro-assembler-shaped text compiled to basis terms; the human-writable form of routine bodies."}

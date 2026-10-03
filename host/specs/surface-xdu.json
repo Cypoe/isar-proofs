@@ -1,0 +1,9 @@
+{"name": "xdu",
+ "layer": "surface",
+ "in": "bytes",
+ "out": "term-graph",
+ "axis": "surface",
+ "status": "realized-seed",
+ "impl": {"seed": ["xdu_dialect"]},
+ "refuses": "transition table inconsistent, alphabet undeclared",
+ "doc": "transducer surface — finite-state transducer specs compiled via bracket_abstract0; the spec-as-data witness dialect (decision 017)."}

@@ -26,6 +26,7 @@
 | routines | c.hosted.lo | routines_c.C_HOSTED_LO | realized | C reducer kernel — the second host (IStepBasis, hosted) |
 | routines | x86_64.win64.ir | routines_x86_64_win64.X86_64_WIN64_IR | realized | packed-IR batch front end (depack replaces token parse; per-root arena reset) |
 | routines | x86_64.win64.res | routines_x86_64_win64.X86_64_WIN64_RES | realized | residual-application kernel: packed residual in .data, per-root graft + reduce |
+| routines | x86_64.win64.ir.mt | routines_x86_64_win64.X86_64_WIN64_IR_MT | realized | multithreaded packed-IR kernel: T workers depack into private slab claims (lock xadd), ordered frame join |
 | target | pe64 | target_pe64.PE64 | realized |  |
 | target | elf64 | target_elf64.ELF64 | realized | ELF64 container writer |
 | target | elf64.aarch64 | target_elf64.ELF64_AARCH64 | realized | same static ELF64 container, e_machine=EM_AARCH64 |
@@ -53,6 +54,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | native.x86_64.pe | bytecode.postfix | x86_64 | x86_64.win64.lo | pe64 | runtime | realized |
 | native.x86_64.pe.ir | packed.ir | x86_64 | x86_64.win64.ir | pe64 | runtime | realized |
+| native.x86_64.pe.ir.mt | packed.ir | x86_64 | x86_64.win64.ir.mt | pe64 | runtime | realized |
 | native.x86_64.fasmg | bytecode.postfix | x86_64.fasmg | x86_64.win64.lo | fasmg.pe64 | runtime | realized |
 | native.x86_64.ir.fasmg | packed.ir | x86_64.fasmg | x86_64.win64.ir | fasmg.pe64 | runtime | realized |
 | native.x86_64.res | packed.ir | x86_64 | x86_64.win64.res | pe64 | runtime | realized |
@@ -81,11 +83,12 @@
 - **abi**: win64=realized, linux=realized, uefi=declared
 - **fuse_s**: False=realized, True=realized
 - **alloc**: bump-chunked=realized, arena=declared
-- **reclaim**: none=realized, refcount=declared, mark-sweep=declared
+- **reclaim**: none=realized, redirect=realized, refcount=declared, mark-sweep=declared
+- **dialect**: pir=realized, plex.v3=realized
 - **stack**: machine=realized, explicit=declared
 - **io**: stdin/stdout=realized, memory=declared
 - **fuel**: None=realized, int=realized
-- **peephole**: False=realized — default, both routes, True=realized — seed route only; staged chain NotRealized (no peepholeOf stage)
+- **peephole**: False=realized — default, both routes, True=realized — both routes (seed: opt_peephole; staged: peepholeOf stage, G9i)
 - **geometry**: chunk_bytes, stack_reserve, read_buf_bytes, node_bytes
 
 ## Paths

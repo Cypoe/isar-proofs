@@ -1,0 +1,9 @@
+{"name": "pe64",
+ "layer": "target",
+ "in": "term-graph",
+ "out": "bytes",
+ "axis": "target",
+ "status": "realized",
+ "impl": {"emit_chain": ["emit_sections", "write_emit_bundle"]},
+ "refuses": "image layout inconsistent — misaligned sections, out-of-range RVAs, caps widening (archive side)",
+ "doc": "PE64 executable container — the emit chain's target dialect: program/link/symtab/assemble/pack produce image bytes through the same bounded-read/validate/refuse shape as every other layer.  An ISA+ABI+container triplet, no different in kind than .plex."}

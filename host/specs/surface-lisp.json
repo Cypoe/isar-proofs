@@ -1,0 +1,9 @@
+{"name": "lisp",
+ "layer": "surface",
+ "in": "bytes",
+ "out": "term-graph",
+ "axis": "surface",
+ "status": "realized-seed",
+ "impl": {"seed": ["lisp_dialect.parse_all"]},
+ "refuses": "form outside the corpus-driven subset (no floats/negatives/strings/set!/varargs), unbound symbol",
+ "doc": "TinyLisp surface — s-expr -> desugar -> lambda_dialect NExpr -> bracket: a dialect->dialect->encoding chain already.  Tagged values (v = λp. p TAG PAY); each `assert` is an independent root."}

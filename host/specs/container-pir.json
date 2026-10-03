@@ -1,0 +1,9 @@
+{"name": "pir",
+ "layer": "container",
+ "in": "bytes",
+ "out": "pir-stream",
+ "axis": "dialect",
+ "status": "realized",
+ "impl": {"x86_64.win64": []},
+ "refuses": "stream element with bad magic/version, truncated header or body",
+ "doc": "raw packed-IR stream — the identity container: stdin IS the PIR element sequence directly (ADR-0005).  Chosen by dialect=\"pir\", the default."}
