@@ -984,7 +984,7 @@ def _emit_layout(R: seed.Realization, routines=None, rt=None,
         text_base = target_pe64.text_rva(imports, slots)
     _d = seed.Realization()
     _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-                  "node_bytes", "stack_reserve", "peephole"}
+                  "node_bytes", "stack_reserve", "peephole", "dialect"}
     fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
     return routines, imports, slots, text_base, fixed
 
@@ -1310,7 +1310,7 @@ def pack_emit_program(R: seed.Realization,
     if store is not None:
         _d = seed.Realization()
         _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-                      "node_bytes", "stack_reserve", "peephole"}
+                      "node_bytes", "stack_reserve", "peephole", "dialect"}
         fixed = {k: getattr(R, k)
                  for k in vars(_d) if k not in _prog_axes}
         rn = routines if routines is not None else (
@@ -1363,8 +1363,7 @@ def emit_sections(pir: bytes, caps: Optional[dict],
     stage_rows = []
     dep_pairs = []
     query_rows = []
-    blob_pool = bytearray(pir)
-    blob_pool += b"\x00" * (-len(blob_pool) % 8)
+    blob_pool = bytearray()
     if streams:
         stages = [("emit.term", "pir-stream", "exe.bytes"),
                   ("emit.program", "pir-stream", "exe.term"),
@@ -1422,8 +1421,14 @@ def emit_sections(pir: bytes, caps: Optional[dict],
              for k, v in sorted(evidence.items())]
     secs.append(pb.Section(pb.KIND_EVIDENCE, pb.U64, 4,
                            len(erows), _u64rows(erows)))
-    secs.append(pb.Section(pb.KIND_BYTES, pb.U8, 1, 0,
-                           bytes(blob_pool)))
+    if blob_pool:
+        secs.append(pb.Section(pb.KIND_BYTES, pb.U8, 1, 0,
+                               bytes(blob_pool)))
+        secs[-1].rows = secs[-1].length
+    # the canonical emit term is its own section kind — the
+    # kernel-side ingest contract (dialect="plex.v3"): exactly
+    # one KIND_PIR span = the packed-IR program stream
+    secs.append(pb.Section(pb.KIND_PIR, pb.U8, 1, 0, pir))
     secs[-1].rows = secs[-1].length
     secs[0] = pb.Section(pb.KIND_STRINGS, pb.U8, 1, 0,
                          bytes(pool.buf))
@@ -1493,25 +1498,31 @@ def write_emit_bundle(path: str, R: seed.Realization,
 
 def emit_bundle_streams(bundle) -> Dict[str, bytes]:
     """emit.plex (plex.emit/2) -> {stage_name: PIR stream}: the
-    QUERIES rows' `off:len` blob tokens sliced out of the BYTES pool,
-    digests verified — a malformed span or digest mismatch refuses."""
+    QUERIES rows' `off:len` blob tokens sliced out of their pool —
+    `emit.term` spans the KIND_PIR section (the canonical payload),
+    every other stream spans the BYTES pool.  Digests verified — a
+    malformed span or digest mismatch refuses."""
     import plex_bundle as pb
     pool = bundle.bytes_pool()
+    psec = bundle.section(pb.KIND_PIR)
+    ppool = psec.payload(bundle.data) if psec is not None else b""
     stages = bundle.stage_rows()
     out = {}
     for sidx, dig, tok in bundle.query_rows():
+        name = stages[sidx][0]
+        src = ppool if name == "emit.term" else pool
         off_s, len_s = tok.split(":")
         off, ln = int(off_s), int(len_s)
-        if off < 0 or ln < 0 or off + ln > len(pool):
+        if off < 0 or ln < 0 or off + ln > len(src):
             raise toolchain.NotRealized(
-                f"emit bundle stream {stages[sidx][0]!r}: span "
-                f"{off}:{ln} outside pool {len(pool)}")
-        blob = pool[off:off + ln]
+                f"emit bundle stream {name!r}: span "
+                f"{off}:{ln} outside pool {len(src)}")
+        blob = src[off:off + ln]
         if hashlib.sha256(blob).hexdigest() != dig:
             raise toolchain.NotRealized(
-                f"emit bundle stream {stages[sidx][0]!r}: digest "
+                f"emit bundle stream {name!r}: digest "
                 f"mismatch — content missing or corrupted")
-        out[stages[sidx][0]] = blob
+        out[name] = blob
     return out
 
 
@@ -1776,7 +1787,7 @@ def emit_image(R: seed.Realization,
     # terms via `fixed` so builder-level branches on reclaim/io/payload
     # emit the declared variant instead of silently defaulting.
     _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-                  "node_bytes", "stack_reserve", "peephole"}
+                  "node_bytes", "stack_reserve", "peephole", "dialect"}
     fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
     if rt is not None:
         if R.order not in rt.orders:

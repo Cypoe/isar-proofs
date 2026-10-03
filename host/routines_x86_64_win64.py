@@ -63,10 +63,24 @@ DATA_SLOTS_IR: Tuple[Tuple[str, int], ...] = DATA_SLOTS + (
 # (pay-once for shared input redexes)
 DATA_SLOTS_PS: Tuple[Tuple[str, int], ...] = (("pcur", 8), ("pend", 8))
 
+# dialect="plex.v3" (ADR-0006 ingest): the kernel depacks the archive
+# itself — directory buffer, selected PIR span, KIND_PIR row count,
+# and plexleft = payload bytes remaining (the stream's bounded EOF)
+DATA_SLOTS_PX: Tuple[Tuple[str, int], ...] = (
+    ("plexdir", 8), ("plexoff", 8), ("plexlen", 8), ("plexnp", 8),
+    ("plexleft", 8),
+)
+
 # packed-IR constants — pinned by docs/adr/0005; keep in sync with
 # spec_term.IR_MAGIC / IR_VERSION / IR_VAR.
 IR_MAGIC = 0x30524950                # "PIR0"
 IR_VERSION = 1
+# .plex v3 archive (ADR-0006) — pinned by host/plex_bundle.py
+PLEX_MAGIC = 0x58454C50              # "PLEX" little-endian u32
+PLEX_VERSION = 3
+PLEX_HEADER = 12                     # magic+ver+flags+hsize+nsec
+PLEX_DIR_ENT = 32                    # fixed-width directory row
+PLEX_KIND_PIR = 10                   # packed-IR program stream payload
 MEM_RESERVE = 0x2000                 # VirtualAlloc MEM_RESERVE
 MEM_COMMIT = 0x1000                  # VirtualAlloc MEM_COMMIT
 MEM_DECOMMIT = 0x4000                # VirtualFree MEM_DECOMMIT
@@ -1263,6 +1277,184 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
     return p
 
 
+def r_plex_read(R: Realization, ctx: Ctx) -> Program:
+    """plex_read (dialect="plex.v3", ADR-0006 ingest): the kernel
+    depacks the archive itself — stdin stays a byte stream, the
+    container walk is index arithmetic over fixed-width rows.
+
+    12B header ('PLEX' magic, u8 ver==3, u8 flags, u16 hsize, u32
+    n_sections) -> n*32B directory -> validate every row:
+    cell type in {1,4,8}, arity >= 1, length == rows*arity*type
+    (by DIVISION — no mul in this ISA: (ln/m).quot == rows and
+    rem == 0), offset 8-aligned and >= hsize.  Exactly one
+    KIND_PIR (10) row is required — its payload span is the
+    packed-IR stream.  The tail then skips to the span and jumps
+    into ir_sloop; `plexleft` bounds every later stdin read so
+    trailing bytes after the declared span are never consumed
+    (bounded-EOF, mirroring read_bundle's span check — a section
+    lying about its length refuses as a truncated read).
+
+    Refusals (exit3) mirror read_bundle: bad magic/version,
+    hsize < dir_end or misaligned, truncated header/dir/payload,
+    bad cell type, arity 0, length != rows*arity*type, unaligned
+    or < hsize offset, no or duplicate KIND_PIR section.  A span
+    beyond the file is caught when the bounded read hits real EOF.
+
+    Registers: r12 row cursor, r13 hsize, r14 dirbytes then skip
+    delta, r15 row count, rsi read progress, rdi scratch.  rbx/rbp
+    (heap) untouched — this runs before irstart is consumed."""
+    iat = ctx["iat"]
+    p: Program = [
+        LBL("plex_read"),
+        # ---- 12B header into irhdr ----
+        I("xor_r32_r32", "r13d", "r13d"),
+        LBL("px_hdr"),
+        I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("mov_r64_rip", "rdx", ("p", "irhdr")),
+        I("add_r64_r64", "rdx", "r13"),
+        I("mov_r32_imm32", "r8d", PLEX_HEADER),
+        I("sub_r64_r64", "r8", "r13"),
+        I("lea_r64_rip", "r9", ("p", "nread")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("ReadFile")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "nread")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("add_r64_r64", "r13", "rax"),
+        I("cmp_r64_imm", "r13", PLEX_HEADER),
+        I("jl_rel32", ("l", "px_hdr")),
+        # ---- header fields ----
+        I("mov_r64_rip", "r13", ("p", "irhdr")),
+        I("mov_r32_m32", "eax", ("m", "r13", 0)),
+        I("mov_r32_imm32", "ecx", PLEX_MAGIC),
+        I("cmp_r64_r64", "rax", "rcx"),
+        I("jne_rel32", ("l", "exit3")),
+        I("movzx_r32_m8", "eax", ("m", "r13", 4)),
+        I("cmp_r64_imm", "rax", PLEX_VERSION),
+        I("jne_rel32", ("l", "exit3")),
+        # nsec u32 @8 -> r15 (0 -> refuse); hsize u16 @6 -> r13
+        # (nsec first — r13 is about to stop being the buf pointer)
+        I("mov_r32_m32", "ecx", ("m", "r13", 8)),
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r13", 6)),
+        I("and_r64_imm", "rax", 0xFFFF),
+        I("mov_r64_r64", "r13", "rax"),
+        I("mov_r64_r64", "r15", "rcx"),
+        I("mov_r64_r64", "r14", "rcx"), I("shl_r64_imm8", "r14", 5),
+        # dir_end = 12 + 32n must fit hsize, hsize 8-aligned
+        I("lea_r64_m64", "rax", ("m", "r14", PLEX_HEADER)),
+        I("cmp_r64_r64", "r13", "rax"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rax", "r13"), I("and_r64_imm", "rax", 7),
+        I("jne_rel32", ("l", "exit3")),
+        # ---- directory buffer + read-exactly 32n ----
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_r64", "rdx", "r14"),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "plexdir"), "rax"),
+        I("xor_r32_r32", "esi", "esi"),
+        LBL("px_drd"),
+        I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("mov_r64_rip", "rdx", ("p", "plexdir")),
+        I("add_r64_r64", "rdx", "rsi"),
+        I("mov_r64_r64", "r8", "r14"), I("sub_r64_r64", "r8", "rsi"),
+        I("lea_r64_rip", "r9", ("p", "nread")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("ReadFile")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "nread")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("add_r64_r64", "rsi", "rax"),
+        I("cmp_r64_r64", "rsi", "r14"), I("jl_rel32", ("l", "px_drd")),
+        # ---- scan rows: r12 cursor, r15 count ----
+        I("mov_r64_rip", "r12", ("p", "plexdir")),
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "plexnp"), "rax"),
+        LBL("px_row"),
+        # cell type in {1,4,8}
+        I("movzx_r32_m8", "eax", ("m", "r12", 0)),
+        I("cmp_r64_imm", "rax", 1), I("je_rel32", ("l", "px_tok")),
+        I("cmp_r64_imm", "rax", 4), I("je_rel32", ("l", "px_tok")),
+        I("cmp_r64_imm", "rax", 8), I("jne_rel32", ("l", "exit3")),
+        LBL("px_tok"),
+        I("mov_r64_r64", "r8", "rax"),            # r8 = cell type
+        I("movzx_r32_m8", "ecx", ("m", "r12", 1)),
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "exit3")),
+        # m = arity * type via shift (type is a power of two)
+        I("cmp_r64_imm", "r8", 4), I("je_rel32", ("l", "px_m4")),
+        I("cmp_r64_imm", "r8", 8), I("je_rel32", ("l", "px_m8")),
+        I("jmp_rel32", ("l", "px_mset")),          # type 1: m = ar
+        LBL("px_m4"), I("shl_r64_imm8", "rcx", 2),
+        I("jmp_rel32", ("l", "px_mset")),
+        LBL("px_m8"), I("shl_r64_imm8", "rcx", 3),
+        LBL("px_mset"),
+        # length == rows*m  <=>  (ln/m).quot == rows && rem == 0
+        I("mov_r64_m64", "rax", ("m", "r12", 16)),   # ln
+        I("xor_r32_r32", "edx", "edx"),
+        I("div_r64", "rcx"),                          # rax=q, rdx=r
+        I("test_r64_r64", "rdx", "rdx"),
+        I("jne_rel32", ("l", "exit3")),
+        I("mov_r64_m64", "rsi", ("m", "r12", 24)),    # rows
+        I("cmp_r64_r64", "rax", "rsi"),
+        I("jne_rel32", ("l", "exit3")),
+        # offset: 8-aligned and >= hsize(r13)
+        I("mov_r64_m64", "rax", ("m", "r12", 8)),
+        I("mov_r64_r64", "rdx", "rax"), I("and_r64_imm", "rdx", 7),
+        I("jne_rel32", ("l", "exit3")),
+        I("cmp_r64_r64", "rax", "r13"),
+        I("jl_rel32", ("l", "exit3")),
+        # KIND_PIR row: record span, count occurrences
+        I("mov_r32_m32", "edi", ("m", "r12", 2)),
+        I("and_r64_imm", "rdi", 0xFFFF),
+        I("cmp_r64_imm", "rdi", PLEX_KIND_PIR),
+        I("jne_rel32", ("l", "px_next")),
+        I("inc_mrip", ("p", "plexnp")),
+        I("mov_rip_r64", ("p", "plexoff"), "rax"),
+        I("mov_r64_m64", "rdx", ("m", "r12", 16)),
+        I("mov_rip_r64", ("p", "plexlen"), "rdx"),
+        LBL("px_next"),
+        I("add_r64_imm", "r12", PLEX_DIR_ENT),
+        I("dec_r64", "r15"), I("jne_rel32", ("l", "px_row")),
+        # exactly one PIR section
+        I("mov_r64_rip", "rax", ("p", "plexnp")),
+        I("cmp_r64_imm", "rax", 1), I("jne_rel32", ("l", "exit3")),
+        # bounded-EOF for the payload span, then skip to plexoff:
+        # stdin pos = PLEX_HEADER + 32n = PLEX_HEADER + r14 (r14 still
+        # holds dirbytes — the scan never touches it), and plexoff >=
+        # hsize >= pos so the delta is non-negative
+        I("mov_r64_rip", "rax", ("p", "plexlen")),
+        I("mov_rip_r64", ("p", "plexleft"), "rax"),
+        I("mov_r64_rip", "rax", ("p", "plexoff")),
+        I("sub_r64_imm", "rax", PLEX_HEADER),
+        I("sub_r64_r64", "rax", "r14"),
+        I("mov_r64_r64", "r14", "rax"),
+        # n = min(r14, granule); read+discard into irhdr
+        LBL("px_skiploop"),
+        I("test_r64_r64", "r14", "r14"),
+        I("je_rel32", ("l", "ir_sloop")),
+        I("mov_r64_r64", "r8", "r14"),
+        I("mov_r32_imm32", "eax", R.read_buf_bytes),
+        I("cmp_r64_r64", "r8", "rax"),
+        I("jbe_rel32", ("l", "px_sk_n")),
+        I("mov_r64_r64", "r8", "rax"),
+        LBL("px_sk_n"),
+        I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("mov_r64_rip", "rdx", ("p", "irhdr")),
+        I("lea_r64_rip", "r9", ("p", "nread")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("ReadFile")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "nread")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("sub_r64_r64", "r14", "rax"),
+        I("jne_rel32", ("l", "px_skiploop")),
+        I("jmp_rel32", ("l", "ir_sloop")),
+    ]
+    return p
+
+
 def r_ir_read(R: Realization, ctx: Ctx) -> Program:
     """ir_sloop: one packed-IR stream element per iteration — 16B header
     read-exactly (clean EOF -> ir_sdone, partial -> exit3), then the
@@ -1272,6 +1464,27 @@ def r_ir_read(R: Realization, ctx: Ctx) -> Program:
     self-describing, so the same blob feeds a fork-pool chunk today
     and a CUDA grid tile later."""
     iat = ctx["iat"]
+    plex = R.dialect == "plex.v3"
+
+    def _clamp(lbl: str) -> Program:
+        # bounded source: r8 (read request) <= plexleft — at 0 the
+        # kernel reads 0 bytes -> nread=0 -> clean EOF at the span
+        if not plex:
+            return []
+        return [I("mov_r64_rip", "rax", ("p", "plexleft")),
+                I("cmp_r64_r64", "r8", "rax"),
+                I("jbe_rel32", ("l", lbl)),
+                I("mov_r64_r64", "r8", "rax"),
+                LBL(lbl)]
+
+    def _dec() -> Program:
+        if not plex:
+            return []
+        return [I("mov_r64_rip", "rcx", ("p", "plexleft")),
+                I("mov_r64_rip", "rax", ("p", "nread")),
+                I("sub_r64_r64", "rcx", "rax"),
+                I("mov_rip_r64", ("p", "plexleft"), "rcx")]
+
     return [
         LBL("ir_sloop"),
         # ---- 16-byte header, read-exactly into the granule buf ----
@@ -1281,6 +1494,7 @@ def r_ir_read(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rdx", ("p", "irhdr")),
         I("add_r64_r64", "rdx", "r13"),
         I("mov_r32_imm32", "r8d", 16), I("sub_r64_r64", "r8", "r13"),
+        *_clamp("px_hcl"),
         I("lea_r64_rip", "r9", ("p", "nread")),
         I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
         I("call_mrip", iat("ReadFile")),
@@ -1290,6 +1504,7 @@ def r_ir_read(R: Realization, ctx: Ctx) -> Program:
         I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "ir_sdone")),
         I("jmp_rel32", ("l", "exit3")),
         LBL("ir_hok"),
+        *_dec(),
         I("mov_r64_rip", "rax", ("p", "nread")),
         I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "ir_hgot")),
         I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "ir_sdone")),
@@ -1340,10 +1555,12 @@ def r_ir_read(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rdx", ("p", "irbuf")),
         I("add_r64_r64", "rdx", "r13"),
         I("mov_r64_r64", "r8", "r14"), I("sub_r64_r64", "r8", "r13"),
+        *_clamp("px_bcl"),
         I("lea_r64_rip", "r9", ("p", "nread")),
         I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
         I("call_mrip", iat("ReadFile")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        *_dec(),
         I("mov_r64_rip", "rax", ("p", "nread")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
         I("add_r64_r64", "r13", "rax"),
@@ -2843,6 +3060,8 @@ def data_slots_ir(R: Realization) -> tuple:
     s = DATA_SLOTS_IR
     if R.reclaim == "redirect":
         s = s + DATA_SLOTS_PS
+    if R.dialect == "plex.v3":
+        s = s + DATA_SLOTS_PX
     if R.threads > 1:
         s = s + (
             ("slabtop", 8), ("mtslab", 8),
@@ -2890,6 +3109,10 @@ def program(R: Realization) -> Program:
         raise NotRealized(f"reclaim={R.reclaim!r} not realized")
     if R.io != ("stdin", "stdout"):
         raise NotRealized(f"io={R.io!r} not realized by {ROUTINES}")
+    if R.dialect != "pir":
+        raise NotRealized(
+            f"dialect={R.dialect!r} not realized — the token kernel "
+            f"ingests a token stream, not an IR container")
     return _emit(R, ROUTINES)
 
 
@@ -2898,23 +3121,33 @@ def routine_names_ir(R: Realization) -> Tuple[str, ...]:
     record's own data: bytes egress adds emit_bytes/peval/selidx, ir
     egress adds emit_ir.  threads>1 swaps the driver for
     ir_spawn/mt_worker — the reducer core is the same builders,
-    ctx-rewritten by _mt_xform."""
+    ctx-rewritten by _mt_xform.  dialect="plex.v3" inserts plex_read
+    after ir_entry — the container depack sits in front of the
+    stream sloop the way ir_spawn sits in front of depack under MT."""
+    if R.dialect not in ("pir", "plex.v3"):
+        raise NotRealized(f"dialect={R.dialect!r} not realized")
+    names: Tuple[str, ...]
     if R.threads > 1:
         if R.io == ("stdin", "bytes"):
-            return ROUTINES_IR_MT_BYTES
-        if R.io == ("stdin", "ir"):
-            return ROUTINES_IR_MT_IR
-        if R.io != ("stdin", "stdout"):
+            names = ROUTINES_IR_MT_BYTES
+        elif R.io == ("stdin", "ir"):
+            names = ROUTINES_IR_MT_IR
+        elif R.io != ("stdin", "stdout"):
             raise NotRealized(
                 f"io={R.io!r} not realized by {ROUTINES_IR_MT}")
-        return ROUTINES_IR_MT
-    if R.io == ("stdin", "bytes"):
-        return ROUTINES_IR_BYTES
-    if R.io == ("stdin", "ir"):
-        return ROUTINES_IR_IR
-    if R.io != ("stdin", "stdout"):
+        else:
+            names = ROUTINES_IR_MT
+    elif R.io == ("stdin", "bytes"):
+        names = ROUTINES_IR_BYTES
+    elif R.io == ("stdin", "ir"):
+        names = ROUTINES_IR_IR
+    elif R.io != ("stdin", "stdout"):
         raise NotRealized(f"io={R.io!r} not realized by {ROUTINES_IR}")
-    return ROUTINES_IR
+    else:
+        names = ROUTINES_IR
+    if R.dialect == "plex.v3":
+        names = names[:1] + ("plex_read",) + names[1:]
+    return names
 
 
 def program_ir(R: Realization) -> Program:

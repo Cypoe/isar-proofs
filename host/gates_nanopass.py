@@ -679,6 +679,109 @@ def gate_emit_bundle(tmpdir: str) -> bool:
     return True
 
 
+def gate_plex_ingest(tmpdir: str) -> bool:
+    """Phase-7b — the kernel depacks .plex v3 itself.
+
+    dialect="plex.v3" inserts plex_read after ir_entry: validate the
+    12B header + every 32B directory row (type, arity, length ==
+    rows*arity*type — verified by division, this ISA has no mul),
+    require exactly one KIND_PIR section, skip to its span, and hand
+    a bounded-EOF stream to ir_sloop (plexleft clamps every read).
+
+    Asserts: a probe bundle produces frames byte-identical to the
+    same stream on a bare "pir" kernel (ST and MT records), and the
+    full refusal matrix is enforced natively at rc=3 — bad magic,
+    version, misaligned/short hsize, truncated dir, bad cell type,
+    arity 0, length/row-count mismatch, unaligned or sub-hsize
+    offset, missing/duplicate PIR section, declared span too short
+    or beyond EOF, trailing junk inside the span."""
+    import subprocess
+    import struct
+    import plex_bundle as pb
+    Rp = seed.Realization(reclaim="redirect", io=("stdin", "bytes"),
+                          dialect="plex.v3")
+    Rb = seed.Realization(reclaim="redirect", io=("stdin", "bytes"))
+    exp, exr = ec.ir_exe_for(Rp), ec.ir_exe_for(Rb)
+    pir = st.pack_ir(st.bytelist_term(b"ab"),
+                     st.bytelist_term(b""),
+                     st.bytelist_term(b"cd"))
+
+    def bundle(extra_secs=(), pirsec=True, payload=pir):
+        secs = [pb.Section(pb.KIND_STRINGS, pb.U8, 1, 0, b"s"),
+                pb.Section(pb.KIND_REALIZATION, pb.U64, 4, 0, b"")]
+        secs += extra_secs
+        if pirsec:
+            secs.append(pb.Section(pb.KIND_PIR, pb.U8, 1, 0,
+                                   payload))
+        for s in secs:
+            s.rows = s.length
+        return pb.pack_bundle(secs)
+
+    data = bundle(
+        extra_secs=(pb.Section(pb.KIND_BYTES, pb.U8, 1, 0,
+                               b"\xde\xad\xbe\xef"),))
+    ra = subprocess.run([exp], input=data, capture_output=True)
+    rb = subprocess.run([exr], input=pir, capture_output=True)
+    if (ra.returncode, ra.stdout) != (rb.returncode, rb.stdout):
+        return False
+    # MT parity — the walk happens once on the main thread
+    exmt = seed._exe_for(seed.Realization(
+        reclaim="redirect", io=("stdin", "bytes"),
+        dialect="plex.v3", threads=2),
+        toolchain.by_name("native.x86_64.pe.ir.mt"))
+    rm = subprocess.run([exmt], input=data, capture_output=True)
+    if (rm.returncode, rm.stdout) != (ra.returncode, ra.stdout):
+        return False
+    # emit.plex carries KIND_PIR last — the deployed shape
+    path = ec.write_emit_bundle(
+        os.path.join(tmpdir, "emit.plex"), seed.Realization())
+    b = pb.read_bundle(open(path, "rb").read())
+    if b.sections[-1].kind != pb.KIND_PIR:
+        return False
+    pirsec = b.sections[-1]
+    if pirsec.offset + pirsec.length > len(b.data):
+        return False
+    # ---- refusal matrix, all rc=3 ----
+    row = lambda i, f: 12 + i * 32 + f          # dir row i field off
+    cases = []
+    d = bytearray(data); d[0:4] = b"NOPE"; cases.append(bytes(d))
+    d = bytearray(data); d[4] = 2; cases.append(bytes(d))
+    d = bytearray(data); struct.pack_into("<H", d, 6, 9)
+    cases.append(bytes(d))
+    d = bytearray(data); struct.pack_into("<H", d, 6, 8)
+    cases.append(bytes(d))
+    cases.append(data[:20])                       # truncated dir
+    d = bytearray(data); d[12] = 2; cases.append(bytes(d))
+    d = bytearray(data); d[13] = 0; cases.append(bytes(d))
+    d = bytearray(data); struct.pack_into("<Q", d, row(0, 24), 7)
+    cases.append(bytes(d))
+    i_pir = 3                                     # PIR is row 3 in data
+    d = bytearray(data)
+    off = struct.unpack_from("<Q", d, row(i_pir, 8))[0]
+    struct.pack_into("<Q", d, row(i_pir, 8), off | 1)
+    cases.append(bytes(d))
+    d = bytearray(data)
+    struct.pack_into("<Q", d, row(i_pir, 8), 16)
+    cases.append(bytes(d))
+    d = bytearray(data)
+    struct.pack_into("<Q", d, row(i_pir, 16), len(pir) - 4)
+    cases.append(bytes(d))
+    d = bytearray(data)
+    struct.pack_into("<Q", d, row(i_pir, 16), len(pir) + 100000)
+    cases.append(bytes(d))
+    cases.append(bundle(pirsec=False))            # missing PIR
+    dup = bundle(extra_secs=(pb.Section(
+        pb.KIND_PIR, pb.U8, 1, 0, pir),))
+    cases.append(dup)                             # duplicate PIR
+    cases.append(bundle(payload=pir + b"JUNKJUNK"))
+    cases.append(data[:off + 2])                  # mid-payload cut
+    for bad in cases:
+        r = subprocess.run([exp], input=bad, capture_output=True)
+        if r.returncode != 3:
+            return False
+    return True
+
+
 def gate_mt_equiv() -> bool:
     """threads=N == N workers == serial: the MT record's workers
     depack their assigned root range into private slab claims and
@@ -776,6 +879,8 @@ if __name__ == "__main__":
             tempfile.mkdtemp(prefix="nanopass_selfhost_"))),
         ("emit.plex bundle replay", lambda: gate_emit_bundle(
             tempfile.mkdtemp(prefix="nanopass_emitplex_"))),
+        ("kernel .plex v3 ingest", lambda: gate_plex_ingest(
+            tempfile.mkdtemp(prefix="nanopass_plexin_"))),
     ]
     fail = 0
     for name, g in gates:

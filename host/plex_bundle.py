@@ -46,6 +46,9 @@ Section kinds (the contract role table):
     8 EVIDENCE     u64 arity 4: (key, val) string refs — decode
                    counters, format label, oracle digests
     9 BYTES        payload pool (image.bin, stage blobs)
+   10 PIR          packed-IR program stream — the dialect="plex.v3"
+                   kernel depacks the archive and runs exactly this
+                   one section's span as its stdin stream
 
 Refusals (BundleError): bad magic/version, truncated header or
 directory, unknown cell type, zero arity, length != rows*arity*type,
@@ -78,12 +81,17 @@ KIND_REALIZATION = 6
 KIND_CLAIM = 7
 KIND_EVIDENCE = 8
 KIND_BYTES = 9
+KIND_PIR = 10       # packed-IR program stream — the kernel's ingest
+                    # contract: exactly one PIR section; the dialect=
+                    # "plex.v3" depacker selects its span and hands it
+                    # to the stream sloop (bounded by declared length)
 
 _KIND_NAMES = {v: k for k, v in {
     "STRINGS": KIND_STRINGS, "STAGES": KIND_STAGES, "DEPS": KIND_DEPS,
     "QUERIES": KIND_QUERIES, "CAPS": KIND_CAPS,
     "REALIZATION": KIND_REALIZATION, "CLAIM": KIND_CLAIM,
-    "EVIDENCE": KIND_EVIDENCE, "BYTES": KIND_BYTES}.items()}
+    "EVIDENCE": KIND_EVIDENCE, "BYTES": KIND_BYTES,
+    "PIR": KIND_PIR}.items()}
 
 CAP_PORT = 0
 CAP_OS = 1

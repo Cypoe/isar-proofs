@@ -328,6 +328,12 @@ class Realization:
                                     # input-tier reducts live here so shared
                                     # input redexes pay once across a stream
     io: tuple = ("stdin", "stdout")
+    dialect: str = "pir"            # IR kernels: stdin's container format —
+                                    # "pir" = bare packed-IR stream elements
+                                    # (read to EOF); "plex.v3" = a v3
+                                    # archive whose KIND_PIR section is the
+                                    # stream — the kernel depacks the
+                                    # container itself (ADR-0006 ingest).
     abi: str = "win64"
     fuse_s: bool = False              # False: `S` token instantiates derived_s
                                       # (IStepBasis only); True: primitive sβ
