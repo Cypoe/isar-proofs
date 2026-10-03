@@ -48,7 +48,8 @@ import os
 import sys
 from typing import Callable, Dict, List, Tuple
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 
@@ -56,7 +57,8 @@ from reduce import T, K, I, KK, B, S, app, reduce as tree_reduce  # noqa: E402
 from strategy import MixStrategy  # noqa: E402
 from host_pieces import GRAPH_PIECE, GRAPH_CD_PIECE, HostPiece  # noqa: E402
 from lambda_dialect import bracket_abstract0 as bracket  # noqa: E402  (I/K/S only: host/reduce.py has no swap/dup β)
-from lambda_bench import church, MULT, PLUS, EXP  # noqa: E402
+from benches.lambda_bench import (  # noqa: E402
+    church, MULT, PLUS, EXP)
 from lambda_eval import LSTEP_PIECE, t_to_nexpr  # noqa: E402
 import lean_eval  # noqa: E402
 

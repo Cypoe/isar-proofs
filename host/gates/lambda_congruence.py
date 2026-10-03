@@ -5,7 +5,8 @@ import os
 import subprocess
 import sys
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 _ROOT = os.path.dirname(_HOST)
 sys.path.insert(0, _HOST)
 

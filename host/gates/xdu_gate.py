@@ -49,7 +49,8 @@ import subprocess
 import sys
 from typing import List, Tuple
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 _SEED = os.path.normpath(os.path.join(_HOST, "..", "seed"))

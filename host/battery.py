@@ -191,11 +191,14 @@ def run_suite(name: str, cmd: list, cwd: str, verbose: bool = False,
 def _unit_name(suite: str, args) -> str:
     """Log/record name for a run unit: plain suite name, or
     suite__argslug so selector runs don't clobber each other's logs
-    (`--gate X` slugifies to just the id — spec_term__G9d)."""
+    (`--gate X` slugifies to just the id — spec_term__G9d).  Suite
+    names may carry the host-relative subdir (gates/xdu_gate) —
+    flattened for the log filename."""
+    name = suite.replace("/", "__")
     if not args:
-        return suite
+        return name
     slug = "_".join(a.lstrip("-") for a in args if a != "--gate")
-    return suite + "__" + slug if slug else suite
+    return name + "__" + slug if slug else name
 
 
 def main() -> int:
@@ -272,8 +275,11 @@ def main() -> int:
     def _selected(u):
         if only is None:
             return True
-        return u["suite"] in only or any(o.id in only for o in u["obs"]) \
-            or any(s.module in only for s in u["sts"]) \
+        return u["suite"] in only \
+            or os.path.basename(u["suite"]) in only \
+            or any(o.id in only for o in u["obs"]) \
+            or any(s.module in only or os.path.basename(s.module)
+                   in only for s in u["sts"]) \
             or u["name"] in only
 
     results = {}        # unit name -> record

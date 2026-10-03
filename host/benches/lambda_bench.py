@@ -11,7 +11,8 @@ import sys
 import time
 from typing import List, Optional, Tuple
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 

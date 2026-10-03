@@ -33,7 +33,8 @@ import struct
 import subprocess
 import sys
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 if _HOST not in sys.path:
     sys.path.insert(0, _HOST)
 _SEED_DIR = os.path.join(_HOST, "..", "seed")

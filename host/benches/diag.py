@@ -28,7 +28,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import psutil
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 _ROOT = os.path.dirname(_HOST)
 for p in (_HOST, _ROOT, os.path.join(_ROOT, "seed")):
     if p not in sys.path:

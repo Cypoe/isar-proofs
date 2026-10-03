@@ -351,11 +351,11 @@ class Realization:
                                       # `rules=` histogram (redex classes +
                                       # congruence descents) — the instrumented
                                       # baseline for evaluator audits
-    threads: int = 1                  # >1 = multithreaded IR kernel variant
-                                      # (native.x86_64.pe.ir.mt): workers depack
-                                      # the shared input stream into private
-                                      # slab claims (lock xadd) — no shared
-                                      # mutable cells, ordered frame join
+    threads: int = 1                  # >1 = multithreaded kernel variant:
+                                      # workers depack the shared input
+                                      # stream into private slab claims
+                                      # (lock xadd) — no shared mutable
+                                      # cells, ordered frame join
     peephole: bool = False            # Program-level peephole (host/opt_peephole
                                       # on the seed route, spec_term.peepholeOf
                                       # on the staged chain — G9i gates them
@@ -389,6 +389,7 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
     # collection is pure overhead and grows with live-node count, which
     # is what makes emission time vary wildly between draws.  Disable it
     # for the emit's duration.
+    tc = tc or toolchain.by_name("native.x86_64.pe")
     import gc
     gc.disable()
     try:
@@ -398,7 +399,6 @@ def emit(R: Realization = DEFAULT, tc=None, program=None) -> bytes:
 
 
 def _emit(R: Realization, tc, program) -> bytes:
-    tc = tc or toolchain.by_name("native.x86_64.pe")
     isa, rts, tgt = toolchain.resolve(tc)
     if getattr(rts, "abi", R.abi) != R.abi:
         raise NotRealized(

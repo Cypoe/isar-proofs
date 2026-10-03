@@ -42,6 +42,7 @@ Usage: python host/emit_chain.py [--on-exe] [--win64] [--cold]
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import inspect
 import json
@@ -52,6 +53,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, List, Optional, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
@@ -1080,6 +1082,7 @@ def emit_frames(R: seed.Realization,
                 pinned: Optional[dict] = None,
                 timeout: int = 600,
                 staged: bool = False,
+                workers: int = 1,
                 store=None) -> Tuple[bytes, dict]:
     """The emit program EXECUTED on the emitted host: packed streams
     of bounded roots, kernel does every β-reduction, Python
@@ -1114,7 +1117,7 @@ def emit_frames(R: seed.Realization,
     if staged:
         if store is None:
             store = BlobStore()
-        brun = make_bytes_runner(exe, workers=1,
+        brun = make_bytes_runner(exe, workers=workers,
                                  pinned=pinned or store.pins)
         # program stage — items as boundary enumeration.  `prog`
         # fraglists enumerate seed-side; otherwise per-routine frag
@@ -1127,7 +1130,7 @@ def emit_frames(R: seed.Realization,
             _ir_ctx = any(n.startswith("ir_") for n in routines)
             trun = make_ir_runner(
                 ir_exe_for(seed.Realization(reclaim="redirect")),
-                workers=1, pinned=store.pins)
+                workers=workers, pinned=store.pins)
             for name in routines:
                 store.pin_named(
                     st.routine_pin_key(name, fixed, _ir_ctx),
@@ -1146,7 +1149,7 @@ def emit_frames(R: seed.Realization,
         blob_run = make_blob_runner(
             ir_exe_for(seed.Realization(
                 reclaim="redirect", io=("stdin", "ir"))),
-            workers=1, pinned=store.pins)
+            workers=workers, pinned=store.pins)
         ib, db, syms = link_staged(
             imports, slots, None, store=store,
             run_ir=blob_run, run_bytes=brun)
@@ -1325,7 +1328,6 @@ def _pack_stream(text_len: int, idata_len: int, datab_len: int,
     as already-NF bytelist terms: format constants are data, not
     computed answers); stage elements become MAP rows.  Returns
     (stream, [(at_stream_idx, src_stage, src_frame)])."""
-    import plex_bundle as pb
     roots: List[T] = []
     mmap: List[Tuple[int, str, int]] = []
     for e in _pack_recipe(text_len, idata_len, datab_len, stackres):
@@ -1652,7 +1654,8 @@ def emit_bundle_streams(bundle) -> Dict[str, bytes]:
 
 def run_emit_bundle(path, R: Optional[seed.Realization] = None,
                     exe: Optional[str] = None,
-                    timeout: int = 3600) -> Tuple[bytes, dict]:
+                    timeout: int = 3600,
+                    workers: int = 1) -> Tuple[bytes, dict]:
     """emit.plex -> PE image: EXECUTE the serialized schedule —
     every stage's stream rides the archive; replay is dep-order
     execution plus MAP-declared output assembly, never stage
@@ -1727,7 +1730,9 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
         _batch_bounded halves on), so execution slices the root
         table and halves the span on rc=4 — executor scheduling,
         not schedule resolution; root order and content are
-        unchanged (slice_ir preserves digests)."""
+        unchanged (slice_ir preserves digests).  workers>1 strides
+        the chunk list across concurrent exes — chunk independence
+        is what makes the slice a scheduling question."""
         try:
             nr = st.ir_roots(blob)
         except ValueError:
@@ -1736,15 +1741,22 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
         span = nr
         while True:
             try:
-                if span >= nr:
-                    return _run_pir(x, blob, mode)
-                outs = []
-                err = b""
-                for i in range(0, nr, span):
-                    out, err = _run_pir(
+                idxs = list(range(0, nr, span)) or [0]
+
+                def _one(i):
+                    if span >= nr:
+                        return _run_pir(x, blob, mode)
+                    return _run_pir(
                         x, st.slice_ir(blob, i, min(span, nr - i)),
                         mode)
-                    outs.append(out)
+                if workers > 1 and len(idxs) > 1:
+                    with ThreadPoolExecutor(
+                            max_workers=workers) as pool:
+                        results = list(pool.map(_one, idxs))
+                else:
+                    results = [_one(i) for i in idxs]
+                outs = [r[0] for r in results]
+                err = b"".join(r[1] for r in results if r[1])
                 if mode == "term":
                     return b"".join(outs), err
                 return [f for o in outs for f in o], err
@@ -1827,7 +1839,8 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
                        "ir")}
     frames: Dict[str, list] = {}
     progs: Dict[str, bytes] = {}
-    for i in order:
+
+    def _exec(i: int):
         name, _art, runner = stages[i]
         blob = streams[name]
         xm = exes.get(runner)
@@ -1836,12 +1849,33 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
                 f"emit bundle: stage {name!r} runner "
                 f"{runner!r} not realized")
         out, err = _run_stage(xm[0], blob, xm[1])
-        if xm[1] == "term":
-            progs[name] = out
+        return name, xm[1], out, err
+    # dep levels — stages whose deps all sit in earlier levels are
+    # independent by construction (DEPS is the only edge source);
+    # workers>1 runs a level's stages concurrently, each on its own
+    # declared exe.  Frame/prog assignment stays keyed by name —
+    # completion order is scheduling, not data.
+    lvl: Dict[int, int] = {}
+    by_level: Dict[int, list] = {}
+    for i in order:
+        lvl[i] = max((lvl[d] + 1 for a, d in deps if a == i),
+                     default=0)
+        by_level.setdefault(lvl[i], []).append(i)
+    for lv in sorted(by_level):
+        group = by_level[lv]
+        if workers > 1 and len(group) > 1:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results = list(pool.map(_exec, group))
         else:
-            frames[name] = out
-        ev[name] = (f"roots={len(out) if isinstance(out, list) else '?'} "
-                    f"err={len(err)}B")
+            results = [_exec(i) for i in group]
+        for name, mode, out, err in results:
+            if mode == "term":
+                progs[name] = out
+            else:
+                frames[name] = out
+            ev[name] = (f"roots="
+                        f"{len(out) if isinstance(out, list) else '?'} "
+                        f"err={len(err)}B")
     # audit — the program stage's decoded items must enumerate
     # exactly the assemble stream's baked roots (a bundle whose
     # streams no longer correspond is corrupt, not alternate)

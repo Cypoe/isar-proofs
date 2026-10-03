@@ -53,7 +53,8 @@ import sys
 import tempfile
 from typing import Dict, List, Optional, Tuple
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 _SEED = os.path.normpath(os.path.join(_HOST, "..", "seed"))
 for _p in (_HOST, _SEED):
     if _p not in sys.path:

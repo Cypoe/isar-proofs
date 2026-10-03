@@ -7,7 +7,8 @@ Requires: lake env lean --run Main.lean (golden suite mode) to be runnable.
 from __future__ import annotations
 import subprocess, sys, re, os
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
 
 
 def normalize_label(s: str) -> str:

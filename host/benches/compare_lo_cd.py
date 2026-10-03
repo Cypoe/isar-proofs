@@ -9,7 +9,8 @@ import os
 import sys
 import time
 
-_HOST = os.path.dirname(os.path.abspath(__file__))
+_HOST = os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 sys.path.insert(0, _HOST)
 
 from reduce import reduce, reduce_cd  # noqa: E402

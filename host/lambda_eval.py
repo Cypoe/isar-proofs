@@ -43,7 +43,8 @@ from lambda_dialect import (  # noqa: E402
 )
 from host_pieces import HostPiece  # noqa: E402
 import xdu_dialect as xd  # noqa: E402
-from lambda_bench import church, MULT, EXP, appn  # noqa: E402
+from benches.lambda_bench import (  # noqa: E402
+    church, MULT, EXP, appn)
 
 
 # ---------------------------------------------------------------------------
