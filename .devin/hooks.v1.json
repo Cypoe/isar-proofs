@@ -1,0 +1,24 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python .devin/hooks/session_ctx.py"
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python .devin/hooks/frag_check.py"
+        }
+      ]
+    }
+  ]
+}

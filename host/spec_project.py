@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import Dict
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -81,7 +82,6 @@ def _run_ob(o: "toolchain.Obligation", bat: dict) -> str:
 
 def render_gates() -> str:
     bat = _battery()
-    suites = bat["suites"]
     lines = [
         GEN_HDR,
         "",
@@ -136,6 +136,72 @@ def _comp_status(c: toolchain.Component) -> str:
     return "realized" if c.realized else "declared"
 
 
+def _slot_glyph(comps: Dict[str, "toolchain.Component"],
+                name: str) -> str:
+    c = comps.get(name)
+    if c is None:
+        return "—"
+    return "✓" if c.realized else "○"
+
+
+def render_matrix() -> str:
+    """Phase-9b — emit-target triplet matrix: toolchain rows × the
+    component slots each triplet composes (dialect/isa/routines/
+    target), cells derived like CATALOG (✓ realized, ○ declared,
+    — missing).  Second table: obligation families × last-run live
+    cells from battery_last.json — the gate/probe coverage view."""
+    s = toolchain.load()
+    comps = toolchain.components()
+    bat = _battery()
+    lines = [
+        GEN_HDR,
+        "",
+        "# Emit-target matrix (derived status — never asserted)",
+        "",
+        "| toolchain | dialect | isa | routines | target | path "
+        "| status |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for t in s["toolchains"]:
+        cells = [
+            _slot_glyph(comps["dialect"], t.dialect),
+            _slot_glyph(comps["isa"], t.isa),
+            _slot_glyph(comps["routines"], t.routines),
+            _slot_glyph(comps["target"], t.target),
+        ]
+        lines.append(f"| {t.name} | " + " | ".join(cells) +
+                     f" | {t.path} | {t.status} |")
+    lines += [
+        "",
+        "cell: `✓` realized (module imports), `○` declared "
+        "(refuses), `—` not a registered component; "
+        "`status` = the triplet's derived state.",
+        "",
+        "## Gate families × live",
+        "",
+        "| family | obligations | ✓ | ✓* | ✗ | · |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    fams: Dict[str, Dict[str, int]] = {}
+    for o in toolchain.obligations():
+        row = fams.setdefault(
+            o.family, {"n": 0, "✓": 0, "✓*": 0, "✗": 0, "·": 0})
+        row["n"] += 1
+        cell = _live_ob(o, bat)
+        row[cell if cell in row else "·"] += 1
+    for fam in sorted(fams):
+        r = fams[fam]
+        lines.append(f"| {fam} | {r['n']} | {r['✓']} | {r['✓*']} "
+                     f"| {r['✗']} | {r['·']} |")
+    lines += [
+        "",
+        "live cells from battery_last.json — `·` = no record "
+        "(tier/env-gated or not yet run).",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def render_catalog() -> str:
     s = toolchain.load()
     lines = [
@@ -186,7 +252,8 @@ def render_catalog() -> str:
 def main() -> int:
     want_write = "--write" in sys.argv[1:]
     outs = {os.path.join(DOCS, "GATES.md"): render_gates(),
-            os.path.join(DOCS, "CATALOG.md"): render_catalog()}
+            os.path.join(DOCS, "CATALOG.md"): render_catalog(),
+            os.path.join(DOCS, "MATRIX.md"): render_matrix()}
     drift = []
     for path, text in outs.items():
         try:

@@ -1311,6 +1311,19 @@
         "aarch64.linux.o",
         "riscv64.linux.o"
       ]
+    },
+    {
+      "id": "CH1",
+      "suite": "challenges",
+      "family": "staging",
+      "evidence": "seam",
+      "regime": "stdout+stderr+rc",
+      "tier": "full",
+      "what": "standing challenge catalog replayed: v3 refusal matrix (16 named cases + control), emit.plex forges, axis-mode refusals, spec mutations — each diffed against recorded expected outcome",
+      "witnesses": [
+        "native.x86_64.pe",
+        "native.x86_64.pe.ir"
+      ]
     }
   ],
   "selftests": [
@@ -1541,6 +1554,17 @@
         "wall_ms",
         "rss",
         "engine NF agreement"
+      ],
+      "claim": "none — report, not a cost obligation"
+    },
+    {
+      "name": "emit_chain_bench",
+      "module": "bench",
+      "measures": [
+        "steps_per_s",
+        "emit_wall_s",
+        "mt_scale",
+        "arena_bytes"
       ],
       "claim": "none — report, not a cost obligation"
     }

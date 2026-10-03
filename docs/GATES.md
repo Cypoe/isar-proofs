@@ -11,9 +11,9 @@
 | G3 | quotient | congruence | operEq | full | seed | native exe probes, both builds: stream boundary + Church deep terms | native.x86_64.pe, native.x86_64.pe.fuse_s, graph.lo | ✓ | cd9556b+dirty |
 | G4 | quotient | congruence | operEq | full | seed | strategy variations (geometry, fuse_s) + cd refusal + fuel | native.x86_64.pe | ✓ | cd9556b+dirty |
 | G5 | quotient | congruence | operEq | full | seed | host registration: choose -> cpu, native_realize, piece adoption — choose is a strategy, not selection-optimality | native.x86_64.pe, native.x86_64.pe.fuse_s, graph.lo | ✓ | cd9556b+dirty |
-| G6 | staging | structural | — | fast | spec_check | seams: seed section 0-3 contains no catalog names (transform owns interpretation) | — | ✓ | · |
-| G6b | staging | congruence | operEq | fast | futamura_cube | cube: P0 == P1 across witnesses including graph.cd | tree.surface, graph.lo, graph.cd, native.x86_64.pe, native.x86_64.pe.fuse_s | ✓* | · |
-| G8 | staging | congruence | stdout+rc | full | xdu_gate | native == runtime on stdout+rc (nibble transducer plex) | graph.lo, graph.cd, native.x86_64.pe | ✓ | · |
+| G6 | staging | structural | — | fast | gates/spec_check | seams: seed section 0-3 contains no catalog names (transform owns interpretation) | — | · | · |
+| G6b | staging | congruence | operEq | fast | gates/futamura_cube | cube: P0 == P1 across witnesses including graph.cd | tree.surface, graph.lo, graph.cd, native.x86_64.pe, native.x86_64.pe.fuse_s | · | · |
+| G8 | staging | congruence | stdout+rc | full | gates/xdu_gate | native == runtime on stdout+rc (nibble transducer plex) | graph.lo, graph.cd, native.x86_64.pe | · | · |
 | G9 | quotient | congruence | operEq | fast | lambda_eval | witness 3: lambda LStep evaluator + Lean #eval spot oracle (G9 = lambda witness 3; unrelated to G9a–h spec-as-term) | lambda.lstep, lean.eval | ✓ | · |
 | G9a | staging | congruence | operEq | full | spec_term | catalog-as-term: pathOf over toolchain.json (full spec) agrees across witnesses | graph.lo, graph.cd, native.x86_64.pe, python.walk | · | · |
 | G9b | staging | congruence | operEq | full | spec_term | specialize pathOf against the static catalog (P1 shape); residual instances agree with direct queries | graph.lo, graph.cd, native.x86_64.pe, python.walk | · | · |
@@ -25,8 +25,8 @@
 | G9h | staging | seam | bytes | full | spec_term | linkOf + pack2Of + linkasm: the linker stage — section builders run once and export their symtabs; linkOf merges them into the global table assemble's resolver consumes (APPEND iat data = ALOOK last-match / dict.update order); pack2Of takes linked sections as inputs (no rebuild); linkasm assembles against the link-derived symtab end-to-end.  linkOf gated lo+cd at both scales; pack2Of lo+oracle (same measured cd deferral as packOf — image-sized NF); linkasm lo+oracle (composed-stage cd deferred — >50GB measured, the 027/028 retention pathology) | graph.lo, graph.cd, python.walk | · | · |
 | G9i | staging | seam | bytes | full | spec_term | peepholeOf — opt_peephole.optimize at term level: fallthrough jmp, unreachable after ujmp/ret, jump threading via label_at map (ALOOK last-match = setdefault, seen-set on jmp cycles), selfmove drop; ISACLASS tables arrive as term parameters.  decode_program(peepholeOf frags) == opt_peephole.optimize(items) on mini (all four rules + interaction) and the real win64 program.  lo only — the fixpoint self-application defers the recursive call into the taken branch (normal-order; cd would evaluate eagerly) | graph.lo, python.walk | · | · |
 | G9p | staging | seam | bytes | full | spec_term | ADR-005 packed IR: pack/unpack roundtrip (5 cases incl. VAR cells and a lambda-compiled term), canonical bytes (equal-but-distinct trees -> identical streams), multi-root sharing preserved (hash-consed on (tag,l,r)) | python.walk | ✓ | f672ac5+dirty |
-| G18 | quotient | structural | — | fast | caps_gate | cap-subset: used OS bindings extracted from program data (IAT imports, SYS immediates at trap sites, libc call sites) must be subset of each realized routines entry's declared caps; emitter-role hosts (path=native) restricted to {stdin R, stdout W, stderr W, scratch} — 'legal for this host' is checkable | — | · | · |
-| G17 | quotient | congruence | operEq | env | cuda_gate | CUDA evaluator parity: ir_cuda.exe vs native.x86_64.pe.ir on identical PIR batches — NF lines + steps/alloc + rc equal (xisa corpus + G9b instantiation batch, default and FUSE_S builds); fuel -> rc2, malformed -> rc3.  No tempo claim | native.x86_64.pe.ir, cuda | · | · |
+| G18 | quotient | structural | — | fast | gates/caps_gate | cap-subset: used OS bindings extracted from program data (IAT imports, SYS immediates at trap sites, libc call sites) must be subset of each realized routines entry's declared caps; emitter-role hosts (path=native) restricted to {stdin R, stdout W, stderr W, scratch} — 'legal for this host' is checkable | — | · | · |
+| G17 | quotient | congruence | operEq | env | gates/cuda_gate | CUDA evaluator parity: ir_cuda.exe vs native.x86_64.pe.ir on identical PIR batches — NF lines + steps/alloc + rc equal (xisa corpus + G9b instantiation batch, default and FUSE_S builds); fuel -> rc2, malformed -> rc3.  No tempo claim | native.x86_64.pe.ir, cuda | · | · |
 | L0 | quotient | lean | — | env | lake | QuotientMap soundness + OperEq equivalence (Lean) | — | ✓ | · |
 | L1 | cost | lean | — | env | lake | [size-Jones (static) — not runtime Tw,C] JonesOptimal over pe_cost = term_size on abstract PESetup, proved for JonesIdPE | — | ✓ | · |
 | L2 | staging | lean | — | env | lake | Futamura projections 1-3 + square commutation over PESetup (Lean) | — | ✓ | · |
@@ -34,10 +34,11 @@
 | G10-peephole | staging | seam | bytes | full | emit_chain | emit_image(R(peephole=True)) == seed.emit(R(peephole=True)) byte-for-byte — the staged peepholeOf stage (its own reported seam, program.items keyed on the optimized term) vs the seed route's imperative opt_peephole | graph.lo, native.x86_64.pe | · | · |
 | G10-cold | staging | seam | bytes | full | emit_chain | release gate: G10 with every staged stage re-derived (no checkpoint reuse) — graph.lo witness, independent of the emitted kernel | graph.lo, native.x86_64.pe | · | · |
 | G16 | staging | seam | bytes | full | emit_chain | native byte egress (W1): the io=("stdin","bytes") IR kernel decodes each root's byte-list NF itself — [u32le len][bytes] frames in root order, cross-checked against graph.lo+_decode_bytecells and the term-mode kernel byte-for-byte (empty/NUL/0xFF/256/1KiB/4KiB/encode-query corpus); negative legs exit5 (non-list NF), exit3 (truncated PIR), exit2 (fuel) | graph.lo, native.x86_64.pe | · | · |
-| G11 | quotient | congruence | stdout+stderr+rc | env | cross_verify | PE<->C byte-identical stdout+stderr+rc; graph.lo<->C NF (+steps on default build) | native.x86_64.pe, native.c, graph.lo | ✓ | cd9556b+dirty |
+| G11 | quotient | congruence | stdout+stderr+rc | env | gates/cross_verify | PE<->C byte-identical stdout+stderr+rc; graph.lo<->C NF (+steps on default build) | native.x86_64.pe, native.c, graph.lo | · | · |
 | G9b-emit | staging | congruence | operEq | full | spec_term | Futamura-2 residual exe (native.x86_64.res): exe(arg) NF == pooled instantiation residual[1:=arg] NF on the 20-name batch | native.x86_64.res, native.x86_64.pe | · | · |
-| G12 | quotient | congruence | stdout+stderr+rc | env | xisa_gate | cross-ISA reducer parity: identical stdout+stderr+rc across x86_64/aarch64/riscv64 linux.lo (plain, fuse_s, audit rules=, fuel rc2, invalid rc3) | x86_64.linux.lo, aarch64.linux.lo, riscv64.linux.lo | ✓ | cd9556b+dirty |
-| G13 | staging | seam | bytes | fast | elfo_gate | ET_REL .o: relocation-patched .text == executable .text for all three ISAs (symtab/rela vs exec layout) | x86_64.linux.o, aarch64.linux.o, riscv64.linux.o | ✓ | cd9556b+dirty |
+| G12 | quotient | congruence | stdout+stderr+rc | env | gates/xisa_gate | cross-ISA reducer parity: identical stdout+stderr+rc across x86_64/aarch64/riscv64 linux.lo (plain, fuse_s, audit rules=, fuel rc2, invalid rc3) | x86_64.linux.lo, aarch64.linux.lo, riscv64.linux.lo | · | · |
+| G13 | staging | seam | bytes | fast | gates/elfo_gate | ET_REL .o: relocation-patched .text == executable .text for all three ISAs (symtab/rela vs exec layout) | x86_64.linux.o, aarch64.linux.o, riscv64.linux.o | · | · |
+| CH1 | staging | seam | stdout+stderr+rc | full | challenges | standing challenge catalog replayed: v3 refusal matrix (16 named cases + control), emit.plex forges, axis-mode refusals, spec mutations — each diffed against recorded expected outcome | native.x86_64.pe, native.x86_64.pe.ir | · | · |
 
 ## Selftests
 
@@ -45,7 +46,7 @@
 | --- | --- | --- | --- | --- |
 | bytecode_dialect | fast | — | — | ✓ |
 | fasm_dialect | fast | — | — | ✓ |
-| graph_congruence | fast | — | — | ✓* |
+| gates/graph_congruence | fast | — | — | · |
 | graph_runtime | fast | — | — | ✓ |
 | host_pieces | fast | — | — | ✓ |
 | isa_c | fast | — | — | ✓ |
@@ -67,10 +68,10 @@
 | tower | fast | — | — | ✓ |
 | xdu_dialect | fast | — | — | ✓ |
 | cogen | full | — | — | ✓ |
-| observational_suite | full | — | — | ✓ |
+| gates/observational_suite | full | — | — | · |
 | toolchain | full | — | — | ✓ |
-| congruence | env | lake | — | ✓ |
-| lambda_congruence | env | lake | — | ✓ |
+| gates/congruence | env | lake | — | · |
+| gates/lambda_congruence | env | lake | — | · |
 | lean_eval | env | lake | --with-lean | ✓ |
 | isa_x86_64 | env | fasmg | — | ✓ |
 | isa_aarch64 | env | llvm-mc | — | ✓ |
@@ -85,10 +86,11 @@
 
 | name | module | measures | claim |
 | --- | --- | --- | --- |
-| graph_bench | graph_bench | tree_ms, graph_ms, tree_steps, graph_steps, alloc | none — report, not a cost obligation |
-| compare_lo_cd | compare_lo_cd | ms_lo, steps_lo, ms_cd, rounds_cd | none — report, not a cost obligation |
-| lambda_bench | lambda_bench | ms, b, i | none — report, not a cost obligation |
-| diag | diag | wall_ms, rss, engine NF agreement | none — report, not a cost obligation |
+| graph_bench | benches/graph_bench | tree_ms, graph_ms, tree_steps, graph_steps, alloc | none — report, not a cost obligation |
+| compare_lo_cd | benches/compare_lo_cd | ms_lo, steps_lo, ms_cd, rounds_cd | none — report, not a cost obligation |
+| lambda_bench | benches/lambda_bench | ms, b, i | none — report, not a cost obligation |
+| diag | benches/diag | wall_ms, rss, engine NF agreement | none — report, not a cost obligation |
+| emit_chain_bench | bench | steps_per_s, emit_wall_s, mt_scale, arena_bytes | none — report, not a cost obligation |
 
 ## Demos
 
