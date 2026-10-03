@@ -235,6 +235,33 @@ def ch_emit_malformed(tmpdir: str) -> dict:
                     "emit bundle:")
 
 
+def _threshold_bundle(tmpdir: str, name: str, min_par: int) -> str:
+    streams = ec.emit_schedule_streams(seed.Realization())
+    real = {"dialect": "plex.emit/2",
+            "schedule.output": "emit.pack",
+            "schedule.min_parallel_roots": str(min_par)}
+    forged = pb.pack_bundle(ec.emit_sections(
+        b"\x00" * 16, None, real, {}, streams=streams))
+    fpath = os.path.join(tmpdir, name)
+    open(fpath, "wb").write(forged)
+    return fpath
+
+
+def ch_emit_threshold_pool(tmpdir: str) -> dict:
+    """declared threshold below the stage's roots -> pool engages."""
+    fpath = _threshold_bundle(tmpdir, "emit.t2.plex", 2)
+    _img, ev = ec.run_emit_bundle(fpath, timeout=3600, workers=4)
+    return {"pool": "pool=True" in ev.get("emit.assemble", "")}
+
+
+def ch_emit_threshold_serial(tmpdir: str) -> dict:
+    """declared threshold above every stage's roots -> serial even
+    under workers=4 (W(n) below the regimes bound)."""
+    fpath = _threshold_bundle(tmpdir, "emit.tbig.plex", 100000)
+    _img, ev = ec.run_emit_bundle(fpath, timeout=3600, workers=4)
+    return {"pool": "pool=True" in ev.get("emit.assemble", "")}
+
+
 # ---- axis refusals ---------------------------------------------------------
 
 def _axis(name: str, fn: Callable[[], None], word: str) -> dict:
@@ -316,6 +343,12 @@ def catalog() -> List[dict]:
             ("axis-reclaim-marksweep", ch_axis_reclaim)):
         entries.append({"name": name, "expect": {"refused": True},
                         "run": fn})
+    entries.append({"name": "emit-threshold-pool",
+                    "expect": {"pool": True},
+                    "run": ch_emit_threshold_pool})
+    entries.append({"name": "emit-threshold-serial",
+                    "expect": {"pool": False},
+                    "run": ch_emit_threshold_serial})
     for name, fn in _spec_cases():
         entries.append({
             "name": name,
@@ -333,6 +366,8 @@ def _match(observed: dict, expect: dict) -> bool:
         return bool(observed.get("prefix_ok", observed.get("hit")))
     if "validate_errs" in expect:
         return bool(observed.get("validate_errs"))
+    if "pool" in expect:
+        return observed.get("pool") == expect["pool"]
     return observed == expect
 
 

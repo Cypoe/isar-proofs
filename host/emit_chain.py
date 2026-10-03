@@ -42,7 +42,6 @@ Usage: python host/emit_chain.py [--on-exe] [--win64] [--cold]
 """
 from __future__ import annotations
 
-import concurrent.futures
 import hashlib
 import inspect
 import json
@@ -1596,6 +1595,10 @@ def write_emit_bundle(path: str, R: seed.Realization,
         real["text_base"] = hex(_tb)
         real["routines_list"] = ",".join(_rn)
         real["schedule.output"] = "emit.pack"
+        # scheduling contract as data: stages/streams below this
+        # root count run serial even under workers>1 (regimes:
+        # parallel wins only when W(n) > setup+merge overheads)
+        real["schedule.min_parallel_roots"] = "16"
     comp = toolchain.components()["routines"].get(real["routines"])
     caps = dict(comp.data).get("caps") if comp is not None else None
     streams = emit_schedule_streams(
@@ -1705,6 +1708,10 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
     if exe is None:
         exe = ir_exe_for(seed.Realization(
             reclaim="redirect", io=("stdin", "bytes")))
+    # scheduling contract: below the declared root threshold a
+    # stage executes serially even under workers>1 — the regimes
+    # bound (W(n) must clear T_setup+T_merge) as declared data
+    min_par = int(real.get("schedule.min_parallel_roots", "16"))
 
     def _run_pir(x, blob, mode):
         p = subprocess.run([x], input=blob, capture_output=True,
@@ -1749,7 +1756,9 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
                     return _run_pir(
                         x, st.slice_ir(blob, i, min(span, nr - i)),
                         mode)
-                if workers > 1 and len(idxs) > 1:
+                pooled = workers > 1 and len(idxs) > 1 \
+                    and nr >= min_par
+                if pooled:
                     with ThreadPoolExecutor(
                             max_workers=workers) as pool:
                         results = list(pool.map(_one, idxs))
@@ -1758,8 +1767,9 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
                 outs = [r[0] for r in results]
                 err = b"".join(r[1] for r in results if r[1])
                 if mode == "term":
-                    return b"".join(outs), err
-                return [f for o in outs for f in o], err
+                    return b"".join(outs), err, pooled
+                return [f for o in outs for f in o], \
+                    err, pooled
             except toolchain.NotRealized as e:
                 if "rc=4" not in str(e) or span == 1:
                     raise
@@ -1848,8 +1858,8 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
             raise toolchain.NotRealized(
                 f"emit bundle: stage {name!r} runner "
                 f"{runner!r} not realized")
-        out, err = _run_stage(xm[0], blob, xm[1])
-        return name, xm[1], out, err
+        out, err, pooled = _run_stage(xm[0], blob, xm[1])
+        return name, xm[1], out, err, pooled
     # dep levels — stages whose deps all sit in earlier levels are
     # independent by construction (DEPS is the only edge source);
     # workers>1 runs a level's stages concurrently, each on its own
@@ -1863,19 +1873,24 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
         by_level.setdefault(lvl[i], []).append(i)
     for lv in sorted(by_level):
         group = by_level[lv]
-        if workers > 1 and len(group) > 1:
+        # a level pools only when some member's stream clears the
+        # threshold — a level of small stages serializes (spawn
+        # cost dominates; the regimes bound again)
+        heavy = any(st.ir_roots(streams[stages[i][0]]) >= min_par
+                    for i in group)
+        if workers > 1 and len(group) > 1 and heavy:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 results = list(pool.map(_exec, group))
         else:
             results = [_exec(i) for i in group]
-        for name, mode, out, err in results:
+        for name, mode, out, err, pooled in results:
             if mode == "term":
                 progs[name] = out
             else:
                 frames[name] = out
             ev[name] = (f"roots="
                         f"{len(out) if isinstance(out, list) else '?'} "
-                        f"err={len(err)}B")
+                        f"err={len(err)}B pool={pooled}")
     # audit — the program stage's decoded items must enumerate
     # exactly the assemble stream's baked roots (a bundle whose
     # streams no longer correspond is corrupt, not alternate)
