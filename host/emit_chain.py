@@ -869,7 +869,8 @@ def _write_manifest(workdir: str, R: seed.Realization, label: str,
                     routines, keys: Dict[str, str],
                     qdigs: Dict[str, str], runs: dict, run,
                     pack_slot: str,
-                    decodes: Optional[dict] = None) -> str:
+                    decodes: Optional[dict] = None,
+                    img: Optional[bytes] = None, rt=None) -> dict:
     """Phase-4 stage DAG as data: workdir/manifest.json names every
     stage's artifact (content key), its query blob ref, its resolved
     runner, and its deps — replayable addressing, not a code path."""
@@ -909,6 +910,34 @@ def _write_manifest(workdir: str, R: seed.Realization, label: str,
     p = os.path.join(workdir, "manifest.json")
     with open(p, "w") as f:
         json.dump(man, f, indent=1)
+    if img is not None:
+        _write_bundle(workdir, man, img, R, rt)
+    return man
+
+
+def _write_bundle(workdir: str, man: dict, img: bytes,
+                  R: seed.Realization, rt) -> str:
+    """Phase-6 .plex v3 archive beside manifest.json: the stage DAG,
+    query blob refs, realization fields, the routines record's caps,
+    decode evidence, and the image payload — one ingestible unit."""
+    import plex_bundle as pb
+    rname = rt.name if rt is not None else "x86_64.win64.lo"
+    comp = toolchain.components()["routines"].get(rname)
+    caps = dict(comp.data).get("caps") if comp is not None else None
+    real = {k: str(v) for k, v in vars(R).items()}
+    real["routines"] = rname
+    secs = pb.manifest_sections(man, image=img, caps=caps,
+                                realization=real)
+    data = pb.pack_bundle(secs)
+    bundle = pb.read_bundle(data)          # writer self-check
+    if caps is not None:
+        errs = pb.check_bundle_caps(bundle, caps)
+        if errs:
+            raise toolchain.NotRealized(
+                f"bundle caps exceed record {rname}: {errs[0]}")
+    p = os.path.join(workdir, "image.plex")
+    with open(p, "wb") as f:
+        f.write(data)
     return p
 
 
@@ -1323,7 +1352,8 @@ def emit_image(R: seed.Realization,
             if workdir:
                 _write_manifest(workdir, R, label, routines, keys,
                                 qdigs, runs, run, "pack*",
-                                decodes=_dec_delta(dec0))
+                                decodes=_dec_delta(dec0),
+                                img=img, rt=rt)
             return img, report
     else:
         link_nf = _link_nf()
@@ -1358,7 +1388,8 @@ def emit_image(R: seed.Realization,
                     f.write(img)
             _write_manifest(workdir, R, label, routines, keys,
                             qdigs, runs, run, "pack",
-                            decodes=_dec_delta(dec0))
+                            decodes=_dec_delta(dec0),
+                            img=img, rt=rt)
     report.append(("ckpt", ckpt[0], ckpt[1]))
     return img, report
 

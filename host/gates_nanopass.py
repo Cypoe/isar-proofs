@@ -58,6 +58,11 @@ Gates (cheap, no full emit — the byte-equality run is separate):
      modes, stream counts, and empty input; steps identical except
      bytes-probe (FWD-reuse loss), alloc always differs by design.
      Refusals stay record-scoped both ways.
+ 18. PLEX V3 BUNDLE: _write_manifest emits image.plex beside
+     manifest.json — the stage DAG as STAGES/DEPS/QUERIES row tables,
+     REALIZATION/CAPS/EVIDENCE KV rows, the image as BYTES.  Round-
+     trip reproduces the manifest DAG; caps ⊆ record; malformed
+     headers/spans and missing required kinds refuse.
 
 The per-routine stage is exercised byte-exact by
 `emit_image(decompose_asm=True, workdir=...)` — see the
@@ -430,6 +435,71 @@ def gate_link_blob_seam() -> bool:
     return True
 
 
+def gate_plex_bundle(tmpdir: str) -> bool:
+    """Phase-6 .plex v3 archive: _write_manifest emits image.plex
+    beside manifest.json — directory + fixed-width row tables
+    (STAGES/DEPS/QUERIES), REALIZATION + CAPS + EVIDENCE KV rows, the
+    image as BYTES payload.  sections_manifest reconstructs the same
+    DAG replay_emit consumes; bundle caps are checked ⊆ the routines
+    record's declared caps; every malformed field refuses."""
+    import plex_bundle as pb
+    import toolchain
+    R = seed.Realization()
+    keys = {"program.a": "h.k1", "program.items": "h.k2",
+            "link.sections": "h.k3", "text.bin": "h.k4",
+            "image.bin": "h.k5"}
+    img = b"\x4d\x5abundle"
+    ec._write_manifest(tmpdir, R, "gate", ("a",), keys, {},
+                       {}, ec._graph_run, "pack",
+                       img=img, rt=rts.X86_64_WIN64_IR)
+    path = os.path.join(tmpdir, "image.plex")
+    if not os.path.exists(path):
+        return False
+    b = pb.read_bundle(open(path, "rb").read())
+    man = pb.sections_manifest(b)
+    if man["format"] != "plex.stage-manifest/1":
+        return False
+    by_name = {s["name"]: s for s in man["stages"]}
+    if by_name["image.bin"]["deps"] != ["text.bin", "link.sections"]:
+        return False
+    if by_name["program.items"]["deps"] != ["program.a"]:
+        return False
+    if b.bytes_pool() != img:
+        return False
+    real = b.kv_rows(pb.KIND_REALIZATION)
+    if real.get("routines") != "x86_64.win64.ir" or \
+            real.get("order") != "lo":
+        return False
+    # caps: bundle declares the ir record's caps, verified ⊆ record
+    caps = dict(toolchain.components()["routines"]
+                ["x86_64.win64.ir"].data).get("caps")
+    if pb.caps_dict(b.caps_rows()) != caps:
+        return False
+    if pb.check_bundle_caps(b, caps) != []:
+        return False
+    # a bundle may claim less, never more than the record
+    widened = dict(caps["ports"], payload="W")
+    forged = pb.pack_bundle(pb.manifest_sections(
+        man, caps={"ports": widened, "os": caps["os"]}))
+    if not pb.check_bundle_caps(pb.read_bundle(forged), caps):
+        return False
+    # refusals: bad magic, truncated dir, out-of-range span,
+    # missing required section
+    data = open(path, "rb").read()
+    for bad in (b"NOPE" + data[4:], data[:20], data[:-2]):
+        try:
+            pb.read_bundle(bad)
+            return False
+        except pb.BundleError:
+            pass
+    try:
+        b.require(pb.KIND_CLAIM)
+        return False
+    except pb.BundleError:
+        pass
+    return True
+
+
 def gate_mt_equiv() -> bool:
     """threads=N == N workers == serial: the MT record's workers
     depack their assigned root range into private slab claims and
@@ -520,6 +590,8 @@ if __name__ == "__main__":
         ("emit_ir blob round-trip", gate_emit_ir),
         ("link blob seam == dict join", gate_link_blob_seam),
         ("MT threads==serial observable", gate_mt_equiv),
+        ("plex v3 bundle round-trip", lambda: gate_plex_bundle(
+            tempfile.mkdtemp(prefix="nanopass_plex_"))),
     ]
     fail = 0
     for name, g in gates:

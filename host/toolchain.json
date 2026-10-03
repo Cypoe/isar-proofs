@@ -118,7 +118,7 @@
       "note": "multithreaded packed-IR kernel: T workers depack into private slab claims (lock xadd), ordered frame join",
       "caps": {
         "ports": {"stdin": "R", "stdout": "W", "stderr": "W",
-                  "scratch": "RW+grow", "threads": "spawn/join"},
+                  "scratch": "RW+grow"},
         "os": {"kernel32!GetStdHandle": ["stdin", "stdout", "stderr"],
                "kernel32!ReadFile": ["stdin"],
                "kernel32!WriteFile": ["stdout", "stderr"],
