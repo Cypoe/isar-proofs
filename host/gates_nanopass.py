@@ -81,6 +81,7 @@ import routines_x86_64_win64 as rts                            # noqa: E402
 import seed                                                    # noqa: E402
 import spec_term as st                                         # noqa: E402
 import target_pe64                                            # noqa: E402
+import toolchain                                               # noqa: E402
 from graph_runtime import reduce_tree_lo                       # noqa: E402
 
 
@@ -500,6 +501,42 @@ def gate_plex_bundle(tmpdir: str) -> bool:
     return True
 
 
+def gate_emit_frames() -> bool:
+    """Phase-7a — the emit program as data, evaluated by the emitted
+    host.  emit_frames packs the emit chain as two PIR streams:
+    stream A = section bodies [link·KK·KK, link·KK·KI, asm·KK]
+    (persist zone pays link once across roots), stream B = pack's
+    derived chunks (ALIGN/B4ADD/U64/ZEROFILL/PADLIST numeral terms —
+    the pack_staged recipe as roots).  Python constructs terms and
+    splices frames; every β-reduction runs on the emitted kernel.
+    The result must be byte-identical to _mini_oracle — the
+    independent python_link/python_assemble/python_pack composition
+    (cross-realization observation, not self-agreement).  Refusals:
+    truncated stream -> rc -> NotRealized."""
+    import spec_term as st
+    import target_pe64
+    imps, slots = ("ExitProcess",), (("x", 8),)
+    base = target_pe64.text_rva(imps, slots)
+    img, ev = ec.emit_frames(
+        seed.Realization(), imports=imps, slots=slots,
+        text_base=base, prog=st.fraglist_term(st.ASM_LINK))
+    if img != ec._mini_oracle():
+        return False
+    for k in ("stream_a", "stream_b"):
+        if "steps=" not in ev[k]:
+            return False
+    # refusal: a non-byte-list root on the bytes kernel exits rc=5 —
+    # _run_stream must surface it as NotRealized, not an image
+    try:
+        ec._run_stream(ec.ir_exe_for(seed.Realization(
+            reclaim="redirect", io=("stdin", "bytes"))),
+            [st.church(3)])
+        return False
+    except toolchain.NotRealized:
+        pass
+    return True
+
+
 def gate_mt_equiv() -> bool:
     """threads=N == N workers == serial: the MT record's workers
     depack their assigned root range into private slab claims and
@@ -592,6 +629,7 @@ if __name__ == "__main__":
         ("MT threads==serial observable", gate_mt_equiv),
         ("plex v3 bundle round-trip", lambda: gate_plex_bundle(
             tempfile.mkdtemp(prefix="nanopass_plex_"))),
+        ("emit frames on emitted host", gate_emit_frames),
     ]
     fail = 0
     for name, g in gates:

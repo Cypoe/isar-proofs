@@ -941,6 +941,361 @@ def _write_bundle(workdir: str, man: dict, img: bytes,
     return p
 
 
+# ---------------------------------------------------------------------------
+# Phase 7a — the emit program as data.
+#
+# The whole emit is one reducible term: program_rt's record-driven fold
+# feeds linkOf's projections into assembleOf and pack2Of, all as
+# UNREDUCED queries.  Python's only roles here are term construction
+# (data assembly) and packing (serialization) — every β-step of the
+# emit runs on the consuming host.  This is the POC shape: a single
+# root; the staged-DAG decomposition (stage queries as roots, DEPS
+# rows as scheduling data) is the Phase-8 final shape.
+
+
+def _emit_queries(R: seed.Realization,
+                  routines=None,
+                  passes: Tuple[str, ...] = (),
+                  rt=None,
+                  imports=None,
+                  slots=None,
+                  text_base: Optional[int] = None,
+                  prog: Optional[T] = None
+                  ) -> Tuple[T, T]:
+    """(link_query, assemble_query) for the emit — the shared
+    composition used by emit_term (monolithic, the semantic form)
+    and emit_frames (scheduled roots, the executable form)."""
+    if getattr(R, "peephole", False):
+        raise toolchain.NotRealized(
+            "emit_term: peephole's fixpoint is a seamed per-item "
+            "runner loop — it has no single-term form")
+    _d = seed.Realization()
+    _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
+                  "node_bytes", "stack_reserve", "peephole"}
+    fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
+    if rt is not None:
+        if R.order not in rt.orders:
+            raise toolchain.NotRealized(
+                f"emit_term: order={R.order!r} not in {rt.orders}")
+        if R.io not in rt.ios:
+            raise toolchain.NotRealized(
+                f"emit_term: io={R.io!r} not realized by {rt.name}")
+        if routines is None:
+            nf = getattr(rt, "names_for", None)
+            routines = nf(R) if nf else rt.routines
+        if imports is None:
+            imports = rt.imports
+        if slots is None:
+            slots = rt.data_slots(R) if callable(rt.data_slots) \
+                else rt.data_slots
+    imports = rts.IMPORTS if imports is None else imports
+    slots = rts.DATA_SLOTS if slots is None else slots
+    routines = rts.ROUTINES if routines is None else routines
+    if text_base is None:
+        text_base = target_pe64.text_rva(imports, slots)
+    link_q = st.link_query(imports, slots)
+    prog_q = prog if prog is not None else st.program_query_rt(
+        routines, R, passes, fixed=fixed)
+    asm_q = st.assemble_query_t(prog_q, app(link_q, KI), text_base)
+    return link_q, asm_q
+
+
+def emit_term(R: seed.Realization,
+              routines=None,
+              passes: Tuple[str, ...] = (),
+              rt=None,
+              imports=None,
+              slots=None,
+              text_base: Optional[int] = None,
+              prog: Optional[T] = None) -> T:
+    """`pack2Of (assembleOf program (linkOf .. (K I))) ..` — the full
+    emit chain as one term, zero Python reduction inside: the
+    emit program's SEMANTIC form.  Executable form is emit_frames —
+    pack2's concat-spine live set is the documented wall (>4min even
+    at 280B of sections; the chunked decompose exists for it), so the
+    single root is the equality oracle, not the schedule."""
+    link_q, asm_q = _emit_queries(R, routines, passes, rt, imports,
+                                  slots, text_base, prog)
+    return st.pack2_query_t(app(asm_q, KK),
+                            app(app(link_q, KK), KK),
+                            app(app(link_q, KK), KI),
+                            R.stack_reserve)
+
+
+def _parse_frames(buf: bytes) -> List[bytes]:
+    """`[u32le len][payload]` frames -> payload list (root order)."""
+    out, pos = [], 0
+    while pos + 4 <= len(buf):
+        ln = struct.unpack_from("<I", buf, pos)[0]
+        if pos + 4 + ln > len(buf):
+            raise toolchain.NotRealized(
+                f"frame stream truncated: need {ln} at {pos}")
+        out.append(buf[pos + 4:pos + 4 + ln])
+        pos += 4 + ln
+    if pos != len(buf):
+        raise toolchain.NotRealized(
+            f"frame stream: {len(buf) - pos} trailing bytes")
+    return out
+
+
+def _run_stream(exe: str, roots: List[T],
+                pinned: Optional[dict] = None,
+                timeout: int = 600) -> Tuple[List[bytes], str]:
+    """Pack roots as one PIR stream -> run the kernel -> egress
+    frames.  Returns (frames, stderr) — rc != 0 refuses."""
+    data = st.pack_ir(*roots, pinned=pinned)
+    p = subprocess.run([exe], input=data, capture_output=True,
+                       timeout=timeout)
+    if p.returncode != 0:
+        raise toolchain.NotRealized(
+            f"emit stream refused: rc={p.returncode} "
+            f"{p.stderr[:160]!r}")
+    return _parse_frames(p.stdout), p.stderr.decode("utf-8",
+                                                    "replace")
+
+
+def emit_frames(R: seed.Realization,
+                routines=None,
+                passes: Tuple[str, ...] = (),
+                rt=None,
+                imports=None,
+                slots=None,
+                text_base: Optional[int] = None,
+                prog: Optional[T] = None,
+                exe: Optional[str] = None,
+                pinned: Optional[dict] = None,
+                timeout: int = 600) -> Tuple[bytes, dict]:
+    """The emit program EXECUTED on the emitted host: two packed
+    streams, kernel does every β-reduction, Python constructs terms
+    and splices bytes.
+
+    Stream A = section bodies — [link·KK·KK, link·KK·KI, asm·KK];
+    the persist zone pays link once across roots (measured: 548K
+    steps / 1.9s for mini link+asm in one stream).  Stream B =
+    pack's derived chunks as roots — the same small terms
+    pack_staged `run`s (ALIGN512/B4ADD/U64/ZEROFILL/PADLIST over
+    numeral args); the chunk recipe itself is PE layout data, not
+    semantics.  Python's residue: length bookkeeping (boundary
+    metadata, same discipline pack_staged declares) + byte splice =
+    moving the file.
+
+    Returns (image_bytes, evidence) — evidence carries per-stream
+    stderr stats for the gate's provenance trail."""
+    if exe is None:
+        exe = ir_exe_for(seed.Realization(
+            reclaim="redirect", io=("stdin", "bytes")))
+    link_q, asm_q = _emit_queries(R, routines, passes, rt, imports,
+                                  slots, text_base, prog)
+    imports = rts.IMPORTS if imports is None else imports
+    slots = rts.DATA_SLOTS if slots is None else slots
+    roots_a = [app(app(link_q, KK), KK),
+               app(app(link_q, KK), KI),
+               app(asm_q, KK)]
+    fa, ev_a = _run_stream(exe, roots_a, pinned, timeout)
+    ib, db, tb = fa
+
+    def K_(name: str):
+        return bracket(parse(getattr(st, name)))
+
+    def b4(v: int) -> T:
+        return st.bytelist_term(v.to_bytes(4, "little"))
+
+    lt, li, ld = b4(len(tb)), b4(len(ib)), b4(len(db))
+    traw = st._appn(K_("_ALIGN512"), lt)
+    iraw = st._appn(K_("_ALIGN512"), li)
+    draw = st._appn(K_("_ALIGN512"), ld)
+    drva = st._appn(K_("_ALIGN4096"),
+                    st._appn(K_("_B4ADD"), b4(0x1000), li))
+    trva = st._appn(K_("_ALIGN4096"),
+                    st._appn(K_("_B4ADD"), drva, ld))
+    dptr = st._appn(K_("_B4ADD"), b4(0x200), iraw)
+    tptr = st._appn(K_("_B4ADD"), dptr, draw)
+    iddr = st._appn(K_("_B4ADD"), iraw, draw)
+    img = st._appn(K_("_ALIGN4096"),
+                   st._appn(K_("_B4ADD"), trva, lt))
+    u64 = st._appn(K_("_U64"), b4(R.stack_reserve))
+    roots_b = [traw, iraw, draw, drva, trva, dptr, tptr, iddr,
+               img, u64,
+               st._appn(K_("_ZEROFILL"), st.church(12)),
+               st._appn(K_("_ZEROFILL"), st.church(58)),
+               st._appn(K_("_ZEROFILL"), st.church(14 * 8)),
+               st._appn(K_("_ZEROFILL"), st.church(0x200 - 448)),
+               st._appn(K_("_PADLIST"), li),
+               st._appn(K_("_PADLIST"), ld),
+               st._appn(K_("_PADLIST"), lt)]
+    fb, ev_b = _run_stream(exe, roots_b, pinned, timeout)
+    (v_traw, v_iraw, v_draw, v_drva, v_trva, v_dptr, v_tptr,
+     v_iddr, v_img, v_u64, z12, z58, z112, zfh,
+     padi, padd, padt) = fb
+    chunks = [
+        b"MZ", z58, struct.pack("<I", 0x40), b"PE\x00\x00",
+        struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x22),
+        struct.pack("<HBB", 0x20B, 0, 0),
+        v_traw, v_iddr, struct.pack("<I", 0),
+        v_trva, v_trva,
+        struct.pack("<Q", 0x140000000),
+        struct.pack("<II", 0x1000, 0x200),
+        struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0),
+        struct.pack("<I", 0), v_img,
+        struct.pack("<II", 0x200, 0),
+        struct.pack("<HH", 3, 0x8100),
+        v_u64,
+        struct.pack("<QQQ", 0x1000, 0x100000, 0x1000),
+        struct.pack("<II", 0, 16), struct.pack("<II", 0, 0),
+        struct.pack("<I", 0x1000), len(ib).to_bytes(4, "little"),
+        z112,
+        b".idata\x00\x00", len(ib).to_bytes(4, "little"),
+        struct.pack("<I", 0x1000), v_iraw,
+        struct.pack("<I", 0x200), z12,
+        struct.pack("<I", 0x40000040),
+        b".data\x00\x00\x00", len(db).to_bytes(4, "little"),
+        v_drva, v_draw, v_dptr, z12,
+        struct.pack("<I", 0xC0000040),
+        b".text\x00\x00\x00", len(tb).to_bytes(4, "little"),
+        v_trva, v_traw, v_tptr, z12,
+        struct.pack("<I", 0x60000020),
+        zfh,
+        ib, padi, db, padd, tb, padt,
+    ]
+    return b"".join(chunks), {"stream_a": ev_a, "stream_b": ev_b}
+
+
+def _pin_emit_consts(store: "BlobStore", R, routines, fixed) -> None:
+    """Register the emit term's generated constants so pack splices
+    stored blobs instead of re-walking (program_rt's routine trie is
+    the ~12M-node constant; pack_ir on it dominates at ~400s cold).
+    A fresh store still walks each once — pinning only reorders."""
+    h = st._fix_key(fixed)
+    ir_ctx = any(n.startswith("ir_") for n in routines)
+    store.pin_named(
+        f"emit.program_rt.{h}.{int(ir_ctx)}",
+        st.program_rt(fixed, ir_ctx))
+    store.pin_named(
+        st.const_pin_key("assemble", st._pin_src(st._g("_ASSEMBLE"))),
+        st._g("_ASSEMBLE"))
+
+
+def pack_emit_program(R: seed.Realization,
+                      routines=None,
+                      passes: Tuple[str, ...] = (),
+                      rt=None,
+                      imports=None,
+                      slots=None,
+                      text_base: Optional[int] = None,
+                      store: Optional["BlobStore"] = None
+                      ) -> Tuple[bytes, str]:
+    """emit_term -> (PIR stream, root Merkle digest).  `store` (a
+    BlobStore, optionally disk-backed via workdir) splices the
+    generated constants; the stream is complete either way."""
+    t = emit_term(R, routines, passes, rt, imports, slots, text_base)
+    if store is not None:
+        _d = seed.Realization()
+        _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
+                      "node_bytes", "stack_reserve", "peephole"}
+        fixed = {k: getattr(R, k)
+                 for k in vars(_d) if k not in _prog_axes}
+        rn = routines if routines is not None else (
+            (rt.names_for(R) if getattr(rt, "names_for", None)
+             else rt.routines) if rt is not None else rts.ROUTINES)
+        _pin_emit_consts(store, R, rn, fixed)
+        store.pin_named(st.const_pin_key(
+            "link.%d.%d" % (len(imports if imports is not None
+                            else rts.IMPORTS),
+                            len(slots if slots is not None
+                                else rts.DATA_SLOTS)),
+            st.link_src(len(imports if imports is not None
+                            else rts.IMPORTS),
+                        len(slots if slots is not None
+                            else rts.DATA_SLOTS))),
+            st.link_term(len(imports if imports is not None
+                             else rts.IMPORTS),
+                         len(slots if slots is not None
+                             else rts.DATA_SLOTS)))
+        store.pin_named(st.const_pin_key("pack2", st.pack2_src()),
+                        st.pack2_term())
+        data, keys = st.pack_ir_keyed(t, pinned=store.pins)
+        return data, keys[0]
+    data, keys = st.pack_ir_keyed(t)
+    return data, keys[0]
+
+
+def emit_sections(pir: bytes, caps: Optional[dict],
+                  realization: dict, evidence: dict) -> list:
+    """v3 sections for an emit program bundle — not a stage manifest:
+    STRINGS + REALIZATION + CAPS + EVIDENCE + the PIR stream as BYTES.
+    `realization` should carry `dialect=plex.emit/1` and `routines`."""
+    import plex_bundle as pb
+    pool = pb._Pool()
+    secs = [pb.Section(pb.KIND_STRINGS, pb.U8, 1, 0, b"")]
+
+    def _u64rows(rows):
+        return b"".join(struct.pack(f"<{len(r)}Q", *r) for r in rows)
+
+    rrows = [pool.ref(str(k)) + pool.ref(str(v))
+             for k, v in sorted(realization.items())]
+    secs.append(pb.Section(pb.KIND_REALIZATION, pb.U64, 4,
+                           len(rrows), _u64rows(rrows)))
+    if caps:
+        crows = []
+        for p, m in sorted(caps.get("ports", {}).items()):
+            crows.append((pb.CAP_PORT,) + pool.ref(str(p))
+                         + pool.ref(str(m)))
+        for b, pl in sorted(caps.get("os", {}).items()):
+            crows.append((pb.CAP_OS,) + pool.ref(str(b))
+                         + pool.ref(",".join(str(p) for p in pl)))
+        secs.append(pb.Section(pb.KIND_CAPS, pb.U64, 5,
+                               len(crows), _u64rows(crows)))
+    erows = [pool.ref(str(k)) + pool.ref(str(v))
+             for k, v in sorted(evidence.items())]
+    secs.append(pb.Section(pb.KIND_EVIDENCE, pb.U64, 4,
+                           len(erows), _u64rows(erows)))
+    secs.append(pb.Section(pb.KIND_BYTES, pb.U8, 1, 0, pir))
+    secs[-1].rows = secs[-1].length
+    secs[0] = pb.Section(pb.KIND_STRINGS, pb.U8, 1, 0,
+                         bytes(pool.buf))
+    secs[0].rows = secs[0].length
+    return secs
+
+
+def write_emit_bundle(path: str, R: seed.Realization,
+                      routines=None,
+                      passes: Tuple[str, ...] = (),
+                      rt=None,
+                      imports=None,
+                      slots=None,
+                      text_base: Optional[int] = None,
+                      workdir: Optional[str] = None) -> str:
+    """emit_term -> emit.plex: the emit program + its caps/realization
+    contract as one ingestible archive.  Returns the path."""
+    import plex_bundle as pb
+    store = BlobStore(os.path.join(workdir, "blobs")) if workdir \
+        else None
+    pir, rdig = pack_emit_program(R, routines, passes, rt, imports,
+                                  slots, text_base, store=store)
+    real = {k: str(v) for k, v in vars(R).items()}
+    real["routines"] = rt.name if rt is not None else "x86_64.win64.lo"
+    real["dialect"] = "plex.emit/1"
+    comp = toolchain.components()["routines"].get(real["routines"])
+    caps = dict(comp.data).get("caps") if comp is not None else None
+    ev = {"format": "plex.emit/1",
+          "emit_root_digest": rdig,
+          "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                       time.gmtime())}
+    data = pb.pack_bundle(emit_sections(pir, caps, real, ev))
+    bundle = pb.read_bundle(data)
+    if caps is not None:
+        errs = pb.check_bundle_caps(bundle, caps)
+        if errs:
+            raise toolchain.NotRealized(
+                f"emit bundle caps exceed record "
+                f"{real['routines']}: {errs[0]}")
+    os.makedirs(os.path.dirname(os.path.abspath(path))
+                or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
 def replay_emit(workdir: str) -> Tuple[bytes, dict]:
     """Resolve the recorded stage DAG — pure artifact addressing:
     every stage must already be materialized under its content key;
