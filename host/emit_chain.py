@@ -953,6 +953,42 @@ def _write_bundle(workdir: str, man: dict, img: bytes,
 # rows as scheduling data) is the Phase-8 final shape.
 
 
+def _emit_layout(R: seed.Realization, routines=None, rt=None,
+                 imports=None, slots=None,
+                 text_base: Optional[int] = None):
+    """(routines, imports, slots, text_base, fixed) — the emit's
+    layout resolution, shared by the term composition (_emit_queries)
+    and the staged schedule (emit_frames staged=True): rt.names_for
+    picks the R-specialized routine set, rt.data_slots sizes .data
+    per realization, `fixed` carries the non-program axes into the
+    program queries."""
+    if rt is not None:
+        if R.order not in rt.orders:
+            raise toolchain.NotRealized(
+                f"emit: order={R.order!r} not in {rt.orders}")
+        if R.io not in rt.ios:
+            raise toolchain.NotRealized(
+                f"emit: io={R.io!r} not realized by {rt.name}")
+        if routines is None:
+            nf = getattr(rt, "names_for", None)
+            routines = nf(R) if nf else rt.routines
+        if imports is None:
+            imports = rt.imports
+        if slots is None:
+            slots = rt.data_slots(R) if callable(rt.data_slots) \
+                else rt.data_slots
+    imports = rts.IMPORTS if imports is None else imports
+    slots = rts.DATA_SLOTS if slots is None else slots
+    routines = rts.ROUTINES if routines is None else routines
+    if text_base is None:
+        text_base = target_pe64.text_rva(imports, slots)
+    _d = seed.Realization()
+    _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
+                  "node_bytes", "stack_reserve", "peephole"}
+    fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
+    return routines, imports, slots, text_base, fixed
+
+
 def _emit_queries(R: seed.Realization,
                   routines=None,
                   passes: Tuple[str, ...] = (),
@@ -969,30 +1005,8 @@ def _emit_queries(R: seed.Realization,
         raise toolchain.NotRealized(
             "emit_term: peephole's fixpoint is a seamed per-item "
             "runner loop — it has no single-term form")
-    _d = seed.Realization()
-    _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-                  "node_bytes", "stack_reserve", "peephole"}
-    fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
-    if rt is not None:
-        if R.order not in rt.orders:
-            raise toolchain.NotRealized(
-                f"emit_term: order={R.order!r} not in {rt.orders}")
-        if R.io not in rt.ios:
-            raise toolchain.NotRealized(
-                f"emit_term: io={R.io!r} not realized by {rt.name}")
-        if routines is None:
-            nf = getattr(rt, "names_for", None)
-            routines = nf(R) if nf else rt.routines
-        if imports is None:
-            imports = rt.imports
-        if slots is None:
-            slots = rt.data_slots(R) if callable(rt.data_slots) \
-                else rt.data_slots
-    imports = rts.IMPORTS if imports is None else imports
-    slots = rts.DATA_SLOTS if slots is None else slots
-    routines = rts.ROUTINES if routines is None else routines
-    if text_base is None:
-        text_base = target_pe64.text_rva(imports, slots)
+    routines, imports, slots, text_base, fixed = _emit_layout(
+        R, routines, rt, imports, slots, text_base)
     link_q = st.link_query(imports, slots)
     prog_q = prog if prog is not None else st.program_query_rt(
         routines, R, passes, fixed=fixed)
@@ -1064,35 +1078,94 @@ def emit_frames(R: seed.Realization,
                 prog: Optional[T] = None,
                 exe: Optional[str] = None,
                 pinned: Optional[dict] = None,
-                timeout: int = 600) -> Tuple[bytes, dict]:
-    """The emit program EXECUTED on the emitted host: two packed
-    streams, kernel does every β-reduction, Python constructs terms
-    and splices bytes.
+                timeout: int = 600,
+                staged: bool = False,
+                store=None) -> Tuple[bytes, dict]:
+    """The emit program EXECUTED on the emitted host: packed streams
+    of bounded roots, kernel does every β-reduction, Python
+    constructs terms and splices bytes.
 
-    Stream A = section bodies — [link·KK·KK, link·KK·KI, asm·KK];
-    the persist zone pays link once across roots (measured: 548K
-    steps / 1.9s for mini link+asm in one stream).  Stream B =
-    pack's derived chunks as roots — the same small terms
-    pack_staged `run`s (ALIGN512/B4ADD/U64/ZEROFILL/PADLIST over
-    numeral args); the chunk recipe itself is PE layout data, not
-    semantics.  Python's residue: length bookkeeping (boundary
-    metadata, same discipline pack_staged declares) + byte splice =
-    moving the file.
+    Unstaged (mini scale): stream A = section bodies —
+    [link·KK·KK, link·KK·KI, asm·KK]; the persist zone pays link
+    once across roots (measured: 548K steps / 1.9s for mini
+    link+asm in one stream).  At real scale the monolithic asm root
+    is OOM-class (measured rc=4 at 48GB arena — bump-allocation has
+    no intra-root GC), so `staged=True` decomposes the same stages:
 
-    Returns (image_bytes, evidence) — evidence carries per-stream
-    stderr stats for the gate's provenance trail."""
+    - program: per-routine frag queries -> items (term-construction
+      enumeration; `prog=` fraglists enumerate seed-side);
+    - link: link_staged blob seam — section bytes via bytes roots,
+      the merged symtab a PIR blob, never decoded Python-side;
+    - assemble: assemble_staged — per-item encodeOf roots as batched
+      streams (the documented arena-boundary decomposition);
+    - pack: stream B — the pack_staged recipe's derived chunks as
+      roots (ALIGN512/B4ADD/U64/ZEROFILL/PADLIST numerals).
+
+    Python's residue: enumeration/bookkeeping/splice — boundary
+    metadata + moving the file.  Returns (image_bytes, evidence) —
+    evidence carries per-stream stderr stats and the decode-crossing
+    counts for the gate's provenance trail."""
     if exe is None:
         exe = ir_exe_for(seed.Realization(
             reclaim="redirect", io=("stdin", "bytes")))
-    link_q, asm_q = _emit_queries(R, routines, passes, rt, imports,
-                                  slots, text_base, prog)
-    imports = rts.IMPORTS if imports is None else imports
-    slots = rts.DATA_SLOTS if slots is None else slots
-    roots_a = [app(app(link_q, KK), KK),
-               app(app(link_q, KK), KI),
-               app(asm_q, KK)]
-    fa, ev_a = _run_stream(exe, roots_a, pinned, timeout)
-    ib, db, tb = fa
+    routines, imports, slots, text_base, fixed = _emit_layout(
+        R, routines, rt, imports, slots, text_base)
+    ev: dict = {}
+    if staged:
+        if store is None:
+            store = BlobStore()
+        brun = make_bytes_runner(exe, workers=1,
+                                 pinned=pinned or store.pins)
+        # program stage — items as boundary enumeration.  `prog`
+        # fraglists enumerate seed-side; otherwise per-routine frag
+        # queries reduce on a term-egress kernel and decode at the
+        # boundary (the decode crossing, counted in evidence).
+        if prog is not None:
+            items = [it for fr in st.ASM_LINK for it in fr]
+            ev["program"] = "fraglist"
+        else:
+            _ir_ctx = any(n.startswith("ir_") for n in routines)
+            trun = make_ir_runner(
+                ir_exe_for(seed.Realization(reclaim="redirect")),
+                workers=1, pinned=store.pins)
+            for name in routines:
+                store.pin_named(
+                    st.routine_pin_key(name, fixed, _ir_ctx),
+                    st.routine_of(name, fixed, _ir_ctx))
+            nfs, s_p, _ = trun.batch(
+                [st.routine_query(n, R, passes, fixed=fixed,
+                                  ir_ctx=_ir_ctx)
+                 for n in routines])
+            items = []
+            for nf in nfs:
+                items.extend(st.decode_frag(nf))
+                _DECODE_COUNT["frag"] += 1
+            ev["program"] = f"frags={len(nfs)} steps={s_p}"
+        # link stage — blob seam: kernel projections for the byte
+        # sections, kernel APPEND for the merged symtab (PIR blob).
+        blob_run = make_blob_runner(
+            ir_exe_for(seed.Realization(
+                reclaim="redirect", io=("stdin", "ir"))),
+            workers=1, pinned=store.pins)
+        ib, db, syms = link_staged(
+            imports, slots, None, store=store,
+            run_ir=blob_run, run_bytes=brun)
+        ev["link"] = f"ib={len(ib)} db={len(db)} symblob={len(syms)}"
+        # assemble stage — per-item encodeOf roots, batched streams.
+        tb, _loc = assemble_staged(items, syms, text_base, brun,
+                                   store=store)
+        ev["assemble"] = (f"items={len(items)} text={len(tb)}B "
+                          f"loc={len(_loc)}")
+    else:
+        link_q, asm_q = _emit_queries(R, routines, passes, rt,
+                                      imports, slots, text_base,
+                                      prog)
+        roots_a = [app(app(link_q, KK), KK),
+                   app(app(link_q, KK), KI),
+                   app(asm_q, KK)]
+        fa, ev_a = _run_stream(exe, roots_a, pinned, timeout)
+        ib, db, tb = fa
+        ev["stream_a"] = ev_a
 
     def K_(name: str):
         return bracket(parse(getattr(st, name)))
@@ -1123,7 +1196,9 @@ def emit_frames(R: seed.Realization,
                st._appn(K_("_PADLIST"), li),
                st._appn(K_("_PADLIST"), ld),
                st._appn(K_("_PADLIST"), lt)]
-    fb, ev_b = _run_stream(exe, roots_b, pinned, timeout)
+    fb, ev_b = _run_stream(exe, roots_b, pinned or (
+        store.pins if store is not None else None), timeout)
+    ev["stream_b"] = ev_b
     (v_traw, v_iraw, v_draw, v_drva, v_trva, v_dptr, v_tptr,
      v_iddr, v_img, v_u64, z12, z58, z112, zfh,
      padi, padd, padt) = fb
@@ -1157,7 +1232,51 @@ def emit_frames(R: seed.Realization,
         zfh,
         ib, padi, db, padd, tb, padt,
     ]
-    return b"".join(chunks), {"stream_a": ev_a, "stream_b": ev_b}
+    return b"".join(chunks), ev
+
+
+def emit_schedule_streams(R: seed.Realization,
+                          routines=None,
+                          passes: Tuple[str, ...] = (),
+                          rt=None, imports=None, slots=None,
+                          text_base: Optional[int] = None,
+                          pinned: Optional[dict] = None
+                          ) -> List[Tuple[str, str, bytes]]:
+    """The staged schedule's stream-level queries as
+    (name, runner, PIR-stream) — the executable skeleton beside
+    pack_emit_program's canonical monolithic term:
+
+    - `emit.program`: per-routine frag queries in one stream
+      (the program stage's executable form, term-egress);
+    - `emit.link`: `[idata·KK, datab·KK]` byte projections
+      (the same roots emit_frames runs, bytes-egress);
+    - `emit.symtab`: `[APPEND (idata·KI) (datab·KI)]` — the
+      merged symtab as one root, ir-egress: it leaves the
+      kernel as a PIR blob spliced into pass-2 encode queries
+      (the blob seam — never decoded Python-side).
+
+    The canonical `emit.term` rides separately as the bundle's
+    primary PIR payload (pack_emit_program).  assemble/pack
+    streams are NOT produced: their roots depend on upstream
+    results (items, loc, section lengths) — resolving them IS
+    the schedule's job (the Phase-8 DAG)."""
+    routines, imports, slots, text_base, fixed = _emit_layout(
+        R, routines, rt, imports, slots, text_base)
+    _ir_ctx = any(n.startswith("ir_") for n in routines)
+    drva = target_pe64.data_rva(imports)
+    iq, dq = st.idata_query(imports), st.data_query(slots, drva)
+    return [
+        ("emit.program", "exe.term",
+         st.pack_ir(*[st.routine_query(
+                      n, R, passes, fixed=fixed, ir_ctx=_ir_ctx)
+                     for n in routines], pinned=pinned)),
+        ("emit.link", "exe.bytes",
+         st.pack_ir(app(iq, KK), app(dq, KK), pinned=pinned)),
+        ("emit.symtab", "exe.ir",
+         st.pack_ir(st._appn(st.append_term(),
+                             app(iq, st._KI), app(dq, st._KI)),
+                    pinned=pinned)),
+    ]
 
 
 def _pin_emit_consts(store: "BlobStore", R, routines, fixed) -> None:
@@ -1220,10 +1339,20 @@ def pack_emit_program(R: seed.Realization,
 
 
 def emit_sections(pir: bytes, caps: Optional[dict],
-                  realization: dict, evidence: dict) -> list:
+                  realization: dict, evidence: dict,
+                  streams: Optional[List[Tuple[str, str, bytes]]] = None
+                  ) -> list:
     """v3 sections for an emit program bundle — not a stage manifest:
     STRINGS + REALIZATION + CAPS + EVIDENCE + the PIR stream as BYTES.
-    `realization` should carry `dialect=plex.emit/1` and `routines`."""
+    `realization` should carry `dialect=plex.emit/1` and `routines`.
+
+    `streams` (emit_schedule_streams' output) upgrades the archive to
+    `plex.emit/2`: STAGES rows for program/link/assemble/pack with
+    DEPS edges, and QUERIES rows whose blob token is `off:len` into
+    the BYTES pool — each stream aligned at 8 inside the pool,
+    `emit.term` first.  assemble/pack are declared stages without
+    streams: their roots depend on upstream results (the Phase-8 DAG
+    resolves them; the bundle carries the skeleton)."""
     import plex_bundle as pb
     pool = pb._Pool()
     secs = [pb.Section(pb.KIND_STRINGS, pb.U8, 1, 0, b"")]
@@ -1231,6 +1360,50 @@ def emit_sections(pir: bytes, caps: Optional[dict],
     def _u64rows(rows):
         return b"".join(struct.pack(f"<{len(r)}Q", *r) for r in rows)
 
+    stage_rows = []
+    dep_pairs = []
+    query_rows = []
+    blob_pool = bytearray(pir)
+    blob_pool += b"\x00" * (-len(blob_pool) % 8)
+    if streams:
+        stages = [("emit.term", "pir-stream", "exe.bytes"),
+                  ("emit.program", "pir-stream", "exe.term"),
+                  ("emit.link", "pir-stream", "exe.bytes"),
+                  ("emit.symtab", "pir-stream", "exe.ir"),
+                  ("emit.assemble", "derived", "exe.bytes"),
+                  ("emit.pack", "derived", "exe.bytes")]
+        s_of = {s[0]: i for i, s in enumerate(stages)}
+        deps = {"emit.assemble": ("emit.program", "emit.link",
+                                  "emit.symtab"),
+                "emit.pack": ("emit.link", "emit.assemble")}
+        for i, (name, artifact, runner) in enumerate(stages):
+            stage_rows.append(tuple(
+                v for f in (name, artifact, runner)
+                for v in pool.ref(f)))
+            for d in deps.get(name, ()):
+                dep_pairs.append((i, s_of[d]))
+        do, dl = pool.ref(hashlib.sha256(pir).hexdigest())
+        bo, bl = pool.ref(f"0:{len(pir)}")
+        query_rows.append((s_of["emit.term"], do, dl, bo, bl))
+        for name, runner, blob in streams:
+            dig = hashlib.sha256(blob).hexdigest()
+            do, dl = pool.ref(dig)
+            bo, bl = pool.ref(f"{len(blob_pool)}:{len(blob)}")
+            query_rows.append((s_of[name], do, dl, bo, bl))
+            blob_pool += blob
+            blob_pool += b"\x00" * (-len(blob_pool) % 8)
+        if stage_rows:
+            secs.append(pb.Section(pb.KIND_STAGES, pb.U64, 6,
+                                   len(stage_rows),
+                                   _u64rows(stage_rows)))
+        if dep_pairs:
+            secs.append(pb.Section(pb.KIND_DEPS, pb.U32, 2,
+                                   len(dep_pairs),
+                                   b"".join(struct.pack("<II", *p)
+                                            for p in dep_pairs)))
+        secs.append(pb.Section(pb.KIND_QUERIES, pb.U64, 5,
+                               len(query_rows),
+                               _u64rows(query_rows)))
     rrows = [pool.ref(str(k)) + pool.ref(str(v))
              for k, v in sorted(realization.items())]
     secs.append(pb.Section(pb.KIND_REALIZATION, pb.U64, 4,
@@ -1249,7 +1422,8 @@ def emit_sections(pir: bytes, caps: Optional[dict],
              for k, v in sorted(evidence.items())]
     secs.append(pb.Section(pb.KIND_EVIDENCE, pb.U64, 4,
                            len(erows), _u64rows(erows)))
-    secs.append(pb.Section(pb.KIND_BYTES, pb.U8, 1, 0, pir))
+    secs.append(pb.Section(pb.KIND_BYTES, pb.U8, 1, 0,
+                           bytes(blob_pool)))
     secs[-1].rows = secs[-1].length
     secs[0] = pb.Section(pb.KIND_STRINGS, pb.U8, 1, 0,
                          bytes(pool.buf))
@@ -1264,9 +1438,18 @@ def write_emit_bundle(path: str, R: seed.Realization,
                       imports=None,
                       slots=None,
                       text_base: Optional[int] = None,
-                      workdir: Optional[str] = None) -> str:
+                      workdir: Optional[str] = None,
+                      schedule: bool = True) -> str:
     """emit_term -> emit.plex: the emit program + its caps/realization
-    contract as one ingestible archive.  Returns the path."""
+    contract as one ingestible archive.  Returns the path.
+
+    `schedule` (default) upgrades the archive to `plex.emit/2`:
+    emit_schedule_streams' stage-level PIR streams ride in the
+    BYTES pool beside the canonical emit term, with STAGES/DEPS/
+    QUERIES rows making the DAG skeleton data — a consumer reads
+    `emit.program`/`emit.link` streams and drives the staged
+    schedule; the monolithic `emit.term` stays the semantic
+    oracle."""
     import plex_bundle as pb
     store = BlobStore(os.path.join(workdir, "blobs")) if workdir \
         else None
@@ -1274,14 +1457,26 @@ def write_emit_bundle(path: str, R: seed.Realization,
                                   slots, text_base, store=store)
     real = {k: str(v) for k, v in vars(R).items()}
     real["routines"] = rt.name if rt is not None else "x86_64.win64.lo"
-    real["dialect"] = "plex.emit/1"
+    real["dialect"] = "plex.emit/2" if schedule else "plex.emit/1"
+    if schedule:
+        _rn, _im, _sl, _tb, _fx = _emit_layout(
+            R, routines, rt, imports, slots, text_base)
+        real["imports"] = ",".join(str(n) for n in _im)
+        real["slots"] = ",".join(f"{n}:{s}" for n, s in _sl)
+        real["text_base"] = hex(_tb)
+        real["routines_list"] = ",".join(_rn)
     comp = toolchain.components()["routines"].get(real["routines"])
     caps = dict(comp.data).get("caps") if comp is not None else None
-    ev = {"format": "plex.emit/1",
+    streams = emit_schedule_streams(
+        R, routines, passes, rt, imports, slots, text_base,
+        pinned=store.pins if store is not None else None) \
+        if schedule else None
+    ev = {"format": "plex.emit/2" if schedule else "plex.emit/1",
           "emit_root_digest": rdig,
           "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                        time.gmtime())}
-    data = pb.pack_bundle(emit_sections(pir, caps, real, ev))
+    data = pb.pack_bundle(emit_sections(pir, caps, real, ev,
+                                        streams=streams))
     bundle = pb.read_bundle(data)
     if caps is not None:
         errs = pb.check_bundle_caps(bundle, caps)
@@ -1294,6 +1489,189 @@ def write_emit_bundle(path: str, R: seed.Realization,
     with open(path, "wb") as f:
         f.write(data)
     return path
+
+
+def emit_bundle_streams(bundle) -> Dict[str, bytes]:
+    """emit.plex (plex.emit/2) -> {stage_name: PIR stream}: the
+    QUERIES rows' `off:len` blob tokens sliced out of the BYTES pool,
+    digests verified — a malformed span or digest mismatch refuses."""
+    import plex_bundle as pb
+    pool = bundle.bytes_pool()
+    stages = bundle.stage_rows()
+    out = {}
+    for sidx, dig, tok in bundle.query_rows():
+        off_s, len_s = tok.split(":")
+        off, ln = int(off_s), int(len_s)
+        if off < 0 or ln < 0 or off + ln > len(pool):
+            raise toolchain.NotRealized(
+                f"emit bundle stream {stages[sidx][0]!r}: span "
+                f"{off}:{ln} outside pool {len(pool)}")
+        blob = pool[off:off + ln]
+        if hashlib.sha256(blob).hexdigest() != dig:
+            raise toolchain.NotRealized(
+                f"emit bundle stream {stages[sidx][0]!r}: digest "
+                f"mismatch — content missing or corrupted")
+        out[stages[sidx][0]] = blob
+    return out
+
+
+def run_emit_bundle(path, R: Optional[seed.Realization] = None,
+                    exe: Optional[str] = None,
+                    timeout: int = 3600) -> Tuple[bytes, dict]:
+    """emit.plex -> PE image: drive the staged schedule from the
+    bundle's own streams — the emit program IS data.
+
+    Contract: `dialect=plex.emit/2`, stream digests verified
+    (emit_bundle_streams), caps ⊆ the routines record.  The
+    bundle's streams cover stages 1–2 (program frags, link byte
+    projections, merged symtab); stages 3–4 are `derived` — the
+    replay resolves them exactly the way emit_frames(staged=True)
+    does: decode frag NFs -> items (boundary crossing, counted),
+    per-item encodeOf roots on the bytes kernel, pack chunks as
+    roots.  Python's residue is the same as emit_frames':
+    enumeration decode, loc bookkeeping, byte splice.
+
+    Returns (image_bytes, evidence)."""
+    import plex_bundle as pb
+    data = open(path, "rb").read() if isinstance(path, str) \
+        else path
+    b = pb.read_bundle(data)
+    real = b.kv_rows(pb.KIND_REALIZATION)
+    if real.get("dialect") != "plex.emit/2":
+        raise toolchain.NotRealized(
+            f"emit bundle dialect {real.get('dialect')!r} — "
+            f"need plex.emit/2 (schedule streams)")
+    rn = real.get("routines", "")
+    comp = toolchain.components().get("routines", {}).get(rn) \
+        if rn else None
+    declared = dict(comp.data).get("caps") if comp is not None \
+        else None
+    if declared is not None:
+        errs = pb.check_bundle_caps(b, declared)
+        if errs:
+            raise toolchain.NotRealized(
+                f"emit bundle caps exceed record {rn}: {errs[0]}")
+    streams = emit_bundle_streams(b)
+    ev: dict = {}
+    R = R or seed.Realization(
+        reclaim=real.get("reclaim", "redirect"))
+    if exe is None:
+        exe = ir_exe_for(seed.Realization(
+            reclaim="redirect", io=("stdin", "bytes")))
+
+    def _run_pir(x, blob, mode):
+        p = subprocess.run([x], input=blob, capture_output=True,
+                           timeout=timeout)
+        if p.returncode != 0:
+            raise toolchain.NotRealized(
+                f"emit bundle stage refused: rc={p.returncode} "
+                f"{p.stderr[:160]!r}")
+        if mode == "term":
+            return p.stdout, p.stderr
+        # bytes + ir egress share the [u32le len][payload] framing;
+        # ir frames are validated as PIR blobs (the blob seam keeps
+        # them opaque — assemble splices them, never decodes them)
+        frames = _parse_frames(p.stdout)
+        if mode == "ir":
+            for f in frames:
+                st.digest_ir_blob(f)
+        return frames, p.stderr
+
+    term_exe = ir_exe_for(seed.Realization(reclaim="redirect"))
+    ir_exe = ir_exe_for(seed.Realization(
+        reclaim="redirect", io=("stdin", "ir")))
+    # stage 1 — program: frag NFs as term text -> decode -> items
+    out, e1 = _run_pir(term_exe, streams["emit.program"], "term")
+    items = []
+    for line in out.decode("utf-8", "replace").splitlines():
+        if line.strip():
+            items.extend(st.decode_frag(_nf_from_text(line)))
+            _DECODE_COUNT["frag"] += 1
+    ev["program"] = f"items={len(items)}"
+    # stage 2 — link: byte projections + symtab blob
+    frames, e2 = _run_pir(exe, streams["emit.link"], "bytes")
+    ib, db = frames
+    sm_frames, e3 = _run_pir(ir_exe, streams["emit.symtab"], "ir")
+    syms = sm_frames[0]
+    ev["link"] = f"ib={len(ib)} db={len(db)} symblob={len(syms)}"
+    # stages 3-4 — derived: replay resolves them (same machinery as
+    # emit_frames staged): encodeOf roots per item + pack chunks.
+    store = BlobStore()
+    brun = make_bytes_runner(exe, workers=1, pinned=store.pins)
+    text_base = int(real.get("text_base", "0"), 16) \
+        or target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS)
+    tb, _loc = assemble_staged(items, syms, text_base, brun,
+                               store=store)
+    ev["assemble"] = f"items={len(items)} text={len(tb)}B"
+
+    def K_(name: str):
+        return bracket(parse(getattr(st, name)))
+
+    def b4(v: int) -> T:
+        return st.bytelist_term(v.to_bytes(4, "little"))
+
+    lt, li, ld = b4(len(tb)), b4(len(ib)), b4(len(db))
+    traw = st._appn(K_("_ALIGN512"), lt)
+    iraw = st._appn(K_("_ALIGN512"), li)
+    draw = st._appn(K_("_ALIGN512"), ld)
+    drva = st._appn(K_("_ALIGN4096"),
+                    st._appn(K_("_B4ADD"), b4(0x1000), li))
+    trva = st._appn(K_("_ALIGN4096"),
+                    st._appn(K_("_B4ADD"), drva, ld))
+    dptr = st._appn(K_("_B4ADD"), b4(0x200), iraw)
+    tptr = st._appn(K_("_B4ADD"), dptr, draw)
+    iddr = st._appn(K_("_B4ADD"), iraw, draw)
+    img_ = st._appn(K_("_ALIGN4096"),
+                    st._appn(K_("_B4ADD"), trva, lt))
+    stackres = int(real.get("stack_reserve",
+                            str(64 << 20)))
+    u64 = st._appn(K_("_U64"), b4(stackres))
+    roots_b = [traw, iraw, draw, drva, trva, dptr, tptr, iddr,
+               img_, u64,
+               st._appn(K_("_ZEROFILL"), st.church(12)),
+               st._appn(K_("_ZEROFILL"), st.church(58)),
+               st._appn(K_("_ZEROFILL"), st.church(14 * 8)),
+               st._appn(K_("_ZEROFILL"), st.church(0x200 - 448)),
+               st._appn(K_("_PADLIST"), li),
+               st._appn(K_("_PADLIST"), ld),
+               st._appn(K_("_PADLIST"), lt)]
+    fb, e4 = _run_pir(exe, st.pack_ir(*roots_b,
+                                     pinned=store.pins), "bytes")
+    (v_traw, v_iraw, v_draw, v_drva, v_trva, v_dptr, v_tptr,
+     v_iddr, v_img, v_u64, z12, z58, z112, zfh,
+     padi, padd, padt) = fb
+    chunks = [
+        b"MZ", z58, struct.pack("<I", 0x40), b"PE\x00\x00",
+        struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x22),
+        struct.pack("<HBB", 0x20B, 0, 0),
+        v_traw, v_iddr, struct.pack("<I", 0),
+        v_trva, v_trva,
+        struct.pack("<Q", 0x140000000),
+        struct.pack("<II", 0x1000, 0x200),
+        struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0),
+        struct.pack("<I", 0), v_img,
+        struct.pack("<II", 0x200, 0),
+        struct.pack("<HH", 3, 0x8100),
+        v_u64,
+        struct.pack("<QQQ", 0x1000, 0x100000, 0x1000),
+        struct.pack("<II", 0, 16), struct.pack("<II", 0, 0),
+        struct.pack("<I", 0x1000), len(ib).to_bytes(4, "little"),
+        z112,
+        b".idata\x00\x00", len(ib).to_bytes(4, "little"),
+        struct.pack("<I", 0x1000), v_iraw,
+        struct.pack("<I", 0x200), z12,
+        struct.pack("<I", 0x40000040),
+        b".data\x00\x00\x00", len(db).to_bytes(4, "little"),
+        v_drva, v_draw, v_dptr, z12,
+        struct.pack("<I", 0xC0000040),
+        b".text\x00\x00\x00", len(tb).to_bytes(4, "little"),
+        v_trva, v_traw, v_tptr, z12,
+        struct.pack("<I", 0x60000020),
+        zfh,
+        ib, padi, db, padd, tb, padt,
+    ]
+    ev["pack"] = "chunks=16"
+    return b"".join(chunks), ev
 
 
 def replay_emit(workdir: str) -> Tuple[bytes, dict]:
@@ -1902,7 +2280,7 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
         # blob — registered as a placeholder, spliced into every
         # pass-2 query, never decoded Python-side.
         if store is None:
-            raise NotRealized(
+            raise toolchain.NotRealized(
                 "symtab as packed-IR blob needs a BlobStore to splice")
         sym_t = store.blob_term(bytes(syms))
     else:

@@ -537,6 +537,148 @@ def gate_emit_frames() -> bool:
     return True
 
 
+def gate_selfhost_fixpoint(tmpdir: str) -> bool:
+    """Phase-7 — the self-hosting fixpoint on the emitted host.
+
+    emit_frames(staged=True) drives the WHOLE emit as packed-IR
+    stream roots on emitted kernels: program frag queries (term
+    egress) -> link blob seam (ir egress, symtab never decoded) ->
+    per-item encodeOf roots (bytes egress) -> pack chunk roots.
+    Python does term construction, loc bookkeeping, and the byte
+    splice only.
+
+    fixpoint: emit_frames on the ir-bytes record must reproduce the
+    on-disk kernel byte-identically (H1 == H0; sha bacc6505…).
+    behavioral: H1 must evaluate a probe stream identically to H0 —
+    frames AND the rc=5 refusal on a non-byte-list root.
+    pickup: a changed Realization (stack_reserve) must produce a
+    DIFFERENT image that still equals seed.emit's oracle for the
+    changed R and still works as a kernel — the change is picked
+    up, not served stale.
+
+    Evidence category: construction-seam byte comparison (fixpoint,
+    oracle) + cross-realization observation (probe parity)."""
+    import hashlib
+    import subprocess
+    # .lo record — the staged schedule against the emit_native oracle
+    img_lo, ev_lo = ec.emit_frames(seed.Realization(), staged=True)
+    if img_lo != ec.emit_native():
+        return False
+    # fixpoint — the bytes kernel reproduces its own image
+    Rb = seed.Realization(reclaim="redirect", io=("stdin", "bytes"))
+    exe0 = ec.ir_exe_for(Rb)
+    h0 = open(exe0, "rb").read()
+    img, ev = ec.emit_frames(Rb, rt=rts.X86_64_WIN64_IR,
+                             staged=True, timeout=3600)
+    if img != h0:
+        return False
+    # behavioral — H1 works as a kernel, identical frames + refusal
+    h1 = os.path.join(tmpdir, "H1.exe")
+    open(h1, "wb").write(img)
+    K = lambda n: ec.bracket(ec.parse(getattr(st, n)))
+    b4 = lambda v: st.bytelist_term(v.to_bytes(4, "little"))
+    roots = [st._appn(K("_U64"), b4(7)),
+             st._appn(K("_ZEROFILL"), st.church(5)),
+             st.church(3)]
+    data = st.pack_ir(*roots)
+    outs = []
+    for exe in (exe0, h1):
+        p = subprocess.run([exe], input=data, capture_output=True)
+        if p.returncode != 5:
+            return False
+        outs.append(p.stdout)
+    if outs[0] != outs[1]:
+        return False
+    # pickup — changed Realization -> different valid kernel
+    import dataclasses
+    Rb2 = dataclasses.replace(Rb, stack_reserve=32 << 20)
+    img2, _ev2 = ec.emit_frames(Rb2, rt=rts.X86_64_WIN64_IR,
+                                staged=True, timeout=3600)
+    if img2 == h0:
+        return False
+    if img2 != seed.emit(
+            Rb2, tc=toolchain.by_name("native.x86_64.pe.ir")):
+        return False
+    h1p = os.path.join(tmpdir, "H1p.exe")
+    open(h1p, "wb").write(img2)
+    p = subprocess.run([h1p], input=data, capture_output=True)
+    return p.returncode == 5 and p.stdout == outs[0]
+
+
+def gate_emit_bundle(tmpdir: str) -> bool:
+    """Phase-7 — emit.plex as the executable emit archive.
+
+    write_emit_bundle serializes the schedule: the canonical
+    monolithic emit.term PIR payload plus the stage-level streams
+    (program frags, link byte projections, merged symtab) as
+    digest-referenced spans in the BYTES pool, with STAGES rows,
+    DEPS edges, REALIZATION layout fields, and record caps.
+
+    run_emit_bundle must reconstruct the image byte-identically
+    to emit_native, driving every reduction off the bundle's own
+    streams — the symtab crossing as an opaque PIR blob.  Refusals:
+    a corrupted stream payload (digest mismatch) and a bundle
+    whose caps exceed the routines record."""
+    import plex_bundle as pb
+    path = ec.write_emit_bundle(
+        os.path.join(tmpdir, "emit.plex"), seed.Realization())
+    b = pb.read_bundle(open(path, "rb").read())
+    names = [s[0] for s in b.stage_rows()]
+    if names != ["emit.term", "emit.program", "emit.link",
+                 "emit.symtab", "emit.assemble", "emit.pack"]:
+        return False
+    sidx = {n: i for i, n in enumerate(names)}
+    edges = {(names[a], names[c]) for a, c in b.dep_edges()}
+    if not {("emit.assemble", "emit.program"),
+            ("emit.assemble", "emit.link"),
+            ("emit.assemble", "emit.symtab"),
+            ("emit.pack", "emit.link"),
+            ("emit.pack", "emit.assemble")} <= edges:
+        return False
+    real = b.kv_rows(pb.KIND_REALIZATION)
+    if real.get("dialect") != "plex.emit/2":
+        return False
+    streams = ec.emit_bundle_streams(b)
+    if set(streams) != {"emit.term", "emit.program", "emit.link",
+                        "emit.symtab"}:
+        return False
+    img, ev = ec.run_emit_bundle(path, timeout=3600)
+    if img != ec.emit_native():
+        return False
+    # corruption: flip a byte inside a stream span -> digest refuse
+    data = bytearray(open(path, "rb").read())
+    bsec = b.section(pb.KIND_BYTES)
+    for s_i, _dig, tok in b.query_rows():
+        if names[s_i] == "emit.link":
+            off, ln = (int(x) for x in tok.split(":"))
+            data[bsec.offset + off] ^= 0xFF
+            bad = os.path.join(tmpdir, "emit.bad.plex")
+            open(bad, "wb").write(bytes(data))
+            try:
+                ec.run_emit_bundle(bad)
+                return False
+            except toolchain.NotRealized:
+                break
+    else:
+        return False
+    # widened caps: a bundle may claim less, never more
+    rn = real.get("routines")
+    caps = dict(toolchain.components()["routines"][rn].data
+                ).get("caps")
+    widened = dict(caps["ports"], forge_extra="RW")
+    forged = pb.pack_bundle(ec.emit_sections(
+        b"\x00", {"ports": widened, "os": caps["os"]},
+        dict(real), {}))
+    fpath = os.path.join(tmpdir, "emit.wide.plex")
+    open(fpath, "wb").write(forged)
+    try:
+        ec.run_emit_bundle(fpath)
+        return False
+    except toolchain.NotRealized:
+        pass
+    return True
+
+
 def gate_mt_equiv() -> bool:
     """threads=N == N workers == serial: the MT record's workers
     depack their assigned root range into private slab claims and
@@ -630,6 +772,10 @@ if __name__ == "__main__":
         ("plex v3 bundle round-trip", lambda: gate_plex_bundle(
             tempfile.mkdtemp(prefix="nanopass_plex_"))),
         ("emit frames on emitted host", gate_emit_frames),
+        ("self-hosting fixpoint", lambda: gate_selfhost_fixpoint(
+            tempfile.mkdtemp(prefix="nanopass_selfhost_"))),
+        ("emit.plex bundle replay", lambda: gate_emit_bundle(
+            tempfile.mkdtemp(prefix="nanopass_emitplex_"))),
     ]
     fail = 0
     for name, g in gates:
