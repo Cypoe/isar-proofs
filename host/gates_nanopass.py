@@ -616,7 +616,7 @@ def gate_emit_bundle(tmpdir: str) -> bool:
 
     run_emit_bundle must reconstruct the image byte-identically
     to emit_native, driving every reduction off the bundle's own
-    streams — the symtab crossing as an opaque PIR blob.  Refusals:
+    streams — dep-order execution plus MAP-declared concat.  Refusals:
     a corrupted stream payload (digest mismatch) and a bundle
     whose caps exceed the routines record."""
     import plex_bundle as pb
@@ -640,7 +640,7 @@ def gate_emit_bundle(tmpdir: str) -> bool:
         return False
     streams = ec.emit_bundle_streams(b)
     if set(streams) != {"emit.term", "emit.program", "emit.link",
-                        "emit.symtab"}:
+                        "emit.symtab", "emit.assemble", "emit.pack"}:
         return False
     img, ev = ec.run_emit_bundle(path, timeout=3600)
     if img != ec.emit_native():
@@ -673,6 +673,86 @@ def gate_emit_bundle(tmpdir: str) -> bool:
     open(fpath, "wb").write(forged)
     try:
         ec.run_emit_bundle(fpath)
+        return False
+    except toolchain.NotRealized:
+        pass
+    return True
+
+
+def gate_emit_schedule(tmpdir: str) -> bool:
+    """Phase-8b — the staged DAG is fully serialized.
+
+    emit.plex carries every stage's stream: emit.assemble is one
+    `encodeOf` root per prep position (frames concat to .text —
+    resv/loc/end4 baked seed-side from the Python oracles), and
+    emit.pack is _pack_recipe serialized (literals as passthrough
+    queries, computed fields as roots, MAP rows declaring the
+    section interleave).  run_emit_bundle is a pure executor:
+    dep closure -> topo order -> declared runner -> MAP-guided
+    concat; slice_ir bounds each exe call's arena (halve on rc=4).
+
+    Asserts: all six stage rows are pir-stream; the MAP section
+    declares pack's three splices; replay byte-identical to
+    emit_native; refusals — MAP src frame out of range, a
+    dep-closure stage carrying no stream, and program/assemble
+    streams out of correspondence (the audit)."""
+    import struct
+    import plex_bundle as pb
+    path = ec.write_emit_bundle(
+        os.path.join(tmpdir, "emit.plex"), seed.Realization())
+    b = pb.read_bundle(open(path, "rb").read())
+    if any(s[1] != "pir-stream" for s in b.stage_rows()):
+        return False
+    names = [s[0] for s in b.stage_rows()]
+    sidx = {n: i for i, n in enumerate(names)}
+    if b.map_rows() != [(sidx["emit.pack"], 47, sidx["emit.link"], 0),
+                        (sidx["emit.pack"], 48, sidx["emit.link"], 1),
+                        (sidx["emit.pack"], 49, sidx["emit.assemble"],
+                         pb.MAP_ALL)]:
+        return False
+    if b.kv_rows(pb.KIND_REALIZATION).get("schedule.output") \
+            != "emit.pack":
+        return False
+    img, _ev = ec.run_emit_bundle(path, timeout=3600)
+    if img != ec.emit_native():
+        return False
+    # forge 1 — MAP src frame out of range -> refusal at assembly
+    data = bytearray(open(path, "rb").read())
+    msec = b.section(pb.KIND_MAP)
+    struct.pack_into("<I", data, msec.offset + 12, 7)  # row0 frame
+    fpath = os.path.join(tmpdir, "emit.map.plex")
+    open(fpath, "wb").write(bytes(data))
+    try:
+        ec.run_emit_bundle(fpath, timeout=3600)
+        return False
+    except toolchain.NotRealized:
+        pass
+    streams = ec.emit_schedule_streams(seed.Realization())
+    # forge 2 — a dep-closure stage carries no stream -> refusal
+    thin = [s for s in streams if s[0] != "emit.assemble"]
+    forged = pb.pack_bundle(ec.emit_sections(
+        b"\x00" * 16, None, {"dialect": "plex.emit/2"}, {},
+        streams=thin))
+    fpath = os.path.join(tmpdir, "emit.thin.plex")
+    open(fpath, "wb").write(forged)
+    try:
+        ec.run_emit_bundle(fpath, timeout=3600)
+        return False
+    except toolchain.NotRealized:
+        pass
+    # forge 3 — program stream from another realization: decoded
+    # items no longer enumerate the baked roots -> audit refusal
+    alien = {n: bl for n, _r, bl, _m in
+             ec.emit_schedule_streams(seed.Realization(fuse_s=True))}
+    mixed = [(n, r, alien[n] if n == "emit.program" else bl, m)
+             for n, r, bl, m in streams]
+    forged = pb.pack_bundle(ec.emit_sections(
+        b"\x00" * 16, None, {"dialect": "plex.emit/2"}, {},
+        streams=mixed))
+    fpath = os.path.join(tmpdir, "emit.alien.plex")
+    open(fpath, "wb").write(forged)
+    try:
+        ec.run_emit_bundle(fpath, timeout=3600)
         return False
     except toolchain.NotRealized:
         pass
@@ -1000,6 +1080,8 @@ if __name__ == "__main__":
         ("kernel .plex v3 ingest", lambda: gate_plex_ingest(
             tempfile.mkdtemp(prefix="nanopass_plexin_"))),
         ("kernel layer composition", gate_layer_chain),
+        ("emit schedule serialized", lambda: gate_emit_schedule(
+            tempfile.mkdtemp(prefix="nanopass_sched_"))),
     ]
     fail = 0
     for name, g in gates:

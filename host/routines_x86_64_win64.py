@@ -3166,16 +3166,25 @@ _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
 }
 
 
-def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
+def _emit_parts(R: Realization, names: Tuple[str, ...]):
+    """per-name emitted item lists — _emit's per-builder stage as
+    data.  Schedule authors need the frag boundaries: pass chains
+    apply frag->frag per routine, so the program's items enumerate
+    per name, not as one flat list."""
     ctx = _ctx()
     ctx["ir"] = any(n.startswith("ir_") for n in names)
     ctx["irnext"] = "ir_spawn" if R.threads > 1 else "ir_depack"
-    p: Program = []
     for name in names:
         prog = _BUILDERS[name](R, ctx)
         if R.threads > 1 and name in _MT_THREADED:
             prog = _mt_xform(prog, _MT_DEPACK_REN if name == "ir_depack"
                              else None)
+        yield name, prog
+
+
+def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
+    p: Program = []
+    for _name, prog in _emit_parts(R, names):
         p += prog
     return p
 

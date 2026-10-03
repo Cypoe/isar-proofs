@@ -49,6 +49,12 @@ Section kinds (the contract role table):
    10 PIR          packed-IR program stream — the dialect="plex.v3"
                    kernel depacks the archive and runs exactly this
                    one section's span as its stdin stream
+   11 MAP          u32 arity 4: (stage_idx, at_stream_idx,
+                   src_stage_idx, src_frame) — a stage's output
+                   assembly: before consuming its own stream frame
+                   `at`, splice src's frame(s); src_frame 0xFFFFFFFF
+                   = all frames in order.  Declares how derived
+                   stages' outputs interleave (pack's recipe).
 
 Refusals (BundleError): bad magic/version, truncated header or
 directory, unknown cell type, zero arity, length != rows*arity*type,
@@ -85,13 +91,15 @@ KIND_PIR = 10       # packed-IR program stream — the kernel's ingest
                     # contract: exactly one PIR section; the dialect=
                     # "plex.v3" depacker selects its span and hands it
                     # to the stream sloop (bounded by declared length)
+KIND_MAP = 11       # output-assembly rows for derived stages
+MAP_ALL = 0xFFFFFFFF    # src_frame sentinel: splice all of src's frames
 
 _KIND_NAMES = {v: k for k, v in {
     "STRINGS": KIND_STRINGS, "STAGES": KIND_STAGES, "DEPS": KIND_DEPS,
     "QUERIES": KIND_QUERIES, "CAPS": KIND_CAPS,
     "REALIZATION": KIND_REALIZATION, "CLAIM": KIND_CLAIM,
     "EVIDENCE": KIND_EVIDENCE, "BYTES": KIND_BYTES,
-    "PIR": KIND_PIR}.items()}
+    "PIR": KIND_PIR, "MAP": KIND_MAP}.items()}
 
 CAP_PORT = 0
 CAP_OS = 1
@@ -222,6 +230,16 @@ class Bundle:
         if s is None:
             return []
         return [(r[0], r[1]) for r in self._rows(KIND_DEPS, 2, "<I")]
+
+    def map_rows(self) -> List[Tuple[int, int, int, int]]:
+        """(stage_idx, at_stream_idx, src_stage_idx, src_frame) —
+        the output-assembly recipe for stages whose output splices
+        other stages' frames into their own stream order."""
+        s = self.section(KIND_MAP)
+        if s is None:
+            return []
+        return [(r[0], r[1], r[2], r[3])
+                for r in self._rows(KIND_MAP, 4, "<I")]
 
     def query_rows(self) -> List[Tuple[int, str, str]]:
         s = self.section(KIND_QUERIES)

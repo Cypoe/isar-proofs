@@ -1235,47 +1235,161 @@ def emit_frames(R: seed.Realization,
     return b"".join(chunks), ev
 
 
+def _schedule_items(rt, R, routines, passes) -> list:
+    """the program stage's item list as seed-side schedule data —
+    mirrors routine_expr's emission exactly: raw per-builder items
+    (no _mt_xform — the term carries pre-xform frags), the fs
+    conditional that st_s/build_ds encode in-term applied as a
+    skip, then the pass chain per frag.  Every pass must have a
+    Python mirror (_PASS_PY): `peephole` mirrors the SINGLE
+    PEEPHOLE_PASS application the term chain performs per
+    occurrence — the fixpoint lives elsewhere
+    (peephole_fixpoint); a pass with no mirror refuses rather than
+    silently emitting un-passed items."""
+    import opt_peephole
+    _PASS_PY = {
+        "id": lambda prog: list(prog),
+        "peephole": lambda prog: opt_peephole._pass_once(
+            list(prog), "x86_64")[0],
+    }
+    _FS_NEED = {"st_s": True, "build_ds": False}
+    mod = getattr(rt, "module", None) or rt
+    builders = getattr(mod, "_BUILDERS", None)
+    if builders is None:
+        if passes:
+            raise toolchain.NotRealized(
+                "emit schedule: per-frag passes need "
+                "routines-module _BUILDERS")
+        return list(mod.program(R))
+    ctx = mod._ctx()
+    ctx["ir"] = any(n.startswith("ir_") for n in routines)
+    ctx["irnext"] = "ir_spawn" if R.threads > 1 else "ir_depack"
+    items = []
+    for name in routines:
+        need = _FS_NEED.get(name)
+        if need is not None and bool(need) != bool(R.fuse_s):
+            continue                       # emits fs ? frag : NIL
+        frag = list(builders[name](R, ctx))
+        for p in passes:
+            apply = _PASS_PY.get(p)
+            if apply is None:
+                raise toolchain.NotRealized(
+                    f"emit schedule: pass {p!r} has no seed mirror")
+            frag = apply(frag)
+        items += frag
+    return items
+
+
+def _assemble_stream(items, syms, base: int,
+                     pinned: Optional[dict] = None
+                     ) -> Tuple[bytes, int]:
+    """emit.assemble's stream: one `encodeOf item resv` per prep
+    position, in order — the frames concat to .text directly, no
+    substitution bookkeeping.  rel-sensitive items carry their
+    resv-closed query (symtab/loc/end4 as seed-side schedule data:
+    loc accumulates positions predicted by the Python encode
+    oracle — the same lengths encodeOf's frames prove).  Returns
+    (stream, text_len)."""
+    import isa_x86_64 as isa
+    sym_t = st.symtab_term(syms)
+    loc: dict = {}
+    prep: List[tuple] = []
+    pos = 0
+    for it in items:
+        if it[0] == "label":
+            loc[it[1]] = base + pos
+            continue
+        n = len(isa.encode(tuple(it[1:])))
+        prep.append((it, pos, n))
+        pos += n
+    loc_t = st.symtab_term(loc)
+    roots = []
+    for it, off, ln in prep:
+        if _is_rel_item(it):
+            e4 = st.bytelist_term(
+                (base + off + ln).to_bytes(4, "little"))
+            resv = st._appn(_resvmk(), sym_t, loc_t, e4)
+            q = st.encode_query(it, resv)
+        else:
+            q = st.encode_query(it)
+        roots.append(app(q, KK))
+    return st.pack_ir(*roots, pinned=pinned), pos
+
+
+def _pack_stream(text_len: int, idata_len: int, datab_len: int,
+                 stackres: int,
+                 pinned: Optional[dict] = None
+                 ) -> Tuple[bytes, List[Tuple[int, str, int]]]:
+    """emit.pack's stream: _pack_recipe serialized — lit/root
+    elements become stream queries in splice order (literals ride
+    as already-NF bytelist terms: format constants are data, not
+    computed answers); stage elements become MAP rows.  Returns
+    (stream, [(at_stream_idx, src_stage, src_frame)])."""
+    import plex_bundle as pb
+    roots: List[T] = []
+    mmap: List[Tuple[int, str, int]] = []
+    for e in _pack_recipe(text_len, idata_len, datab_len, stackres):
+        if e[0] == "stage":
+            mmap.append((len(roots), e[1], e[2]))
+        elif e[0] == "lit":
+            roots.append(st.bytelist_term(e[1]))
+        else:
+            roots.append(e[1])
+    return st.pack_ir(*roots, pinned=pinned), mmap
+
+
 def emit_schedule_streams(R: seed.Realization,
                           routines=None,
                           passes: Tuple[str, ...] = (),
                           rt=None, imports=None, slots=None,
                           text_base: Optional[int] = None,
                           pinned: Optional[dict] = None
-                          ) -> List[Tuple[str, str, bytes]]:
-    """The staged schedule's stream-level queries as
-    (name, runner, PIR-stream) — the executable skeleton beside
-    pack_emit_program's canonical monolithic term:
+                          ) -> List[Tuple[str, str, bytes, tuple]]:
+    """The staged schedule's streams — every stage's executable
+    form as (name, runner, PIR-stream, map_rows), the complete
+    serialized DAG beside pack_emit_program's canonical monolith:
 
-    - `emit.program`: per-routine frag queries in one stream
-      (the program stage's executable form, term-egress);
-    - `emit.link`: `[idata·KK, datab·KK]` byte projections
-      (the same roots emit_frames runs, bytes-egress);
-    - `emit.symtab`: `[APPEND (idata·KI) (datab·KI)]` — the
-      merged symtab as one root, ir-egress: it leaves the
-      kernel as a PIR blob spliced into pass-2 encode queries
-      (the blob seam — never decoded Python-side).
+    - `emit.program`: per-routine frag queries (term-egress);
+    - `emit.link`: `[idata·KK, datab·KK]` byte projections;
+    - `emit.symtab`: `[APPEND (idata·KI) (datab·KI)]` merged
+      symtab, ir-egress (provenance + the blob-seam audit);
+    - `emit.assemble`: per-prep-position `encodeOf` roots —
+      frames concat to .text (the loc/resv schedule authored
+      seed-side from the Python oracles);
+    - `emit.pack`: the chunk recipe — literals as passthrough
+      queries, computed fields as numeral roots, and MAP rows
+      declaring where emit.link/emit.assemble frames interleave.
 
     The canonical `emit.term` rides separately as the bundle's
-    primary PIR payload (pack_emit_program).  assemble/pack
-    streams are NOT produced: their roots depend on upstream
-    results (items, loc, section lengths) — resolving them IS
-    the schedule's job (the Phase-8 DAG)."""
+    primary PIR payload.  With all six stages serialized the
+    schedule is fully data: replay is dep-order execution plus
+    MAP-declared concat — Python's residue is spawn, concat,
+    compare."""
     routines, imports, slots, text_base, fixed = _emit_layout(
         R, routines, rt, imports, slots, text_base)
+    rt_eff = rt if rt is not None else rts
     _ir_ctx = any(n.startswith("ir_") for n in routines)
     drva = target_pe64.data_rva(imports)
     iq, dq = st.idata_query(imports), st.data_query(slots, drva)
+    items = _schedule_items(rt_eff, R, routines, passes)
+    ib, db, syms = st.python_link(imports, slots)
+    asm_stream, text_len = _assemble_stream(items, syms, text_base,
+                                            pinned)
+    pack_stream, pack_map = _pack_stream(
+        text_len, len(ib), len(db), R.stack_reserve, pinned)
     return [
         ("emit.program", "exe.term",
          st.pack_ir(*[st.routine_query(
                       n, R, passes, fixed=fixed, ir_ctx=_ir_ctx)
-                     for n in routines], pinned=pinned)),
+                     for n in routines], pinned=pinned), ()),
         ("emit.link", "exe.bytes",
-         st.pack_ir(app(iq, KK), app(dq, KK), pinned=pinned)),
+         st.pack_ir(app(iq, KK), app(dq, KK), pinned=pinned), ()),
         ("emit.symtab", "exe.ir",
          st.pack_ir(st._appn(st.append_term(),
                              app(iq, st._KI), app(dq, st._KI)),
-                    pinned=pinned)),
+                    pinned=pinned), ()),
+        ("emit.assemble", "exe.bytes", asm_stream, ()),
+        ("emit.pack", "exe.bytes", pack_stream, tuple(pack_map)),
     ]
 
 
@@ -1340,19 +1454,20 @@ def pack_emit_program(R: seed.Realization,
 
 def emit_sections(pir: bytes, caps: Optional[dict],
                   realization: dict, evidence: dict,
-                  streams: Optional[List[Tuple[str, str, bytes]]] = None
+                  streams: Optional[List[Tuple[str, str, bytes,
+                                               tuple]]] = None
                   ) -> list:
     """v3 sections for an emit program bundle — not a stage manifest:
     STRINGS + REALIZATION + CAPS + EVIDENCE + the PIR stream as BYTES.
     `realization` should carry `dialect=plex.emit/1` and `routines`.
 
     `streams` (emit_schedule_streams' output) upgrades the archive to
-    `plex.emit/2`: STAGES rows for program/link/assemble/pack with
-    DEPS edges, and QUERIES rows whose blob token is `off:len` into
-    the BYTES pool — each stream aligned at 8 inside the pool,
-    `emit.term` first.  assemble/pack are declared stages without
-    streams: their roots depend on upstream results (the Phase-8 DAG
-    resolves them; the bundle carries the skeleton)."""
+    `plex.emit/2`: STAGES rows for all six stages, DEPS edges, MAP
+    rows declaring emit.pack's output assembly, and QUERIES rows
+    whose blob token is `off:len` into the BYTES pool — each stream
+    aligned at 8 inside the pool, `emit.term` first.  Every stage
+    carries its executable stream: replay is dep-order execution
+    plus MAP-declared concat, never stage resolution."""
     import plex_bundle as pb
     pool = pb._Pool()
     secs = [pb.Section(pb.KIND_STRINGS, pb.U8, 1, 0, b"")]
@@ -1363,14 +1478,15 @@ def emit_sections(pir: bytes, caps: Optional[dict],
     stage_rows = []
     dep_pairs = []
     query_rows = []
+    map_rows = []
     blob_pool = bytearray()
     if streams:
         stages = [("emit.term", "pir-stream", "exe.bytes"),
                   ("emit.program", "pir-stream", "exe.term"),
                   ("emit.link", "pir-stream", "exe.bytes"),
                   ("emit.symtab", "pir-stream", "exe.ir"),
-                  ("emit.assemble", "derived", "exe.bytes"),
-                  ("emit.pack", "derived", "exe.bytes")]
+                  ("emit.assemble", "pir-stream", "exe.bytes"),
+                  ("emit.pack", "pir-stream", "exe.bytes")]
         s_of = {s[0]: i for i, s in enumerate(stages)}
         deps = {"emit.assemble": ("emit.program", "emit.link",
                                   "emit.symtab"),
@@ -1384,13 +1500,15 @@ def emit_sections(pir: bytes, caps: Optional[dict],
         do, dl = pool.ref(hashlib.sha256(pir).hexdigest())
         bo, bl = pool.ref(f"0:{len(pir)}")
         query_rows.append((s_of["emit.term"], do, dl, bo, bl))
-        for name, runner, blob in streams:
+        for name, runner, blob, mmap in streams:
             dig = hashlib.sha256(blob).hexdigest()
             do, dl = pool.ref(dig)
             bo, bl = pool.ref(f"{len(blob_pool)}:{len(blob)}")
             query_rows.append((s_of[name], do, dl, bo, bl))
             blob_pool += blob
             blob_pool += b"\x00" * (-len(blob_pool) % 8)
+            for at, src, sf in mmap:
+                map_rows.append((s_of[name], at, s_of[src], sf))
         if stage_rows:
             secs.append(pb.Section(pb.KIND_STAGES, pb.U64, 6,
                                    len(stage_rows),
@@ -1400,6 +1518,11 @@ def emit_sections(pir: bytes, caps: Optional[dict],
                                    len(dep_pairs),
                                    b"".join(struct.pack("<II", *p)
                                             for p in dep_pairs)))
+        if map_rows:
+            secs.append(pb.Section(pb.KIND_MAP, pb.U32, 4,
+                                   len(map_rows),
+                                   b"".join(struct.pack("<IIII", *r)
+                                            for r in map_rows)))
         secs.append(pb.Section(pb.KIND_QUERIES, pb.U64, 5,
                                len(query_rows),
                                _u64rows(query_rows)))
@@ -1470,6 +1593,7 @@ def write_emit_bundle(path: str, R: seed.Realization,
         real["slots"] = ",".join(f"{n}:{s}" for n, s in _sl)
         real["text_base"] = hex(_tb)
         real["routines_list"] = ",".join(_rn)
+        real["schedule.output"] = "emit.pack"
     comp = toolchain.components()["routines"].get(real["routines"])
     caps = dict(comp.data).get("caps") if comp is not None else None
     streams = emit_schedule_streams(
@@ -1529,24 +1653,32 @@ def emit_bundle_streams(bundle) -> Dict[str, bytes]:
 def run_emit_bundle(path, R: Optional[seed.Realization] = None,
                     exe: Optional[str] = None,
                     timeout: int = 3600) -> Tuple[bytes, dict]:
-    """emit.plex -> PE image: drive the staged schedule from the
-    bundle's own streams — the emit program IS data.
+    """emit.plex -> PE image: EXECUTE the serialized schedule —
+    every stage's stream rides the archive; replay is dep-order
+    execution plus MAP-declared output assembly, never stage
+    resolution.
 
     Contract: `dialect=plex.emit/2`, stream digests verified
-    (emit_bundle_streams), caps ⊆ the routines record.  The
-    bundle's streams cover stages 1–2 (program frags, link byte
-    projections, merged symtab); stages 3–4 are `derived` — the
-    replay resolves them exactly the way emit_frames(staged=True)
-    does: decode frag NFs -> items (boundary crossing, counted),
-    per-item encodeOf roots on the bytes kernel, pack chunks as
-    roots.  Python's residue is the same as emit_frames':
-    enumeration decode, loc bookkeeping, byte splice.
+    (emit_bundle_streams), caps ⊆ the routines record.  The dep
+    closure of `schedule.output` topologically orders the stages;
+    each stage runs on its declared runner; a stage in the closure
+    with no stream is a refusal (the bundle is incomplete, not
+    underresolved).  Output assembly walks a stage's MAP rows —
+    before consuming its own stream frame `at`, splice src's
+    frame(s).  Audit: the decoded program items must enumerate
+    exactly the baked encode roots — a bundle whose assemble
+    stream no longer corresponds to its declared program is a
+    refusal, not a different image.
 
-    Returns (image_bytes, evidence)."""
+    Python's residue: subprocess per runner, frame concat, write
+    the file.  Returns (image_bytes, evidence)."""
     import plex_bundle as pb
     data = open(path, "rb").read() if isinstance(path, str) \
         else path
-    b = pb.read_bundle(data)
+    try:
+        b = pb.read_bundle(data)
+    except pb.BundleError as e:
+        raise toolchain.NotRealized(f"emit bundle: {e}")
     real = b.kv_rows(pb.KIND_REALIZATION)
     if real.get("dialect") != "plex.emit/2":
         raise toolchain.NotRealized(
@@ -1562,10 +1694,11 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
         if errs:
             raise toolchain.NotRealized(
                 f"emit bundle caps exceed record {rn}: {errs[0]}")
-    streams = emit_bundle_streams(b)
+    try:
+        streams = emit_bundle_streams(b)
+    except pb.BundleError as e:
+        raise toolchain.NotRealized(f"emit bundle: {e}")
     ev: dict = {}
-    R = R or seed.Realization(
-        reclaim=real.get("reclaim", "redirect"))
     if exe is None:
         exe = ir_exe_for(seed.Realization(
             reclaim="redirect", io=("stdin", "bytes")))
@@ -1581,108 +1714,188 @@ def run_emit_bundle(path, R: Optional[seed.Realization] = None,
             return p.stdout, p.stderr
         # bytes + ir egress share the [u32le len][payload] framing;
         # ir frames are validated as PIR blobs (the blob seam keeps
-        # them opaque — assemble splices them, never decodes them)
+        # them opaque — never decoded Python-side)
         frames = _parse_frames(p.stdout)
         if mode == "ir":
             for f in frames:
                 st.digest_ir_blob(f)
         return frames, p.stderr
 
-    term_exe = ir_exe_for(seed.Realization(reclaim="redirect"))
-    ir_exe = ir_exe_for(seed.Realization(
-        reclaim="redirect", io=("stdin", "ir")))
-    # stage 1 — program: frag NFs as term text -> decode -> items
-    out, e1 = _run_pir(term_exe, streams["emit.program"], "term")
+    def _run_stage(x, blob, mode):
+        """one stage stream -> its output, arena-bounded: the bump
+        arena accumulates across a stream's roots (the same wall
+        _batch_bounded halves on), so execution slices the root
+        table and halves the span on rc=4 — executor scheduling,
+        not schedule resolution; root order and content are
+        unchanged (slice_ir preserves digests)."""
+        try:
+            nr = st.ir_roots(blob)
+        except ValueError:
+            raise toolchain.NotRealized(
+                "emit bundle: stream is not a packed-IR stream")
+        span = nr
+        while True:
+            try:
+                if span >= nr:
+                    return _run_pir(x, blob, mode)
+                outs = []
+                err = b""
+                for i in range(0, nr, span):
+                    out, err = _run_pir(
+                        x, st.slice_ir(blob, i, min(span, nr - i)),
+                        mode)
+                    outs.append(out)
+                if mode == "term":
+                    return b"".join(outs), err
+                return [f for o in outs for f in o], err
+            except toolchain.NotRealized as e:
+                if "rc=4" not in str(e) or span == 1:
+                    raise
+                span = max(1, span // 2)
+
+    try:
+        stages = b.stage_rows()
+        deps = b.dep_edges()
+        maps = b.map_rows()
+    except pb.BundleError as e:
+        raise toolchain.NotRealized(f"emit bundle: {e}")
+    s_of = {n: i for i, (n, _a, _r) in enumerate(stages)}
+    out_name = real.get("schedule.output", "emit.pack")
+    if out_name not in s_of:
+        raise toolchain.NotRealized(
+            f"emit bundle: output stage {out_name!r} "
+            f"not in STAGES")
+    # dep closure of the output stage, topo-ordered (deps first —
+    # a cycle is a malformed schedule, not a scheduling problem)
+    need: set = set()
+    stack = [s_of[out_name]]
+    while stack:
+        i = stack.pop()
+        if i in need:
+            continue
+        need.add(i)
+        stack += [d for a, d in deps if a == i]
+    order, done = [], set()
+    while len(order) < len(need):
+        progressed = False
+        for i in sorted(need):
+            if i in done:
+                continue
+            if all(d in done for a, d in deps if a == i):
+                order.append(i)
+                done.add(i)
+                progressed = True
+        if not progressed:
+            raise toolchain.NotRealized(
+                "emit bundle: DEPS cycle — no topological order")
+    # structural completeness — every closure stage carries its
+    # stream and every MAP row stays inside declared bounds; these
+    # are bundle-shape properties, checked before any execution
+    for i in need:
+        if stages[i][0] not in streams:
+            raise toolchain.NotRealized(
+                f"emit bundle: stage {stages[i][0]!r} in the dep "
+                f"closure of {out_name!r} carries no stream — "
+                f"incomplete schedule, not resolvable")
+    for si, at, src, _sf in maps:
+        if si >= len(stages) or src >= len(stages):
+            raise toolchain.NotRealized(
+                "emit bundle: MAP row outside STAGES")
+        src_name = stages[src][0]
+        if si in need and src_name not in {stages[i][0]
+                                          for i in need}:
+            raise toolchain.NotRealized(
+                f"emit bundle: MAP src {src_name!r} is not a dep "
+                f"of {stages[si][0]!r}")
+        bl = streams.get(stages[si][0])
+        if bl is not None:
+            try:
+                nr = st.ir_roots(bl)
+            except ValueError:
+                raise toolchain.NotRealized(
+                    f"emit bundle: stage {stages[si][0]!r} stream "
+                    f"is not a packed-IR stream")
+            if at > nr:
+                raise toolchain.NotRealized(
+                    f"emit bundle: MAP row at={at} exceeds "
+                    f"{stages[si][0]} roots {nr}")
+    exes = {"exe.term": (ir_exe_for(seed.Realization(
+                            reclaim="redirect")), "term"),
+            "exe.bytes": (exe, "bytes"),
+            "exe.ir": (ir_exe_for(seed.Realization(
+                        reclaim="redirect", io=("stdin", "ir"))),
+                       "ir")}
+    frames: Dict[str, list] = {}
+    progs: Dict[str, bytes] = {}
+    for i in order:
+        name, _art, runner = stages[i]
+        blob = streams[name]
+        xm = exes.get(runner)
+        if xm is None:
+            raise toolchain.NotRealized(
+                f"emit bundle: stage {name!r} runner "
+                f"{runner!r} not realized")
+        out, err = _run_stage(xm[0], blob, xm[1])
+        if xm[1] == "term":
+            progs[name] = out
+        else:
+            frames[name] = out
+        ev[name] = (f"roots={len(out) if isinstance(out, list) else '?'} "
+                    f"err={len(err)}B")
+    # audit — the program stage's decoded items must enumerate
+    # exactly the assemble stream's baked roots (a bundle whose
+    # streams no longer correspond is corrupt, not alternate)
     items = []
-    for line in out.decode("utf-8", "replace").splitlines():
-        if line.strip():
-            items.extend(st.decode_frag(_nf_from_text(line)))
-            _DECODE_COUNT["frag"] += 1
-    ev["program"] = f"items={len(items)}"
-    # stage 2 — link: byte projections + symtab blob
-    frames, e2 = _run_pir(exe, streams["emit.link"], "bytes")
-    ib, db = frames
-    sm_frames, e3 = _run_pir(ir_exe, streams["emit.symtab"], "ir")
-    syms = sm_frames[0]
-    ev["link"] = f"ib={len(ib)} db={len(db)} symblob={len(syms)}"
-    # stages 3-4 — derived: replay resolves them (same machinery as
-    # emit_frames staged): encodeOf roots per item + pack chunks.
-    store = BlobStore()
-    brun = make_bytes_runner(exe, workers=1, pinned=store.pins)
-    text_base = int(real.get("text_base", "0"), 16) \
-        or target_pe64.text_rva(rts.IMPORTS, rts.DATA_SLOTS)
-    tb, _loc = assemble_staged(items, syms, text_base, brun,
-                               store=store)
-    ev["assemble"] = f"items={len(items)} text={len(tb)}B"
+    ptxt = progs.get("emit.program")
+    if ptxt is not None:
+        for line in ptxt.decode("utf-8", "replace").splitlines():
+            if line.strip():
+                items.extend(st.decode_frag(_nf_from_text(line)))
+                _DECODE_COUNT["frag"] += 1
+    asm = frames.get("emit.assemble")
+    if ptxt is not None and asm is not None:
+        n_prep = sum(1 for it in items if it[0] != "label")
+        if n_prep != len(asm):
+            raise toolchain.NotRealized(
+                f"emit bundle: program items {n_prep} != assemble "
+                f"roots {len(asm)} — streams out of correspondence")
+        ev["program"] = f"items={len(items)}"
+    # MAP-declared output assembly
+    def _output(name: str) -> bytes:
+        fr = frames.get(name)
+        if fr is None:
+            raise toolchain.NotRealized(
+                f"emit bundle: stage {name!r} has no frames to "
+                f"assemble")
+        rows = sorted((r for r in maps if r[0] == s_of[name]),
+                      key=lambda r: r[1])
+        parts, cur = [], 0
+        for _s, at, src, sf in rows:
+            if at > len(fr):
+                raise toolchain.NotRealized(
+                    f"emit bundle: MAP row at={at} exceeds "
+                    f"{name} frames {len(fr)}")
+            parts.extend(fr[cur:at])
+            cur = at
+            src_name = stages[src][0] if src < len(stages) else "?"
+            srcf = frames.get(src_name)
+            if srcf is None:
+                raise toolchain.NotRealized(
+                    f"emit bundle: MAP src {src_name!r} has no "
+                    f"frames")
+            if sf == pb.MAP_ALL:
+                parts.extend(srcf)
+            elif sf < len(srcf):
+                parts.append(srcf[sf])
+            else:
+                raise toolchain.NotRealized(
+                    f"emit bundle: MAP src frame {sf} exceeds "
+                    f"{src_name} frames {len(srcf)}")
+        parts.extend(fr[cur:])
+        return b"".join(parts)
 
-    def K_(name: str):
-        return bracket(parse(getattr(st, name)))
-
-    def b4(v: int) -> T:
-        return st.bytelist_term(v.to_bytes(4, "little"))
-
-    lt, li, ld = b4(len(tb)), b4(len(ib)), b4(len(db))
-    traw = st._appn(K_("_ALIGN512"), lt)
-    iraw = st._appn(K_("_ALIGN512"), li)
-    draw = st._appn(K_("_ALIGN512"), ld)
-    drva = st._appn(K_("_ALIGN4096"),
-                    st._appn(K_("_B4ADD"), b4(0x1000), li))
-    trva = st._appn(K_("_ALIGN4096"),
-                    st._appn(K_("_B4ADD"), drva, ld))
-    dptr = st._appn(K_("_B4ADD"), b4(0x200), iraw)
-    tptr = st._appn(K_("_B4ADD"), dptr, draw)
-    iddr = st._appn(K_("_B4ADD"), iraw, draw)
-    img_ = st._appn(K_("_ALIGN4096"),
-                    st._appn(K_("_B4ADD"), trva, lt))
-    stackres = int(real.get("stack_reserve",
-                            str(64 << 20)))
-    u64 = st._appn(K_("_U64"), b4(stackres))
-    roots_b = [traw, iraw, draw, drva, trva, dptr, tptr, iddr,
-               img_, u64,
-               st._appn(K_("_ZEROFILL"), st.church(12)),
-               st._appn(K_("_ZEROFILL"), st.church(58)),
-               st._appn(K_("_ZEROFILL"), st.church(14 * 8)),
-               st._appn(K_("_ZEROFILL"), st.church(0x200 - 448)),
-               st._appn(K_("_PADLIST"), li),
-               st._appn(K_("_PADLIST"), ld),
-               st._appn(K_("_PADLIST"), lt)]
-    fb, e4 = _run_pir(exe, st.pack_ir(*roots_b,
-                                     pinned=store.pins), "bytes")
-    (v_traw, v_iraw, v_draw, v_drva, v_trva, v_dptr, v_tptr,
-     v_iddr, v_img, v_u64, z12, z58, z112, zfh,
-     padi, padd, padt) = fb
-    chunks = [
-        b"MZ", z58, struct.pack("<I", 0x40), b"PE\x00\x00",
-        struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x22),
-        struct.pack("<HBB", 0x20B, 0, 0),
-        v_traw, v_iddr, struct.pack("<I", 0),
-        v_trva, v_trva,
-        struct.pack("<Q", 0x140000000),
-        struct.pack("<II", 0x1000, 0x200),
-        struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0),
-        struct.pack("<I", 0), v_img,
-        struct.pack("<II", 0x200, 0),
-        struct.pack("<HH", 3, 0x8100),
-        v_u64,
-        struct.pack("<QQQ", 0x1000, 0x100000, 0x1000),
-        struct.pack("<II", 0, 16), struct.pack("<II", 0, 0),
-        struct.pack("<I", 0x1000), len(ib).to_bytes(4, "little"),
-        z112,
-        b".idata\x00\x00", len(ib).to_bytes(4, "little"),
-        struct.pack("<I", 0x1000), v_iraw,
-        struct.pack("<I", 0x200), z12,
-        struct.pack("<I", 0x40000040),
-        b".data\x00\x00\x00", len(db).to_bytes(4, "little"),
-        v_drva, v_draw, v_dptr, z12,
-        struct.pack("<I", 0xC0000040),
-        b".text\x00\x00\x00", len(tb).to_bytes(4, "little"),
-        v_trva, v_traw, v_tptr, z12,
-        struct.pack("<I", 0x60000020),
-        zfh,
-        ib, padi, db, padd, tb, padt,
-    ]
-    ev["pack"] = "chunks=16"
-    return b"".join(chunks), ev
+    img = _output(out_name)
+    return img, ev
 
 
 def replay_emit(workdir: str) -> Tuple[bytes, dict]:
@@ -2403,119 +2616,126 @@ def assemble_staged(items: List[tuple], syms: dict, base: int,
     return bytes(out), loc
 
 
+_PACK_T: Dict[str, T] = {}
+
+
+def _pack_term(name: str) -> T:
+    """bracket(parse(st._NAME)) memoized — the pack recipe's
+    vocabulary constants (ALIGN512/B4ADD/ZEROFILL/PADLIST/U64)."""
+    t = _PACK_T.get(name)
+    if t is None:
+        t = _PACK_T[name] = bracket(parse(getattr(st, name)))
+    return t
+
+
+def _pack_recipe(text_len: int, idata_len: int, datab_len: int,
+                 stackres: int) -> List[Tuple]:
+    """pack2Of's chunk list as element data, in splice order:
+
+      ("lit", bytes)   — format constants the stage emits verbatim
+      ("root", T)      — a term whose NF is the chunk's bytes
+      ("stage", name, frame) — a prior stage's frame(s); frame
+                         0xFFFFFFFF splices all its frames in order
+
+    The two realizations read it identically: the emit.plex bake
+    serializes lit/root elements as stream queries and stage
+    elements as MAP rows; pack_staged evaluates roots on a runner
+    and inserts literals/section bytes directly.  Section sizes are
+    int arguments (boundary metadata — the same discipline as
+    assemble's pos bookkeeping; LENB4-as-term measured OOM-class),
+    and the numeral args stay unreduced inside each query —
+    confluence makes embedding the numeral identical to embedding
+    its value."""
+    def b4(v: int) -> T:
+        return st.bytelist_term(v.to_bytes(4, "little"))
+
+    lt, li, ld = b4(text_len), b4(idata_len), b4(datab_len)
+    traw = st._appn(_pack_term("_ALIGN512"), lt)
+    iraw = st._appn(_pack_term("_ALIGN512"), li)
+    draw = st._appn(_pack_term("_ALIGN512"), ld)
+    # section VAs — .idata fixed at 0x1000, .data and .text computed
+    # (pack2Of's drva/trva lets); .text LAST keeps code size unbounded.
+    drva = st._appn(_pack_term("_ALIGN4096"),
+                    st._appn(_pack_term("_B4ADD"), b4(0x1000), li))
+    trva = st._appn(_pack_term("_ALIGN4096"),
+                    st._appn(_pack_term("_B4ADD"), drva, ld))
+    dptr = st._appn(_pack_term("_B4ADD"), b4(0x200), iraw)
+    tptr = st._appn(_pack_term("_B4ADD"), dptr, draw)
+    iddr = st._appn(_pack_term("_B4ADD"), iraw, draw)
+    img = st._appn(_pack_term("_ALIGN4096"),
+                   st._appn(_pack_term("_B4ADD"), trva, lt))
+    u64 = st._appn(_pack_term("_U64"), b4(stackres))
+
+    def zf(n: int) -> T:
+        return st._appn(_pack_term("_ZEROFILL"), st.church(n))
+
+    def pad(len4: T) -> T:
+        return st._appn(_pack_term("_PADLIST"), len4)
+
+    z12 = zf(12)
+    L = lambda b: ("lit", b)
+    R_ = lambda t: ("root", t)
+    ALL = 0xFFFFFFFF
+    return [
+        L(b"MZ"), R_(zf(58)), L(struct.pack("<I", 0x40)),
+        L(b"PE\x00\x00"),
+        L(struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x22)),
+        L(struct.pack("<HBB", 0x20B, 0, 0)),
+        R_(traw), R_(iddr), L(struct.pack("<I", 0)),
+        R_(trva), R_(trva),
+        L(struct.pack("<Q", 0x140000000)),
+        L(struct.pack("<II", 0x1000, 0x200)),
+        L(struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0)),
+        L(struct.pack("<I", 0)), R_(img),
+        L(struct.pack("<II", 0x200, 0)),
+        L(struct.pack("<HH", 3, 0x8100)),
+        R_(u64),
+        L(struct.pack("<QQQ", 0x1000, 0x100000, 0x1000)),
+        L(struct.pack("<II", 0, 16)), L(struct.pack("<II", 0, 0)),
+        L(struct.pack("<I", 0x1000)), R_(li),
+        R_(zf(14 * 8)),
+        L(b".idata\x00\x00"), R_(li),
+        L(struct.pack("<I", 0x1000)), R_(iraw),
+        L(struct.pack("<I", 0x200)), R_(z12),
+        L(struct.pack("<I", 0x40000040)),
+        L(b".data\x00\x00\x00"), R_(ld),
+        R_(drva), R_(draw), R_(dptr), R_(z12),
+        L(struct.pack("<I", 0xC0000040)),
+        L(b".text\x00\x00\x00"), R_(lt),
+        R_(trva), R_(traw), R_(tptr), R_(z12),
+        L(struct.pack("<I", 0x60000020)),
+        R_(zf(0x200 - 448)),
+        ("stage", "emit.link", 0), R_(pad(li)),
+        ("stage", "emit.link", 1), R_(pad(ld)),
+        ("stage", "emit.assemble", ALL), R_(pad(lt)),
+    ]
+
+
 def pack_staged(text: bytes, idata: bytes, datab: bytes,
                 stackres: int,
                 run: Callable[[T], Tuple[T, int, int]],
                 verbose: bool = False) -> bytes:
-    """pack2Of decomposed at chunk granularity — mirrors _pack_body's
-    chunk list exactly.  Every derived chunk (bytes4 size fields, the
-    u64 stack-reserve, zerofills, padlists) is a small `run`-ed term
-    reduction over the same vocabulary constants; the byte join is
-    the seam (identical to what pack2Of's JOIN computes — the oracle
-    gate `python_pack` verifies byte-exact)."""
-    import struct
-    _c: dict = {}
-
-    def K_(name: str):
-        if name not in _c:
-            _c[name] = bracket(parse(getattr(st, name)))
-        return _c[name]
-
-    def b4(v: int) -> T:
-        return st.bytelist_term(v.to_bytes(4, "little"))
-
-    # bytes-mode runner (io=("stdin","bytes")): r1's results are raw
-    # bytes already — dec is identity; a value that re-enters a query
-    # as a term (bytes4 intermediates feeding ALIGN512/B4ADD/PADLIST)
-    # re-wraps via bytelist_term — construction, not NF decode.
-    if getattr(run, "is_bytes", False):
-        def r1(q: T):
-            return run(q)[0]
-
-        def dec(b) -> bytes:
-            return b
-
-        def tm(b) -> T:
-            return st.bytelist_term(b)
-    else:
-        def r1(q: T) -> T:
-            return run(q)[0]
-
-        def dec(t: T) -> bytes:
-            return st._decode_bytecells(t)
-
-        def tm(t: T) -> T:
-            return t
-
-    # the lets — ALIGN/B4ADD/U64/PADLIST/ZEROFILL as standalone
-    # reductions over bytes4/Church numerals (tiny terms; section
-    # contents never enter).  lt/li/ld are NOT re-folded through
-    # LENB4: at the chunk seam the sections are serialized bytes and
-    # their length is boundary metadata — the same discipline as
-    # assemble_staged's pos/loc bookkeeping.  (LENB4-as-term measured
-    # OOM-class: ~16GB LO live set / 72GB naive-exe arena on the
-    # 2696-cell win64 text — a sequential fold has no cones to
-    # develop and nothing to share.)
-    lt = r1(b4(len(text)))
-    li = r1(b4(len(idata)))
-    ld = r1(b4(len(datab)))
-    traw = r1(st._appn(K_("_ALIGN512"), tm(lt)))
-    iraw = r1(st._appn(K_("_ALIGN512"), tm(li)))
-    draw = r1(st._appn(K_("_ALIGN512"), tm(ld)))
-    # section VAs — .idata fixed at 0x1000, .data and .text computed
-    # (pack2Of's drva/trva lets); .text LAST keeps code size unbounded.
-    drva = r1(st._appn(K_("_ALIGN4096"),
-                       st._appn(K_("_B4ADD"), b4(0x1000), tm(li))))
-    trva = r1(st._appn(K_("_ALIGN4096"),
-                       st._appn(K_("_B4ADD"), tm(drva), tm(ld))))
-    dptr = r1(st._appn(K_("_B4ADD"), b4(0x200), tm(iraw)))
-    tptr = r1(st._appn(K_("_B4ADD"), tm(dptr), tm(draw)))
-    iddr = r1(st._appn(K_("_B4ADD"), tm(iraw), tm(draw)))
-    img = r1(st._appn(K_("_ALIGN4096"),
-                      st._appn(K_("_B4ADD"), tm(trva), tm(lt))))
-    u64 = r1(st._appn(K_("_U64"), b4(stackres)))
-
-    def zf(n: int) -> bytes:
-        return dec(r1(st._appn(K_("_ZEROFILL"), st.church(n))))
-
-    def pad(len4: T) -> bytes:
-        return dec(r1(st._appn(K_("_PADLIST"), len4)))
-
-    sizes = {"lt": lt, "li": li, "ld": ld, "traw": traw,
-             "iraw": iraw, "draw": draw, "drva": drva, "trva": trva,
-             "dptr": dptr, "tptr": tptr, "iddr": iddr, "img": img}
-    sects = {"text": text, "idata": idata, "datab": datab}
-    z12 = zf(12)
-    chunks = [
-        b"MZ", zf(58), struct.pack("<I", 0x40), b"PE\x00\x00",
-        struct.pack("<HHIIIHH", 0x8664, 3, 0, 0, 0, 0xF0, 0x22),
-        struct.pack("<HBB", 0x20B, 0, 0),
-        dec(traw), dec(iddr), struct.pack("<I", 0),
-        dec(trva), dec(trva),
-        struct.pack("<Q", 0x140000000),
-        struct.pack("<II", 0x1000, 0x200),
-        struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0),
-        struct.pack("<I", 0), dec(img),
-        struct.pack("<II", 0x200, 0),
-        struct.pack("<HH", 3, 0x8100),
-        dec(u64),
-        struct.pack("<QQQ", 0x1000, 0x100000, 0x1000),
-        struct.pack("<II", 0, 16), struct.pack("<II", 0, 0),
-        struct.pack("<I", 0x1000), dec(li),
-        zf(14 * 8),
-        b".idata\x00\x00", dec(li),
-        struct.pack("<I", 0x1000), dec(iraw),
-        struct.pack("<I", 0x200), z12,
-        struct.pack("<I", 0x40000040),
-        b".data\x00\x00\x00", dec(ld),
-        dec(drva), dec(draw), dec(dptr), z12,
-        struct.pack("<I", 0xC0000040),
-        b".text\x00\x00\x00", dec(lt),
-        dec(trva), dec(traw), dec(tptr), z12,
-        struct.pack("<I", 0x60000020),
-        zf(0x200 - 448),
-        idata, pad(tm(li)), datab, pad(tm(ld)), text, pad(tm(lt)),
-    ]
+    """pack2Of decomposed at chunk granularity — evaluates
+    _pack_recipe: root elements are small `run`-ed term reductions
+    over the vocabulary constants; lit elements are emitted
+    verbatim; stage elements insert the linked/assembled sections.
+    The byte join is the seam (identical to what pack2Of's JOIN
+    computes — the oracle gate `python_pack` verifies byte-exact)."""
+    import plex_bundle as pb
+    sects = {("emit.link", 0): idata, ("emit.link", 1): datab,
+             ("emit.assemble", pb.MAP_ALL): text}
+    bytes_mode = getattr(run, "is_bytes", False)
+    chunks = []
+    for e in _pack_recipe(len(text), len(idata), len(datab),
+                          stackres):
+        if e[0] == "lit":
+            chunks.append(e[1])
+        elif e[0] == "stage":
+            chunks.append(sects[(e[1], e[2])])
+        else:
+            nf = run(e[1])[0]
+            chunks.append(nf if bytes_mode
+                          else st._decode_bytecells(nf))
     return b"".join(chunks)
 
 

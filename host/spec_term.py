@@ -3615,6 +3615,62 @@ def _rebase_ir_nodes(blob: bytes, n_nodes: int, base: int) -> bytes:
     return bytes(out)
 
 
+def ir_roots(blob: bytes) -> int:
+    """packed-IR stream -> root count (header field, no walk)."""
+    if len(blob) < 16:
+        raise ValueError("packed-IR: truncated header")
+    magic, ver, _nn, nr = struct.unpack_from("<IIII", blob, 0)
+    if magic != IR_MAGIC or ver != IR_VERSION:
+        raise ValueError("packed-IR: bad magic/version")
+    return nr
+
+
+def slice_ir(blob: bytes, start: int, count: int) -> bytes:
+    """root-range substream of a canonical multi-root pack — the
+    reachable-subgraph projection.  Kept nodes stay in original
+    postorder (children precede parents, so the slice is a valid
+    canonical stream) with child indices rebased; leaf/var records
+    carry values, verbatim.  Node digests are position-independent,
+    so the surviving roots' content keys are unchanged — bounded
+    execution of a large stream is slicing, not repacking."""
+    magic, ver, nn, nr = struct.unpack_from("<IIII", blob, 0)
+    if magic != IR_MAGIC or ver != IR_VERSION:
+        raise ValueError("packed-IR: bad magic/version")
+    if not 0 <= start <= start + count <= nr:
+        raise ValueError(
+            f"packed-IR: slice {start}:{start + count} outside "
+            f"{nr} roots")
+    idx = struct.unpack_from(f"<{nr}I", blob, 16)
+    nodes = memoryview(blob)[16 + 4 * nr:]
+    keep = bytearray(nn)
+    for ri in idx[start:start + count]:
+        st_ = [ri]
+        while st_:
+            i = st_.pop()
+            if keep[i]:
+                continue
+            keep[i] = 1
+            tag, l, r = _IR_NODE.unpack_from(nodes, i * 9)
+            if tag == 0:
+                st_.append(l)
+                st_.append(r)
+    rebase: Dict[int, int] = {}
+    out = bytearray()
+    unpack = _IR_NODE.unpack_from
+    pack = _IR_NODE.pack
+    for i in range(nn):
+        if not keep[i]:
+            continue
+        rebase[i] = len(rebase)
+        tag, l, r = unpack(nodes, i * 9)
+        out += pack(tag, rebase[l], rebase[r]) \
+            if tag == 0 else pack(tag, l, r)
+    n_idx = [rebase[r] for r in idx[start:start + count]]
+    return (struct.pack("<IIII", IR_MAGIC, IR_VERSION,
+                        len(rebase), count)
+            + struct.pack(f"<{count}I", *n_idx) + bytes(out))
+
+
 def _pack_ir_all(*roots: T, pinned: Optional[Dict[int, tuple]] = None):
     """One walk -> (node bytes, root indices, per-node Merkle digests).
 
