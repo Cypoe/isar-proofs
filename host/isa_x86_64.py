@@ -126,6 +126,12 @@ INSN: Tuple[Tuple[str, str, int, int, object, object], ...] = (
     ("inc_mrip",      "inc",   0xFF,   1, 0,     "p"),
     ("div_r64",       "div",   0xF7,   1, 6,     0),
     ("syscall",       "syscall", 0x0F05, 0, None, 0),
+    # MT kernel (x86_64.win64.ir.mt): slab claiming + ctx-memory adds +
+    # u32 frame-len stores + buffer append copies
+    ("lock_xadd_rip", "lock xadd", 0x0FC1, 1, None, "p"),
+    ("add_m64_imm",   "add",   0x81,   1, 0,     "gm"),
+    ("mov_m32_r32",   "mov",   0x89,   0, None,  0),
+    ("rep_movsb",     "rep movsb", 0xA4, 0, None, 0),
 )
 FORMS: Dict[str, Tuple[str, int, int, object, object]] = {r[0]: r[1:] for r in INSN}
 
@@ -286,6 +292,22 @@ ENCS: Dict[str, Tuple] = {
                            ("modrm", "ext", "rip"), ("rel", 0))),),
     "div_r64":       (((), _EXT_RM),),
     "syscall":       (((), (("op",),)),),
+    # lock xadd [m64], r64 — F0 48 0F C1 /r (reg=src, mem=dst; reg
+    # receives the old value — atomic bump-claim primitive)
+    "lock_xadd_rip": (((), (("raw", 0xF0), ("rex", "w", "R1"),
+                            ("op",), ("modrm", "reg1", "rip"), ("rel", 0))),),
+    # grp1 add [m64],imm — same shape as cmp_m64_imm, ext=0
+    "add_m64_imm": (
+        ((("i8", 1),), (("rex", "w", "B0"), ("op", 0x83),
+                        ("modrm", "ext", "mem0"), ("disp",),
+                        ("imm", "i8", 1))),
+        ((),           (("rex", "w", "B0"), ("op",),
+                        ("modrm", "ext", "mem0"), ("disp",),
+                        ("imm", "i32", 1))),
+    ),
+    "mov_m32_r32":   (((), (("rex", "B0", "R1"), ("op",),
+                           ("modrm", "reg1", "mem0"), ("disp",))),),
+    "rep_movsb":     (((), (("raw", 0xF3), ("op",))),),
 }
 
 
@@ -362,9 +384,14 @@ def _f_rel(ctx: _Ctx, i: int) -> bytes:
     return struct.pack("<i", ctx.resolve(o[1]))
 
 
+def _f_raw(ctx: _Ctx, *v) -> bytes:
+    """literal prefix bytes (LOCK/REP) — emitted ahead of REX by row order."""
+    return bytes(v)
+
+
 FIELDS: Dict[str, Callable[..., bytes]] = {
     "rex": _f_rex, "op": _f_op, "oprd": _f_oprd, "modrm": _f_modrm,
-    "disp": _f_disp, "imm": _f_imm, "rel": _f_rel,
+    "disp": _f_disp, "imm": _f_imm, "rel": _f_rel, "raw": _f_raw,
 }
 
 PREDS: Dict[str, Callable[..., bool]] = {
@@ -434,6 +461,14 @@ def render_fasm(insn: Insn, resolve=None) -> str:
         return f"mov {mem(ops[0])}, {ops[1]}"
     if form == "cmp_m64_imm":
         return f"cmp qword {mem(ops[0])}, {ops[1]}"
+    if form == "add_m64_imm":
+        return f"add qword {mem(ops[0])}, {ops[1]}"
+    if form == "lock_xadd_rip":
+        return f"lock xadd qword {mem(ops[0])}, {ops[1]}"
+    if form == "mov_m32_r32":
+        return f"mov dword {mem(ops[0])}, {ops[1]}"
+    if form == "rep_movsb":
+        return "rep movsb"
     if form == "add_r8_imm8":
         return f"add {ops[0]}, {ops[1]}"
     if len(ops) == 0:
@@ -630,6 +665,11 @@ ROW_SAMPLES: List[Tuple[str, Insn]] = [
     ("inc_mrip", ("inc_mrip", ("p", 0x3000))),
     ("div_r64", ("div_r64", "r8")),
     ("syscall", ("syscall",)),
+    ("lock_xadd_rip", ("lock_xadd_rip", ("p", 0x3000), "rax")),
+    ("add_m64_imm", ("add_m64_imm", ("m", "r10", 0), 1)),
+    ("add_m64_imm", ("add_m64_imm", ("m", "r13", 0x40), 0x1000)),
+    ("mov_m32_r32", ("mov_m32_r32", ("m", "r14", 0), "edx")),
+    ("rep_movsb", ("rep_movsb",)),
 ]
 
 

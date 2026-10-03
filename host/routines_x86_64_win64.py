@@ -1152,7 +1152,10 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
         I("mov_rip_r64", ("p", "irhdr"), "rax"),
         # heap: one reserved region; rbx=rbp=base means "nothing committed"
         I("xor_r32_r32", "ecx", "ecx"),
-        I("mov_r64_imm", "rdx", R.ir_arena_bytes),
+        # MT: the reservation scales by T — each worker's slab claims get
+        # the full single-thread budget, so T threads is not a smaller
+        # per-stream arena than the ST kernel's (VA-only until commit).
+        I("mov_r64_imm", "rdx", R.ir_arena_bytes * R.threads),
         I("mov_r32_imm32", "r8d", MEM_RESERVE),
         I("mov_r32_imm32", "r9d", PAGE_RW),
         I("call_mrip", iat("VirtualAlloc")),
@@ -1166,6 +1169,38 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
         I("mov_rip_r64", ("p", "irnstreams"), "rax"),
         I("mov_rip_r64", ("p", "irj"), "rax"),
     ]
+    if R.threads > 1:
+        # r10 = the main thread's ctx block — mtctxs[threads].  Every
+        # threaded helper (mkapp/mkleaf for the vocab below) keeps its
+        # mutable state r10-relative; main's own ctx keeps pre-spawn
+        # bookkeeping valid and makes it reachable at aggregation.
+        p += [
+            I("lea_r64_rip", "r10", ("p", "mtctxs")),
+            I("mov_r64_imm", "rax", R.threads * MT_CTX_BYTES),
+            I("add_r64_r64", "r10", "rax"),
+            # first chunk committed for the template/vocab prefix —
+            # grow_heap's claim path needs mtslab, which is per-stream
+            I("mov_r64_r64", "rcx", "rbp"),
+            I("mov_r64_imm", "rdx", R.chunk_bytes),
+            I("mov_r32_imm32", "r8d", MEM_COMMIT),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+            I("mov_r64_imm", "rax", R.chunk_bytes),
+            I("add_r64_r64", "rbp", "rax"),
+            # ctx[T] span = the whole reservation — the vocab build's
+            # grow_heap stays on the commit path and never reaches the
+            # per-stream slabtop claim.  r10 reload: kernel32's syscall
+            # path clobbers it (mov r10,rcx).
+            I("lea_r64_rip", "r10", ("p", "mtctxs")),
+            I("mov_r64_imm", "rax", R.threads * MT_CTX_BYTES),
+            I("add_r64_r64", "r10", "rax"),
+            I("mov_r64_rip", "rax", ("p", "irarena")),
+            I("mov_r64_imm", "rcx", R.ir_arena_bytes * R.threads),
+            I("add_r64_r64", "rax", "rcx"),
+            I("mov_m64_r64", ("m", "r10", MT_CTX["myend"]), "rax"),
+            I("mov_m64_r64", ("m", "r10", MT_CTX["homeend"]), "rax"),
+        ]
     if not R.fuse_s:
         # derived-S template: oldest arena cells (below permend), so a
         # reclaim="redirect" step can never rewrite it in place; tag-3
@@ -1175,7 +1210,7 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
         # egress vocab in the same permanent prefix: I/K leaves, the KI
         # cell, and 16 inert marker leaves {tag EG_MARK, l=k} — every
         # decode probe references them, so they sit below permend too
-        p += [
+        vocab = [
             I("mov_r64_rip", "rax", ("p", "nalloc")),    # vocab allocs
             I("mov_rip_r64", ("p", "scratch"), "rax"),   # uncounted
             I("mov_r32_imm32", "edx", Tag.norm),
@@ -1199,20 +1234,26 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
             I("jl_rel32", ("l", "eb_mkloop")),
             I("mov_r64_rip", "rax", ("p", "scratch")),
             I("mov_rip_r64", ("p", "nalloc"), "rax"),
+        ]
+        p += vocab
+        if R.threads == 1:
             # committed frame buffer: [bytes] per root (u32 len prefix
             # lives in .data — no 32-bit store in the ISA), cap doubles
-            # as the malformed-spine termination bound
-            I("xor_r32_r32", "ecx", "ecx"),
-            I("mov_r64_imm", "rdx", EG_OUT_BYTES),
-            I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
-            I("mov_r32_imm32", "r9d", PAGE_RW),
-            I("call_mrip", iat("VirtualAlloc")),
-            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-            I("mov_rip_r64", ("p", "eb_out"), "rax"),
-            I("mov_r64_imm", "rdx", EG_OUT_BYTES),
-            I("add_r64_r64", "rax", "rdx"),
-            I("mov_rip_r64", ("p", "eb_lim"), "rax"),
-        ]
+            # as the malformed-spine termination bound.  MT: per-thread
+            # buffers are VA'd at spawn instead.
+            p += [
+                I("xor_r32_r32", "ecx", "ecx"),
+                I("mov_r64_imm", "rdx", EG_OUT_BYTES),
+                I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+                I("mov_r32_imm32", "r9d", PAGE_RW),
+                I("call_mrip", iat("VirtualAlloc")),
+                I("test_r64_r64", "rax", "rax"),
+                I("je_rel32", ("l", "exit4")),
+                I("mov_rip_r64", ("p", "eb_out"), "rax"),
+                I("mov_r64_imm", "rdx", EG_OUT_BYTES),
+                I("add_r64_r64", "rax", "rdx"),
+                I("mov_rip_r64", ("p", "eb_lim"), "rax"),
+            ]
     p += [
         # end of the immutable prefix — depacked input cells occupy
         # [permend, irstart), the reduction bump starts at irstart
@@ -1291,7 +1332,8 @@ def r_ir_read(R: Realization, ctx: Ctx) -> Program:
         I("shl_r64_imm8", "rcx", 2), I("add_r64_r64", "rax", "rcx"),
         I("mov_r64_r64", "r14", "rax"),                      # body size
         I("test_r64_r64", "r14", "r14"),
-        I("je_rel32", ("l", "ir_depack")),                   # empty body
+        # MT: next stage is ir_spawn (workers depack); ST: ir_depack
+        I("je_rel32", ("l", ctx.get("irnext", "ir_depack"))),
         I("xor_r32_r32", "r13d", "r13d"),
         LBL("ir_brd"),
         I("mov_r64_rip", "rcx", ("p", "hin")),
@@ -1546,6 +1588,285 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rax", ("p", "irnstreams")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
         I("mov_r64_rip", "r15", ("p", "irsteps")),
+    ]
+    return p
+
+
+def r_ir_spawn(R: Realization, ctx: Ctx) -> Program:
+    """MT stream driver (falls through from ir_read): slabtop reset,
+    mtslab = depack span + headroom, ctx blocks zeroed, static root
+    chunks, T CreateThreads, WaitForMultipleObjects join, stats
+    aggregation, then ordered frame flush — thread t holds the
+    contiguous chunk [j0,j1) so concatenating buffers in t order IS
+    root order.  Owns the ir_sdone tail (falls to stats)."""
+    iat = ctx["iat"]
+    T = R.threads
+    CTXB = MT_CTX_BYTES
+    p: Program = [
+        LBL("ir_spawn"),
+        # own frame: arg5/arg6 live at [rsp+0x20/0x28]; locals 0x30+
+        I("sub_r64_imm", "rsp", 0x50),
+        # fresh claim frontier per stream: slabs start past the template
+        I("mov_r64_rip", "rax", ("p", "permend")),
+        I("mov_rip_r64", ("p", "slabtop"), "rax"),
+        # mtslab = pagealign(24*nn + 8*nr [+ persist] + headroom)
+        I("mov_r64_rip", "rax", ("p", "irnodes")),
+    ] + _mul24() + [
+        I("mov_r64_rip", "rcx", ("p", "irnroots")),
+        I("shl_r64_imm8", "rcx", 3),
+        I("add_r64_r64", "rax", "rcx"),
+    ]
+    if R.reclaim == "redirect":
+        p += [I("mov_r64_imm", "rcx", R.persist_bytes),
+              I("add_r64_r64", "rax", "rcx")]
+    p += [
+        I("mov_r64_imm", "rcx", MT_HEADROOM),
+        I("add_r64_r64", "rax", "rcx"),
+        I("add_r64_imm", "rax", 0xfff),
+        I("and_r64_imm", "rax", -4096),
+        I("mov_rip_r64", ("p", "mtslab"), "rax"),
+        # zero the ctx array ((T+1) blocks; ctx[T] is main's)
+        I("lea_r64_rip", "rdi", ("p", "mtctxs")),
+        I("mov_r64_imm", "rcx", (T + 1) * CTXB // 8),
+        I("xor_r32_r32", "eax", "eax"),
+        LBL("mt_z"),
+        I("mov_m64_r64", ("m", "rdi", 0), "rax"),
+        I("add_r64_imm", "rdi", 8), I("dec_r64", "rcx"),
+        I("jne_rel32", ("l", "mt_z")),
+        # per-thread ordered frame buffers — one VA, T partitions
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_imm", "rdx", T * EG_MT_OUT),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_r64", "r13", "rax"),                  # outbase
+        # chunk geometry: c = nr // T, rem = nr % T
+        I("mov_r64_rip", "rax", ("p", "irnroots")),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "ecx", T),
+        I("div_r64", "rcx"),
+        I("mov_r64_r64", "r12", "rax"),                  # c
+        I("mov_m64_r64", ("m", "rsp", 0x30), "rdx"),     # rem
+        # spawn loop: r14=ctxptr, r15=t, rbx=running chunk start
+        I("lea_r64_rip", "r14", ("p", "mtctxs")),
+        I("xor_r32_r32", "r15d", "r15d"),
+        I("xor_r32_r32", "ebx", "ebx"),
+        LBL("mt_sploop"),
+        I("mov_m64_r64", ("m", "r14", MT_CTX["irj"]), "rbx"),
+        I("mov_r64_r64", "rax", "r12"),                  # take = c
+        I("mov_r64_m64", "rcx", ("m", "rsp", 0x30)),
+        I("cmp_r64_r64", "r15", "rcx"),                  # t < rem?
+        I("jge_rel32", ("l", "mt_noext")),
+        I("inc_r64", "rax"),
+        LBL("mt_noext"),
+        I("add_r64_r64", "rax", "rbx"),                  # jend
+        I("mov_m64_r64", ("m", "r14", MT_CTX["jend"]), "rax"),
+        I("mov_r64_r64", "rbx", "rax"),
+        # outbuf = outbase + t*EG_MT_OUT (EG_MT_OUT is 1<<24)
+        I("mov_r64_r64", "rax", "r15"),
+        I("shl_r64_imm8", "rax", 24),
+        I("add_r64_r64", "rax", "r13"),
+        I("mov_m64_r64", ("m", "r14", MT_CTX["outbuf"]), "rax"),
+        I("mov_m64_r64", ("m", "r14", MT_CTX["outcur"]), "rax"),
+        I("mov_r64_imm", "rcx", EG_MT_OUT),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_m64_r64", ("m", "r14", MT_CTX["outlim"]), "rax"),
+        # CreateThread(0,0,mt_worker,ctx,0,0) -> handles[t]
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("xor_r32_r32", "edx", "edx"),
+        I("lea_r64_rip", "r8", ("p", "mt_worker")),
+        I("mov_r64_r64", "r9", "r14"),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("mov_m64_imm32", ("m", "rsp", 0x28), 0),
+        I("call_mrip", iat("CreateThread")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("lea_r64_rip", "rcx", ("p", "mthandles")),
+        I("mov_r64_r64", "rdx", "r15"), I("shl_r64_imm8", "rdx", 3),
+        I("add_r64_r64", "rcx", "rdx"),
+        I("mov_m64_r64", ("m", "rcx", 0), "rax"),
+        I("add_r64_imm", "r14", CTXB),
+        I("inc_r64", "r15"),
+        I("cmp_r64_imm", "r15", T), I("jl_rel32", ("l", "mt_sploop")),
+        # WaitForMultipleObjects(T, handles, TRUE, INFINITE)
+        I("mov_r32_imm32", "ecx", T),
+        I("lea_r64_rip", "rdx", ("p", "mthandles")),
+        I("mov_r32_imm32", "r8d", 1),
+        I("mov_r32_imm32", "r9d", -1),
+        I("call_mrip", iat("WaitForMultipleObjects")),
+        I("mov_r64_imm", "rcx", 0xFFFFFFFF),             # WAIT_FAILED
+        I("cmp_r64_r64", "rax", "rcx"), I("je_rel32", ("l", "exit4")),
+        # aggregate + flush, thread order: r14=ctxptr, r15=t
+        I("lea_r64_rip", "r14", ("p", "mtctxs")),
+        I("xor_r32_r32", "r15d", "r15d"),
+        LBL("mt_join"),
+        # Σctx[t].nalloc / .irsteps (+ .eb_dec in bytes mode) — the
+        # T+1st block (main's vocab) rides the loop's last step
+        I("mov_r64_m64", "rax", ("m", "r14", MT_CTX["nalloc"])),
+        I("mov_r64_rip", "rdx", ("p", "nalloc")),
+        I("add_r64_r64", "rdx", "rax"),
+        I("mov_rip_r64", ("p", "nalloc"), "rdx"),
+        I("mov_r64_m64", "rax", ("m", "r14", MT_CTX["irsteps"])),
+        I("mov_r64_rip", "rdx", ("p", "irsteps")),
+        I("add_r64_r64", "rdx", "rax"),
+        I("mov_rip_r64", ("p", "irsteps"), "rdx"),
+    ]
+    if R.io[1] == "bytes":
+        p += [
+            I("mov_r64_m64", "rax", ("m", "r14", MT_CTX["eb_dec"])),
+            I("mov_r64_rip", "rdx", ("p", "eb_dec")),
+            I("add_r64_r64", "rdx", "rax"),
+            I("mov_rip_r64", ("p", "eb_dec"), "rdx"),
+        ]
+    p += [
+        # flush this thread's frames: WriteFile(hout, outbuf, outcur-buf)
+        I("cmp_r64_imm", "r15", T), I("jge_rel32", ("l", "mt_jnext")),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("mov_r64_m64", "rdx", ("m", "r14", MT_CTX["outbuf"])),
+        I("mov_r64_m64", "r8", ("m", "r14", MT_CTX["outcur"])),
+        I("sub_r64_r64", "r8", "rdx"),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        # CloseHandle(handles[t])
+        I("lea_r64_rip", "rcx", ("p", "mthandles")),
+        I("mov_r64_r64", "rdx", "r15"), I("shl_r64_imm8", "rdx", 3),
+        I("add_r64_r64", "rcx", "rdx"),
+        I("mov_r64_m64", "rcx", ("m", "rcx", 0)),
+        I("call_mrip", iat("CloseHandle")),
+        LBL("mt_jnext"),
+        I("add_r64_imm", "r14", CTXB),
+        I("inc_r64", "r15"),
+        I("cmp_r64_imm", "r15", T + 1),
+        I("jl_rel32", ("l", "mt_join")),
+        # ---- bdone tail: release the stream region, next stream ----
+        I("mov_r64_rip", "rcx", ("p", "irbuf")),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r32_imm32", "r8d", MEM_RELEASE),
+        I("call_mrip", iat("VirtualFree")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_r64_rip", "rax", ("p", "irnstreams")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "irnstreams"), "rax"),
+        I("add_r64_imm", "rsp", 0x50),
+        I("jmp_rel32", ("l", "ir_sloop")),
+        LBL("ir_sdone"),
+        I("mov_r64_rip", "rax", ("p", "irnstreams")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "r15", ("p", "irsteps")),
+    ]
+    return p
+
+
+def r_mt_worker(R: Realization, ctx: Ctx) -> Program:
+    """mt_worker(rcx=ctxptr): claim a slab span (lock xadd slabtop),
+    depack the shared input into it, then the per-root loop over the
+    static chunk [irj, jend): arena reset, reduce, egress to the
+    thread's ordered frame buffer.  Nothing shared-mutable is written:
+    slab cells are thread-private, template/vocab are read-only."""
+    iat = ctx["iat"]
+    p: Program = [
+        LBL("mt_worker"),
+        # CreateThread entry; save the callee-saved regs the body uses
+        I("push_r64", "rbx"), I("push_r64", "rbp"),
+        I("push_r64", "rsi"), I("push_r64", "rdi"),
+        I("push_r64", "r12"), I("push_r64", "r13"),
+        I("push_r64", "r14"), I("push_r64", "r15"),
+        I("sub_r64_imm", "rsp", 0x28),
+        I("mov_r64_r64", "r10", "rcx"),                  # ctx base
+        # claim [slabtop, +mtslab)
+        I("mov_r64_rip", "rax", ("p", "mtslab")),
+        I("lock_xadd_rip", ("p", "slabtop"), "rax"),
+        I("mov_r64_rip", "rcx", ("p", "mtslab")),
+        I("add_r64_r64", "rcx", "rax"),                  # span end
+        I("mov_r64_rip", "rdx", ("p", "irarena")),
+        I("mov_r64_imm", "r8", R.ir_arena_bytes * R.threads),
+        I("add_r64_r64", "rdx", "r8"),
+        I("cmp_r64_r64", "rdx", "rcx"),
+        I("jl_rel32", ("l", "exit4")),
+        I("mov_m64_r64", ("m", "r10", MT_CTX["cellbase"]), "rax"),
+        I("mov_m64_r64", ("m", "r10", MT_CTX["myend"]), "rcx"),
+        I("mov_m64_r64", ("m", "r10", MT_CTX["homeend"]), "rcx"),
+        I("mov_r64_r64", "rbx", "rax"),                  # bump cursors
+        I("mov_r64_r64", "rbp", "rax"),                  # = uncommitted
+    ]
+    if R.io[1] == "bytes":
+        # frame payload bound = this thread's out buffer end
+        p += [
+            I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["outlim"])),
+            I("mov_m64_r64", ("m", "r10", MT_CTX["eb_lim"]), "rax"),
+        ]
+    p += [
+        I("jmp_rel32", ("l", "ir_depack")),
+        # ---- depack tail lands here: per-root loop over [irj, jend)
+        LBL("ir_binit"),
+        LBL("ir_bloop"),
+        I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["irj"])),
+        I("mov_r64_m64", "rcx", ("m", "r10", MT_CTX["jend"])),
+        I("cmp_r64_r64", "rax", "rcx"),
+        I("jge_rel32", ("l", "mt_wdone")),
+        # arena reset: bump back to irstart inside the home span —
+        # pages stay committed (reset is a cursor move; MEM_COMMIT
+        # re-arming by grow_heap is idempotent) and never decommitted
+        # mid-stream: span claims interleave, so no free-range is
+        # exclusively this thread's to release.
+        I("mov_r64_m64", "rbx", ("m", "r10", MT_CTX["irstart"])),
+        I("mov_r64_r64", "rbp", "rbx"),
+        I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["homeend"])),
+        I("mov_m64_r64", ("m", "r10", MT_CTX["myend"]), "rax"),
+        # r12 = irroots[irj]; r15 = per-root steps
+        I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["irj"])),
+        I("shl_r64_imm8", "rax", 3),
+        I("mov_r64_m64", "rcx", ("m", "r10", MT_CTX["irroots"])),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_r64_m64", "r12", ("m", "rax", 0)),
+        I("xor_r32_r32", "r15d", "r15d"),
+        LBL("ir_rloop"),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_red_done")),
+        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
+    ]
+    if R.fuel is not None:
+        p += [I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2"))]
+    p += [
+        I("jmp_rel32", ("l", "ir_rloop")),
+        LBL("ir_red_done"),
+        I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["irsteps"])),
+        I("add_r64_r64", "rax", "r15"),
+        I("mov_m64_r64", ("m", "r10", MT_CTX["irsteps"]), "rax"),
+    ]
+    if R.io[1] == "bytes":
+        # payload window begins past the u32 len slot at outcur
+        p += [
+            I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["outcur"])),
+            I("add_r64_imm", "rax", 4),
+            I("mov_m64_r64", ("m", "r10", MT_CTX["eb_out"]), "rax"),
+            I("call_rel32", ("l", "emit_bytes")),
+        ]
+    elif R.io[1] == "ir":
+        p += [I("call_rel32", ("l", "emit_ir"))]
+    else:
+        # text NF line straight into the frame buffer
+        p += [
+            I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
+            I("mov_r64_m64", "rsi", ("m", "r10", MT_CTX["outcur"])),
+            I("add_r64_r64", "rax", "rax"),
+            I("add_r64_imm", "rax", 16),
+            I("add_r64_r64", "rax", "rsi"),
+            I("mov_r64_m64", "rcx", ("m", "r10", MT_CTX["outlim"])),
+            I("cmp_r64_r64", "rcx", "rax"),
+            I("jl_rel32", ("l", "exit4")),
+            I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "emit_nf")),
+            I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
+            I("mov_m64_r64", ("m", "r10", MT_CTX["outcur"]), "rsi"),
+        ]
+    p += [
+        I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["irj"])),
+        I("inc_r64", "rax"),
+        I("mov_m64_r64", ("m", "r10", MT_CTX["irj"]), "rax"),
+        I("jmp_rel32", ("l", "ir_bloop")),
+        LBL("mt_wdone"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("call_mrip", iat("ExitThread")),
     ]
     return p
 
@@ -1814,8 +2135,58 @@ def r_res_reduce(R: Realization, ctx: Ctx) -> Program:
 def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
     """grow_heap (IR): commit-ahead inside the reserved arena —
     VirtualAlloc(rbp, chunk, MEM_COMMIT, RW); rbp += chunk on success.
-    Also bounds the depack-region ds build (its rbp = region end)."""
+    Also bounds the depack-region ds build (its rbp = region end).
+    MT: commit-ahead within the thread's claimed span; at myend the
+    worker claims the next slab span (lock xadd on slabtop), commits
+    its first chunk, and the bump cursors jump to it."""
     iat = ctx["iat"]
+    if R.threads > 1:
+        return [
+            LBL("grow_heap"),
+            I("sub_r64_imm", "rsp", 0x28),
+            # in-span room?  rbp+chunk <= ctx.myend -> commit [rbp,chunk)
+            I("lea_r64_m64", "rax", ("m", "rbp", R.chunk_bytes)),
+            I("mov_r64_m64", "rcx", ("m", "r10", MT_CTX["myend"])),
+            I("cmp_r64_r64", "rcx", "rax"),
+            I("jl_rel32", ("l", "gh_claim")),
+            I("mov_r64_r64", "rcx", "rbp"),
+            I("mov_r64_imm", "rdx", R.chunk_bytes),
+            I("mov_r32_imm32", "r8d", MEM_COMMIT),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"),
+            I("je_rel32", ("l", "grow_fail")),
+            I("mov_r64_imm", "rax", R.chunk_bytes),
+            I("add_r64_r64", "rbp", "rax"),
+            I("add_r64_imm", "rsp", 0x28), I("ret"),
+            # ---- span exhausted: claim [slabtop, +mtslab) ----
+            LBL("gh_claim"),
+            I("mov_r64_rip", "rax", ("p", "mtslab")),
+            I("lock_xadd_rip", ("p", "slabtop"), "rax"),
+            # rax = claimed base; bound: base+mtslab <= arena end
+            I("mov_r64_rip", "rcx", ("p", "mtslab")),
+            I("add_r64_r64", "rcx", "rax"),              # rcx = new myend
+            I("mov_r64_rip", "rdx", ("p", "irarena")),
+            I("mov_r64_imm", "r8", R.ir_arena_bytes * R.threads),
+            I("add_r64_r64", "rdx", "r8"),
+            I("cmp_r64_r64", "rdx", "rcx"),
+            I("jl_rel32", ("l", "grow_fail")),
+            I("mov_m64_r64", ("m", "r10", MT_CTX["myend"]), "rcx"),
+            I("mov_r64_r64", "rbx", "rax"),
+            I("mov_r64_r64", "rbp", "rax"),
+            I("mov_r64_r64", "rcx", "rbp"),
+            I("mov_r64_imm", "rdx", R.chunk_bytes),
+            I("mov_r32_imm32", "r8d", MEM_COMMIT),
+            I("mov_r32_imm32", "r9d", PAGE_RW),
+            I("call_mrip", iat("VirtualAlloc")),
+            I("test_r64_r64", "rax", "rax"),
+            I("je_rel32", ("l", "grow_fail")),
+            I("mov_r64_imm", "rax", R.chunk_bytes),
+            I("add_r64_r64", "rbp", "rax"),
+            I("add_r64_imm", "rsp", 0x28), I("ret"),
+            LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
+            I("call_mrip", iat("ExitProcess")),
+        ]
     return [
         LBL("grow_heap"),
         I("sub_r64_imm", "rsp", 0x28),
@@ -2037,23 +2408,36 @@ def r_emit_bytes(R: Realization, ctx: Ctx) -> Program:
         I("mov_m8_r8", ("m", "r14", 0), "al"),
         I("inc_r64", "r14"),
         I("jmp_rel32", ("l", "eb_loop")),
-        # ---- flush: u32le len (in .data — no 32-bit store form) + bytes
+        # ---- flush: u32le len + bytes ----
         LBL("eb_flush"),
         I("mov_r64_rip", "rax", ("p", "eb_out")),
         I("mov_r64_r64", "rdx", "r14"), I("sub_r64_r64", "rdx", "rax"),
-        I("mov_rip_r64", ("p", "eb_len"), "rdx"),
-        I("mov_r64_rip", "rcx", ("p", "hout")),
-        I("lea_r64_rip", "rdx", ("p", "eb_len")),
-        I("mov_r32_imm32", "r8d", 4),
-        I("lea_r64_rip", "r9", ("p", "nw")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("WriteFile")),
-        I("mov_r64_rip", "rcx", ("p", "hout")),
-        I("mov_r64_rip", "rdx", ("p", "eb_out")),
-        I("mov_r64_r64", "r8", "r14"), I("sub_r64_r64", "r8", "rdx"),
-        I("lea_r64_rip", "r9", ("p", "nw")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("WriteFile")),
+    ]
+    if R.threads > 1:
+        # MT: append [u32 len][payload] to this thread's frame buffer —
+        # the worker set eb_out = outcur+4, so the len slot is outcur
+        # itself and the payload already sits where it belongs.
+        p += [
+            I("mov_m32_r32", ("m", "rax", -4), "edx"),
+            I("mov_rip_r64", ("p", "outcur"), "r14"),
+        ]
+    else:
+        p += [
+            I("mov_rip_r64", ("p", "eb_len"), "rdx"),
+            I("mov_r64_rip", "rcx", ("p", "hout")),
+            I("lea_r64_rip", "rdx", ("p", "eb_len")),
+            I("mov_r32_imm32", "r8d", 4),
+            I("lea_r64_rip", "r9", ("p", "nw")),
+            I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+            I("call_mrip", iat("WriteFile")),
+            I("mov_r64_rip", "rcx", ("p", "hout")),
+            I("mov_r64_rip", "rdx", ("p", "eb_out")),
+            I("mov_r64_r64", "r8", "r14"), I("sub_r64_r64", "r8", "rdx"),
+            I("lea_r64_rip", "r9", ("p", "nw")),
+            I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+            I("call_mrip", iat("WriteFile")),
+        ]
+    p += [
         I("mov_r64_rip", "rax", ("p", "eb_save")),
         I("mov_rip_r64", ("p", "nalloc"), "rax"),    # probe cells uncounted
         I("add_r64_imm", "rsp", 0x28), I("ret"),
@@ -2154,21 +2538,43 @@ def r_emit_ir(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_imm", "rax", 1 << 32),
         I("add_r64_r64", "rax", "rcx"),
         I("mov_m64_r64", ("m", "r14", 8), "rax"),
-        # frame: u32 len (in .data — no dword store) + payload
+        # frame: u32 len + payload
         I("mov_r64_r64", "rdx", "rsi"), I("sub_r64_r64", "rdx", "r14"),
-        I("mov_rip_r64", ("p", "ei_len"), "rdx"),
-        I("mov_r64_rip", "rcx", ("p", "hout")),
-        I("lea_r64_rip", "rdx", ("p", "ei_len")),
-        I("mov_r32_imm32", "r8d", 4),
-        I("lea_r64_rip", "r9", ("p", "nw")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("WriteFile")),
-        I("mov_r64_rip", "rcx", ("p", "hout")),
-        I("mov_r64_rip", "rdx", ("p", "ei_out")),
-        I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "rdx"),
-        I("lea_r64_rip", "r9", ("p", "nw")),
-        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
-        I("call_mrip", iat("WriteFile")),
+    ]
+    if R.threads > 1:
+        # MT: append [u32 len][blob] to this thread's frame buffer —
+        # bound by outlim, then rep movsb the staging blob across.
+        p += [
+            I("mov_r64_rip", "rax", ("p", "outcur")),
+            I("lea_r64_m64", "rcx", ("m", "rax", 4)),
+            I("add_r64_r64", "rcx", "rdx"),            # end-of-frame
+            I("mov_r64_rip", "r8", ("p", "outlim")),
+            I("cmp_r64_r64", "r8", "rcx"),
+            I("jl_rel32", ("l", "exit4")),             # frame overflow
+            I("mov_m32_r32", ("m", "rax", 0), "edx"),
+            I("lea_r64_m64", "rdi", ("m", "rax", 4)),
+            I("mov_r64_rip", "rsi", ("p", "ei_out")),
+            I("mov_r64_r64", "rcx", "rdx"),
+            I("rep_movsb"),
+            I("mov_rip_r64", ("p", "outcur"), "rdi"),
+        ]
+    else:
+        p += [
+            I("mov_rip_r64", ("p", "ei_len"), "rdx"),
+            I("mov_r64_rip", "rcx", ("p", "hout")),
+            I("lea_r64_rip", "rdx", ("p", "ei_len")),
+            I("mov_r32_imm32", "r8d", 4),
+            I("lea_r64_rip", "r9", ("p", "nw")),
+            I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+            I("call_mrip", iat("WriteFile")),
+            I("mov_r64_rip", "rcx", ("p", "hout")),
+            I("mov_r64_rip", "rdx", ("p", "ei_out")),
+            I("mov_r64_r64", "r8", "rsi"), I("sub_r64_r64", "r8", "rdx"),
+            I("lea_r64_rip", "r9", ("p", "nw")),
+            I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+            I("call_mrip", iat("WriteFile")),
+        ]
+    p += [
         # release table + buffer (MEM_RELEASE: size operand is 0)
         I("mov_r64_rip", "rcx", ("p", "ei_tab")),
         I("xor_r32_r32", "edx", "edx"),
@@ -2284,7 +2690,27 @@ ROUTINES_IR_BYTES: Tuple[str, ...] = ROUTINES_IR + (
 # the kernel already depackable (emit_ir only — no probe vocab needed)
 ROUTINES_IR_IR: Tuple[str, ...] = ROUTINES_IR + ("emit_ir",)
 
+# MT variant (R.threads>1): ir_reduce's per-root loop becomes
+# ir_spawn (driver) + mt_worker (per-thread depack+reduce+egress);
+# ir_depack emits last — the worker jumps into it, its tail lands on
+# mt_worker's ir_binit.  Ordering constraints: ir_spawn must follow
+# ir_read (fallthrough) and precede stats (ir_sdone tail fallthrough).
+ROUTINES_IR_MT: Tuple[str, ...] = (
+    "ir_entry", "ir_read", "ir_spawn", "stats", "exits", "mt_worker",
+    "ir_depack", "grow_heap_ir", "mkleaf", "mkapp", "mkapp_p", "repr",
+    "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp",
+    "st_s", "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
+)
+ROUTINES_IR_MT_BYTES: Tuple[str, ...] = ROUTINES_IR_MT + (
+    "emit_bytes", "peval", "selidx",
+)
+ROUTINES_IR_MT_IR: Tuple[str, ...] = ROUTINES_IR_MT + ("emit_ir",)
+
 IMPORTS_IR: Tuple[str, ...] = IMPORTS + ("VirtualFree",)
+IMPORTS_IR_MT: Tuple[str, ...] = IMPORTS_IR + (
+    "CreateThread", "WaitForMultipleObjects", "CloseHandle",
+    "ExitThread",
+)
 
 # egress .data (bytes mode only — callable below keeps term-mode .data
 # byte-identical): probe vocab ptrs, frame buffer bounds, u32 len slot,
@@ -2304,11 +2730,129 @@ DATA_SLOTS_EI: Tuple[Tuple[str, int], ...] = (
 )
 
 
+# ======================================================================
+# MT KERNEL (threads>1 — toolchain native.x86_64.pe.ir.mt)
+#
+# Model (the g_slabtop/SLAB_CELLS discipline of ir_cuda.cu): the shared
+# arena reservation is partitioned by atomic claims — a worker's slab is
+# [lock-xadd bump, +slab) — and every mutable slot the reducer touches
+# becomes a field of a per-thread context block, addressed through r10
+# (unused kernel-wide; volatile across WinAPI, so call_mrip sites in
+# threaded routines save/restore it on their own frame).
+#
+# Isolation: each worker depacks the shared input bytes into ITS OWN
+# slab cells — redirect's FWD write-backs then mutate only thread-local
+# memory; the sub-permend template/vocab region is the only shared data
+# and it is immutable by construction.  Root partition is static
+# contiguous chunks, so concatenating per-thread frame buffers in thread
+# order reproduces root order byte-for-byte.  Stats aggregate at join.
+#
+# Rewrite: _mt_xform maps ("p",slot) operands of threaded routines to
+# ("m","r10",off) — every routine keeps ONE source; the MT program is
+# the same builders, post-passed.  Main thread gets ctx[T] so xform'd
+# helpers (mkapp for the vocab) are valid pre-spawn too.
+
+MT_CTX_FIELDS: Tuple[str, ...] = (
+    "cellbase", "myend", "homeend",           # claimed span geometry
+    "irj", "jend",                            # this worker's root chunk
+    "irsteps", "nalloc",                      # per-thread stats
+    "pcur", "pend",                           # persist zone (redirect)
+    "irstart", "irroots",                     # depack products
+    "outbuf", "outcur", "outlim",             # ordered frame buffer
+    "eb_save", "eb_out", "eb_lim", "eb_dec",  # bytes-egress cursors
+    "ei_tab", "ei_out", "ei_lim", "ei_idx",   # ir-egress state
+    "ei_cells", "ei_outz",
+)
+MT_CTX: Dict[str, int] = {n: i * 8 for i, n in enumerate(MT_CTX_FIELDS)}
+MT_CTX_BYTES = len(MT_CTX_FIELDS) * 8
+
+# ("p",slot) -> ctx field, applied to thread-executed routines —
+# covers every ctx field name so threaded builders stay slot-shaped.
+_MT_REN: Dict[str, str] = {n: n for n in MT_CTX_FIELDS}
+# depack is the one routine where "permend" means "my cells base", not
+# the global immutable bound — same slot name, different semantics
+_MT_DEPACK_REN = {"permend": "cellbase"}
+
+# routines whose p-slots rewrite to ctx fields (the worker's world).
+_MT_THREADED = frozenset({
+    "ir_depack", "grow_heap_ir", "mkleaf", "mkapp", "mkapp_p", "repr",
+    "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp",
+    "st_s", "step_congr", "count_nodes", "emit_nf", "itoa",
+    "emit_bytes", "emit_ir", "peval", "selidx",
+})
+
+
+def _mt_xform(prog: Program, extra: Optional[Dict[str, str]] = None
+              ) -> Program:
+    """Rewrite ("p",slot) operands of a threaded routine to r10-ctx
+    memory operands, and bracket every call_mrip (WinAPI clobbers r10)
+    with a frame-local save/restore — the inserted 0x10 keeps rsp
+    16-aligned at the call site."""
+    ren = dict(_MT_REN)
+    ren.update(extra or {})
+    out: Program = []
+    for ins in prog:
+        if ins[0] != "i":
+            out.append(ins)
+            continue
+        form, ops = ins[1], ins[2:]
+        if form == "call_mrip":
+            out += [
+                I("sub_r64_imm", "rsp", 0x30),
+                I("mov_m64_r64", ("m", "rsp", 0x20), "r10"),
+                ins,
+                I("mov_r64_m64", "r10", ("m", "rsp", 0x20)),
+                I("add_r64_imm", "rsp", 0x30),
+            ]
+            continue
+        # one p-operand at most per insn in these routines
+        pi = [i for i, o in enumerate(ops)
+              if isinstance(o, tuple) and o and o[0] == "p"
+              and o[1] in ren]
+        if not pi:
+            out.append(ins)
+            continue
+        i = pi[0]
+        off = MT_CTX[ren[ops[i][1]]]
+        mem = ("m", "r10", off)
+        if form == "mov_r64_rip":                       # load
+            out.append(I("mov_r64_m64", ops[0], mem))
+        elif form == "mov_rip_r64":                     # store
+            out.append(I("mov_m64_r64", mem, ops[1]))
+        elif form == "lea_r64_rip":                     # address-take
+            out += [I("mov_r64_r64", ops[0], "r10"),
+                    I("lea_r64_m64", ops[0], ("m", ops[0], off))]
+        elif form == "inc_mrip":
+            out.append(I("add_m64_imm", mem, 1))
+        else:                                           # generic mem op
+            ops2 = list(ops)
+            ops2[i] = mem
+            out.append(I(form, *ops2))
+    return out
+
+
+MT_HEADROOM = 32 << 20          # reduction space inside the first claim
+EG_MT_OUT = 16 << 20            # per-thread ordered frame buffer
+
+
 def data_slots_ir(R: Realization) -> tuple:
-    """IR slots; io=("stdin","bytes"/"ir") appends the egress block."""
+    """IR slots; io=("stdin","bytes"/"ir") appends the egress block.
+    MT: the egress cursors live in per-thread ctx fields — only the
+    shared vocab pointers (bytes mode) and the spawn bookkeeping land
+    in .data."""
     s = DATA_SLOTS_IR
     if R.reclaim == "redirect":
         s = s + DATA_SLOTS_PS
+    if R.threads > 1:
+        s = s + (
+            ("slabtop", 8), ("mtslab", 8),
+            ("mtctxs", (R.threads + 1) * MT_CTX_BYTES),
+            ("mthandles", R.threads * 8),
+        )
+        if R.io[1] == "bytes":
+            s = s + (("eb_i", 8), ("eb_k", 8), ("eb_ki", 8),
+                     ("eb_marks", 8), ("eb_dec", 8))
+        return s
     if R.io[1] == "bytes":
         s = s + DATA_SLOTS_EB
     if R.io[1] == "ir":
@@ -2324,13 +2868,18 @@ _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
 def _emit(R: Realization, names: Tuple[str, ...]) -> Program:
     ctx = _ctx()
     ctx["ir"] = any(n.startswith("ir_") for n in names)
+    ctx["irnext"] = "ir_spawn" if R.threads > 1 else "ir_depack"
     p: Program = []
     for name in names:
         if name == "st_s" and not R.fuse_s:
             continue
         if name == "build_ds" and R.fuse_s:
             continue
-        p += _BUILDERS[name](R, ctx)
+        prog = _BUILDERS[name](R, ctx)
+        if R.threads > 1 and name in _MT_THREADED:
+            prog = _mt_xform(prog, _MT_DEPACK_REN if name == "ir_depack"
+                             else None)
+        p += prog
     return p
 
 
@@ -2347,7 +2896,18 @@ def program(R: Realization) -> Program:
 def routine_names_ir(R: Realization) -> Tuple[str, ...]:
     """the record's routine list for R — the io specialization is the
     record's own data: bytes egress adds emit_bytes/peval/selidx, ir
-    egress adds emit_ir."""
+    egress adds emit_ir.  threads>1 swaps the driver for
+    ir_spawn/mt_worker — the reducer core is the same builders,
+    ctx-rewritten by _mt_xform."""
+    if R.threads > 1:
+        if R.io == ("stdin", "bytes"):
+            return ROUTINES_IR_MT_BYTES
+        if R.io == ("stdin", "ir"):
+            return ROUTINES_IR_MT_IR
+        if R.io != ("stdin", "stdout"):
+            raise NotRealized(
+                f"io={R.io!r} not realized by {ROUTINES_IR_MT}")
+        return ROUTINES_IR_MT
     if R.io == ("stdin", "bytes"):
         return ROUTINES_IR_BYTES
     if R.io == ("stdin", "ir"):
@@ -2365,6 +2925,25 @@ def program_ir(R: Realization) -> Program:
         raise NotRealized(f"order={R.order!r} declared but not realized")
     if R.reclaim not in ("none", "redirect"):
         raise NotRealized(f"reclaim={R.reclaim!r} not realized")
+    if R.threads != 1:
+        raise NotRealized(
+            f"threads={R.threads} needs record x86_64.win64.ir.mt")
+    return _emit(R, routine_names_ir(R))
+
+
+def program_ir_mt(R: Realization) -> Program:
+    """Multithreaded IR kernel — R.threads>1.  Same builder corpus; the
+    per-thread world is _mt_xform'd to r10-relative ctx fields."""
+    if R.order != "lo":
+        raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.reclaim not in ("none", "redirect"):
+        raise NotRealized(f"reclaim={R.reclaim!r} not realized")
+    if R.threads <= 1:
+        raise NotRealized("mt record requires threads>1")
+    if R.threads > 64:
+        raise NotRealized("WaitForMultipleObjects caps at 64 handles")
+    if R.audit:
+        raise NotRealized("audit counters not realized under threads>1")
     return _emit(R, routine_names_ir(R))
 
 
@@ -2405,6 +2984,25 @@ X86_64_WIN64_IR = Routines(
     routines=ROUTINES_IR,
     program=program_ir,
     imports=IMPORTS_IR,
+    data_slots=data_slots_ir,
+    ios=(("stdin", "stdout"), ("stdin", "bytes"), ("stdin", "ir")),
+    names_for=routine_names_ir,
+)
+
+
+# Multithreaded variant (threads>1): T workers depack the shared
+# stream into private claimed slabs — nothing shared-mutable exists,
+# which is what redirect's FWD write-backs require.  Same reducer
+# source; per-thread state is r10-ctx-rewritten.  Thread imports are
+# the record's added capabilities.
+X86_64_WIN64_IR_MT = Routines(
+    name="x86_64.win64.ir.mt",
+    isa="x86_64",
+    abi="win64",
+    orders=("lo",),
+    routines=ROUTINES_IR_MT,
+    program=program_ir_mt,
+    imports=IMPORTS_IR_MT,
     data_slots=data_slots_ir,
     ios=(("stdin", "stdout"), ("stdin", "bytes"), ("stdin", "ir")),
     names_for=routine_names_ir,

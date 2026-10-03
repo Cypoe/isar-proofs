@@ -1673,7 +1673,7 @@ def program_query_rt(names, R, passes: Tuple[str, ...] = (),
 # the λ vocabulary below, and operands/addresses are byte cells.
 #
 # Field tags (nibble dispatch — the name->code map is generated with the
-# table): 0 rex, 1 op, 2 oprd, 3 modrm, 4 disp, 5 imm, 6 rel.
+# table): 0 rex, 1 op, 2 oprd, 3 modrm, 4 disp, 5 imm, 6 rel, 7 raw.
 # Pred tags: 0 i8, 1 i32, 2 acc.
 # modrm reg-side: [0,nib] lit | [1] ext | [2,idx] regN.
 # modrm rm-side:  [0,idx] rm | [1,idx] mem | [2] rip.
@@ -1762,9 +1762,11 @@ def _nrole(r: str) -> NExpr:
 
 def _nfield(f) -> NExpr:
     tag = {"rex": 0, "op": 1, "oprd": 2, "modrm": 3,
-           "disp": 4, "imm": 5, "rel": 6}[f[0]]
+           "disp": 4, "imm": 5, "rel": 6, "raw": 7}[f[0]]
     out = [NComb(_SELECTORS[tag])]
-    if f[0] == "rex":
+    if f[0] == "raw":
+        out.append(NComb(byte_term(f[1])))
+    elif f[0] == "rex":
         out.append(_nlist([_nrole(r) for r in f[1:]]))
     elif f[0] == "op" and len(f) > 1:
         out.append(NComb(byte_term(f[1])))
@@ -2000,9 +2002,13 @@ def _encode_src() -> str:
     ], "EMIT acc (resv nm)")
     f_rel = "(\\acc. \\args. " + f_rel + ")"
 
+    # raw — one literal byte cell (prefix bytes, e.g. lock); args[0]
+    f_raw = ("(\\acc. \\args. EMIT acc "
+             + _conss("(" + _HEAD + " args)", "K") + ")")
+
     fldstep = ("(\\acc. \\fld. fld K (\\tg. \\args. "
-               + _sel16("tg", ["F0", "F1", "F2", "F3", "F4", "F5", "F6"],
-                        "acc args") + "))")
+               + _sel16("tg", ["F0", "F1", "F2", "F3", "F4", "F5", "F6",
+                               "F7"], "acc args") + "))")
 
     # preds — acc = bool; `acc EV (K I)` = AND acc EV
     payl = "(\\o. o K (\\tg. \\rr. " + _HEAD + " rr))"
@@ -2041,7 +2047,7 @@ def _encode_src() -> str:
         # F0..F6 before EVALF: the impl sources are free-name references
         # into fldstep's dispatch and must sit inside their binders.
         ("F0", f_rex), ("F1", f_op), ("F2", f_oprd), ("F3", f_modrm),
-        ("F4", f_disp), ("F5", f_imm), ("F6", f_rel),
+        ("F4", f_disp), ("F5", f_imm), ("F6", f_rel), ("F7", f_raw),
         ("EVALF", evalf),
     ], ares + " (\\dn. \\rs. rs)")
     return "(\\et. \\rt. \\ott. \\item. \\resv. " + body + ")"

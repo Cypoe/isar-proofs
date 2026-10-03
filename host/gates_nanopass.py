@@ -52,6 +52,12 @@ Gates (cheap, no full emit — the byte-equality run is separate):
      kernel APPEND over blob placeholders — zero decode_* at the
      seam, and the blob symtab resolves byte-identical to the dict
      join (hit, rip-symbol, and 0-end miss).
+ 17. MT EQUIV: threads in {2,4} under native.x86_64.pe.ir.mt —
+     per-worker slab claims + private depack — produce byte-identical
+     stdout and rc to the serial kernel across all three egress
+     modes, stream counts, and empty input; steps identical except
+     bytes-probe (FWD-reuse loss), alloc always differs by design.
+     Refusals stay record-scoped both ways.
 
 The per-routine stage is exercised byte-exact by
 `emit_image(decompose_asm=True, workdir=...)` — see the
@@ -424,6 +430,73 @@ def gate_link_blob_seam() -> bool:
     return True
 
 
+def gate_mt_equiv() -> bool:
+    """threads=N == N workers == serial: the MT record's workers
+    depack their assigned root range into private slab claims and
+    flush per-thread frames in root order — stdout/rc must be
+    byte-identical to the serial kernel for every egress mode
+    (text, bytes, ir), stream count, and threads in {2,4}.  Stats
+    caveat (asserted for stdout/ir, not bytes): irsteps/nalloc can
+    diverge honestly — private depack forfeits cross-root FWD reuse
+    through shared input cells and duplicates the depack per worker.
+    Refusals: program_ir refuses threads>1, program_ir_mt refuses
+    threads=1 — the capability stays record-scoped."""
+    import subprocess
+    import toolchain
+    from reduce import I, KK, S, app
+    R1 = seed.Realization(reclaim="redirect")
+    try:
+        rts.program_ir(seed.Realization(threads=2))
+        return False
+    except Exception:                             # noqa: BLE001
+        pass
+    try:
+        rts.program_ir_mt(seed.Realization(threads=1))
+        return False
+    except Exception:                             # noqa: BLE001
+        pass
+    terms = (I, app(app(S, KK), KK),
+             app(app(S, app(KK, I)), app(S, app(KK, I))), I)
+    blobs = [st.pack_ir(*terms),
+             st.pack_ir(*terms) + st.pack_ir(app(app(S, app(S, KK)), KK)),
+             b""]
+    for io_out in ("stdout", "bytes", "ir"):
+        Rm = seed.Realization(reclaim="redirect",
+                              io=("stdin", io_out))
+        if io_out == "bytes":
+            blobs_m = [st.pack_ir(st.bytelist_term(b"ab"),
+                                  st.bytelist_term(b"")),
+                       st.pack_ir(st.bytelist_term(b"cd")) +
+                       st.pack_ir(st.bytelist_term(b"e")),
+                       b""]
+        else:
+            blobs_m = blobs
+        exe_st = seed._exe_for(Rm, toolchain.by_name(
+            "native.x86_64.pe.ir"))
+        for blob in blobs_m:
+            r0 = subprocess.run([exe_st], input=blob,
+                                capture_output=True, timeout=120)
+            for t in (2, 4):
+                exe_mt = seed._exe_for(seed.Realization(
+                    reclaim="redirect", io=("stdin", io_out),
+                    threads=t), toolchain.by_name(
+                    "native.x86_64.pe.ir.mt"))
+                r1 = subprocess.run([exe_mt], input=blob,
+                                    capture_output=True, timeout=120)
+                if (r1.returncode, r1.stdout) != (r0.returncode,
+                                                r0.stdout):
+                    return False
+                # alloc always diverges (per-worker depack); steps
+                # must match except under the bytes probe, where
+                # cross-root FWD reuse on shared list tails is lost
+                if io_out != "bytes" and r0.returncode == 0:
+                    s0 = r0.stderr.split(b"steps=")[-1].split()[0]
+                    s1 = r1.stderr.split(b"steps=")[-1].split()[0]
+                    if s1 != s0:
+                        return False
+    return True
+
+
 if __name__ == "__main__":
     R = seed.Realization()
     gates = [
@@ -446,6 +519,7 @@ if __name__ == "__main__":
         ("decode-crossing evidence", gate_decode_evidence),
         ("emit_ir blob round-trip", gate_emit_ir),
         ("link blob seam == dict join", gate_link_blob_seam),
+        ("MT threads==serial observable", gate_mt_equiv),
     ]
     fail = 0
     for name, g in gates:
