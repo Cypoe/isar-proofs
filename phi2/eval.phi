@@ -196,6 +196,19 @@ inst : <node, ren, n> <-> <o> shape self where {
       inst<ot, r1, n1> = [r2|[n2|ot2]]
       o = [r2|[n2|'call(nm2, at2, ot2)]]
     }
+  | fresh (op, a, b, r1, n1, a2, r2, n2, b2) {
+      node = 'cmp(op, a, b)
+      inst<a, ren, n> = [r1|[n1|a2]]
+      inst<b, r1, n1> = [r2|[n2|b2]]
+      o = [r2|[n2|'cmp(op, a2, b2)]]
+    }
+  | fresh (g, k, ot, r1, n1, g2, r2, n2, k2, r3, n3, ot2) {
+      node = 'run(g, k, ot)
+      inst<g, ren, n> = [r1|[n1|g2]]
+      inst<k, r1, n1> = [r2|[n2|k2]]
+      inst<ot, r2, n2> = [r3|[n3|ot2]]
+      o = [r3|[n3|'run(g2, k2, ot2)]]
+    }
 }
 inst_list : <lst, ren, n> <-> <o> shape self where {
   | lst = [] { o = [ren|[n|[]]] }
@@ -226,12 +239,57 @@ reify_w : <w, s> <-> <r> shape self where {
   | fresh (i) { w = 'var(i)   r = w }
 }
 
+;; --- term equality probe for 'cmp: post-walk operands unify ---
+eq_t : <a, b> <-> <hit> where {
+  | a = b { hit = 'yes }
+}
+
+;; --- 'run out marker: collected stream -> enc probe value ---
+run_res : <res, ot, s> <-> <s3> where {
+  | res = [] { unify_enc<ot, 'atom(0, 0), s> = s3 }
+  | fresh (h) {
+      res = [h|_]
+      unify_enc<ot, 'sym('nonempty), s> = s3
+    }
+}
+
 ;; --- eval: goals are enc terms; o = PAIR(s2, n2) ---
 eval : <env, goal, s, n> <-> <o> shape self where {
   | fresh (a, b, s2) {
       goal = 'unify(a, b)
       unify_enc<a, b, s> = s2
       o = [s2|n]
+    }
+  | fresh (a, b, wa, wb, res) {
+      ;; 'cmp('neq, a, b): the guard — succeeds iff walked terms
+      ;; DON'T unify; absence-probe keeps it exclusive
+      goal = 'cmp('neq, a, b)
+      walk<a, s> = wa
+      walk<b, s> = wb
+      RUN(eq_t<wa, wb>, 1) = res
+      res = []
+      o = [s|n]
+    }
+  | fresh (a, b, wa, wb, res) {
+      ;; 'cmp('eq, a, b): walked terms DO unify
+      goal = 'cmp('eq, a, b)
+      walk<a, s> = wa
+      walk<b, s> = wb
+      RUN(eq_t<wa, wb>, 1) = res
+      res = ['yes|_]
+      o = [s|n]
+    }
+  | fresh (g2, n2, ot, res, s3) {
+      ;; 'run(g, k, outT): meta-level stream->list IS the surface
+      ;; RUN over the corpus eval — the stepper materializes.
+      ;; outT binds 'atom(0,0) (empty) or 'sym('nonempty) — the
+      ;; probe form.  Carrying the raw stream itself is a 'data
+      ;; axis: results are raw [s|n] spines, outside the closed
+      ;; enc domain — named, not smuggled.
+      goal = 'run(g2, n2, ot)
+      RUN(eval<env, g2, s, n>, 1) = res
+      run_res<res, ot, s> = s3
+      o = [s3|n]
     }
   | fresh (nm, at, ot, x, def) {
       goal = 'call(nm, at, ot)

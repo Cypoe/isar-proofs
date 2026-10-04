@@ -1505,6 +1505,61 @@ def _selftest() -> int:
         assert run_value(dg, "runtime", [img, caps, eAtom(8, 42)],
                          n=1) == []
         docr = "catalog+spec+runtime+map, refusals hold"
+    # self-description foothold: eval on enc'd defs (double meta).
+    # 'cmp/'run goal forms + inst coverage — an enc'd subst_lookup
+    # evaluated by the corpus eval against an enc'd env.
+    sd = "absent"
+    if metacirc != "absent":
+        def eT(tag, *xs):
+            o = xs[-1] if xs else NIL
+            for x in reversed(xs[:-1]):
+                o = t_pair(x, o)
+            return t_pair(t_sym(tag), o)
+
+        sl_def = eT("def",
+                    eList(nv("k"), nv("lst")), nv("r"),
+                    eList(
+                        eT("clause", eList(
+                            eT("unify", nv("lst"),
+                               eT("pair",
+                                  eT("pair", nv("k"), nv("v")),
+                                  nv("rest"))),
+                            eT("unify", nv("r"),
+                               eT("pair", eSym("bound"), nv("v"))))),
+                        eT("clause", eList(
+                            eT("unify", nv("lst"),
+                               eT("pair",
+                                  eT("pair", nv("k2"), nv("_w")),
+                                  nv("rest"))),
+                            eT("cmp", t_sym("neq"), nv("k"),
+                               nv("k2")),
+                            eT("call", eSym("subst_lookup"),
+                               eList(nv("k"), nv("rest")),
+                               nv("r")))),
+                        eT("clause", eList(
+                            eT("unify", nv("lst"), eAtom(0, 0)),
+                            eT("unify", nv("r"), eSym("unbound"))))))
+        senv = eList(t_pair(S("subst_lookup"), sl_def))
+        elist = eT("pair", eT("pair", eAtom(8, 1), eAtom(8, 7)),
+                   eT("pair", eT("pair", eAtom(8, 2), eAtom(8, 8)),
+                      eAtom(0, 0)))
+        goal = eT("call", eSym("subst_lookup"),
+                  eList(eAtom(8, 1), elist), eVar(0))
+        _reset_fresh()
+        hit = run_value(eg, "eval", [senv, goal, NIL,
+                                     t_atom(8, 1)], n=1)
+        assert len(hit) == 1
+        o = run_value(eg, "reify", [eVar(0), hit[0][1]], n=1)
+        assert o == [eT("pair", eSym("bound"), eAtom(8, 7))], o
+        goal2 = eT("call", eSym("subst_lookup"),
+                   eList(eAtom(8, 9), elist), eVar(0))
+        _reset_fresh()
+        miss = run_value(eg, "eval", [senv, goal2, NIL,
+                                      t_atom(8, 1)], n=1)
+        assert len(miss) == 1
+        o2 = run_value(eg, "reify", [eVar(0), miss[0][1]], n=1)
+        assert o2 == [eSym("unbound")], o2
+        sd = "enc'd subst_lookup hit+miss"
     # corpus files if present
     std = os.path.join(here, "std")
     if os.path.isdir(std):
@@ -1528,7 +1583,7 @@ def _selftest() -> int:
           f"append fwd/bwd + head, refusals, corpus rels={nstd}, "
           f"meta-circular eval [{metacirc}], "
           f"specialize [{specr}], realize [{realr}], "
-          f"docs [{docr}]: pass")
+          f"docs [{docr}], self-desc [{sd}]: pass")
     return 0
 
 
