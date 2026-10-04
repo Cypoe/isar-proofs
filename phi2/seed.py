@@ -1448,6 +1448,63 @@ def _selftest() -> int:
             eList(S("m9")))], n=1)
         assert missing == []
         realr = "fold ordered, refusal honest"
+    # S2d/e documents — toolchain catalog, comp spec, runtime
+    # contract, and the first real map (x86 assemble rows)
+    docr = "absent"
+    tcp = os.path.join(here, "toolchain.plex")
+    cpp = os.path.join(here, "comp.plex")
+    rtp = os.path.join(here, "runtime.plex")
+    cgp = os.path.join(here, "cogen.plex")
+    amp = os.path.join(here, "maps", "assemble_rules_x86.plex")
+    if metacirc != "absent" and all(os.path.exists(p) for p in
+                                    (tcp, cpp, rtp, cgp, amp)):
+        std_dir = os.path.join(here, "std")
+        dg = load_corpus(
+            [os.path.join(std_dir, f)
+             for f in sorted(os.listdir(std_dir))
+             if f.endswith(".plex")]
+            + [evp, rzp, cgp, tcp, cpp, rtp, amp])
+
+        def eT(tag, *xs):
+            o = xs[-1] if xs else NIL
+            for x in reversed(xs[:-1]):
+                o = t_pair(x, o)
+            return t_pair(t_sym(tag), o)
+
+        cat = run_value(dg, "toolchain", [], n=1)[0]
+        m = run_value(dg, "map_of", [S("assemble_x86"), cat], n=1)
+        assert len(m) == 1
+        t = run_value(dg, "target_of",
+                      [S("win64_x86_64_pe"), cat], n=1)
+        assert len(t) == 1
+        # the assemble map emits real x86 bytes and refuses on
+        # every unlisted axis
+        ops = eList(eT("op", S("push"), S("rax")),
+                    eT("op", S("pop"), S("rbx")),
+                    eT("op", S("ret")))
+        b = run_value(dg, "assemble", [ops], n=1)
+        assert b == [eList(t_atom(8, 0x50), t_atom(8, 0x5B),
+                           t_atom(8, 0xC3))], b
+        assert run_value(dg, "assemble", [eList(
+            eT("op", S("push"), S("r8")))], n=1) == []
+        assert run_value(dg, "assemble", [eList(
+            eT("op", S("xyz")))], n=1) == []
+        # comp emits the spec document; cogen refuses honestly on
+        # the deferred qmaps until a loader binds them
+        sp = run_value(dg, "comp", [], n=1)[0]
+        assert run_value(dg, "cogen", [sp], n=1) == []
+        # runtime: 'graph loader runs an img through corpus eval;
+        # an unbound loader family refuses
+        iddef = t_pair(S("def"), t_pair(
+            eList(nv("x")), t_pair(nv("x"),
+                                  eList(t_pair(S("clause"), NIL)))))
+        img = eT("img", eList(t_pair(S("id"), iddef)), S("id"))
+        r = run_value(dg, "runtime", [img, NIL, eAtom(8, 42)], n=1)
+        assert r == [eAtom(8, 42)], r
+        caps = eList(t_pair(S("loader"), S("fasm")))
+        assert run_value(dg, "runtime", [img, caps, eAtom(8, 42)],
+                         n=1) == []
+        docr = "catalog+spec+runtime+map, refusals hold"
     # corpus files if present
     std = os.path.join(here, "std")
     if os.path.isdir(std):
@@ -1470,7 +1527,8 @@ def _selftest() -> int:
           f"S.row0=3, K^2=0), rel-bundle round-trip, stepper "
           f"append fwd/bwd + head, refusals, corpus rels={nstd}, "
           f"meta-circular eval [{metacirc}], "
-          f"specialize [{specr}], realize [{realr}]: pass")
+          f"specialize [{specr}], realize [{realr}], "
+          f"docs [{docr}]: pass")
     return 0
 
 

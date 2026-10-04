@@ -1,0 +1,40 @@
+;; toolchain.plex — the catalog as data: which maps exist, which
+;; targets, which regimes, which loader families.  A spec names
+;; map names; the catalog is what says those names mean something —
+;; rows, not a registry hardcoded in a host.
+;;
+;;   'regime(name)                    observation regime
+;;   'target(name, container, loads)  output contract:
+;;                                    container format + loader
+;;                                    families (budget order)
+;;   'map(name, file, entry)          a map bundle: .plex ref +
+;;                                    entry rel (entry<x> = y)
+;;
+;; Resolution scans rows via member — no keyed builtin; an absent
+;; name fails as an empty stream, same refusal as everywhere else.
+;; uses: std/lists_member_assoc
+
+toolchain : <> <-> <cat> where {
+  cat = ['regime('operEq),
+         'target('win64_x86_64_pe, 'pe64,
+                 ['graph, 'fasm, 'cpu, 'simd]),
+         'map('assemble_x86, 'file('maps, 'assemble_rules_x86),
+             'assemble),
+         'map('link_x86, 'file('maps, 'link_symbols_fixpoint),
+             'link),
+         'map('pack_pe64, 'file('maps, 'pack_image_layout),
+             'pack)]
+}
+
+;; --- row projections: destructure a matched row ---
+map_of : <name, cat> <-> <m> where {
+  fresh (f, e) {
+    member<'map(name, f, e), cat> = m
+  }
+}
+
+target_of : <name, cat> <-> <t> where {
+  fresh (cont, loads) {
+    member<'target(name, cont, loads), cat> = t
+  }
+}

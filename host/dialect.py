@@ -223,10 +223,12 @@ def s_phi_rel(path: str, surface: str) -> dict:
     atomic replace of --file.  The .plex is canonical; a refused
     surface leaves it byte-identical.
 
-    `;; uses: a, b/c` declares the file's dep closure — sibling
-    bundles (relative to --file, .plex implied) merged for the
-    schema check.  The canonical graph records `uses`; a dep rel
-    never shadows a local name (local wins, dup stays declared)."""
+    `;; uses: a, b/c` declares the file's dep closure — bundles
+    resolved relative to --file's dir (.plex implied) and merged
+    for the schema check; a dep's own `uses` are followed, so the
+    effective closure is transitive and stays enumerable per-file.
+    The canonical graph records `uses`; a dep rel never shadows a
+    local name (local wins, dup stays declared)."""
     import phi_rel
     import rel_schema
     if not path.endswith(".plex"):
@@ -243,10 +245,17 @@ def s_phi_rel(path: str, surface: str) -> dict:
         g["uses"] = uses
         merged = {"format": g["format"], "rels": list(g["rels"])}
         names = {r["name"] for r in merged["rels"]}
-        base = os.path.dirname(path)
-        for u in uses:
+        # transitive closure: a dep's own `uses` are resolved
+        # against ITS dir; local rels always win over dep rels
+        work = [(os.path.dirname(path), u) for u in uses]
+        seen = set()
+        while work:
+            base, u = work.pop(0)
             up = u if u.endswith(".plex") else u + ".plex"
-            cand = os.path.join(base, up)
+            cand = os.path.normpath(os.path.join(base, up))
+            if cand in seen:
+                continue
+            seen.add(cand)
             if not os.path.exists(cand):
                 raise ValueError(
                     f"uses: dep {u!r} not found at {cand}")
@@ -256,6 +265,8 @@ def s_phi_rel(path: str, surface: str) -> dict:
                 if r["name"] not in names:
                     names.add(r["name"])
                     merged["rels"].append(r)
+            for u2 in dg.get("uses", []):
+                work.append((os.path.dirname(cand), u2))
         rel_schema.check(merged)             # SchemaRefusal
     else:
         rel_schema.check(g)                  # SchemaRefusal = refused

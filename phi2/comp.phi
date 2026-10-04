@@ -1,0 +1,28 @@
+;; comp.plex — the compiler's own spec document.  The compiler is
+;; a spec like any other: cogen<comp_spec, out> IS the production
+;; of the native evaluator/reducer, not a second pipeline.
+;;
+;;   spec = 'spec(src, maps, qmaps, regime, ctx)
+;;
+;;   src    — 'src('kernel_corpus): the program term (the corpus
+;;            evaluator) to be realized; a named ref the loader
+;;            binds to the actual env at Load time
+;;   maps   — the declared fold order for the compiler build:
+;;            assemble -> link -> pack, fixed here as data
+;;   qmaps  — 'qmaps('toolchain): deferred — the toolchain rows
+;;            name bundle refs; binding refs to envs is the
+;;            loader's job (bind dynamic inputs).  Until a loader
+;;            materializes it, realize refuses on assoc — the
+;;            honest missing-data path, not a fake default
+;;   regime — 'sym('operEq): shared-normal-form equivalence —
+;;            the regime cogen binds
+;;   ctx    — the machine context: the win64 target row
+;; uses: toolchain
+
+comp : <> <-> <spec> where {
+  spec = 'spec('src('kernel_corpus),
+              ['assemble_x86, 'link_x86, 'pack_pe64],
+              'qmaps('toolchain),
+              'sym('operEq),
+              'ctx('win64_x86_64_pe))
+}

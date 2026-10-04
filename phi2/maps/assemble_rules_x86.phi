@@ -1,0 +1,64 @@
+;; maps/assemble_rules_x86.plex — quotient map: op-terms -> x86-64
+;; machine bytes.  The encoding rows are declared data shaped like
+;; clauses (op-pattern -> byte template); the relation machine does
+;; the matching — no table-lookup algorithm where a table belongs.
+;;
+;;   entry: assemble<ops> = bytes   (uniform map sig entry<x> = y)
+;;   op   = 'op(name, operand...)   an abstract op-term
+;;   byte = ATOM(8, v)              one machine byte
+;;
+;; Realized rows: ret/nop/int3, push/pop r64, mov_r64_imm64 (imm
+;; carried as its own 8 LE bytes — splitting immediates is a
+;; separate axis, refused: 'op('mov_ri, r, i) with a scalar i does
+;; NOT match).  r8-r15 need REX.B — unlisted, refuses.  An op that
+;; matches no row fails as an empty stream, naming the axis.
+;; uses: ../std/lists_append_mapfold, ../std/unify_terms_core
+;; uses: ../std/meta_call_run
+
+;; --- register codes: the low-8 file only (REX.B axis refused) ---
+reg_code : <r> <-> <c> where {
+  | r = 'rax { c = 0 }
+  | r = 'rcx { c = 1 }
+  | r = 'rdx { c = 2 }
+  | r = 'rbx { c = 3 }
+  | r = 'rsp { c = 4 }
+  | r = 'rbp { c = 5 }
+  | r = 'rsi { c = 6 }
+  | r = 'rdi { c = 7 }
+}
+
+;; --- the encoding table: one clause row per realized op-form ---
+enc : <op> <-> <bytes> where {
+  | op = 'op('ret)  { bytes = [0xC3] }
+  | op = 'op('nop)  { bytes = [0x90] }
+  | op = 'op('int3) { bytes = [0xCC] }
+  | fresh (r, rd) {
+      op = 'op('push, r)
+      reg_code<r> = rd
+      bytes = [ATOM(8, rd+0x50)]
+    }
+  | fresh (r, rd) {
+      op = 'op('pop, r)
+      reg_code<r> = rd
+      bytes = [ATOM(8, rd+0x58)]
+    }
+  | fresh (r, rd, i0, i1, i2, i3, i4, i5, i6, i7) {
+      ;; mov r64, imm64 -> REX.W(48) B8+rd then imm64 little-endian;
+      ;; the pattern demands exactly 8 bytes — wrong arity refuses
+      op = 'op('mov_ri, r, [i0, i1, i2, i3, i4, i5, i6, i7])
+      reg_code<r> = rd
+      bytes = [0x48, ATOM(8, rd+0xB8), i0, i1, i2, i3, i4, i5,
+               i6, i7]
+    }
+}
+
+;; --- the map entry: fold op-terms -> concatenated byte stream ---
+assemble : <ops> <-> <bytes> shape self where {
+  | ops = [] { bytes = [] }
+  | fresh (o, rest, eb, rb) {
+      ops = [o|rest]
+      enc<o> = eb
+      assemble<rest> = rb
+      append<eb, rb> = bytes
+    }
+}

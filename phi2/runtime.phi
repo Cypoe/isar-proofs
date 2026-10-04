@@ -1,0 +1,57 @@
+;; runtime.plex — the emitted-output contract:
+;;   Load -> bind dynamic inputs and capabilities -> Run
+;;
+;;   img  = 'img(env, entry): a loaded program — env-alist of defs
+;;          (bundle graph as data) + entry rel name
+;;   caps = env-shaped alist [['k|v],...] — 'loader is just one
+;;          more capability binding; absent -> 'graph (the zero-
+;;          capability loader, a declared baseline not a silent
+;;          default).  bind prepends caps: capabilities shadow the
+;;          program env, newest-first.
+;;   arg  = the single input term; out reifies 'var(0), the
+;;          convention apply/realize already use.
+;;
+;; Loader families: 'graph is realized — the corpus eval IS the
+;; loader.  'fasm 'cpu 'simd are named in the toolchain target row
+;; but unrealized: runtime caps naming one fails as an empty
+;; stream — declared-not-realized.
+;; uses: std/lists_member_assoc, eval
+
+runtime : <img, caps, arg> <-> <out> where {
+  fresh (env, entry, env2, l, goal, res, s2) {
+    img = 'img(env, entry)
+    loader_of<caps> = l
+    l = 'graph
+    bind<caps, env> = env2
+    goal = 'call('sym(entry), [arg], 'var(0))
+    eval<env2, goal, [], 1> = res
+    res = [s2|_]
+    reify<'var(0), s2> = out
+  }
+}
+
+;; --- 'loader cap lookup: first binding wins, absent = 'graph ---
+loader_of : <caps> <-> <l> where {
+  | fresh (res, v) {
+      RUN(assoc<'loader, caps>, 1) = res
+      res = [v|_]
+      l = v
+    }
+  | fresh (res) {
+      RUN(assoc<'loader, caps>, 1) = res
+      res = []
+      l = 'graph
+    }
+}
+
+;; --- bind: capabilities shadow the program env (self-contained —
+;;     the donor append drags a transitive 'cons dep; a direct
+;;     cons-fold is the same two clauses, no extra uses) ---
+bind : <caps, env> <-> <env2> shape self where {
+  | caps = [] { env2 = env }
+  | fresh (c, rest, e2) {
+      caps = [c|rest]
+      bind<rest, env> = e2
+      env2 = [c|e2]
+    }
+}
