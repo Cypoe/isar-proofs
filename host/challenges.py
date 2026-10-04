@@ -18,6 +18,14 @@ Categories (the boundary-refusal vocabulary of the gates):
             must refuse naming the axis, never default
   spec-*    toolchain.json mutation cases — spec_validate must
             reject each (delegates to toolchain._negative_cases)
+  rel-*     phi.rel surface — parser refuses malformed clauses,
+            schema refuses inadmissible construction (unbound rel,
+            undeclared recursion shape, ungrounded directed call),
+            evaluator refuses unknown rels; append backward is a
+            recorded 3-solution read; fuel exhaustion is an
+            observable empty stream; the patent corpus parses (28
+            rels) and refuses as inadmissible (nibble_half_add is
+            called-but-undefined in the sketch)
 
 Replay:
 
@@ -262,6 +270,121 @@ def ch_emit_threshold_serial(tmpdir: str) -> dict:
     return {"pool": "pool=True" in ev.get("emit.assemble", "")}
 
 
+# ---- rel challenges — parser / schema / evaluator --------------------------
+
+def _rel_refuses(fn: Callable[[], None], exc, prefix: str) -> dict:
+    try:
+        fn()
+    except exc as e:
+        return {"refuses": prefix, "prefix_ok": prefix in str(e)}
+    return {"refuses": prefix, "prefix_ok": False}
+
+
+def ch_rel_malformed(_t) -> dict:
+    """RUN without (goal, n) = out refuses at parse."""
+    import phi_rel
+    return _rel_refuses(
+        lambda: phi_rel.parse_rel(
+            "y : <a> <-> <b> where { RUN(g) = o }"),
+        phi_rel.RelError, "RUN(goal, n) = out")
+
+
+def ch_rel_shape_missing(_t) -> dict:
+    """recursive rel without shape refuses — never inferred."""
+    import phi_rel
+    import rel_schema
+    return _rel_refuses(
+        lambda: rel_schema.check(phi_rel.parse_rel(
+            "a : <x> <-> <y> where { a<x> = y }")),
+        rel_schema.SchemaRefusal, "declares no shape")
+
+
+def ch_rel_unbound(_t) -> dict:
+    """call into an undefined rel names it."""
+    import phi_rel
+    import rel_schema
+    return _rel_refuses(
+        lambda: rel_schema.check(phi_rel.parse_rel(
+            "a : <x> <-> <y> where { nosuch<x> = y }")),
+        rel_schema.SchemaRefusal, "unbound rel 'nosuch'")
+
+
+def ch_rel_mode_violation(_t) -> dict:
+    """directed call on ungrounded args refuses — -> is a query
+    mode, not a reversible read."""
+    import phi_rel
+    import rel_schema
+    src = ("d : <x> -> <y> where { y = x }\n"
+           "a : <p> <-> <q> where { fresh (z) { d<z> = q } }")
+    return _rel_refuses(
+        lambda: rel_schema.check(phi_rel.parse_rel(src)),
+        rel_schema.SchemaRefusal, "requires grounding")
+
+
+def ch_rel_eval_unbound(_t) -> dict:
+    """running an absent rel refuses by name at eval too."""
+    import phi_rel
+    import rel_eval
+    g = phi_rel.parse_rel(phi_rel._CORPUS)
+    return _rel_refuses(
+        lambda: rel_eval.run_value(g, "nosuchrel",
+                                   [rel_eval.t_atom(8, 0)], n=1),
+        rel_eval.EvalError, "unbound rel")
+
+
+def _rel_append_splits() -> dict:
+    import phi_rel
+    import rel_eval
+    rel_eval._reset_fresh()
+    g = phi_rel.parse_rel(phi_rel._CORPUS)
+    want = rel_eval.t_pair(rel_eval.t_atom(8, 1),
+                           rel_eval.t_pair(rel_eval.t_atom(8, 2),
+                                           rel_eval.NIL))
+    xs, ys = rel_eval.fresh(), rel_eval.fresh()
+    sols = rel_eval.run_solutions(g, "append", [xs, ys], want, n=3)
+    return {"sols": len(sols)}
+
+
+def _rel_fuel_empty() -> dict:
+    import phi_rel
+    import rel_eval
+    rel_eval._reset_fresh()
+    g = phi_rel.parse_rel(phi_rel._CORPUS)
+    return {"sols": len(rel_eval.run_value(
+        g, "fib", [rel_eval.t_atom(8, 5)], n=1, fuel=40))}
+
+
+def _rel_patent() -> dict:
+    import phi_rel
+    pat = os.path.join(_ROOT, os.pardir, "isa-physics",
+                       "patent", "phi-lang")
+    n = 0
+    for fn in ("phi-lang.phi", "phi-stdlib.phi", "phi-runtime.phi"):
+        p = os.path.join(pat, fn)
+        if os.path.exists(p):
+            n += len(phi_rel.parse_rel(
+                open(p, encoding="utf-8").read())["rels"])
+    return {"rels": n}
+
+
+def ch_rel_patent_inadmissible(_t) -> dict:
+    """the merged patent corpus refuses: nibble_half_add is
+    called-but-undefined in the sketch."""
+    import phi_rel
+    import rel_schema
+    merged = {"format": "phi.rel/1", "rels": []}
+    pat = os.path.join(_ROOT, os.pardir, "isa-physics",
+                       "patent", "phi-lang")
+    for fn in ("phi-lang.phi", "phi-stdlib.phi", "phi-runtime.phi"):
+        p = os.path.join(pat, fn)
+        if os.path.exists(p):
+            merged["rels"] += phi_rel.parse_rel(
+                open(p, encoding="utf-8").read())["rels"]
+    return _rel_refuses(lambda: rel_schema.check(merged),
+                        rel_schema.SchemaRefusal,
+                        "unbound rel 'nibble_half_add'")
+
+
 # ---- axis refusals ---------------------------------------------------------
 
 def _axis(name: str, fn: Callable[[], None], word: str) -> dict:
@@ -340,9 +463,24 @@ def catalog() -> List[dict]:
             ("emit-malformed", ch_emit_malformed),
             ("axis-threads-token", ch_axis_threads_token),
             ("axis-dialect-bogus", ch_axis_dialect_bogus),
-            ("axis-reclaim-marksweep", ch_axis_reclaim)):
+            ("axis-reclaim-marksweep", ch_axis_reclaim),
+            ("rel-malformed-clause", ch_rel_malformed),
+            ("rel-shape-missing", ch_rel_shape_missing),
+            ("rel-unbound-rel", ch_rel_unbound),
+            ("rel-mode-violation", ch_rel_mode_violation),
+            ("rel-eval-unbound", ch_rel_eval_unbound),
+            ("rel-patent-inadmissible", ch_rel_patent_inadmissible)):
         entries.append({"name": name, "expect": {"refused": True},
                         "run": fn})
+    entries.append({"name": "rel-append-backward",
+                    "expect": {"sols": 3},
+                    "run": lambda _t: _rel_append_splits()})
+    entries.append({"name": "rel-fuel-empty",
+                    "expect": {"sols": 0},
+                    "run": lambda _t: _rel_fuel_empty()})
+    entries.append({"name": "rel-patent-parse",
+                    "expect": {"rels": 28},
+                    "run": lambda _t: _rel_patent()})
     entries.append({"name": "emit-threshold-pool",
                     "expect": {"pool": True},
                     "run": ch_emit_threshold_pool})

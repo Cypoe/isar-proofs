@@ -9,7 +9,7 @@
 | dialect | bytecode.postfix | bytecode_dialect.bytecode_map | realized |  |
 | dialect | lambda.named | lambda_dialect.lambda_turner_map | realized | host QuotientMap exists; no native token alphabet |
 | dialect | xdu.json | xdu_dialect.XDU | realized | nibble transducer plex (W3) |
-| dialect | phi.rel | — | declared | spec only |
+| dialect | phi.rel | — | declared | host-side realized: phi_rel.parse_rel, rel_schema.check, rel_eval miniKanren; no dialect record — rel-graph is data over the substrate, not a compiled surface |
 | dialect | packed.ir | spec_term.ir_map | realized | ADR-005 canonical packed-IR node stream (multi-root batch); the exe-seam transport |
 | isa | x86_64 | isa_x86_64.X86_64 | realized |  |
 | isa | aarch64 | isa_aarch64.AARCH64 | realized |  |

@@ -5,6 +5,7 @@
  "axis": "surface",
  "status": "declared",
  "impl": {"ref": "isa-physics patent/phi-lang (boot + boot-mlir)",
-          "planned": ["phi_rel.parse_rel"]},
+          "host": ["phi_rel.parse_rel", "rel_schema.check",
+                   "rel_eval.run_value"]},
  "refuses": "form outside the clause vocabulary; directed-mode violation (insufficient grounding on -> calls); unbound rel name; shape undeclared on recursive rel",
  "doc": "Relational surface — the substrate speaks first: clauses declare relation EXTENSIONS (guarded union), not function bodies.  name : <in> <-> <out> is reversible composition, <=> contraction (lossy rewrite), -> directed mode (in -> out query view).  Kernel vocabulary {FRESH, UNIFY, MATCH, APPLY, CHOICE, RUN} — substrate ops, NOT derived combinators: SKI/lambda is an egress view of the same substrate, not the target.  `| guard { body }` = alternative extensions; non-determinism is a relation, determinism is a quotient chosen per call (RUN(g,1) committed read vs RUN(g,0) stream).  Recursion shape declared per rel (self|pairwise|step|reduce — koru-style construction vocabulary): the lowering contract picks a kernel form or refuses; shape is data, not syntax.  No primitive arithmetic — ops are relations (phi-stdlib model)."}

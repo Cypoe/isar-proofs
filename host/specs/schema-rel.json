@@ -1,0 +1,9 @@
+{"name": "schema-rel",
+ "layer": "surface",
+ "in": "rel-graph",
+ "out": "checked-rel-graph",
+ "axis": "surface",
+ "status": "declared",
+ "impl": {"planned": ["rel_schema.check"]},
+ "refuses": "dir outside {<->, <=>, ->}; multi-term sig out; unbound rel; arity mismatch; builtin outside registry; var never declared-or-bound at a consuming position; guard introducing vars; directed (<->) call on ungrounded args; recursive rel without declared shape; shape outside {self, pairwise, step, reduce}; emit/RUN on unbound terms",
+ "doc": "The admissibility contract for phi.rel/1 rel-graphs — the phantom-validation stage of 'semantic relation -> admissible construction -> runtime-observable capability'.  rel_schema.check is the exposed constructive boundary: a rel-graph that fails never reaches the evaluator, and every refusal names the violated invariant.  Program schemas are declared rows {relation, domain, invariant, target_class, refusal} (rel_schema.SCHEMAS) — grounding contract and fuel discipline as data, not docstrings.  Recursion shape is declared construction vocabulary (self=depth-fueled unfold, pairwise=declared split, step|reduce=declared, lowering not realized) — never inferred from syntax.  A layer contract, not a pipeline leg: it sits over the surface axis's output and refuses before interpretation."}

@@ -21,7 +21,7 @@
       }
     },
     "phi.rel": {
-      "note": "spec only"
+      "note": "host-side realized: phi_rel.parse_rel, rel_schema.check, rel_eval miniKanren; no dialect record — rel-graph is data over the substrate, not a compiled surface"
     },
     "packed.ir": {
       "module": "spec_term",
@@ -1372,11 +1372,23 @@
       "tier": "fast"
     },
     {
+      "module": "phi_rel",
+      "tier": "fast"
+    },
+    {
       "module": "quotient_map",
       "tier": "fast"
     },
     {
       "module": "reduce",
+      "tier": "fast"
+    },
+    {
+      "module": "rel_eval",
+      "tier": "fast"
+    },
+    {
+      "module": "rel_schema",
       "tier": "fast"
     },
     {
