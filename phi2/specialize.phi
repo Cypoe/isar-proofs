@@ -1,0 +1,74 @@
+;; specialize.plex — Futamura.lean's subst_env as corpus data.
+;; subst_env<t, env> = residual: 'nvar names bound in env are
+;; replaced by their enc-terms; absent stays OPEN (the dynamic
+;; boundary — a residual var, not an error).  Everything else
+;; walks structurally: leaf tags are identity, cons-spines recurse
+;; both children, tagged nodes ('unify/'call/'clause/'def/...)
+;; recurse the payload only.
+;;
+;; Same enc vocabulary as eval.phi — residuals run through the
+;; corpus eval unchanged:
+;;   specialize<def, env> = subst_env<def, env>
+;; and the Futamura-1 square is checkable:
+;;   eval<subst_env<def,env>, dynArgs> = eval<def, allArgs>
+;;
+;; env: PAIR-spine of PAIR('nameSym, encTerm), newest first
+;; (assoc from std/lists_member_assoc — loose, unique-key by
+;; construction).
+
+;; --- leaf-tag probe: 'nvar/'atom/'sym/'var/'pair close the leaf
+;;     cases; any other sym head is a node tag whose payload
+;;     recurses (clause below guards on absence) ---
+tag_known : <s> <-> <hit> where {
+  | s = 'nvar { hit = 'yes }
+  | s = 'atom { hit = 'yes }
+  | s = 'sym  { hit = 'yes }
+  | s = 'var  { hit = 'yes }
+  | s = 'pair { hit = 'yes }
+}
+
+;; --- the 'nvar case resolves through assoc; res casing is data ---
+subst_nv : <res, t> <-> <r> where {
+  | fresh (v) { res = PAIR(v, _)  r = v }
+  | res = [] { r = t }      ;; absent env binding: stays open
+}
+
+subst_env : <t, env> <-> <r> shape self where {
+  | fresh (x, res) {
+      t = PAIR('nvar, x)
+      RUN(assoc<x, env>, 1) = res
+      subst_nv<res, t> = r
+    }
+  | fresh (c) { t = PAIR('atom, c)  r = t }
+  | fresh (c) { t = PAIR('sym, c)   r = t }
+  | fresh (c) { t = PAIR('var, c)   r = t }
+  | fresh (c, rc) {
+      t = PAIR('pair, c)
+      subst_env<c, env> = rc
+      r = PAIR('pair, rc)
+    }
+  | t = [] { r = [] }
+  | fresh (h, rest, rh, rr) {
+      ;; cons-spine (elem is itself a PAIR): lists, arg lists,
+      ;; clause lists, the payload of 'pair — recurse both
+      t = PAIR(PAIR(_, _), rest)
+      t = PAIR(h, rest)
+      subst_env<h, env> = rh
+      subst_env<rest, env> = rr
+      r = PAIR(rh, rr)
+    }
+  | fresh (s, c, res, rc) {
+      ;; any other sym-tagged node: goals ('unify,'call),
+      ;; 'clause, 'def, 'spec — head is a sym, payload recurses
+      t = PAIR(s, c)
+      RUN(tag_known<s>, 1) = res
+      res = []
+      subst_env<c, env> = rc
+      r = PAIR(s, rc)
+    }
+}
+
+;; --- the Futamura-1 map: residual def = subst_env over the def ---
+specialize : <def, env> <-> <resid> where {
+  subst_env<def, env> = resid
+}

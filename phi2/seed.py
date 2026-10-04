@@ -1346,10 +1346,9 @@ def _selftest() -> int:
                 t_pair(eList(nv("t"), nv("ys")), nv("r")))),
             t_pair(S("unify"),
                    t_pair(nv("zs"), ePair(nv("h"), nv("r"))))))
-        env = eList(t_pair(S("append"),
-                           t_pair(S("def"),
-                                  t_pair(ins, t_pair(
-                                      outP, eList(c1, c2))))))
+        appendDef = t_pair(S("def"), t_pair(
+            ins, t_pair(outP, eList(c1, c2))))
+        env = eList(t_pair(S("append"), appendDef))
         ewant = ePair(eAtom(8, 1), ePair(eAtom(8, 2), NILe))
         goal = t_pair(S("call"), t_pair(
             eSym("append"),
@@ -1367,6 +1366,39 @@ def _selftest() -> int:
         assert splits[0][0] == ("atom", 0, 0) and \
             splits[-1][1] == ("atom", 0, 0), splits
         metacirc = f"{len(splits)} splits congruent"
+    # specialize.plex — Futamura-1: subst_env bakes 'xs=[1] into
+    # the def; the residual goes in under a fresh name (the static
+    # arg is a boundary, not recursive) and must eval congruently.
+    spp = os.path.join(here, "specialize.plex")
+    specr = "absent"
+    if metacirc != "absent" and os.path.exists(spp):
+        sg = load_corpus([
+            os.path.join(here, "std", "lists_member_assoc.plex"),
+            spp, evp])
+        senv = eList(t_pair(S("xs"), ePair(eAtom(8, 1), NILe)))
+        rd = run_value(sg, "specialize", [appendDef, senv], n=1)[0]
+        env2 = eList(t_pair(S("append_1"), rd),
+                     t_pair(S("append"), appendDef))
+        goal = t_pair(S("call"), t_pair(
+            eSym("append_1"),
+            t_pair(eList(ePair(eAtom(8, 1), NILe),
+                         ePair(eAtom(8, 2), NILe)), eVar(97))))
+        _reset_fresh()
+        rs = run_value(sg, "eval", [env2, goal, NIL,
+                                    t_atom(8, 1)], n=1)
+        assert len(rs) == 1
+        rout = run_value(sg, "reify", [eVar(97), rs[0][1]], n=1)[0]
+        env1 = eList(t_pair(S("append"), appendDef))
+        goal = t_pair(S("call"), t_pair(
+            eSym("append"),
+            t_pair(eList(ePair(eAtom(8, 1), NILe),
+                         ePair(eAtom(8, 2), NILe)), eVar(98))))
+        _reset_fresh()
+        oos = run_value(sg, "eval", [env1, goal, NIL,
+                                     t_atom(8, 1)], n=1)
+        oout = run_value(sg, "reify", [eVar(98), oos[0][1]], n=1)[0]
+        assert rout == oout, (rout, oout)
+        specr = "F1 square closed"
     # corpus files if present
     std = os.path.join(here, "std")
     if os.path.isdir(std):
@@ -1388,7 +1420,8 @@ def _selftest() -> int:
     print(f"seed selftest: kernel {len(kb)}B (slices I=5 A=0 "
           f"S.row0=3, K^2=0), rel-bundle round-trip, stepper "
           f"append fwd/bwd + head, refusals, corpus rels={nstd}, "
-          f"meta-circular eval [{metacirc}]: pass")
+          f"meta-circular eval [{metacirc}], "
+          f"specialize [{specr}]: pass")
     return 0
 
 
