@@ -13,8 +13,8 @@
 ;;   eval<subst_env<def,env>, dynArgs> = eval<def, allArgs>
 ;;
 ;; env: PAIR-spine of PAIR('nameSym, encTerm), newest first
-;; (assoc from std/lists_member_assoc — loose, unique-key by
-;; construction).
+;; (assoc — loose, unique-key by construction).
+;; uses: std/lists_member_assoc
 
 ;; --- leaf-tag probe: 'nvar/'atom/'sym/'var/'pair close the leaf
 ;;     cases; any other sym head is a node tag whose payload

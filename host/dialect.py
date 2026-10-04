@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
@@ -214,10 +215,18 @@ PROJECTIONS = {
 }
 
 
+_USES_RE = re.compile(r"^[ \t]*;;[ \t]*uses:[ \t]*(.+)$", re.M)
+
+
 def s_phi_rel(path: str, surface: str) -> dict:
     """Write verb: surface text -> parse -> schema -> bundle ->
     atomic replace of --file.  The .plex is canonical; a refused
-    surface leaves it byte-identical."""
+    surface leaves it byte-identical.
+
+    `;; uses: a, b/c` declares the file's dep closure — sibling
+    bundles (relative to --file, .plex implied) merged for the
+    schema check.  The canonical graph records `uses`; a dep rel
+    never shadows a local name (local wins, dup stays declared)."""
     import phi_rel
     import rel_schema
     if not path.endswith(".plex"):
@@ -228,7 +237,28 @@ def s_phi_rel(path: str, surface: str) -> dict:
         raise ValueError(
             "refusing to write an empty rel-graph — "
             "an empty surface would destroy the bundle")
-    rel_schema.check(g)                      # SchemaRefusal = refused
+    uses = [u.strip() for m in _USES_RE.finditer(surface)
+            for u in m.group(1).split(",") if u.strip()]
+    if uses:
+        g["uses"] = uses
+        merged = {"format": g["format"], "rels": list(g["rels"])}
+        names = {r["name"] for r in merged["rels"]}
+        base = os.path.dirname(path)
+        for u in uses:
+            up = u if u.endswith(".plex") else u + ".plex"
+            cand = os.path.join(base, up)
+            if not os.path.exists(cand):
+                raise ValueError(
+                    f"uses: dep {u!r} not found at {cand}")
+            dg = phi_rel.read_graph_bundle(
+                open(cand, "rb").read())
+            for r in dg["rels"]:
+                if r["name"] not in names:
+                    names.add(r["name"])
+                    merged["rels"].append(r)
+        rel_schema.check(merged)             # SchemaRefusal
+    else:
+        rel_schema.check(g)                  # SchemaRefusal = refused
     blob = phi_rel.graph_bundle(g)
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:

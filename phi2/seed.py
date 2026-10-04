@@ -1399,6 +1399,55 @@ def _selftest() -> int:
         oout = run_value(sg, "reify", [eVar(98), oos[0][1]], n=1)[0]
         assert rout == oout, (rout, oout)
         specr = "F1 square closed"
+    # realize.plex — the spec fold: maps resolve through qmaps
+    # (assoc), each applied through the corpus eval.  Order is
+    # data; missing maps refuse as empty streams.
+    rzp = os.path.join(here, "realize.plex")
+    realr = "absent"
+    if metacirc != "absent" and os.path.exists(rzp):
+        rg = load_corpus([
+            os.path.join(here, "std", "lists_member_assoc.plex"),
+            evp, rzp])
+
+        def markDef(tag):
+            return t_pair(S("def"), t_pair(
+                eList(nv("x")), t_pair(
+                    ePair(eSym(tag), nv("x")),
+                    eList(t_pair(S("clause"), NIL)))))
+
+        def mapT(tag):
+            return t_pair(S("map"), t_pair(
+                eList(t_pair(S("mark"), markDef(tag))),
+                S("mark")))
+
+        qmaps = eList(t_pair(S("m1"), mapT("s1")),
+                      t_pair(S("m2"), mapT("s2")))
+
+        def mkSpec(maps):
+            return t_pair(S("spec"), t_pair(
+                eSym("src"),
+                t_pair(maps, t_pair(
+                    qmaps, t_pair(eSym("operEq"), eSym("ctx"))))))
+
+        _reset_fresh()
+        o1 = run_value(rg, "realize", [mkSpec(
+            eList(S("m1"), S("m2")))], n=1)
+        assert len(o1) == 1
+        s1s2 = dec(o1[0])
+        _reset_fresh()
+        o2 = run_value(rg, "realize", [mkSpec(
+            eList(S("m2"), S("m1")))], n=1)
+        s2s1 = dec(o2[0])
+        assert s1s2 == ("pair", ("sym", "s2"),
+                        ("pair", ("sym", "s1"), ("sym", "src"))), \
+            s1s2
+        assert s2s1 == ("pair", ("sym", "s1"),
+                        ("pair", ("sym", "s2"), ("sym", "src"))), \
+            s2s1
+        missing = run_value(rg, "realize", [mkSpec(
+            eList(S("m9")))], n=1)
+        assert missing == []
+        realr = "fold ordered, refusal honest"
     # corpus files if present
     std = os.path.join(here, "std")
     if os.path.isdir(std):
@@ -1421,7 +1470,7 @@ def _selftest() -> int:
           f"S.row0=3, K^2=0), rel-bundle round-trip, stepper "
           f"append fwd/bwd + head, refusals, corpus rels={nstd}, "
           f"meta-circular eval [{metacirc}], "
-          f"specialize [{specr}]: pass")
+          f"specialize [{specr}], realize [{realr}]: pass")
     return 0
 
 
