@@ -9,9 +9,6 @@
   },
   "main": "./extension.js",
   "activationEvents": [
-    "onLanguage:phi",
-    "onCommand:phi.project",
-    "onCommand:phi.eval",
     "workspaceContains:**/*.phi",
     "workspaceContains:host/dialect.py"
   ],
