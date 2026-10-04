@@ -27,44 +27,55 @@ tag_known : <s> <-> <hit> where {
   | s = 'pair { hit = 'yes }
 }
 
+;; --- pair-head probe: the generic clause must exclude pair-car
+;;     terms — those are cons-spines handled by the clause above;
+;;     without it a pair-headed t unifies s with the pair itself
+;;     and yields a second, unsubstituted residual ---
+is_pair : <x> <-> <hit> where {
+  | fresh (a, b) { x = [a|b]  hit = 'yes }
+}
+
 ;; --- the 'nvar case resolves through assoc; res casing is data ---
 subst_nv : <res, t> <-> <r> where {
-  | fresh (v) { res = PAIR(v, _)  r = v }
+  | fresh (v) { res = [v|_]  r = v }
   | res = [] { r = t }      ;; absent env binding: stays open
 }
 
 subst_env : <t, env> <-> <r> shape self where {
   | fresh (x, res) {
-      t = PAIR('nvar, x)
+      t = 'nvar(x)
       RUN(assoc<x, env>, 1) = res
       subst_nv<res, t> = r
     }
-  | fresh (c) { t = PAIR('atom, c)  r = t }
-  | fresh (c) { t = PAIR('sym, c)   r = t }
-  | fresh (c) { t = PAIR('var, c)   r = t }
+  | fresh (c) { t = 'atom(c)  r = t }
+  | fresh (c) { t = 'sym(c)   r = t }
+  | fresh (c) { t = 'var(c)   r = t }
   | fresh (c, rc) {
-      t = PAIR('pair, c)
+      t = 'pair(c)
       subst_env<c, env> = rc
-      r = PAIR('pair, rc)
+      r = 'pair(rc)
     }
   | t = [] { r = [] }
   | fresh (h, rest, rh, rr) {
       ;; cons-spine (elem is itself a PAIR): lists, arg lists,
       ;; clause lists, the payload of 'pair — recurse both
-      t = PAIR(PAIR(_, _), rest)
-      t = PAIR(h, rest)
+      t = [[_|_]|rest]
+      t = [h|rest]
       subst_env<h, env> = rh
       subst_env<rest, env> = rr
-      r = PAIR(rh, rr)
+      r = [rh|rr]
     }
-  | fresh (s, c, res, rc) {
+  | fresh (s, c, res, pres, rc) {
       ;; any other sym-tagged node: goals ('unify,'call),
-      ;; 'clause, 'def, 'spec — head is a sym, payload recurses
-      t = PAIR(s, c)
+      ;; 'clause, 'def, 'spec — head is a non-pair, non-leaf sym,
+      ;; payload recurses
+      t = [s|c]
       RUN(tag_known<s>, 1) = res
       res = []
+      RUN(is_pair<s>, 1) = pres
+      pres = []
       subst_env<c, env> = rc
-      r = PAIR(s, rc)
+      r = [s|rc]
     }
 }
 

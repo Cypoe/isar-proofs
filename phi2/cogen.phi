@@ -15,10 +15,8 @@
 
 cogen : <spec> <-> <out> where {
   fresh (src, maps, qmaps, regime, ctx) {
-    spec = PAIR('spec,
-             PAIR(src, PAIR(maps, PAIR(qmaps,
-                  PAIR(regime, ctx)))))
-    regime = PAIR('sym, 'operEq)
+    spec = 'spec(src, maps, qmaps, regime, ctx)
+    regime = 'sym('operEq)
     realize<spec> = out
   }
 }

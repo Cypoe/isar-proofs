@@ -1,13 +1,13 @@
 ;; realize.plex — the fold over spec.maps.  A spec is data:
-;;   ('spec, PAIR(src, PAIR(maps, PAIR(qmaps, PAIR(regime, ctx)))))
+;;   'spec(src, maps, qmaps, regime, ctx)
 ;;
 ;;   maps   : ordered spine of map names — the fold order
 ;;   qmaps  : alist PAIR(name, mapT) — resolution stays data,
 ;;            via assoc (std/lists_member_assoc)
-;;   mapT   : ('map, PAIR(menv, entry)) — menv = enc env-alist of
-;;            defs (the map bundle's graph as data), entry = raw
-;;            sym; uniform map signature entry<x> = y (a quotient
-;;            map on artifacts: one term in, one term out)
+;;   mapT   : 'map(menv, entry) — menv = enc env-alist of defs
+;;            (the map bundle's graph as data), entry = raw sym;
+;;            uniform map signature entry<x> = y (a quotient map
+;;            on artifacts: one term in, one term out)
 ;;   regime : observation regime term — carried, bound by cogen,
 ;;            not consumed by the fold
 ;;   ctx    : machine context (target, loader family)
@@ -21,8 +21,7 @@
 
 realize : <spec> <-> <out> where {
   fresh (src, maps, qmaps, rest) {
-    spec = PAIR('spec,
-             PAIR(src, PAIR(maps, PAIR(qmaps, rest))))
+    spec = 'spec(src, maps, qmaps, rest)
     rfold<qmaps, maps, src> = out
   }
 }
@@ -30,7 +29,7 @@ realize : <spec> <-> <out> where {
 rfold : <qmaps, maps, acc> <-> <out> shape self where {
   | maps = [] { out = acc }
   | fresh (mn, rest, q, m2) {
-      maps = PAIR(mn, rest)
+      maps = [mn|rest]
       assoc<mn, qmaps> = q
       apply<q, acc> = m2
       rfold<qmaps, rest, m2> = out
@@ -39,13 +38,11 @@ rfold : <qmaps, maps, acc> <-> <out> shape self where {
 
 apply : <mapT, ain> <-> <aout> where {
   fresh (menv, entry, ov, goal, res, s2) {
-    mapT = PAIR('map, PAIR(menv, entry))
-    ov = PAIR('var, ATOM(8, 0))
-    goal = PAIR('call,
-             PAIR(PAIR('sym, entry),
-                  PAIR(PAIR(ain, []), ov)))
-    eval<menv, goal, [], ATOM(8, 1)> = res
-    res = PAIR(s2, _)
+    mapT = 'map(menv, entry)
+    ov = 'var(0)
+    goal = 'call('sym(entry), [ain], ov)
+    eval<menv, goal, [], 1> = res
+    res = [s2|_]
     reify<ov, s2> = aout
   }
 }

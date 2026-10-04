@@ -17,6 +17,14 @@ legal in a sig).  `| guard { body }`, `| fresh (v..) { body }`,
 `shape self|pairwise|step|reduce` may be declared after the out-sig
 (the lowering contract, data not syntax — see surface spec).
 
+Term sugar (surface only — canonical graphs keep raw PAIR/ATOM):
+`[a, b]` is PAIR-spine sugar ending at NIL; `[a, b|rest]` conses
+onto an open tail; `'tag` is a bare sym; `'tag(a, b, ...)` is
+PAIR('tag, a-PAIR-b-...) right-nested — the enc-domain shorthand
+('nvar('x) 'pair(a,b) 'spec(src,ms,qm,rg,ctx) ...).  Render emits
+proper lists as [...], sym-car pairs as 'tag(...), other pairs as
+[car|cdr].
+
 Goals: term = term unification, term cmp term guards, rel<a> = out
 calls, builtin(a..) = out kernel ops ({UNIFY,MATCH,APPLY,CHOICE,
 RUN,FRESH}, env_lookup, call), nested fresh-blocks, `! term` emit.
@@ -175,21 +183,34 @@ def _term(p: _P) -> dict:
         return atom(8, _to_int(txt))      # bare int -> T[8] scalar
     if txt == "[":
         items = []
-        if not p.at("]"):
+        if not p.at("]") and not p.at("|"):
             items.append(_term(p))
             while p.at(","):
                 p.next()
                 items.append(_term(p))
+        tail = NIL
+        if p.at("|"):
+            # [a,b|rest] — cons sugar: spine onto an open tail
+            p.next()
+            tail = _term(p)
         p.want("]")
-        out = NIL
         for it in reversed(items):
-            out = pair(it, out)
-        return out
+            tail = pair(it, tail)
+        return tail
     if txt == "_":
         return dict(WILD)
     if kind == "sym":
         # 'name — a rel name as a VALUE (env_lookup/call/map args);
-        # the surface's quote literal, not a var
+        # 'name(a, b, ...) — tagged-node sugar: PAIR('name, a-PAIR-b-...)
+        # covers the enc domain: 'nvar('x) 'pair(a,b) 'sym('x) ...
+        if p.at("("):
+            args = _fn_args(p)
+            payload = NIL
+            if args:
+                payload = args[-1]
+                for a in reversed(args[:-1]):
+                    payload = pair(a, payload)
+            return pair({"sym": txt[1:]}, payload)
         return {"sym": txt[1:]}
     if kind == "ident":
         if txt == "ATOM":
@@ -560,7 +581,19 @@ def _term_s(t: dict) -> str:
             cur = cur["pair"][1]
         if cur.get("atom") == [0, 0]:
             return "[" + ",".join(_term_s(i) for i in items) + "]"
-        return f"PAIR({_term_s(t['pair'][0])},{_term_s(t['pair'][1])})"
+        if "sym" in t["pair"][0]:
+            # 'tag(a, b, ...) — destructure the right-nested cdr;
+            # stop at a sym-car pair (nested 'tag(...), same term,
+            # tagged read dominates in the enc domain)
+            args = [t["pair"][1]]
+            while "pair" in args[-1] \
+                    and "sym" not in args[-1]["pair"][0]:
+                c = args[-1]["pair"]
+                args[-1:] = [c[0], c[1]]
+            return f"'{t['pair'][0]['sym']}(" \
+                   f"{','.join(_term_s(a) for a in args)})"
+        return f"[{','.join(_term_s(i) for i in items)}|" \
+               f"{_term_s(cur)}]"
     if "sym" in t:
         return f"'{t['sym']}"
     if "type" in t:
@@ -650,7 +683,10 @@ def render_rel(g: dict) -> str:
     if g.get("format") != FORMAT:
         raise RelError(
             f"render: format {g.get('format')!r} — need {FORMAT}")
-    return "\n\n".join(_rel_s(r) for r in g["rels"]) + "\n"
+    uses = "".join(f";; uses: {u}\n" for u in g.get("uses", []))
+    if uses:
+        uses += "\n"
+    return uses + "\n\n".join(_rel_s(r) for r in g["rels"]) + "\n"
 
 
 # ---------------------------------------------------------------------------

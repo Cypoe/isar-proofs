@@ -1113,7 +1113,7 @@ def main(argv: List[str]) -> int:
     if args[0] == "kernel" and len(args) >= 2:
         open(args[1], "wb").write(kernel_bundle())
         return 0
-    if args[0] == "gate":
+    if args[0] in ("gate", "--gate"):
         return _gate()
     return _selftest()
 

@@ -2,18 +2,18 @@
 ;; the substitution machine, instantiation (alpha-renaming), and
 ;; clause-iteration eval — all as data over enc terms.
 ;;
-;; Encoding contract (enc):
-;;   ("atom",b,v)  -> PAIR('atom, PAIR(ATOM(8,b), ATOM(8,v)))
-;;   ("var",i)     -> PAIR('var,  ATOM(8,i))        ;; i = fresh id
-;;   ("nvar", 'x)  -> PAIR('nvar, 'x)               ;; name-var, AST
-;;   ("pair",a,b)  -> PAIR('pair, PAIR(a, b))
-;;   ("sym",n)     -> PAIR('sym,  'n)
-;;   NIL           -> PAIR('atom, PAIR(0,0))        ;; atom(0,0)
+;; Encoding contract (enc), in 'tag sugar:
+;;   ("atom",b,v)  -> 'atom(ATOM(8,b), ATOM(8,v))
+;;   ("var",i)     -> 'var(i)            ;; i = fresh id
+;;   ("nvar", 'x)  -> 'nvar('x)          ;; name-var, AST
+;;   ("pair",a,b)  -> 'pair(a, b)
+;;   ("sym",n)     -> 'sym('n)
+;;   NIL           -> 'atom(0, 0)        ;; PAIR('atom,PAIR(0,0))
 ;;
-;; goals:  ('unify, PAIR(a,b))
-;;         ('call, PAIR(nameSym, PAIR(argsList, outT)))
-;; def:    PAIR('def, PAIR(inPatList, PAIR(outPat, clauseList)))
-;; clause: PAIR('clause, goalList)
+;; goals:  'unify(a, b)
+;;         'call(nameSym, argsList, outT)
+;; def:    'def(inPatList, outPat, clauseList)
+;; clause: 'clause(goalList)
 ;; env:    PAIR-spine of PAIR(nameSym, defTerm)
 ;; subst:  PAIR-spine of PAIR(ATOM(8,id), encTerm), newest first
 ;; ren:    PAIR-spine of PAIR(nameSym, ATOM(8,id))
@@ -30,11 +30,11 @@ next_id : <n: T[8]> <-> <ATOM(8, n+1)>
 ;; --- subst lookup: first binding wins; unbound is a value ---
 subst_lookup : <k, lst> <-> <r> shape self where {
   | fresh (v, rest) {
-      lst = PAIR(PAIR(k, v), rest)
-      r = PAIR('bound, v)
+      lst = [[k|v]|rest]
+      r = 'bound(v)
     }
   | fresh (k2, rest) {
-      lst = PAIR(PAIR(k2, _), rest)
+      lst = [[k2|_]|rest]
       k != k2
       subst_lookup<k, rest> = r
     }
@@ -44,26 +44,17 @@ subst_lookup : <k, lst> <-> <r> shape self where {
 ;; --- walk: chase var bindings through the subst ---
 walk : <t, s> <-> <r> shape self where {
   | fresh (i, b) {
-      t = PAIR('var, i)
+      t = 'var(i)
       subst_lookup<i, s> = b
       walk_res<b, t, s> = r
     }
-  | fresh (c) {
-      t = PAIR('atom, c)
-      r = t
-    }
-  | fresh (c) {
-      t = PAIR('pair, c)
-      r = t
-    }
-  | fresh (c) {
-      t = PAIR('sym, c)
-      r = t
-    }
+  | fresh (c) { t = 'atom(c)  r = t }
+  | fresh (c) { t = 'pair(c)  r = t }
+  | fresh (c) { t = 'sym(c)   r = t }
 }
 walk_res : <b, t, s> <-> <r> shape self where {
   | fresh (v) {
-      b = PAIR('bound, v)
+      b = 'bound(v)
       walk<v, s> = r
     }
   | b = 'unbound { r = t }
@@ -80,59 +71,59 @@ unify_enc : <u, v, s> <-> <s2> shape self where {
 }
 unify_w : <u, v, s> <-> <s2> shape self where {
   | fresh (i) {
-      u = PAIR('var, i)
-      v = PAIR('var, i)
+      u = 'var(i)
+      v = 'var(i)
       s2 = s
     }
   | fresh (i, j) {
-      u = PAIR('var, i)
-      v = PAIR('var, j)
+      u = 'var(i)
+      v = 'var(j)
       i != j
-      s2 = PAIR(PAIR(i, v), s)
+      s2 = [[i|v]|s]
     }
   | fresh (i, c) {
-      u = PAIR('var, i)
-      v = PAIR('atom, c)
-      s2 = PAIR(PAIR(i, v), s)
+      u = 'var(i)
+      v = 'atom(c)
+      s2 = [[i|v]|s]
     }
   | fresh (i, c) {
-      u = PAIR('var, i)
-      v = PAIR('pair, c)
-      s2 = PAIR(PAIR(i, v), s)
+      u = 'var(i)
+      v = 'pair(c)
+      s2 = [[i|v]|s]
     }
   | fresh (i, c) {
-      u = PAIR('var, i)
-      v = PAIR('sym, c)
-      s2 = PAIR(PAIR(i, v), s)
+      u = 'var(i)
+      v = 'sym(c)
+      s2 = [[i|v]|s]
     }
   | fresh (i, c) {
-      v = PAIR('var, i)
-      u = PAIR('atom, c)
-      s2 = PAIR(PAIR(i, u), s)
+      v = 'var(i)
+      u = 'atom(c)
+      s2 = [[i|u]|s]
     }
   | fresh (i, c) {
-      v = PAIR('var, i)
-      u = PAIR('pair, c)
-      s2 = PAIR(PAIR(i, u), s)
+      v = 'var(i)
+      u = 'pair(c)
+      s2 = [[i|u]|s]
     }
   | fresh (i, c) {
-      v = PAIR('var, i)
-      u = PAIR('sym, c)
-      s2 = PAIR(PAIR(i, u), s)
+      v = 'var(i)
+      u = 'sym(c)
+      s2 = [[i|u]|s]
     }
   | fresh (c) {
-      u = PAIR('atom, c)
-      v = PAIR('atom, c)
+      u = 'atom(c)
+      v = 'atom(c)
       s2 = s
     }
   | fresh (c) {
-      u = PAIR('sym, c)
-      v = PAIR('sym, c)
+      u = 'sym(c)
+      v = 'sym(c)
       s2 = s
     }
   | fresh (a1, b1, a2, b2, s1) {
-      u = PAIR('pair, PAIR(a1, b1))
-      v = PAIR('pair, PAIR(a2, b2))
+      u = 'pair(a1, b1)
+      v = 'pair(a2, b2)
       unify_enc<a1, a2, s> = s1
       unify_enc<b1, b2, s1> = s2
     }
@@ -142,11 +133,11 @@ unify_w : <u, v, s> <-> <s2> shape self where {
 ;;     name = stream failure (a refusal) ---
 env_find : <name, env> <-> <def> shape self where {
   | fresh (d2, rest) {
-      env = PAIR(PAIR(name, d2), rest)
+      env = [[name|d2]|rest]
       def = d2
     }
   | fresh (e, rest) {
-      env = PAIR(e, rest)
+      env = [e|rest]
       env_find<name, rest> = def
     }
 }
@@ -155,11 +146,11 @@ env_find : <name, env> <-> <def> shape self where {
 ;;     find-or-create — rel_eval's ren dict, as data ---
 ren_find : <name, ren> <-> <id> shape self where {
   | fresh (id2, rest) {
-      ren = PAIR(PAIR(name, id2), rest)
+      ren = [[name|id2]|rest]
       id = id2
     }
   | fresh (e, rest) {
-      ren = PAIR(e, rest)
+      ren = [e|rest]
       ren_find<name, rest> = id
     }
 }
@@ -171,13 +162,13 @@ ren_fc : <name, ren, n> <-> <o> where {
 }
 ren_fc_res : <res, name, ren, n> <-> <o> where {
   | fresh (id) {
-      res = PAIR(id, _)
-      o = PAIR(id, PAIR(ren, n))
+      res = [id|_]
+      o = [id|[ren|n]]
     }
   | fresh (n2) {
       res = []
       next_id<n> = n2
-      o = PAIR(n, PAIR(PAIR(PAIR(name, n), ren), n2))
+      o = [n|[[[name|n]|ren]|n2]]
     }
 }
 
@@ -185,45 +176,45 @@ ren_fc_res : <res, name, ren, n> <-> <o> where {
 ;;     ids.  o = PAIR(ren2, PAIR(n2, node2)). ---
 inst : <node, ren, n> <-> <o> shape self where {
   | fresh (x, id, r2, n2) {
-      node = PAIR('nvar, x)
-      ren_fc<x, ren, n> = PAIR(id, PAIR(r2, n2))
-      o = PAIR(r2, PAIR(n2, PAIR('var, id)))
+      node = 'nvar(x)
+      ren_fc<x, ren, n> = [id|[r2|n2]]
+      o = [r2|[n2|'var(id)]]
     }
   | fresh (c) {
-      node = PAIR('atom, c)
-      o = PAIR(ren, PAIR(n, node))
+      node = 'atom(c)
+      o = [ren|[n|node]]
     }
   | fresh (c) {
-      node = PAIR('sym, c)
-      o = PAIR(ren, PAIR(n, node))
+      node = 'sym(c)
+      o = [ren|[n|node]]
     }
   | fresh (a, b, r1, n1, a2, r2, n2, b2) {
-      node = PAIR('pair, PAIR(a, b))
-      inst<a, ren, n> = PAIR(r1, PAIR(n1, a2))
-      inst<b, r1, n1> = PAIR(r2, PAIR(n2, b2))
-      o = PAIR(r2, PAIR(n2, PAIR('pair, PAIR(a2, b2))))
+      node = 'pair(a, b)
+      inst<a, ren, n> = [r1|[n1|a2]]
+      inst<b, r1, n1> = [r2|[n2|b2]]
+      o = [r2|[n2|'pair(a2, b2)]]
     }
   | fresh (a, b, r1, n1, a2, r2, n2, b2) {
-      node = PAIR('unify, PAIR(a, b))
-      inst<a, ren, n> = PAIR(r1, PAIR(n1, a2))
-      inst<b, r1, n1> = PAIR(r2, PAIR(n2, b2))
-      o = PAIR(r2, PAIR(n2, PAIR('unify, PAIR(a2, b2))))
+      node = 'unify(a, b)
+      inst<a, ren, n> = [r1|[n1|a2]]
+      inst<b, r1, n1> = [r2|[n2|b2]]
+      o = [r2|[n2|'unify(a2, b2)]]
     }
   | fresh (nm, at, ot, r0, n0, nm2, r1, n1, at2, r2, n2, ot2) {
-      node = PAIR('call, PAIR(nm, PAIR(at, ot)))
-      inst<nm, ren, n> = PAIR(r0, PAIR(n0, nm2))
-      inst_list<at, r0, n0> = PAIR(r1, PAIR(n1, at2))
-      inst<ot, r1, n1> = PAIR(r2, PAIR(n2, ot2))
-      o = PAIR(r2, PAIR(n2, PAIR('call, PAIR(nm2, PAIR(at2, ot2)))))
+      node = 'call(nm, at, ot)
+      inst<nm, ren, n> = [r0|[n0|nm2]]
+      inst_list<at, r0, n0> = [r1|[n1|at2]]
+      inst<ot, r1, n1> = [r2|[n2|ot2]]
+      o = [r2|[n2|'call(nm2, at2, ot2)]]
     }
 }
 inst_list : <lst, ren, n> <-> <o> shape self where {
-  | lst = [] { o = PAIR(ren, PAIR(n, [])) }
+  | lst = [] { o = [ren|[n|[]]] }
   | fresh (h, rest, r1, n1, h2, r2, n2, rest2) {
-      lst = PAIR(h, rest)
-      inst<h, ren, n> = PAIR(r1, PAIR(n1, h2))
-      inst_list<rest, r1, n1> = PAIR(r2, PAIR(n2, rest2))
-      o = PAIR(r2, PAIR(n2, PAIR(h2, rest2)))
+      lst = [h|rest]
+      inst<h, ren, n> = [r1|[n1|h2]]
+      inst_list<rest, r1, n1> = [r2|[n2|rest2]]
+      o = [r2|[n2|[h2|rest2]]]
     }
 }
 
@@ -236,81 +227,72 @@ reify : <t, s> <-> <r> shape self where {
 }
 reify_w : <w, s> <-> <r> shape self where {
   | fresh (a, b, ra, rb) {
-      w = PAIR('pair, PAIR(a, b))
+      w = 'pair(a, b)
       reify<a, s> = ra
       reify<b, s> = rb
-      r = PAIR('pair, PAIR(ra, rb))
+      r = 'pair(ra, rb)
     }
-  | fresh (c) {
-      w = PAIR('atom, c)
-      r = w
-    }
-  | fresh (c) {
-      w = PAIR('sym, c)
-      r = w
-    }
-  | fresh (i) {
-      w = PAIR('var, i)
-      r = w
-    }
+  | fresh (c) { w = 'atom(c)  r = w }
+  | fresh (c) { w = 'sym(c)   r = w }
+  | fresh (i) { w = 'var(i)   r = w }
 }
 
 ;; --- eval: goals are enc terms; o = PAIR(s2, n2) ---
 eval : <env, goal, s, n> <-> <o> shape self where {
   | fresh (a, b, s2) {
-      goal = PAIR('unify, PAIR(a, b))
+      goal = 'unify(a, b)
       unify_enc<a, b, s> = s2
-      o = PAIR(s2, n)
+      o = [s2|n]
     }
   | fresh (nm, at, ot, x, def) {
-      goal = PAIR('call, PAIR(nm, PAIR(at, ot)))
-      nm = PAIR('sym, x)
+      goal = 'call(nm, at, ot)
+      nm = 'sym(x)
       env_find<x, env> = def
       eval_call<env, def, at, ot, s, n> = o
     }
 }
 eval_call : <env, def, at, ot, s, n> <-> <o> shape self where {
   | fresh (ins, outP, clauses) {
-      def = PAIR('def, PAIR(ins, PAIR(outP, clauses)))
+      def = 'def(ins, outP, clauses)
       eval_clauses<env, clauses, ins, outP, at, ot, s, n> = o
     }
 }
 eval_clauses : <env, clauses, ins, outP, at, ot, s, n> <-> <o>
     shape self where {
   | fresh (cl, rest) {
-      clauses = PAIR(cl, rest)
+      clauses = [cl|rest]
       eval_clause<env, cl, ins, outP, at, ot, s, n> = o
     }
   | fresh (cl, rest) {
-      clauses = PAIR(cl, rest)
+      clauses = [cl|rest]
       eval_clauses<env, rest, ins, outP, at, ot, s, n> = o
     }
 }
 eval_clause : <env, cl, ins, outP, at, ot, s, n> <-> <o> shape self where {
   | fresh (goals, r1, n1, ins2, r2, n2, outP2,
            r3, n3, goals2, s1, s3) {
-      cl = PAIR('clause, goals)
-      inst_list<ins, [], n> = PAIR(r1, PAIR(n1, ins2))
-      inst<outP, r1, n1> = PAIR(r2, PAIR(n2, outP2))
-      inst_list<goals, r2, n2> = PAIR(r3, PAIR(n3, goals2))
+      cl = 'clause(goals)
+      inst_list<ins, [], n> = [r1|[n1|ins2]]
+      inst<outP, r1, n1> = [r2|[n2|outP2]]
+      inst_list<goals, r2, n2> = [r3|[n3|goals2]]
       unify_args<ins2, at, s> = s1
       unify_enc<ot, outP2, s1> = s3
       eval_body<env, goals2, s3, n3> = o
     }
 }
 eval_body : <env, goals, s, n> <-> <o> shape self where {
-  | goals = [] { o = PAIR(s, n) }
+  | goals = [] { o = [s|n] }
   | fresh (g, rest, s1, n1) {
-      goals = PAIR(g, rest)
-      eval<env, g, s, n> = PAIR(s1, n1)
+      goals = [g|rest]
+      eval<env, g, s, n> = [s1|n1]
       eval_body<env, rest, s1, n1> = o
     }
 }
 unify_args : <ins, at, s> <-> <s1> shape self where {
   | ins = [] & at = [] { s1 = s }
   | fresh (p, prest, a, arest, s0) {
-      ins = PAIR(p, prest)
-      at = PAIR(a, arest)
+      ins = [p|prest]
+      at = [a|arest]
       unify_enc<p, a, s> = s0
       unify_args<prest, arest, s0> = s1
     }
