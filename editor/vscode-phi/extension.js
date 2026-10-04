@@ -95,6 +95,7 @@ class PhiBundleFs {
     this._em = new vscode.EventEmitter();
     this.onDidChangeFile = this._em.event;
   }
+  watch() { return new vscode.Disposable(() => {}); }
   _file(uri) {
     // uri.path carries the absolute path (posix-style, leading /)
     let p = decodeURIComponent(uri.path);
