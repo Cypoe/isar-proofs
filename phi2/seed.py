@@ -1067,6 +1067,143 @@ def load_corpus(paths: List[str]) -> dict:
     return merge_graphs([load_graph(p) for p in paths])
 
 
+# ---------------------------------------------------------------------------
+# enc'er — surface rel-graph (dict form) -> enc'd env term.
+# Any corpus program becomes data in the corpus eval's own domain:
+# the self-description + Futamura-1 substrate.  Unsupported goal
+# forms refuse by name — the enc domain's boundary is explicit.
+# ---------------------------------------------------------------------------
+
+def _e(tag, *xs):
+    """'tag(a, b, ...) — right-nested tagged enc node."""
+    o = xs[-1] if xs else NIL
+    for x in reversed(xs[:-1]):
+        o = t_pair(x, o)
+    return t_pair(t_sym(tag), o)
+
+
+def _esym(x):
+    return t_pair(t_sym("sym"), t_sym(x))
+
+
+def enc_term(t: dict, wc: list):
+    """dict-form surface term -> enc'd term.  wc threads a
+    wildcard counter so each `_` gets a distinct 'nvar name."""
+    if "wild" in t:
+        wc[0] += 1
+        return _e("nvar", t_sym(f"_w{wc[0]}"))
+    if "var" in t:
+        if t["var"] == "_":
+            wc[0] += 1
+            return _e("nvar", t_sym(f"_w{wc[0]}"))
+        return _e("nvar", t_sym(t["var"]))
+    if "sym" in t:
+        return _esym(t["sym"])
+    if "atom" in t:
+        return _e("atom", t_atom(8, t["atom"][0]),
+                  t_atom(8, t["atom"][1]))
+    if "atom_dyn" in t:
+        be, ve = t["atom_dyn"]
+        if be.get("const") != 8:
+            raise EvalError("enc: non-T[8] atom_dyn — 'adyn axis")
+        if "const" in ve:
+            return _e("atom", t_atom(8, 8), t_atom(8, ve["const"]))
+        name, d = ve["var_delta"]
+        return _e("adyn", _e("nvar", t_sym(name)),
+                  _e("atom", t_atom(8, 8), t_atom(8, d)))
+    if "pair" in t:
+        return _e("pair", enc_term(t["pair"][0], wc),
+                  enc_term(t["pair"][1], wc))
+    if "typed" in t:
+        return enc_term(t["typed"][0], wc)     # sig types drop
+    if "type" in t or "const" in t or "var_delta" in t:
+        raise EvalError(f"enc: stray term form {t!r}")
+    raise EvalError(f"enc: unsupported term {t!r}")
+
+
+_CMPS = {"!=": "neq", "==": "eq", "<": "lt", ">": "gt",
+         "<=": "le", ">=": "ge"}
+
+
+def enc_goal(g: dict, wc: list):
+    """dict-form surface goal -> enc'd goal node."""
+    if "unify" in g:
+        return _e("unify", enc_term(g["unify"][0], wc),
+                  enc_term(g["unify"][1], wc))
+    if "cmp" in g:
+        op, a, b = g["cmp"]
+        if op == "=":
+            return _e("unify", enc_term(a, wc), enc_term(b, wc))
+        if op not in _CMPS:
+            raise EvalError(f"enc: cmp op {op!r} — unsupported")
+        return _e("cmp", t_sym(_CMPS[op]), enc_term(a, wc),
+                  enc_term(b, wc))
+    if "call" in g:
+        c = g["call"]
+        args = NIL
+        for a in reversed(c["args"]):
+            args = t_pair(enc_term(a, wc), args)
+        return _e("call", _esym(c["rel"]), args,
+                  enc_term(c["out"], wc))
+    if "run" in g:
+        r = g["run"]
+        wc[0] += 1
+        outv = _e("nvar", t_sym(f"_ro{wc[0]}"))
+        goal = r["goal"]
+        if "call_term" in goal:
+            args = NIL
+            for a in reversed(goal["call_term"][1]):
+                args = t_pair(enc_term(a, wc), args)
+            inner = _e("call", _esym(goal["call_term"][0]),
+                       args, outv)
+        elif "call" in goal:
+            inner = enc_goal(goal, wc)
+        else:
+            raise EvalError(f"enc: RUN goal {goal!r} — axis")
+        return _e("run", inner, enc_term(r["n"], wc),
+                  enc_term(r["out"], wc))
+    if "fresh" in g:
+        raise EvalError("enc: nested fresh — splice into clause "
+                        "goals instead (axis)")
+    if "builtin" in g:
+        raise EvalError(
+            f"enc: builtin {g['builtin']['name']!r} — axis")
+    if "emit" in g or "choice" in g:
+        raise EvalError("enc: emit/choice goal — axis")
+    raise EvalError(f"enc: unsupported goal {g!r}")
+
+
+def enc_rel(r: dict):
+    """rel dict -> 'def(ins, outPat, clauses) enc'd term."""
+    wc = [0]
+    ins = NIL
+    for p in reversed(r["in"]):
+        ins = t_pair(enc_term(p, wc), ins)
+    if len(r["out"]) != 1:
+        raise EvalError(
+            f"enc: rel {r['name']!r} multi-out sig — axis")
+    out = enc_term(r["out"][0], wc)
+    cls = NIL
+    # sig-only rels are direct extensions — one empty-goal clause
+    for c in reversed(r.get("clauses") or [{"goals": []}]):
+        goals = [enc_goal(g, wc)
+                 for g in c.get("guard") or []] \
+              + [enc_goal(g, wc) for g in c["goals"]]
+        gl = NIL
+        for g in reversed(goals):
+            gl = t_pair(g, gl)
+        cls = t_pair(_e("clause", gl), cls)
+    return _e("def", ins, out, cls)
+
+
+def enc_env(graph: dict):
+    """rel-graph -> enc'd env-alist term [[name|def]...]."""
+    env = NIL
+    for r in reversed(graph["rels"]):
+        env = t_pair(t_pair(t_sym(r["name"]), enc_rel(r)), env)
+    return env
+
+
 def _parse_arg(text: str):
     """CLI arg surface: 42 -> ATOM(8,42); 'n -> sym; (a,b) -> pair;
     [x,y,..] -> NIL-terminated list."""
@@ -1559,7 +1696,29 @@ def _selftest() -> int:
         assert len(miss) == 1
         o2 = run_value(eg, "reify", [eVar(0), miss[0][1]], n=1)
         assert o2 == [eSym("unbound")], o2
-        sd = "enc'd subst_lookup hit+miss"
+        # enc'er: a real .plex graph -> enc'd env, run by corpus
+        # eval — any bundle becomes program data, no hand-built
+        # terms.  assoc<'b> hits 'atom(8,20) inside an enc'd spine.
+        ma = load_graph(os.path.join(
+            here, "std", "lists_member_assoc.plex"))
+        menv = enc_env(ma)
+        alist = eT("pair",
+                   eT("pair", eSym("a"), eAtom(8, 1)),
+                   eT("pair",
+                      eT("pair", eSym("b"), eAtom(8, 20)),
+                      eAtom(0, 0)))
+        mg = eT("call", eSym("assoc"),
+                eList(eSym("b"), alist), eVar(0))
+        _reset_fresh()
+        mh = run_value(eg, "eval", [menv, mg, NIL,
+                                    t_atom(8, 1)], n=1)
+        assert len(mh) == 1
+        mo = run_value(eg, "reify", [eVar(0), mh[0][1]], n=1)
+        assert mo == [eAtom(8, 20)], mo
+        # whole eval.plex enc's as data too — the 25-rel env is
+        # the self-description substrate for L2 interpretation
+        _ = enc_env(eg)
+        sd = "enc'd subst_lookup hit+miss + enc'er bundle->env"
     # corpus files if present
     std = os.path.join(here, "std")
     if os.path.isdir(std):

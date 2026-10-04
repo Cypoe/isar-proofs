@@ -23,9 +23,34 @@
 ;; only test sig vars; all destructuring happens under fresh in
 ;; goals; the unify_w matrix cases u/v by tag so each pair hits
 ;; exactly one clause.
+;; uses: std/arith_peano_succ
 
 ;; --- atom counter for fresh ids ---
 next_id : <n: T[8]> <-> <ATOM(8, n+1)>
+
+;; --- 'adyn resolution: enc'd ATOM(var±k) dynamic exprs.  After
+;;     walk, 'adyn(base, delta) with both operands walked to
+;;     'atom(PAIR(b,v)) evaluates to 'atom(PAIR(b, v+delta)) —
+;;     arithmetic is the corpus add on the raw T[8] slots. ---
+adyn_res : <t, s> <-> <r> where {
+  | fresh (bt, dt, wb, wd, bi, vi, di, dvi, nv2) {
+      t = 'adyn(bt, dt)
+      walk<bt, s> = wb
+      walk<dt, s> = wd
+      wb = 'atom([bi|vi])
+      wd = 'atom([di|dvi])
+      add<vi, dvi> = nv2
+      r = 'atom([bi|nv2])
+    }
+  | fresh (hit) {
+      RUN(adyn_probe<t>, 1) = hit
+      hit = []
+      r = t
+    }
+}
+adyn_probe : <t> <-> <hit> where {
+  | fresh (bt, dt) { t = 'adyn(bt, dt)  hit = 'yes }
+}
 
 ;; --- subst lookup: first binding wins; unbound is a value ---
 subst_lookup : <k, lst> <-> <r> shape self where {
@@ -51,6 +76,7 @@ walk : <t, s> <-> <r> shape self where {
   | fresh (c) { t = 'atom(c)  r = t }
   | fresh (c) { t = 'pair(c)  r = t }
   | fresh (c) { t = 'sym(c)   r = t }
+  | fresh (c) { t = 'adyn(c)  r = t }
 }
 walk_res : <b, t, s> <-> <r> shape self where {
   | fresh (v) {
@@ -67,15 +93,18 @@ nonvar : <t> <-> <hit> where {
   | fresh (c) { t = 'atom(c)  hit = 'yes }
   | fresh (c) { t = 'pair(c)  hit = 'yes }
   | fresh (c) { t = 'sym(c)   hit = 'yes }
+  | fresh (c) { t = 'adyn(c)  hit = 'yes }
 }
 
 ;; --- unify on the encoded domain: the triangular-subst mgu.
 ;;     unify_w cases (u,v) by tag — exactly one clause per pair. ---
 unify_enc : <u, v, s> <-> <s2> shape self where {
-  | fresh (uw, vw) {
+  | fresh (uw, vw, u2, v2) {
       walk<u, s> = uw
       walk<v, s> = vw
-      unify_w<uw, vw, s> = s2
+      adyn_res<uw, s> = u2
+      adyn_res<vw, s> = v2
+      unify_w<u2, v2, s> = s2
     }
 }
 unify_w : <u, v, s> <-> <s2> shape self where {
@@ -201,6 +230,12 @@ inst : <node, ren, n> <-> <o> shape self where {
       inst<a, ren, n> = [r1|[n1|a2]]
       inst<b, r1, n1> = [r2|[n2|b2]]
       o = [r2|[n2|'cmp(op, a2, b2)]]
+    }
+  | fresh (bt, dt, r1, n1, b2, r2, n2, d2) {
+      node = 'adyn(bt, dt)
+      inst<bt, ren, n> = [r1|[n1|b2]]
+      inst<dt, r1, n1> = [r2|[n2|d2]]
+      o = [r2|[n2|'adyn(b2, d2)]]
     }
   | fresh (g, k, ot, r1, n1, g2, r2, n2, k2, r3, n3, ot2) {
       node = 'run(g, k, ot)
