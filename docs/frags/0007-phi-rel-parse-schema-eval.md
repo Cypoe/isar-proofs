@@ -2,8 +2,8 @@
 type: decision
 id: 0007
 provenance: host/phi_rel.py; host/rel_schema.py; host/rel_eval.py;
-  host/specs/schema-rel.json; isa-physics patent/phi-lang/*.phi;
-  megaplan 10a/10b/10c
+  host/rel_witness.py; host/specs/schema-rel.json;
+  isa-physics patent/phi-lang/*.phi; megaplan 10a/10b/10c
 ts: 2026-10-08
 tags: [phi.rel, parser, schema, admissible-construction, evaluator, substrate]
 ---
@@ -71,14 +71,51 @@ corpus is the admissible core with complete call edges.
   bound `def`, not a fresh var. Declared/bound comparisons run on
   var *roots*.
 
+## The basis-term slice — `rel_witness.py`
+
+The plan's heavy item was a full miniKanren in basis terms; the slice
+that proves the claim (rel ops as *derived* term constructions, not a
+privileged host) is UNIFY computed by the reducer the emitted kernel
+actually runs: `bracket(parse(λ-src)) → Graph.import_tree →
+reduce_cd → export`. Four computations:
+
+- `PAIR(VAR1,ATOM2)` vs `PAIR(ATOM3,VAR4)` → `VAR1 := ATOM3` (264 cd
+  rounds)
+- `ATOM5` vs `ATOM7` → the declared FAIL marker (134)
+- nested pair-of-pairs → `VAR2 := ATOM4` (326)
+- `VAR1` vs `PAIR(VAR1,ATOM2)` → binds the pair — **no occurs check**;
+  declared bound, not a hidden divergence
+
+Encoding: `VAR k|ATOM n|PAIR l r` as Scott data, subst as a Scott
+list of `(k . t)` pairs — substitution is data, same as the patent's
+`MATCH = subst`. `unify` is depth-unfolded (`U_i` binds `U_{i-1}`
+once per level via `\self`, linear source); the unfold depth IS the
+fuel — no Y, no magic recursion, exhaustion is a `no` result not a
+hang.
+
+Two traps the slice had to clear: `reduce.py`'s `step`/`cd` implement
+IStep exactly — I/K/B/S only, no Dβ/Cβ — so `bracket()` output (which
+contains D and C) stalls after ~50 steps at the first D-headed redex.
+The witness must run `graph_runtime.reduce_tree_cd`, where D/C are
+real. And `reduce` is spine-lazy at partial applications — results
+are compared as exported NF trees, not step counts.
+
+Scope is deliberately bounded: var/atom/pair, single-threaded unify,
+bounded depth. What it is NOT: interleaved streams, `RUN`/CHOICE,
+occurs check, or the emitted leg — `phi.rel` stays `status: declared`
+until a seed-side leg exists. It IS evidence that the relational
+vocabulary lands on the same basis as everything else rather than
+needing a second machine.
+
 ## Where this sits
 
 The evaluator is the **Python witness** — the semantics spelled out
 on the same term model the substrate uses, independent of the
 bracket/SKI reducer (which remains an egress view, not the kernel).
-The plan's basis-term evaluator slice and the `step|reduce` lowerings
-stay declared-not-realized; `schema-rel.json` is `status: declared`
-until the emitted leg exists. The patent `.phi` files parse verbatim
+`rel_witness` is the **basis witness** — bounded unify computed by
+the kernel's own cd fixpoint. The `step|reduce` lowerings stay
+declared-not-realized; `schema-rel.json` is `status: declared` until
+the emitted leg exists. The patent `.phi` files parse verbatim
 (28 rels) — surface fidelity without importing the sketch's
 incomplete edges.
 

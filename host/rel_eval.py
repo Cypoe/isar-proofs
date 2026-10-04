@@ -433,16 +433,56 @@ def _callers(rel: dict) -> set:
     return out
 
 
+def _cyclic(rels: Dict[str, dict]) -> set:
+    """Rels on a call cycle — transitive fixpoint.  The schema does
+    this check at construction; the evaluator repeats it because
+    forged rel-graphs can reach _rel_call unchecked."""
+    edges = {n: _callers(r) & set(rels) for n, r in rels.items()}
+    reach = {n: set(es) for n, es in edges.items()}
+    changed = True
+    while changed:
+        changed = False
+        for n, rs in reach.items():
+            new = set(rs)
+            for r in rs:
+                new |= reach.get(r, set())
+            if new != rs:
+                reach[n] = new
+                changed = True
+    return {n for n, rs in reach.items() if n in rs}
+
+
+# declared lowering forms the evaluator can honor — the koru
+# contract: a shape names a kernel form, and a form without an
+# implementation refuses rather than silently substituting unfold.
+LOWERINGS = {
+    "self": "depth-fueled recursive unfold",
+    "pairwise": "unfold — split scheduling declared-not-wired "
+                "(schedule.min_parallel_roots contract)",
+}
+
+
 def _rel_call(name: str, args: List[dict], out_node,
               env, s: Subst, fuel, caller_ren) -> Iterator[Subst]:
     rel = env["rels"].get(name)
     if rel is None:
         raise EvalError(f"rel_eval: unbound rel {name!r}")
-    if name in _callers(rel) and rel.get("shape") is None:
-        raise EvalError(
-            f"rel_eval: recursive rel {name!r} declares no "
-            f"shape — admissible construction refuses "
-            f"(undeclared recursion contract)")
+    if "cyc" not in env:
+        env["cyc"] = _cyclic(env["rels"])
+    if name in env["cyc"]:
+        shape = rel.get("shape")
+        if shape is None:
+            raise EvalError(
+                f"rel_eval: recursive rel {name!r} declares no "
+                f"shape — admissible construction refuses "
+                f"(undeclared recursion contract)")
+        if shape not in LOWERINGS:
+            raise EvalError(
+                f"rel_eval: rel {name!r} declares shape "
+                f"{shape!r} — lowering not realized "
+                f"(realized: {sorted(LOWERINGS)}; a declared kernel "
+                f"form without an implementation refuses before "
+                f"silently substituting unfold)")
     if len(args) != len(rel["in"]):
         raise EvalError(
             f"rel_eval: {name} arity {len(rel['in'])} != "
@@ -580,10 +620,30 @@ def main() -> int:
         raise AssertionError("unbound rel ran")
     # fuel is data: exhaustion is an empty stream, never a hang
     assert run_value(g, "fib", [t_atom(8, 5)], n=1, fuel=40) == []
+    # lowering contract: shape step is declared, not realized —
+    # refuses rather than silently substituting unfold
+    g2 = phi_rel.parse_rel(
+        "r : <x> <-> <y> shape step where { r<x> = y }")
+    try:
+        run_value(g2, "r", [t_atom(8, 0)], n=1)
+    except EvalError as e:
+        assert "lowering not realized" in str(e), e
+    else:
+        raise AssertionError("shape step ran")
+    # transitive cycle without shape — forged graphs refuse too
+    g3 = phi_rel.parse_rel(
+        "a : <x> <-> <y> shape self where { b<x> = y }\n"
+        "b : <x> <-> <y> where { a<x> = y }")
+    try:
+        run_value(g3, "a", [t_atom(8, 0)], n=1)
+    except EvalError as e:
+        assert "declares no shape" in str(e), e
+    else:
+        raise AssertionError("unshaped cycle ran")
     print(f"rel_eval selftest: append fwd 1 sol, "
           f"bwd {[term_str(a) for a, _ in got]}, "
           f"head/equal ok, add/fib relational, unbound+fuel "
-          f"refusals: pass")
+          f"refusals, lowering+cycle contracts: pass")
     return 0
 
 

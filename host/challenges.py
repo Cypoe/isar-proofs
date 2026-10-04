@@ -321,6 +321,20 @@ def ch_rel_mode_violation(_t) -> dict:
         rel_schema.SchemaRefusal, "requires grounding")
 
 
+def ch_rel_lowering_unrealized(_t) -> dict:
+    """shape step is declared — but no such lowering exists, so the
+    evaluator refuses rather than silently substituting unfold."""
+    import phi_rel
+    import rel_eval
+    rel_eval._reset_fresh()
+    g = phi_rel.parse_rel(
+        "r : <x> <-> <y> shape step where { r<x> = y }")
+    return _rel_refuses(
+        lambda: rel_eval.run_value(g, "r",
+                                   [rel_eval.t_atom(8, 0)], n=1),
+        rel_eval.EvalError, "lowering not realized")
+
+
 def ch_rel_eval_unbound(_t) -> dict:
     """running an absent rel refuses by name at eval too."""
     import phi_rel
@@ -365,6 +379,19 @@ def _rel_patent() -> dict:
             n += len(phi_rel.parse_rel(
                 open(p, encoding="utf-8").read())["rels"])
     return {"rels": n}
+
+
+def _rel_witness_unify() -> dict:
+    """basis-term slice: atom-vs-atom unify on the graph cd
+    fixpoint must return the FAIL marker — same reducer the
+    emitted kernel runs, no Python fallback."""
+    import rel_witness
+    got, rounds = rel_witness._run(
+        "(" + rel_witness._unify(4) + " " + rel_witness.r_atom(5) +
+        " " + rel_witness.r_atom(7) + " " + rel_witness._NIL +
+        " (\\s2. s2) " + rel_witness._FAIL + ")")
+    want = rel_witness._expect(rel_witness._FAIL)
+    return {"fail": rel_witness._cmp(got, want), "rounds": rounds}
 
 
 def ch_rel_patent_inadmissible(_t) -> dict:
@@ -468,6 +495,7 @@ def catalog() -> List[dict]:
             ("rel-shape-missing", ch_rel_shape_missing),
             ("rel-unbound-rel", ch_rel_unbound),
             ("rel-mode-violation", ch_rel_mode_violation),
+            ("rel-lowering-unrealized", ch_rel_lowering_unrealized),
             ("rel-eval-unbound", ch_rel_eval_unbound),
             ("rel-patent-inadmissible", ch_rel_patent_inadmissible)):
         entries.append({"name": name, "expect": {"refused": True},
@@ -481,6 +509,9 @@ def catalog() -> List[dict]:
     entries.append({"name": "rel-patent-parse",
                     "expect": {"rels": 28},
                     "run": lambda _t: _rel_patent()})
+    entries.append({"name": "rel-witness-unify",
+                    "expect": {"fail": True, "rounds": 134},
+                    "run": lambda _t: _rel_witness_unify()})
     entries.append({"name": "emit-threshold-pool",
                     "expect": {"pool": True},
                     "run": ch_emit_threshold_pool})

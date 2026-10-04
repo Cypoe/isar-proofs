@@ -1392,6 +1392,10 @@
       "tier": "fast"
     },
     {
+      "module": "rel_witness",
+      "tier": "full"
+    },
+    {
       "module": "routines_aarch64_linux_lo",
       "tier": "fast"
     },
