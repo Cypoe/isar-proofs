@@ -1,0 +1,24 @@
+;; cogen.plex — CoGen.lean's spine: realize under a declared
+;; regime.  Bootstrap = Realize under operEqRegime + machine
+;; context — never a different engine.
+;;
+;;   cogen<spec, out> = regime bound, realize<spec, out>
+;;
+;; The regime is a gate, not a footnote: 'operEq (shared-normal-
+;; form equivalence) is the one realized regime today; naming
+;; another ('bytes, 'io-trace, ...) fails as an empty stream —
+;; declared-not-realized, exactly like a missing map.  spec.ctx
+;; carries the machine context incl. LoaderFamily (graph|fasm|
+;; cpu|simd, budget-selected) — data for the maps, not consumed
+;; by the fold.
+;; uses: std/lists_member_assoc, eval, realize
+
+cogen : <spec> <-> <out> where {
+  fresh (src, maps, qmaps, regime, ctx) {
+    spec = PAIR('spec,
+             PAIR(src, PAIR(maps, PAIR(qmaps,
+                  PAIR(regime, ctx)))))
+    regime = PAIR('sym, 'operEq)
+    realize<spec> = out
+  }
+}
