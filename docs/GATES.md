@@ -60,6 +60,7 @@
 | reduce | fast | — | — | ✓ |
 | rel_eval | fast | — | — | · |
 | rel_schema | fast | — | — | · |
+| dialect | fast | — | — | · |
 | rel_witness | full | — | — | · |
 | routines_aarch64_linux_lo | fast | — | — | ✓ |
 | routines_riscv64_linux_lo | fast | — | — | ✓ |

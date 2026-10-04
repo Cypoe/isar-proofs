@@ -1,0 +1,76 @@
+{
+  "name": "phi-dialects",
+  "displayName": "phi.rel dialects — projectional views",
+  "description": "Project stage files through the isar-proofs toolchain: .phi source -> rel-graph, schema verdicts, eval queries, .plex sections, spec status. Never parses anything itself — the host dialect bridge does.",
+  "version": "0.1.0",
+  "publisher": "isar-proofs",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:phi",
+    "onCommand:phi.project",
+    "onCommand:phi.eval",
+    "workspaceContains:**/*.phi",
+    "workspaceContains:host/dialect.py"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "phi",
+        "extensions": [".phi"],
+        "aliases": ["phi.rel"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "phi.project",
+        "title": "phi.rel: Project Dialect"
+      },
+      {
+        "command": "phi.eval",
+        "title": "phi.rel: Run Rel Query"
+      },
+      {
+        "command": "phi.refresh",
+        "title": "phi.rel: Refresh Views"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "phi",
+          "title": "phi.rel",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "phi": [
+        {
+          "id": "phi.specs",
+          "name": "Spec Status"
+        },
+        {
+          "id": "phi.rels",
+          "name": "Rel Graph"
+        }
+      ]
+    },
+    "configuration": {
+      "properties": {
+        "phi.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python interpreter (3.11) for host/dialect.py"
+        },
+        "phi.repoRoot": {
+          "type": "string",
+          "default": "",
+          "description": "isar-proofs repo root (defaults to workspace folder containing host/)"
+        }
+      }
+    }
+  }
+}

@@ -1392,6 +1392,10 @@
       "tier": "fast"
     },
     {
+      "module": "dialect",
+      "tier": "fast"
+    },
+    {
       "module": "rel_witness",
       "tier": "full"
     },
