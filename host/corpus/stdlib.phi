@@ -202,3 +202,38 @@ call : <name, args> <-> <result> where {
   MATCH(def.pat, args) = subst
   APPLY(subst, def.body) = result
 }
+
+;; --- spine membership (generative: enumerates, absent fails) ---
+member : <x, xs> <-> <y> shape self where {
+  | fresh (t) { xs = PAIR(x, t)   y = x }
+  | fresh (h, t) {
+      xs = PAIR(h, t)
+      member<x, t> = y
+    }
+}
+
+;; --- keyed lookup over PAIR(k,v) spines ---
+;; assoc     : loose — unique-key by construction; a duplicated key
+;;             yields BOTH bindings (ambiguity stays observable).
+;; assoc_id  : strict first-hit-wins for atom keys (subst/env ids).
+assoc : <k, lst> <-> <v> shape self where {
+  | fresh (v2, rest) {
+      lst = PAIR(PAIR(k, v2), rest)
+      v = v2
+    }
+  | fresh (e, rest) {
+      lst = PAIR(e, rest)
+      assoc<k, rest> = v
+    }
+}
+assoc_id : <k, lst> <-> <v> shape self where {
+  | fresh (v2, rest) {
+      lst = PAIR(PAIR(k, v2), rest)
+      v = v2
+    }
+  | fresh (k2, v2, rest) {
+      lst = PAIR(PAIR(k2, v2), rest)
+      k != k2
+      assoc_id<k, rest> = v
+    }
+}

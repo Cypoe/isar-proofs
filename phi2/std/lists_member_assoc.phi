@@ -1,0 +1,43 @@
+;; lists_member_assoc — spine membership and keyed lookup.
+;; the primitives spec/env/catalog terms are built on.
+;;
+;; member : generative — member<x,xs> = y yields y=x once per
+;;          occurrence; x open enumerates the spine, absent fails
+;;          (empty stream, honest not-found).
+;; assoc  : loose keyed lookup over PAIR(k,v) spines, any key type —
+;;          unique-key by construction; a duplicated key yields BOTH
+;;          bindings (ambiguity stays observable, never first-won).
+;; assoc_id : strict first-hit-wins for atom keys (subst/env ids) —
+;;            k != k2 gives real shadow semantics; absent = empty
+;;            stream.
+
+member : <x, xs> <-> <y> shape self where {
+  | fresh (t) { xs = PAIR(x, t)   y = x }
+  | fresh (h, t) {
+      xs = PAIR(h, t)
+      member<x, t> = y
+    }
+}
+
+assoc : <k, lst> <-> <v> shape self where {
+  | fresh (v2, rest) {
+      lst = PAIR(PAIR(k, v2), rest)
+      v = v2
+    }
+  | fresh (e, rest) {
+      lst = PAIR(e, rest)
+      assoc<k, rest> = v
+    }
+}
+
+assoc_id : <k, lst> <-> <v> shape self where {
+  | fresh (v2, rest) {
+      lst = PAIR(PAIR(k, v2), rest)
+      v = v2
+    }
+  | fresh (k2, v2, rest) {
+      lst = PAIR(PAIR(k2, v2), rest)
+      k != k2
+      assoc_id<k, rest> = v
+    }
+}

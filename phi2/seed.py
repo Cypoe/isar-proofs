@@ -1160,6 +1160,9 @@ def _gate() -> int:
         ("nibble_add", [L(A(1, 4), A(2, 4)),
                         L(A(3, 4), A(0, 4)), A(0, 4)]),
         ("norm", [("goalterm", "append", [L(A(9)), NIL])]),
+        ("assoc", [S("b"), L(P(S("a"), A(10)), P(S("b"), A(20)))]),
+        ("assoc_id", [A(7), L(P(A(7), S("first")),
+                              P(A(7), S("second")))]),
     ]
     for rel, args in queries:
         _reset_fresh()
@@ -1182,6 +1185,20 @@ def _gate() -> int:
                                       rel_eval.t_atom(8, 2),
                                       rel_eval.NIL)), n=3)]
     assert ours == theirs, (ours, theirs)
+    # member enumeration: open arg over [1,2,3] — order is observable
+    _reset_fresh()
+    mx = fresh()
+    ours = [reify(mx, s) for s in run_solutions(
+        cg, "member", [mx, L(A(1), A(2), A(3))], mx, n=5)]
+    rel_eval._reset_fresh()
+    mx = rel_eval.fresh()
+    theirs = [rel_eval.reify(mx, s) for s in rel_eval.run_solutions(
+        og, "member", [mx, rel_eval.t_pair(
+            rel_eval.t_atom(8, 1), rel_eval.t_pair(
+                rel_eval.t_atom(8, 2), rel_eval.t_pair(
+                    rel_eval.t_atom(8, 3), rel_eval.NIL)))],
+        mx, n=5)]
+    assert ours == theirs, (ours, theirs)
     # both machines refuse compose identically (declared-not-realized)
     for eng, g, tag in ((run_value, cg, "seed"),
                         (rel_eval.run_value, og, "oracle")):
@@ -1191,7 +1208,7 @@ def _gate() -> int:
             pass
         else:
             raise AssertionError(f"{tag} ran compose - must refuse")
-    print(f"seed gate: {len(queries) + 2} congruence checks vs "
+    print(f"seed gate: {len(queries) + 3} congruence checks vs "
           f"oracle - identical streams, identical refusals: pass")
     return 0
 
