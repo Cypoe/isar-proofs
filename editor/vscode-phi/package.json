@@ -10,7 +10,9 @@
   "main": "./extension.js",
   "activationEvents": [
     "workspaceContains:**/*.phi",
-    "workspaceContains:host/dialect.py"
+    "workspaceContains:**/*.rel.plex",
+    "workspaceContains:host/dialect.py",
+    "onFileSystem:phi-bundle"
   ],
   "contributes": {
     "languages": [
@@ -22,12 +24,20 @@
     ],
     "commands": [
       {
+        "command": "phi.switchView",
+        "title": "phi.rel: Switch Dialect View"
+      },
+      {
         "command": "phi.project",
         "title": "phi.rel: Project Dialect"
       },
       {
         "command": "phi.eval",
         "title": "phi.rel: Run Rel Query"
+      },
+      {
+        "command": "phi.openSurface",
+        "title": "phi.rel: Open Surface View"
       },
       {
         "command": "phi.refresh",

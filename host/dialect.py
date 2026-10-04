@@ -2,26 +2,41 @@
 """dialect — the routing bridge: every stage file projected
 through the toolchain, as JSON.
 
-The editor (and any other downstream consumer) never parses a
-dialect itself — it asks the toolchain.  One truth, one grammar,
-no forked semantics:
+The .plex bundle is the document of record; surface text (.phi)
+is a derived, regenerable view.  The editor (and any other
+downstream consumer) never parses a dialect itself — it asks the
+toolchain.  One truth, one grammar, no forked semantics:
 
     python host/dialect.py --list
-    python host/dialect.py --file X --as phi.rel
-    python host/dialect.py --file X --as auto     # by extension
+    python host/dialect.py --file X --as phi.rel    # .phi|.plex -> view
+    python host/dialect.py --file X --as auto       # detect + views
     python host/dialect.py --file X --as eval --call append \
         --args '[{"atom":[8,1]}]'
+    python host/dialect.py --file X.rel.plex --set phi.rel < surf.phi
+    python host/dialect.py                          # selftest
+
+This module is also the shape of the eventual emitted interpreter —
+the program that opens a .plex, projects a view, accepts edits,
+and rebundles.  Today the legs run on the Python host; when cogen
+lands this dispatch table is what gets specialized and emitted —
+the interpreter is the intermediary, not a separate tool.
 
 Projections (dialect names):
 
-  phi.rel      .phi source -> rel-graph (phi_rel.parse_rel)
-  rel-graph    a parsed rel-graph document (JSON in, rel-graph out)
+  phi.rel      rel-graph -> surface text (+graph) — derived view
+  rel-graph    the graph itself (from .phi, graph-json, or .plex)
   schema       admissibility verdict {admissible | refused, why}
   eval         RUN a rel: --call NAME --args '[<term nodes>]' → outs
   bundle       .plex archive -> section inventory + REALIZATION rows
   spec         a spec/toolchain json -> status card
   dialects     the toolchain dialect inventory
   file         raw summary (bytes, ext, detected dialect)
+
+Write verbs (--set):
+
+  phi.rel      stdin surface -> parse -> schema -> graph_bundle ->
+               atomic replace of --file (.plex only).  Refusals
+               leave the bundle untouched.
 
 Output contract: {"dialect": d, "ok": true|false,
                   "data": {...} | "error": "..."}
@@ -55,30 +70,42 @@ def _out(dialect: str, ok: bool, data=None, error=None) -> int:
 # projections
 # ---------------------------------------------------------------------------
 
+def _graph_of(path: str) -> dict:
+    """The rel-graph behind --file, whatever container it lives in:
+    .phi surface, phi.rel/1 graph-json, or a .plex rel-bundle.
+    Anything else refuses — the bridge does not guess."""
+    import phi_rel
+    if path.endswith(".plex"):
+        return phi_rel.read_graph_bundle(
+            open(path, "rb").read())
+    if path.endswith(".json"):
+        g = json.load(open(path, encoding="utf-8"))
+        if g.get("format") != phi_rel.FORMAT:
+            raise ValueError(
+                f"not a {phi_rel.FORMAT} graph "
+                f"(format={g.get('format')!r})")
+        return g
+    return phi_rel.parse_rel(open(path, encoding="utf-8").read())
+
+
 def p_phi_rel(path: str) -> dict:
     import phi_rel
-    g = phi_rel.parse_rel(open(path, encoding="utf-8").read())
-    return {"graph": g, "rels": [r["name"] for r in g["rels"]]}
+    g = _graph_of(path)
+    return {"graph": g, "rels": [r["name"] for r in g["rels"]],
+            "surface": phi_rel.render_rel(g)}
 
 
 def p_rel_graph(path: str) -> dict:
-    g = json.load(open(path, encoding="utf-8"))
-    if g.get("format") != "phi.rel/1":
-        raise ValueError(
-            f"not a phi.rel/1 graph (format={g.get('format')!r})")
+    g = _graph_of(path)
     return {"graph": g, "rels": [r["name"] for r in g["rels"]]}
 
 
 def p_schema(path: str) -> dict:
-    """Admissibility of whatever --file points at: parse .phi (or
-    read a rel-graph json) then rel_schema.check.  Refusals are
-    data — the violated invariant, named."""
-    import phi_rel
+    """Admissibility of whatever --file points at (.phi, graph-json,
+    .plex rel-bundle) — rel_schema.check on the graph.  Refusals
+    are data — the violated invariant, named."""
     import rel_schema
-    if path.endswith(".json"):
-        g = json.load(open(path, encoding="utf-8"))
-    else:
-        g = phi_rel.parse_rel(open(path, encoding="utf-8").read())
+    g = _graph_of(path)
     try:
         rel_schema.check(g)
         return {"admissible": True, "rels": len(g["rels"])}
@@ -91,9 +118,8 @@ def p_eval(path: str, call: str, args_json: str,
            nlim: int = 1) -> dict:
     """Bounded RUN through rel_eval — args are rel-graph term
     nodes (the same JSON the parser emits), lifted through lift."""
-    import phi_rel
     import rel_eval
-    g = phi_rel.parse_rel(open(path, encoding="utf-8").read())
+    g = _graph_of(path)
     arg_nodes = json.loads(args_json or "[]")
     rel_eval._reset_fresh()
     ren: dict = {}
@@ -153,6 +179,13 @@ def _detect(path: str) -> str:
     if ext == ".phi":
         return "phi.rel"
     if ext == ".plex":
+        try:
+            b = plex_bundle.read_bundle(open(path, "rb").read())
+            real = b.kv_rows(plex_bundle.KIND_REALIZATION)
+            if real.get("dialect") == "phi.rel/1":
+                return "rel-bundle"
+        except Exception:
+            pass
         return "bundle"
     if base == "toolchain.json":
         return "spec"
@@ -180,14 +213,48 @@ PROJECTIONS = {
     "file": lambda p, **_kw: p_file(p),
 }
 
+
+def s_phi_rel(path: str, surface: str) -> dict:
+    """Write verb: surface text -> parse -> schema -> bundle ->
+    atomic replace of --file.  The .plex is canonical; a refused
+    surface leaves it byte-identical."""
+    import phi_rel
+    import rel_schema
+    if not path.endswith(".plex"):
+        raise ValueError(
+            f"--set writes .plex bundles, not {path!r}")
+    g = phi_rel.parse_rel(surface)           # RelError = refused
+    if not g["rels"]:
+        raise ValueError(
+            "refusing to write an empty rel-graph — "
+            "an empty surface would destroy the bundle")
+    rel_schema.check(g)                      # SchemaRefusal = refused
+    blob = phi_rel.graph_bundle(g)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(blob)
+    os.replace(tmp, path)
+    return {"written": path, "bytes": len(blob),
+            "rels": len(g["rels"])}
+
+
+SETTERS = {
+    "phi.rel": s_phi_rel,
+}
+
 # which projections a detected file can take (the switchable set)
 VIEWS = {
-    "phi.rel": ["phi.rel", "schema", "eval", "file"],
-    "rel-graph": ["rel-graph", "schema", "file"],
+    "phi.rel": ["phi.rel", "rel-graph", "schema", "eval", "file"],
+    "rel-bundle": ["phi.rel", "rel-graph", "schema", "eval",
+                   "bundle", "file"],
+    "rel-graph": ["phi.rel", "rel-graph", "schema", "file"],
     "bundle": ["bundle", "file"],
     "spec": ["spec", "file"],
     "file": ["file"],
 }
+
+# which views are writable back to the document (the surface set)
+WRITABLE = {"phi.rel"}
 
 
 # ---------------------------------------------------------------------------
@@ -197,11 +264,14 @@ VIEWS = {
 
 def _selftest() -> int:
     import tempfile
+    import phi_rel
     cor = os.path.join(_HOST, "corpus", "stdlib.phi")
 
     d = PROJECTIONS["phi.rel"](cor)
     assert d["graph"]["format"] == "phi.rel/1"
     assert len(d["rels"]) == 27 and "append" in d["rels"]
+    # surface is a derived view — it re-parses to the same graph
+    assert phi_rel.parse_rel(d["surface"]) == d["graph"]
 
     d = PROJECTIONS["schema"](cor)
     assert d["admissible"] and d["rels"] == 27
@@ -210,17 +280,47 @@ def _selftest() -> int:
                           args='[{"atom":[8,2]},{"atom":[8,3]}]')
     assert d["outs"] == ["ATOM(8,5)"]
 
-    # bundle projection on a fresh .plex round-trip
-    import phi_rel
+    # .plex rel-bundle: the canonical document — every view
+    # projects through the bundle, not the surface file
     with tempfile.TemporaryDirectory() as td:
         bp = os.path.join(td, "g.plex")
         open(bp, "wb").write(phi_rel.graph_bundle(
             phi_rel.parse_rel(open(cor, encoding="utf-8").read())))
+        assert _detect(bp) == "rel-bundle"
         d = PROJECTIONS["bundle"](bp)
         kinds = [s["kind"] for s in d["sections"]]
         assert kinds == ["STRINGS", "REALIZATION", "BYTES"], kinds
         assert d["realization"]["dialect"] == "phi.rel/1"
-        assert _detect(bp) == "bundle"
+        assert PROJECTIONS["schema"](bp)["admissible"]
+        d = PROJECTIONS["eval"](bp, call="add",
+                              args='[{"atom":[8,1]},{"atom":[8,1]}]')
+        assert d["outs"] == ["ATOM(8,2)"]
+        # the surface view of the bundle re-parses to its graph
+        d = PROJECTIONS["phi.rel"](bp)
+        assert phi_rel.parse_rel(d["surface"]) == \
+            phi_rel.read_graph_bundle(open(bp, "rb").read())
+
+        # --set: the write path — parse -> schema -> bundle ->
+        # atomic replace.  A refused surface leaves the bundle
+        # byte-identical.
+        before = open(bp, "rb").read()
+        surf = phi_rel.render_rel(
+            phi_rel.read_graph_bundle(before))
+        d = SETTERS["phi.rel"](bp, surf)
+        assert d["written"] == bp and d["rels"] == 27
+        # graph_bundle is deterministic — an identical surface
+        # rewrites identical bytes
+        assert open(bp, "rb").read() == before
+        bad_surf = surf + "\nx : <a> -> <a> where ghost<a> = a\n"
+        try:
+            SETTERS["phi.rel"](bp, bad_surf)
+            raise AssertionError("unbound call accepted")
+        except AssertionError:
+            raise
+        except Exception:
+            pass
+        assert open(bp, "rb").read() == before, \
+            "bundle changed after refusal"
 
     sp = os.path.join(_HOST, "specs", "surface-phi.rel.json")
     d = PROJECTIONS["spec"](sp)
@@ -245,13 +345,14 @@ def _selftest() -> int:
         assert not d["admissible"] and "ghost" in d["refused"], d
 
     print("dialect selftest: projections "
-          f"{sorted(PROJECTIONS)} - pass")
+          f"{sorted(PROJECTIONS)}, setters {sorted(SETTERS)} - pass")
     return 0
 
 
 def main() -> int:
     file = None
     dialect = "auto"
+    setter = None
     call = None
     args = "[]"
     nlim = 1
@@ -261,7 +362,12 @@ def main() -> int:
         if a == "--list":
             return _out("dialects", True, {
                 "projections": sorted(PROJECTIONS),
+                "setters": sorted(SETTERS),
                 "detect": sorted(VIEWS)})
+        if a == "--set":
+            setter = sys.argv[i + 1]
+            i += 2
+            continue
         if a == "--file":
             file = sys.argv[i + 1]
             i += 2
@@ -283,15 +389,30 @@ def main() -> int:
             i += 2
             continue
         return _out(dialect, False, error=f"dialect: bad arg {a!r}")
-    if dialect == "auto" and file is None:
+    if dialect == "auto" and file is None and setter is None:
         return _selftest()
     try:
+        if setter is not None:
+            if file is None:
+                return _out(setter, False,
+                            error="dialect: --set needs --file")
+            if setter not in SETTERS:
+                return _out(setter, False,
+                            error=f"dialect: {setter!r} is not "
+                                  f"writable — choose from "
+                                  f"{sorted(SETTERS)}")
+            surface = sys.stdin.read()
+            return _out(setter, True,
+                        SETTERS[setter](file, surface))
         if dialect == "auto":
             d = _detect(file)
             views = VIEWS.get(d, ["file"])
-            data = PROJECTIONS[d](file, call=call, args=args,
-                                  nlim=nlim)
+            primary = "phi.rel" if d == "rel-bundle" else d
+            data = PROJECTIONS[primary](file, call=call, args=args,
+                                        nlim=nlim)
             data["views"] = views
+            data["writable"] = sorted(
+                v for v in views if v in WRITABLE)
             return _out(d, True, data)
         if dialect not in PROJECTIONS:
             return _out(dialect, False,

@@ -522,6 +522,138 @@ def parse_rel(src: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# render — the inverse projection: rel-graph -> surface text.
+# The .plex bundle is canonical; surface text is derived and
+# regenerable.  Round-trip evidence: parse(render(g)) == g.
+# ---------------------------------------------------------------------------
+
+def _aexpr_s(e: dict) -> str:
+    if "const" in e:
+        return str(e["const"])
+    if "var_delta" in e:
+        n, d = e["var_delta"]
+        if d == 0:
+            return n
+        return f"{n}{'+' if d > 0 else ''}{d}"
+    raise RelError(f"render: bad ATOM payload {e!r}")
+
+
+def _term_s(t: dict) -> str:
+    if "wild" in t:
+        return "_"
+    if "var" in t:
+        return t["var"]
+    if "atom" in t:
+        b, v = t["atom"]
+        if b == 0 and v == 0:
+            return "[]"
+        if b == 8:
+            return str(v)
+        return f"ATOM({b},{v})"
+    if "atom_dyn" in t:
+        return f"ATOM({_aexpr_s(t['atom_dyn'][0])}," \
+               f"{_aexpr_s(t['atom_dyn'][1])})"
+    if "pair" in t:
+        items, cur = [], t
+        while "pair" in cur:
+            items.append(cur["pair"][0])
+            cur = cur["pair"][1]
+        if cur.get("atom") == [0, 0]:
+            return "[" + ",".join(_term_s(i) for i in items) + "]"
+        return f"PAIR({_term_s(t['pair'][0])},{_term_s(t['pair'][1])})"
+    if "sym" in t:
+        return f"'{t['sym']}"
+    if "type" in t:
+        return t["type"]
+    if "typed" in t:
+        return f"{_term_s(t['typed'][0])}:{t['typed'][1]}"
+    if "op" in t:
+        return f"{t['op'][0]}({','.join(_term_s(a) for a in t['op'][1])})"
+    if "call_term" in t:
+        return f"{t['call_term'][0]}<" \
+               f"{','.join(_term_s(a) for a in t['call_term'][1])}>"
+    if "const" in t:
+        return str(t["const"])
+    if "var_delta" in t:
+        return _aexpr_s(t)
+    raise RelError(f"render: unknown term node {t!r}")
+
+
+def _eq_s(e: dict) -> str:
+    if "unify" in e:
+        return f"{_term_s(e['unify'][0])} = {_term_s(e['unify'][1])}"
+    if "cmp" in e:
+        op, a, b = e["cmp"]
+        return f"{_term_s(a)} {op} {_term_s(b)}"
+    raise RelError(f"render: bad guard {e!r}")
+
+
+def _goal_s(g: dict) -> str:
+    if "unify" in g or "cmp" in g:
+        return _eq_s(g)
+    if "call" in g:
+        c = g["call"]
+        s = f"{c['rel']}<{','.join(_term_s(a) for a in c['args'])}>"
+        return s + (f" = {_term_s(c['out'])}" if c["out"] else "")
+    if "builtin" in g:
+        b = g["builtin"]
+        s = f"{b['name']}({','.join(_term_s(a) for a in b['args'])})"
+        return s + (f" = {_term_s(b['out'])}" if b["out"] else "")
+    if "run" in g:
+        r = g["run"]
+        return f"RUN({_term_s(r['goal'])},{_term_s(r['n'])})" \
+               f" = {_term_s(r['out'])}"
+    if "choice" in g:
+        c = g["choice"]
+        return f"CHOICE({_term_s(c['a'])},{_term_s(c['b'])})" \
+               f" = {_term_s(c['out'])}"
+    if "emit" in g:
+        return f"! {_term_s(g['emit'])}"
+    if "fresh" in g:
+        f = g["fresh"]
+        inner = "\n".join("    " + _goal_s(x) for x in f["goals"])
+        return f"fresh ({','.join(f['vars'])}) {{\n{inner}\n  }}"
+    raise RelError(f"render: unknown goal {g!r}")
+
+
+def _clause_s(c: dict, bar: bool) -> List[str]:
+    head = "| " if bar else ""
+    goals = [_goal_s(x) for x in c["goals"]]
+    if c["guard"]:
+        g = " & ".join(_eq_s(e) for e in c["guard"])
+        body = "\n".join("    " + x for x in goals)
+        return [f"{head}when {g} {{", body, "  }"]
+    if c["fresh"]:
+        body = "\n".join("    " + x for x in goals)
+        return [f"{head}fresh ({','.join(c['fresh'])}) {{", body, "  }"]
+    return [head + x for x in goals]
+
+
+def _rel_s(r: dict) -> str:
+    sig_i = ",".join(_term_s(t) for t in r["in"])
+    sig_o = ",".join(_term_s(t) for t in r["out"])
+    s = f"{r['name']} : <{sig_i}> {r['dir']} <{sig_o}>"
+    if r["shape"]:
+        s += f" shape {r['shape']}"
+    cs = r.get("clauses")
+    if not cs:
+        return s
+    lines = [s + " where {"]
+    for i, c in enumerate(cs):
+        lines += _clause_s(c, bar=i > 0)
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def render_rel(g: dict) -> str:
+    """phi.rel/1 rel-graph -> patent surface text (derived view)."""
+    if g.get("format") != FORMAT:
+        raise RelError(
+            f"render: format {g.get('format')!r} — need {FORMAT}")
+    return "\n\n".join(_rel_s(r) for r in g["rels"]) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # bundle persistence — the rel-graph is a storable artifact
 # ---------------------------------------------------------------------------
 
@@ -665,8 +797,22 @@ def main() -> int:
     data = graph_bundle(g)
     g2 = read_graph_bundle(data)
     assert g2 == g, "rel-graph bundle round-trip drifted"
+    # surface round-trip: render is the inverse projection —
+    # parse(render(g)) must be the same graph, on the corpus
+    # and on the patent files verbatim
+    assert parse_rel(render_rel(g)) == g, "surface round-trip drifted"
+    pat = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       os.pardir, os.pardir, "isa-physics",
+                       "patent", "phi-lang")
+    for fn in ("phi-lang.phi", "phi-stdlib.phi", "phi-runtime.phi"):
+        p = os.path.join(pat, fn)
+        if os.path.exists(p):
+            gp = parse_rel(open(p, encoding="utf-8").read())
+            assert parse_rel(render_rel(gp)) == gp, \
+                f"patent {fn} surface round-trip drifted"
     print(f"phi_rel selftest: {len(names)} rels parsed, "
-          f"bundle {len(data)}B round-trips: pass")
+          f"bundle {len(data)}B round-trips, surface "
+          f"render->parse stable: pass")
     return 0
 
 
