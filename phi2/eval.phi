@@ -60,6 +60,15 @@ walk_res : <b, t, s> <-> <r> shape self where {
   | b = 'unbound { r = t }
 }
 
+;; --- nonvar probe: the leaf set minus 'var — collapses the two
+;;     three-row mirrors below into single clauses; exclusivity:
+;;     (var,var) hits only rows 1-2 since nonvar<'var> misses ---
+nonvar : <t> <-> <hit> where {
+  | fresh (c) { t = 'atom(c)  hit = 'yes }
+  | fresh (c) { t = 'pair(c)  hit = 'yes }
+  | fresh (c) { t = 'sym(c)   hit = 'yes }
+}
+
 ;; --- unify on the encoded domain: the triangular-subst mgu.
 ;;     unify_w cases (u,v) by tag — exactly one clause per pair. ---
 unify_enc : <u, v, s> <-> <s2> shape self where {
@@ -81,34 +90,14 @@ unify_w : <u, v, s> <-> <s2> shape self where {
       i != j
       s2 = [[i|v]|s]
     }
-  | fresh (i, c) {
+  | fresh (i) {
       u = 'var(i)
-      v = 'atom(c)
+      nonvar<v> = 'yes
       s2 = [[i|v]|s]
     }
-  | fresh (i, c) {
-      u = 'var(i)
-      v = 'pair(c)
-      s2 = [[i|v]|s]
-    }
-  | fresh (i, c) {
-      u = 'var(i)
-      v = 'sym(c)
-      s2 = [[i|v]|s]
-    }
-  | fresh (i, c) {
+  | fresh (i) {
       v = 'var(i)
-      u = 'atom(c)
-      s2 = [[i|u]|s]
-    }
-  | fresh (i, c) {
-      v = 'var(i)
-      u = 'pair(c)
-      s2 = [[i|u]|s]
-    }
-  | fresh (i, c) {
-      v = 'var(i)
-      u = 'sym(c)
+      nonvar<u> = 'yes
       s2 = [[i|u]|s]
     }
   | fresh (c) {
