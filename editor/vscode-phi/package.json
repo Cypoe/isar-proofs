@@ -10,7 +10,7 @@
   "main": "./extension.js",
   "activationEvents": [
     "workspaceContains:**/*.phi",
-    "workspaceContains:**/*.rel.plex",
+    "workspaceContains:**/*.plex",
     "workspaceContains:host/dialect.py",
     "onFileSystem:phi-bundle"
   ],
