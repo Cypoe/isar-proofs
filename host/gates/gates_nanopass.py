@@ -10,6 +10,10 @@ Gate bodies live in the family modules (same directory):
                       fixpoint, serialized emit.plex DAG (13,19-21,24)
   np_gates_kernel   — kernel/container: bundle format, MT equiv,
                       .plex ingest, layer legs (17-18,22-23)
+  np_gates_rel      — phi.rel contract: verbatim parse, admissible
+                      construction, eval, shape/lowerings, fuel,
+                      meta-call, carry chain, congruence, basis
+                      unify (25-32)
   np_common         — shared helpers (_fixed_of)
 
 Registry order below is the evidence order — cheap structural
@@ -29,6 +33,7 @@ import np_gates_record as rec                                  # noqa: E402
 import np_gates_streams as strm                                # noqa: E402
 import np_gates_emit as emit                                   # noqa: E402
 import np_gates_kernel as kern                                 # noqa: E402
+import np_gates_rel as rel                                     # noqa: E402
 
 
 if __name__ == "__main__":
@@ -69,6 +74,14 @@ if __name__ == "__main__":
         ("kernel layer composition", kern.gate_layer_chain),
         ("emit schedule serialized", lambda: emit.gate_emit_schedule(
             tempfile.mkdtemp(prefix="nanopass_sched_"))),
+        ("phi.rel verbatim parse + bundle", rel.gate_rel_parse_verbatim),
+        ("phi.rel schema admissible", rel.gate_rel_schema_admissible),
+        ("phi.rel shape lowering contract", rel.gate_rel_shape_lowering),
+        ("phi.rel fuel quotient", rel.gate_rel_fuel_quotient),
+        ("phi.rel meta-level call", rel.gate_rel_meta_call),
+        ("phi.rel nibble carry chain", rel.gate_rel_carry_chain),
+        ("phi.rel phi_boot congruence", rel.gate_rel_boot_congruence),
+        ("phi.rel basis-term unify", rel.gate_rel_basis_unify),
     ]
     only = {s for a in sys.argv[1:] if a.startswith("--only=")
             for s in a.split("=", 1)[1].lower().split(",")}
