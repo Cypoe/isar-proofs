@@ -1087,6 +1087,10 @@ def _parse_arg(text: str):
 
 
 def main(argv: List[str]) -> int:
+    # meta-circular eval stacks ~10 frames per step — fuel is the
+    # semantic bound, the C-level limit is only an implementation
+    # parameter (honest divergence stays an empty stream)
+    sys.setrecursionlimit(100_000)
     args = argv[1:]
     if not args:
         return _selftest()
@@ -1266,6 +1270,86 @@ def _selftest() -> int:
         assert "unbound rel" in str(e)
     else:
         raise AssertionError("unbound rel ran")
+    # eval.plex — the meta-circular check: the evaluator as data
+    # runs an encoded append def and must produce the stepper's own
+    # splits, in the same order (observational equivalence).
+    evp = os.path.join(here, "eval.plex")
+    metacirc = "absent"
+    if os.path.exists(evp):
+        eg = load_graph(evp)
+        S = t_sym
+
+        def eAtom(b, v):
+            return t_pair(S("atom"), t_pair(t_atom(8, b),
+                                           t_atom(8, v)))
+
+        def eVar(i):
+            return t_pair(S("var"), t_atom(8, i))
+
+        def eNvar(x):
+            return t_pair(S("nvar"), S(x))
+
+        def ePair(a, b):
+            return t_pair(S("pair"), t_pair(a, b))
+
+        def eSym(x):
+            return t_pair(S("sym"), S(x))
+
+        def eList(*xs):
+            o = NIL
+            for x in reversed(xs):
+                o = t_pair(x, o)
+            return o
+
+        def dec(e):
+            if e[0] == "pair" and e[1][0] == "sym":
+                k = e[1][1]
+                if k == "atom":
+                    return ("atom", e[2][1][2], e[2][2][2])
+                if k == "pair":
+                    return ("pair", dec(e[2][1]), dec(e[2][2]))
+                if k == "var":
+                    return ("var", e[2][2])
+                if k == "sym":
+                    return ("sym", e[2][1])
+            raise ValueError(e)
+
+        NILe = eAtom(0, 0)
+        nv = eNvar
+        ins = eList(nv("xs"), nv("ys"))
+        outP = nv("zs")
+        c1 = t_pair(S("clause"), eList(
+            t_pair(S("unify"), t_pair(nv("xs"), NILe)),
+            t_pair(S("unify"), t_pair(nv("zs"), nv("ys")))))
+        c2 = t_pair(S("clause"), eList(
+            t_pair(S("unify"),
+                   t_pair(nv("xs"), ePair(nv("h"), nv("t")))),
+            t_pair(S("call"), t_pair(
+                eSym("append"),
+                t_pair(eList(nv("t"), nv("ys")), nv("r")))),
+            t_pair(S("unify"),
+                   t_pair(nv("zs"), ePair(nv("h"), nv("r"))))))
+        env = eList(t_pair(S("append"),
+                           t_pair(S("def"),
+                                  t_pair(ins, t_pair(
+                                      outP, eList(c1, c2))))))
+        ewant = ePair(eAtom(8, 1), ePair(eAtom(8, 2), NILe))
+        goal = t_pair(S("call"), t_pair(
+            eSym("append"),
+            t_pair(eList(eVar(90), eVar(91)), ewant)))
+        _reset_fresh()
+        sols = run_value(eg, "eval", [env, goal, NIL,
+                                      t_atom(8, 1)], n=3)
+        splits = []
+        for sp in sols:
+            s2 = sp[1]
+            rx = run_value(eg, "reify", [eVar(90), s2], n=1)[0]
+            ry = run_value(eg, "reify", [eVar(91), s2], n=1)[0]
+            splits.append((dec(rx), dec(ry)))
+        assert len(splits) == 3, splits
+        assert splits[0][0] == ("atom", 0, 0) and \
+            splits[-1][1] == ("atom", 0, 0), splits
+        metacirc = f"{len(splits)} splits congruent"
     # corpus files if present
     std = os.path.join(here, "std")
     if os.path.isdir(std):
@@ -1286,8 +1370,8 @@ def _selftest() -> int:
         nstd = 0
     print(f"seed selftest: kernel {len(kb)}B (slices I=5 A=0 "
           f"S.row0=3, K^2=0), rel-bundle round-trip, stepper "
-          f"append fwd/bwd + head, refusals, corpus rels={nstd}: "
-          f"pass")
+          f"append fwd/bwd + head, refusals, corpus rels={nstd}, "
+          f"meta-circular eval [{metacirc}]: pass")
     return 0
 
 
