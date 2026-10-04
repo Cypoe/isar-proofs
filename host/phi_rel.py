@@ -85,6 +85,7 @@ _TOK = re.compile(r"""
     (?P<dir><->|<=>|->|>=|<=|!=)   |
     (?P<int>-?0x[0-9a-fA-F]+|-?\d+)  |
     (?P<punct>[<>{}()\[\]:|&,=!\+\-\*])  |
+    (?P<sym>'[A-Za-z_][A-Za-z0-9_]*)      |
     (?P<ident>[A-Za-z_][A-Za-z0-9_'.?]*)  |
     (?P<ws>\s+)                    |
     (?P<bad>.)
@@ -186,6 +187,10 @@ def _term(p: _P) -> dict:
         return out
     if txt == "_":
         return dict(WILD)
+    if kind == "sym":
+        # 'name — a rel name as a VALUE (env_lookup/call/map args);
+        # the surface's quote literal, not a var
+        return {"sym": txt[1:]}
     if kind == "ident":
         if txt == "ATOM":
             p.want("(")
@@ -322,7 +327,7 @@ def _goal(p: _P) -> dict:
         line = t[2]
         args = []
         while p.peek() is not None and p.peek()[2] == line \
-                and p.peek()[1] != "=":
+                and p.peek()[1] not in ("=", "}", "|"):
             args.append(_term(p))
         out = None
         if p.at("="):

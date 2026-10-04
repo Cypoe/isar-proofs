@@ -394,6 +394,54 @@ def _rel_witness_unify() -> dict:
     return {"fail": rel_witness._cmp(got, want), "rounds": rounds}
 
 
+def _rel_corpus():
+    import phi_rel
+    p = os.path.join(_ROOT, "host", "corpus", "stdlib.phi")
+    return phi_rel.parse_rel(open(p, encoding="utf-8").read())
+
+
+def _rel_corpus_admissible() -> dict:
+    """stdlib corpus: every edge bound, shapes declared — the
+    patent union made admissible (nibble_half_add closed)."""
+    import rel_schema
+    g = _rel_corpus()
+    try:
+        rel_schema.check(g)
+        return {"rels": len(g["rels"]), "admissible": True}
+    except rel_schema.SchemaRefusal:
+        return {"rels": len(g["rels"]), "admissible": False}
+
+
+def _rel_corpus_eval() -> dict:
+    """meta-level + carry chain: call/map/fold dispatch through
+    env_lookup+MATCH+APPLY; nibble_half_add closes the carry."""
+    import rel_eval
+    rel_eval._reset_fresh()
+    g = _rel_corpus()
+
+    def L(*xs):
+        out = rel_eval.NIL
+        for x in reversed(xs):
+            out = rel_eval.t_pair(x, out)
+        return out
+
+    A = lambda v, bits=8: rel_eval.t_atom(bits, v)
+    return {
+        "call": rel_eval.run_value(g, "call", [rel_eval.t_sym("succ"),
+                                               A(2)], n=1) == [A(3)],
+        "map": rel_eval.run_value(g, "map", [rel_eval.t_sym("succ"),
+                L(A(1), A(2))], n=1) == [L(A(2), A(3))],
+        "fold": rel_eval.run_value(g, "fold", [rel_eval.t_sym("add"),
+                A(0), L(A(1), A(2), A(3))], n=1) == [A(6)],
+        "half": rel_eval.run_value(g, "nibble_half_add",
+                [A(15, 4), A(2, 4), A(1, 4)], n=1) ==
+                [rel_eval.t_pair(A(2, 4), A(1, 4))],
+        "norm": rel_eval.run_value(g, "norm",
+                [("goalterm", "append", [L(A(9)), rel_eval.NIL])],
+                n=1) == [L(A(9))],
+    }
+
+
 def ch_rel_patent_inadmissible(_t) -> dict:
     """the merged patent corpus refuses: nibble_half_add is
     called-but-undefined in the sketch."""
@@ -512,6 +560,13 @@ def catalog() -> List[dict]:
     entries.append({"name": "rel-witness-unify",
                     "expect": {"fail": True, "rounds": 134},
                     "run": lambda _t: _rel_witness_unify()})
+    entries.append({"name": "rel-corpus-admissible",
+                    "expect": {"rels": 27, "admissible": True},
+                    "run": lambda _t: _rel_corpus_admissible()})
+    entries.append({"name": "rel-corpus-eval",
+                    "expect": {"call": True, "map": True, "fold": True,
+                               "half": True, "norm": True},
+                    "run": lambda _t: _rel_corpus_eval()})
     entries.append({"name": "emit-threshold-pool",
                     "expect": {"pool": True},
                     "run": ch_emit_threshold_pool})

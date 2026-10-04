@@ -1,0 +1,204 @@
+;; stdlib.phi — phi.rel/1 admissible standard library
+;; Union of patent phi-lang + phi-stdlib, every edge bound,
+;; recursion shape-declared.  All arithmetic is relational —
+;; no Church shortcuts.
+;;
+;; Deliberately absent: phi-runtime's Futamura rels (interp,
+;; specialize, cogen, llvm_*, plex_*) — they are the egress layer
+;; and their codegen dependencies are declared-not-realized.
+;;
+;; Divergences from the patent sketch, all documented:
+;;  - nibble_half_add / nibble_add_b / nibble_succ / bor are the
+;;    relational completion of the patent's called-but-undefined
+;;    carry chain (succ-chain on T[4], wraps counted as data).
+;;  - succ/pred/add/fib stay atom-level on T[8] (the proven chain);
+;;    patent's add was a delegation to the nibble list chain, which
+;;    also exists here under its patent name.
+;;  - inline rel calls inside terms (PAIR(sn, nibble_add<...>)) are
+;;    sequenced as goal lines — same semantics, no term-embedding
+;;    of calls.
+;;  - 'name is the symbol literal: a rel name as a VALUE
+;;    (call/map/fold args).  The patent left names-as-values
+;;    underspecified; 'n closes it.
+
+;; --- equality (unification only) ---
+equal : <a, b> <-> <a> where a = b
+
+;; --- pairs ---
+cons  : <car, cdr> <-> <PAIR(car, cdr)>
+head  : <PAIR(h, _)> <-> <h>
+tail  : <PAIR(_, t)> <-> <t>
+empty : <ATOM(0,0)> <-> <[]>      ;; nil = 0-bit atom
+
+;; --- Peano atoms (T[8] scalars — the add/fib chain) ---
+zero  : <> <-> <ATOM(4, 0x0)>
+succ  : <n: T[8]> <-> <ATOM(8, n+1)>
+pred  : <n: T[8]> <-> <ATOM(8, n-1)>
+
+;; --- nibble successor (T[4]): PAIR(next, wrap) as 16 facts ---
+;; wrap = 1 iff n = 15 — the carry unit of the half-adder.
+nibble_succ : <n: T[4]> <-> <PAIR(s, w)> where {
+  | n = ATOM(4,0)  { s = ATOM(4,1)
+      w = ATOM(4,0) }
+  | n = ATOM(4,1)  { s = ATOM(4,2)
+      w = ATOM(4,0) }
+  | n = ATOM(4,2)  { s = ATOM(4,3)
+      w = ATOM(4,0) }
+  | n = ATOM(4,3)  { s = ATOM(4,4)
+      w = ATOM(4,0) }
+  | n = ATOM(4,4)  { s = ATOM(4,5)
+      w = ATOM(4,0) }
+  | n = ATOM(4,5)  { s = ATOM(4,6)
+      w = ATOM(4,0) }
+  | n = ATOM(4,6)  { s = ATOM(4,7)
+      w = ATOM(4,0) }
+  | n = ATOM(4,7)  { s = ATOM(4,8)
+      w = ATOM(4,0) }
+  | n = ATOM(4,8)  { s = ATOM(4,9)
+      w = ATOM(4,0) }
+  | n = ATOM(4,9)  { s = ATOM(4,10)
+      w = ATOM(4,0) }
+  | n = ATOM(4,10) { s = ATOM(4,11)
+      w = ATOM(4,0) }
+  | n = ATOM(4,11) { s = ATOM(4,12)
+      w = ATOM(4,0) }
+  | n = ATOM(4,12) { s = ATOM(4,13)
+      w = ATOM(4,0) }
+  | n = ATOM(4,13) { s = ATOM(4,14)
+      w = ATOM(4,0) }
+  | n = ATOM(4,14) { s = ATOM(4,15)
+      w = ATOM(4,0) }
+  | n = ATOM(4,15) { s = ATOM(4,0)
+      w = ATOM(4,1) }
+}
+
+;; --- bit-or on T[4] 0/1 (carry merge) ---
+bor : <x: T[4], y: T[4]> <-> <o: T[4]> where {
+  when x = ATOM(4,0) & y = ATOM(4,0) { o = ATOM(4,0) }
+  when x = ATOM(4,0) & y = ATOM(4,1) { o = ATOM(4,1) }
+  when x = ATOM(4,1) & y = ATOM(4,0) { o = ATOM(4,1) }
+  when x = ATOM(4,1) & y = ATOM(4,1) { o = ATOM(4,1) }
+}
+
+;; --- nibble add by succ-chain: PAIR(sum mod 16, wraps) ---
+;; applies successor b times; wraps accumulate through bor.
+;; The second clause calls nibble_succ BACKWARD (bp = pred b) —
+;; <-> is reversible, this is a declared use of that.
+nibble_add_b : <a: T[4], b: T[4]> <=> <PAIR(s, w)> shape self where {
+  | b = ATOM(4,0) { s = a  w = ATOM(4,0) }
+  | fresh (bp, s1, w1, s2, w2, w') {
+      nibble_succ<bp> = PAIR(b, _)
+      nibble_succ<a>  = PAIR(s1, w1)
+      nibble_add_b<s1, bp> = PAIR(s2, w2)
+      bor<w1, w2> = w'
+      s = s2
+      w = w'
+    }
+}
+
+;; --- half-adder: sn = (a+b+cin) & 15, cn = (a+b+cin) >> 4 ---
+;; the patent's called-but-undefined edge, closed relationally.
+nibble_half_add : <an: T[4], bn: T[4], cin: T[4]> <=> <PAIR(sn, cn)> where {
+  nibble_add_b<an, bn>  = PAIR(s1, w1)
+  nibble_add_b<s1, cin> = PAIR(sn, w2)
+  bor<w1, w2> = cn
+}
+
+;; --- binary add via nibble carry chain (nibble lists) ---
+nibble_add : <a, b, carry: T[4]> <=> <result> shape self where {
+  when a = [] & b = [] & carry = ATOM(4,0) { result = [] }
+  | fresh (an, bn, sn, cn, at, bt, rest) {
+      head<a> = an
+      tail<a> = at
+      head<b> = bn
+      tail<b> = bt
+      nibble_half_add<an, bn, carry> = PAIR(sn, cn)
+      nibble_add<at, bt, cn> = rest
+      result = PAIR(sn, rest)
+    }
+}
+
+;; --- scalar add on T[8] (succ/pred chain — proven) ---
+add : <a: T[8], b: T[8]> <=> <sum: T[8]> shape self where {
+  | b = ATOM(8,0) { sum = a }
+  | fresh (bp, sp) {
+      pred<b> = bp
+      add<a, bp> = sp
+      succ<sp> = sum
+    }
+}
+
+;; --- list operations ---
+append : <xs, ys> <-> <zs> shape self where {
+  | xs = [] { zs = ys }
+  | fresh (h, t, r) {
+      cons<h,t> = xs
+      append<t, ys> = r
+      cons<h,r> = zs
+    }
+}
+
+map : <f, xs> <-> <ys> shape self where {
+  | xs = []  { ys = [] }
+  | fresh (h, t, h', t') {
+      cons<h,t> = xs
+      call<f, h> = h'
+      map<f, t> = t'
+      cons<h',t'> = ys
+    }
+}
+
+fold : <f, acc, xs> <-> <result> shape self where {
+  | xs = [] { result = acc }
+  | fresh (h, t, acc') {
+      cons<h,t> = xs
+      call<f, PAIR(acc,h)> = acc'
+      fold<f, acc', t> = result
+    }
+}
+
+;; --- Fibonacci (structural, pred chain + add) ---
+fib : <n: T[8]> <-> <r: T[8]> shape pairwise where {
+  | n = ATOM(8,0) { r = ATOM(8,0) }
+  | n = ATOM(8,1) { r = ATOM(8,1) }
+  | fresh (n1, n2, r1, r2) {
+      pred<n> = n1
+      pred<n1> = n2
+      fib<n1> = r1
+      fib<n2> = r2
+      add<r1, r2> = r
+    }
+}
+
+;; --- contraction (lossy rewrite) ---
+contract : <rule, tensor> <=> <APPLY(MATCH(rule, tensor), rule.body)>
+
+;; --- composition (reversible rewrite) + inverse ---
+compose : <rule, tensor> <-> <APPLY(MATCH(rule, tensor), rule.body)>
+compose_inv : <rule, result> <-> <APPLY(MATCH(rule.body, result), rule.pat)>
+
+;; --- normalization / search (RUN quotient) ---
+norm : <goal> <-> <result> where {
+  RUN(goal, 1) = PAIR(result, _)
+}
+find : <goal, n> <-> <results> where {
+  RUN(goal, n) = results
+}
+stream : <goal> <-> <results> where {
+  RUN(goal, 0) = results      ;; run*
+}
+
+;; --- fresh variables ---
+fresh_var : <> <-> <FRESH()>
+
+;; --- disjunction (search branching) ---
+any : <g1, g2> <-> <result> where {
+  CHOICE(g1, g2) = result
+}
+
+;; --- relation invocation (definitions are data) ---
+call : <name, args> <-> <result> where {
+  env_lookup(name) = def
+  MATCH(def.pat, args) = subst
+  APPLY(subst, def.body) = result
+}

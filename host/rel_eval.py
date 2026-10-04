@@ -35,7 +35,7 @@ from __future__ import annotations
 import itertools
 import os
 import sys
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 _HOST = os.path.dirname(os.path.abspath(__file__))
 if _HOST not in sys.path:
@@ -82,6 +82,13 @@ def fresh() -> tuple:
 def _reset_fresh() -> None:
     global _fresh_i
     _fresh_i = itertools.count(1)
+    _FIELDS.clear()
+
+
+# pending field projections: varid -> (root var term, field).
+# `def.pat` lifts to a fresh var aliased to root `def`; when the
+# root walks to a reldef, the field projects to its marker.
+_FIELDS: Dict[int, Tuple[tuple, str]] = {}
 
 
 def term_str(t) -> str:
@@ -103,6 +110,12 @@ def term_str(t) -> str:
         return f"'{t[1]}"
     if t[0] == "reldef":
         return f"<reldef {t[1]}>"
+    if t[0] == "goalterm":
+        return f"<goal {t[1]}/>"
+    if t[0] == "pat":
+        return f"<pat {t[1]}>"
+    if t[0] == "bodycall":
+        return f"<body {t[1]}>"
     return repr(t)
 
 
@@ -116,6 +129,15 @@ Subst = Dict[int, tuple]
 def walk(t, s: Subst):
     while isinstance(t, tuple) and t[0] == "var" and t[1] in s:
         t = s[t[1]]
+    # pending field projection: a var aliased to root.field projects
+    # once the root resolves to a reldef; stays a bindable var
+    # until then (def.pat / def.body on an unbound def).
+    if isinstance(t, tuple) and t[0] == "var" and t[1] in _FIELDS:
+        root, fld = _FIELDS[t[1]]
+        rv = walk(root, s)
+        rv = _force(rv, s)
+        if isinstance(rv, tuple) and rv[0] == "reldef":
+            return ("pat", rv[1]) if fld == "pat" else ("bodycall", rv[1])
     return t
 
 
@@ -151,6 +173,9 @@ def lift(node, ren: Dict[str, tuple]):
         n = node["var"]
         if n not in ren:
             ren[n] = fresh()
+            if "." in n:
+                root = lift({"var": n.split(".", 1)[0]}, ren)
+                _FIELDS[ren[n][1]] = (root, n.split(".", 1)[1])
         return ren[n]
     if "wild" in node:
         return fresh()
@@ -174,6 +199,15 @@ def lift(node, ren: Dict[str, tuple]):
         return fresh()                           # bare type slot
     if "var_lit" in node:
         return node["var_lit"]
+    if "sym" in node:
+        return t_sym(node["sym"])
+    if "call_term" in node:
+        # a call in term position is a suspended goal — goals are
+        # data: RUN(g,n)/CHOICE/any dispatch on goalterm values.
+        name, args = node["call_term"]
+        return ("goalterm", name, [lift(a, ren) for a in args])
+    if "__term" in node:
+        return node["__term"]
     raise EvalError(f"rel_eval: unliftable term node {node!r}")
 
 
@@ -303,13 +337,25 @@ def _choice_out(node, ren):
     return lift(node, ren) if node is not None else None
 
 
+def _goal_parts(gnode, env, s, ren):
+    """Resolve a goal to (name, arg-nodes).  Two encodings: a
+    {"call_term"} node directly, or a term that walks to a
+    ("goalterm", name, argterms) — goals are data: any/norm/stream
+    forward them through rel args."""
+    if isinstance(gnode, dict) and "call_term" in gnode:
+        name, args = gnode["call_term"]
+        return name, args
+    gt = _force(walk(lift(gnode, ren), s), s)
+    if isinstance(gt, tuple) and gt[0] == "goalterm":
+        return gt[1], [{"__term": a} for a in gt[2]]
+    raise EvalError(f"goal must be a call_term or goalterm, "
+                    f"got {term_str(gt) if isinstance(gt, tuple) else gnode!r}")
+
+
 def _branch(node, env, out_t, s, fuel, ren) -> Iterator[Subst]:
-    """CHOICE branch: a call_term — each solution's out unifies
-    with the choice's declared out."""
-    if "call_term" not in node:
-        raise EvalError(
-            f"CHOICE branch must be a call_term, got {node!r}")
-    name, args = node["call_term"]
+    """CHOICE branch: each solution's out unifies with the
+    choice's declared out."""
+    name, args = _goal_parts(node, env, s, ren)
     ov = fresh()
     for sx in _rel_call(name, args, {"var_lit": ov},
                         env, s, fuel, ren):
@@ -325,10 +371,7 @@ def _run_goal(r: dict, env, s: Subst, fuel, ren) -> Iterator[Subst]:
     gnode = r["goal"]
     n = walk(lift(r["n"], ren), s)
     nlim = n[2] if isinstance(n, tuple) and n[0] == "atom" else 0
-    if "call_term" not in gnode:
-        raise EvalError(
-            f"RUN: goal must be a call_term, got {gnode!r}")
-    name, args = gnode["call_term"]
+    name, args = _goal_parts(gnode, env, s, ren)
     ov = fresh()
     results = []
     for sx in _rel_call(name, args, {"var_lit": ov},
@@ -344,6 +387,119 @@ def _run_goal(r: dict, env, s: Subst, fuel, ren) -> Iterator[Subst]:
         yield s2
 
 
+def _pat_lift(node):
+    """Lift an in-pattern node to a term with SURFACE var names —
+    a rel's declared pattern is data; its vars bind in the caller's
+    subst under the declared names."""
+    if "var" in node:
+        return ("var", node["var"])
+    if "wild" in node:
+        return fresh()
+    if "atom" in node:
+        return t_atom(node["atom"][0], node["atom"][1])
+    if "atom_dyn" in node:
+        be, pe = node["atom_dyn"]
+        out = []
+        for e in (be, pe):
+            if "const" in e:
+                out.append(("const", e["const"]))
+            else:
+                name, d = e["var_delta"]
+                out.append(("delta", ("var", name), d))
+        return ("atom_lazy", *out)
+    if "pair" in node:
+        return t_pair(_pat_lift(node["pair"][0]),
+                      _pat_lift(node["pair"][1]))
+    if "typed" in node:
+        return _pat_lift(node["typed"][0])
+    if "type" in node:
+        return fresh()
+    if "sym" in node:
+        return t_sym(node["sym"])
+    raise EvalError(f"rel_eval: unliftable pattern node {node!r}")
+
+
+def _tvars(t) -> Iterator[tuple]:
+    """Var terms in a pattern term — surface names only (pat vars
+    are match-scoped; caller vars are fresh ints, never shadowed)."""
+    if isinstance(t, tuple):
+        if t[0] == "var" and isinstance(t[1], str):
+            yield t
+        elif t[0] == "pair":
+            yield from _tvars(t[1])
+            yield from _tvars(t[2])
+        elif t[0] == "atom_lazy":
+            for e in t[1:]:
+                if e[0] == "delta":
+                    yield from _tvars(e[1])
+
+
+def _rtuple(terms: list):
+    """Right-nested PAIR tuple, no NIL tail — the k-arg convention:
+    PAIR(a1, PAIR(a2, ... ak))."""
+    out = terms[-1]
+    for t in reversed(terms[:-1]):
+        out = t_pair(t, out)
+    return out
+
+
+def _decode_binds(lst, s: Subst) -> Dict[str, tuple]:
+    """MATCH's subst term — PAIR(PAIR('name, value), ...) spine —
+    back to a surface-name dict for instantiate."""
+    out: Dict[str, tuple] = {}
+    cur = _force(lst, s)
+    while isinstance(cur, tuple) and cur[0] == "pair":
+        ent = cur[1]
+        if isinstance(ent, tuple) and ent[0] == "pair" and \
+                isinstance(ent[1], tuple) and ent[1][0] == "var":
+            out[ent[1][1]] = _force(walk(ent[2], s), s)
+        cur = _force(walk(cur[2], s), s)
+    return out
+
+
+def _instantiate(node, binds: Dict[str, tuple]):
+    """Apply a decoded subst to an in-pattern node — the term
+    APPLY hands to the dispatched rel call."""
+    if "var" in node:
+        return binds.get(node["var"], ("var", node["var"]))
+    if "wild" in node:
+        return fresh()
+    if "atom" in node:
+        return t_atom(node["atom"][0], node["atom"][1])
+    if "atom_dyn" in node:
+        be, pe = node["atom_dyn"]
+        out = []
+        ok = True
+        for e in (be, pe):
+            if "const" in e:
+                out.append(e["const"])
+                continue
+            name, d = e["var_delta"]
+            v = binds.get(name)
+            if isinstance(v, tuple) and v[0] == "atom":
+                out.append(v[2] + d)
+            else:
+                ok = False
+        if ok:
+            return t_atom(out[0], out[1])
+        return ("atom_lazy", *[
+            ("const", e["const"]) if "const" in e else
+            ("delta", binds.get(e["var_delta"][0],
+                                ("var", e["var_delta"][0])),
+             e["var_delta"][1])
+            for e in (be, pe)])
+    if "pair" in node:
+        return t_pair(_instantiate(node["pair"][0], binds),
+                      _instantiate(node["pair"][1], binds))
+    if "typed" in node:
+        return _instantiate(node["typed"][0], binds)
+    if "type" in node:
+        return fresh()
+    if "sym" in node:
+        return t_sym(node["sym"])
+    raise EvalError(f"rel_eval: uninstantiable node {node!r}")
+
+
 def _builtin(b: dict, env, s: Subst, fuel, ren) -> Iterator[Subst]:
     name, args, out = b["name"], b["args"], b["out"]
     if name == "FRESH":
@@ -357,14 +513,36 @@ def _builtin(b: dict, env, s: Subst, fuel, ren) -> Iterator[Subst]:
     if name == "MATCH":
         if len(args) != 2:
             raise EvalError("MATCH(pat, term) = subst expected")
-        s2 = unify(lift(args[0], ren), lift(args[1], ren), s)
+        pat = _force(walk(lift(args[0], ren), s), s)
+        argterm = lift(args[1], ren)
+        if isinstance(pat, tuple) and pat[0] == "pat":
+            # def.pat — the rel's declared in-pattern as data.
+            # Pat vars are match-scoped: shadow any stale surface
+            # binding rather than colliding with an earlier MATCH
+            # on the same names (map/fold recursion calls MATCH
+            # per element — the second 'n' must re-bind).
+            rname = pat[1]
+            rel = env["rels"].get(rname)
+            if rel is None:
+                raise EvalError(f"MATCH: unbound rel {rname!r}")
+            ins = [_pat_lift(n) for n in rel["in"]]
+            shadow = {v[1] for n in ins for v in _tvars(n)}
+            s_sh = {k: v for k, v in s.items() if k not in shadow}
+            # arg-tuple convention (patent): 1 arg = the term;
+            # k args = PAIR(a1, PAIR(a2, ... ak)) right-nested,
+            # no NIL tail — call<f, PAIR(acc,h)> for 2-arg f.
+            target = ins[0] if len(ins) == 1 else \
+                _rtuple(ins)
+            s2 = unify(target, argterm, s_sh)
+        else:
+            s2 = unify(pat, argterm, s)
         if s2 is None:
             return
         if out is None:
             yield s2
             return
         binds = NIL
-        for k, v in sorted(s2.items()):
+        for k, v in sorted(s2.items(), key=lambda kv: str(kv[0])):
             binds = t_pair(t_pair(t_var(k), reify(v, s2)), binds)
         s3 = unify(lift(out, ren), binds, s2)
         if s3 is not None:
@@ -372,6 +550,27 @@ def _builtin(b: dict, env, s: Subst, fuel, ren) -> Iterator[Subst]:
         return
     if name == "APPLY":
         t = _force(walk(lift(args[-1], ren), s), s)
+        if isinstance(t, tuple) and t[0] == "bodycall":
+            # APPLY(subst, def.body) — instantiate the rel's
+            # in-pattern under the subst MATCH produced and
+            # dispatch: the meta-level call is a rel call.
+            rel = env["rels"].get(t[1])
+            if rel is None:
+                raise EvalError(f"APPLY: unbound rel {t[1]!r}")
+            binds = _decode_binds(
+                _force(walk(lift(args[0], ren), s), s), s)
+            argnodes = [{"__term": _instantiate(n, binds)}
+                        for n in rel["in"]]
+            ov = fresh()
+            for sx in _rel_call(t[1], argnodes, {"var_lit": ov},
+                                env, s, fuel, ren):
+                if out is None:
+                    yield sx
+                else:
+                    s2 = unify(lift(out, ren), ov, sx)
+                    if s2 is not None:
+                        yield s2
+            return
         if out is None:
             yield s
         else:
@@ -640,11 +839,107 @@ def main() -> int:
         assert "declares no shape" in str(e), e
     else:
         raise AssertionError("unshaped cycle ran")
+    # ---- 10e: the admissible stdlib corpus, exercised end-to-end
+    corpus = os.path.join(os.path.dirname(__file__), "corpus",
+                          "stdlib.phi")
+    cg = phi_rel.parse_rel(open(corpus, encoding="utf-8").read())
+    import rel_schema
+    rel_schema.check(cg)                      # every edge bound
+    _reset_fresh()
+
+    def L(*xs):
+        out = NIL
+        for x in reversed(xs):
+            out = t_pair(x, out)
+        return out
+
+    def A(v, bits=8):
+        return t_atom(bits, v)
+
+    assert run_value(cg, "call", [t_sym("succ"), A(2)], n=1) == [A(3)]
+    assert run_value(cg, "map", [t_sym("succ"), L(A(1), A(2))],
+                     n=1) == [L(A(2), A(3))]
+    assert run_value(cg, "fold", [t_sym("add"), A(0),
+                                  L(A(1), A(2), A(3))], n=1) == [A(6)]
+    assert run_value(cg, "nibble_half_add",
+                     [A(15, 4), A(2, 4), A(1, 4)], n=1) == \
+        [t_pair(A(2, 4), A(1, 4))]
+    assert run_value(cg, "nibble_add",
+                     [L(A(1, 4), A(2, 4)), L(A(3, 4), A(0, 4)),
+                      A(0, 4)], n=1) == [L(A(4, 4), A(2, 4))]
+    assert run_value(cg, "add", [A(2), A(3)], n=1) == [A(5)]
+    assert run_value(cg, "fib", [A(5)], n=1) == [A(5)]
+    assert run_value(cg, "norm",
+                     [("goalterm", "append", [L(A(9)), NIL])],
+                     n=1) == [L(A(9))]
+
+    # ---- congruence vs the patent boot engine (same program,
+    # both machines, same solutions in the same order)
+    cong = "absent"
+    boot_dir = os.path.join(os.path.dirname(__file__), os.pardir,
+                            os.pardir, "isa-physics", "patent",
+                            "phi-lang")
+    boot_py = os.path.join(boot_dir, "phi_boot.py")
+    if os.path.exists(boot_py):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "phi_boot", boot_py)
+        B = importlib.util.module_from_spec(spec)
+        sys.modules["phi_boot"] = B      # dataclass needs the
+        spec.loader.exec_module(B)       # module registered first
+
+        def appendo(xs, ys, zs):
+            def goal(s):
+                for s1 in B.conj(
+                        B.eq(xs, B.Atom.of(0, bits=0)),
+                        B.eq(zs, ys))(s):
+                    yield s1
+                h, t, r = B.fresh(), B.fresh(), B.fresh()
+                for s1 in B.conj(
+                        B.eq(xs, B.Pair(h, t)),
+                        B.conj(appendo(t, ys, r),
+                               B.eq(zs, B.Pair(h, r))))(s):
+                    yield s1
+            return goal
+
+        def bL(*xs):
+            out = B.Atom.of(0, bits=0)
+            for x in reversed(xs):
+                out = B.Pair(x, out)
+            return out
+
+        bxs, bys = B.fresh(), B.fresh()
+        bwant = bL(B.Atom.of(1), B.Atom.of(2))
+        bres = B.run(appendo(bxs, bys, bwant), n=3)
+        bsplits = [(B.reify(bxs, s), B.reify(bys, s)) for s in bres]
+        _reset_fresh()
+        qx, qy = fresh(), fresh()
+        want = L(A(1), A(2))
+        sols = run_solutions(cg, "append", [qx, qy], want, n=3)
+        ours = [(reify(qx, s), reify(qy, s)) for s in sols]
+        assert len(bsplits) == len(ours) == 3
+        # same splits in the same order (observational equivalence)
+        for (bx, by), (ox, oy) in zip(bsplits, ours):
+            assert _boot_term(bx) == ox and _boot_term(by) == oy, \
+                (bx, ox)
+        cong = "3 splits identical"
     print(f"rel_eval selftest: append fwd 1 sol, "
           f"bwd {[term_str(a) for a, _ in got]}, "
           f"head/equal ok, add/fib relational, unbound+fuel "
-          f"refusals, lowering+cycle contracts: pass")
+          f"refusals, lowering+cycle contracts, "
+          f"stdlib corpus (call/map/fold/nibble-add/norm), "
+          f"phi_boot congruence [{cong}]: pass")
     return 0
+
+
+def _boot_term(bt):
+    """phi_boot Atom/Pair -> our term encoding (duck-typed —
+    phi_boot is loaded via spec_from_file_location, not sys.path)."""
+    if type(bt).__name__ == "Atom":
+        return t_atom(bt.bits, bt.value()) if bt.bits else NIL
+    if type(bt).__name__ == "Pair":
+        return t_pair(_boot_term(bt.car), _boot_term(bt.cdr))
+    return bt
 
 
 if __name__ == "__main__":
