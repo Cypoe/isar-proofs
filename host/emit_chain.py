@@ -726,6 +726,8 @@ def _ck_label(R: seed.Realization, host_name: str) -> str:
         flags.append("io_" + "-".join(R.io))
     if getattr(R, "reclaim", "none") not in (None, "none"):
         flags.append(str(R.reclaim))
+    if getattr(R, "gc", "none") not in (None, "none"):
+        flags.append("gc_" + str(R.gc))
     if R.fuel is not None:
         flags.append("fuel%d" % R.fuel)
     base = (host_name or "host").replace("native.", "").replace(".", "-")

@@ -64,6 +64,16 @@ DATA_SLOTS_IR: Tuple[Tuple[str, int], ...] = DATA_SLOTS + (
 # (pay-once for shared input redexes)
 DATA_SLOTS_PS: Tuple[Tuple[str, int], ...] = (("pcur", 8), ("pend", 8))
 
+# gc="sweep": conservative mark-sweep over the reduction arena
+# [irstart, rbx).  flhead = LIFO freelist (FREE_TAG cells, .l = next),
+# stk0 = stack-root scan limit captured at _start, ngc/nfree = stats.
+DATA_SLOTS_GC: Tuple[Tuple[str, int], ...] = (
+    ("flhead", 8), ("stk0", 8), ("ngc", 8), ("nfree", 8),
+    ("flhead_p", 8),   # IR+persist: swept persist cells recycle ONLY
+                       # via mkapp_p — an input cell may never point
+                       # into the arena (ir_bloop decommits it per root)
+)
+
 # dialect="plex.v3" (ADR-0006 ingest): the kernel depacks the archive
 # itself — directory buffer, selected PIR span, KIND_PIR row count,
 # and plexleft = payload bytes remaining (the stream's bounded EOF)
@@ -108,6 +118,8 @@ FWD_TAG = 10  # redirect store (R.reclaim="redirect"): a collapsed redex
               # cell becomes {tag=FWD, l=reduct} — the heap model of
               # HeapDev.lean (`redirect`/`repr`).  Native-internal like
               # STK_TAG/IR_HOLE/EG_MARK: never on the wire.
+FREE_TAG = 11 # gc="sweep": swept-dead cell — freelist link lives in .l;
+              # never a term tag, never on the wire (like STK/FWD)
 
 # ctx shared by builders: iat operand helper for kernel32 imports.
 Ctx = Dict[str, object]
@@ -123,6 +135,12 @@ def r_entry(R: Realization, ctx: Ctx) -> Program:
     iat = ctx["iat"]
     p: Program = [
         LBL("_start"),
+    ]
+    if R.gc == "sweep":
+        # process-entry rsp: the stack-root scan limit — every frame
+        # the reducer ever builds sits below it
+        p += [I("mov_rip_r64", ("p", "stk0"), "rsp")]
+    p += [
         I("sub_r64_imm", "rsp", 0x28),
         # handles: stdin -10, stdout -11, stderr -12
         I("mov_r32_imm32", "ecx", -10), I("call_mrip", iat("GetStdHandle")),
@@ -346,6 +364,13 @@ def r_stats(R: Realization, ctx: Ctx) -> Program:
         _stats_str(p, " dec=")
         p += [I("mov_r64_rip", "rdi", ("p", "eb_dec")),
               I("call_rel32", ("l", "itoa"))]
+    if R.gc == "sweep":
+        _stats_str(p, " gc=")
+        p += [I("mov_r64_rip", "rdi", ("p", "ngc")),
+              I("call_rel32", ("l", "itoa"))]
+        _stats_str(p, " free=")
+        p += [I("mov_r64_rip", "rdi", ("p", "nfree")),
+              I("call_rel32", ("l", "itoa"))]
     p += [
         I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
         I("mov_r64_rip", "rcx", ("p", "herr")),
@@ -380,8 +405,14 @@ def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
     order for the v<C acyclicity check); "none" keeps per-chunk VAs."""
     iat = ctx["iat"]
     if R.reclaim == "redirect":
+        # VirtualAlloc clobbers the volatile regs (rcx,rdx,r8-r11) —
+        # allocator callers keep live cells there (e.g. st_swap's `x`
+        # in rcx across mkapp), so grow preserves the whole volatile set
         return [
             LBL("grow_heap"),
+            I("push_r64", "rcx"), I("push_r64", "rdx"),
+            I("push_r64", "r8"), I("push_r64", "r9"),
+            I("push_r64", "r10"), I("push_r64", "r11"),
             I("sub_r64_imm", "rsp", 0x28),
             I("mov_r64_r64", "rcx", "rbp"),
             I("mov_r64_imm", "rdx", R.chunk_bytes),
@@ -391,12 +422,43 @@ def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
             I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "grow_fail")),
             I("mov_r64_imm", "rax", R.chunk_bytes),
             I("add_r64_r64", "rbp", "rax"),
-            I("add_r64_imm", "rsp", 0x28), I("ret"),
-            LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
+            I("add_r64_imm", "rsp", 0x28),
+            I("pop_r64", "r11"), I("pop_r64", "r10"),
+            I("pop_r64", "r9"), I("pop_r64", "r8"),
+            I("pop_r64", "rdx"), I("pop_r64", "rcx"),
+            I("ret"),
+            LBL("grow_fail"),
+        ] + ([
+            # gc="sweep": arena reserved-end reached — collect before
+            # conceding; honest exit4 only when a collect frees nothing.
+            # irstart==0 means the tier boundary isn't written yet
+            # (template build): nothing is collectable by construction,
+            # so concede honestly rather than sweep a live prefix.
+            I("mov_r64_rip", "rax", ("p", "irstart")),
+            I("test_r64_r64", "rax", "rax"),
+            I("je_rel32", ("l", "grow_oom")),
+            I("call_rel32", ("l", "gc_collect")),
+            I("mov_r64_rip", "rax", ("p", "flhead")),
+            I("test_r64_r64", "rax", "rax"),
+            I("jne_rel32", ("l", "grow_gc")),
+            LBL("grow_oom"),
+            I("mov_r32_imm32", "ecx", 4),
             I("call_mrip", iat("ExitProcess")),
-        ]
+            LBL("grow_gc"),
+            I("add_r64_imm", "rsp", 0x28),
+            I("pop_r64", "r11"), I("pop_r64", "r10"),
+            I("pop_r64", "r9"), I("pop_r64", "r8"),
+            I("pop_r64", "rdx"), I("pop_r64", "rcx"),
+            I("ret"),
+        ] if R.gc == "sweep" else [
+            I("mov_r32_imm32", "ecx", 4),
+            I("call_mrip", iat("ExitProcess")),
+        ])
     return [
         LBL("grow_heap"),
+        I("push_r64", "rcx"), I("push_r64", "rdx"),
+        I("push_r64", "r8"), I("push_r64", "r9"),
+        I("push_r64", "r10"), I("push_r64", "r11"),
         I("sub_r64_imm", "rsp", 0x28),
         I("xor_r32_r32", "ecx", "ecx"),
         I("mov_r64_imm", "rdx", R.chunk_bytes),
@@ -406,45 +468,100 @@ def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "grow_fail")),
         I("mov_r64_r64", "rbx", "rax"),
         I("lea_r64_m64", "rbp", ("m", "rax", R.chunk_bytes)),
-        I("add_r64_imm", "rsp", 0x28), I("ret"),
+        I("add_r64_imm", "rsp", 0x28),
+        I("pop_r64", "r11"), I("pop_r64", "r10"),
+        I("pop_r64", "r9"), I("pop_r64", "r8"),
+        I("pop_r64", "rdx"), I("pop_r64", "rcx"),
+        I("ret"),
         LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
         I("call_mrip", iat("ExitProcess")),
     ]
 
 
 def r_mkleaf(R: Realization, ctx: Ctx) -> Program:
-    """mkleaf: rdx=tag -> rax node (counted in nalloc)."""
-    return [
-        LBL("mkleaf"),
+    """mkleaf: rdx=tag -> rax node (counted in nalloc).  gc="sweep"
+    pops the freelist first — dead cells recycle; grow_heap may
+    have collected, so the alloc entry is a retry point."""
+    p: Program = [LBL("mkleaf")]
+    if R.gc == "sweep":
+        p += [
+            # the link load clobbers rcx — callers keep live cells in
+            # rcx across allocators (st_swap's `x`), so save/restore it;
+            # a stale freelist link in a live register becomes a
+            # fabricated edge once the cell is recycled
+            I("push_r64", "rcx"),
+            I("mov_r64_rip", "rax", ("p", "flhead")),
+            I("test_r64_r64", "rax", "rax"),
+            I("je_rel32", ("l", "mkleaf_bump_pop")),
+            I("mov_r64_m64", "rcx", ("m", "rax", 8)),   # next free cell
+            I("mov_rip_r64", ("p", "flhead"), "rcx"),
+            I("pop_r64", "rcx"),
+            I("jmp_rel32", ("l", "mkleaf_fill")),
+            LBL("mkleaf_bump_pop"),
+            I("pop_r64", "rcx"),
+            LBL("mkleaf_bump"),
+        ]
+    p += [
         I("lea_r64_m64", "rax", ("m", "rbx", R.node_bytes)),
         I("cmp_r64_r64", "rax", "rbp"), I("jbe_rel32", ("l", "mkleaf_ok")),
         I("push_r64", "rdx"), I("call_rel32", ("l", "grow_heap")),
         I("pop_r64", "rdx"),
+    ]
+    if R.gc == "sweep":
+        p += [I("jmp_rel32", ("l", "mkleaf"))]     # retry: freelist now
+    p += [
         LBL("mkleaf_ok"),
         I("mov_r64_r64", "rax", "rbx"), I("add_r64_imm", "rbx", R.node_bytes),
+        LBL("mkleaf_fill"),
         I("mov_m64_r64", ("m", "rax", 0), "rdx"),
         I("mov_m64_imm32", ("m", "rax", 8), 0),
         I("mov_m64_imm32", ("m", "rax", 16), 0),
         I("inc_mrip", ("p", "nalloc")), I("ret"),
     ]
+    return p
 
 
 def r_mkapp(R: Realization, ctx: Ctx) -> Program:
-    """mkapp: rdi=f, rsi=x -> rax node (counted in nalloc)."""
-    return [
-        LBL("mkapp"),
+    """mkapp: rdi=f, rsi=x -> rax node (counted in nalloc).  gc="sweep"
+    pops the freelist first — dead cells recycle; grow_heap may
+    have collected, so the alloc entry is a retry point."""
+    p: Program = [LBL("mkapp")]
+    if R.gc == "sweep":
+        p += [
+            # rcx is caller state (st_swap's x lives there across the
+            # call) — the link load must not clobber it with a stale
+            # freelist pointer
+            I("push_r64", "rcx"),
+            I("mov_r64_rip", "rax", ("p", "flhead")),
+            I("test_r64_r64", "rax", "rax"),
+            I("je_rel32", ("l", "mkapp_bump_pop")),
+            I("mov_r64_m64", "rcx", ("m", "rax", 8)),   # next free cell
+            I("mov_rip_r64", ("p", "flhead"), "rcx"),
+            I("pop_r64", "rcx"),
+            I("jmp_rel32", ("l", "mkapp_fill")),
+            LBL("mkapp_bump_pop"),
+            I("pop_r64", "rcx"),
+            LBL("mkapp_bump"),
+        ]
+    p += [
         I("lea_r64_m64", "rax", ("m", "rbx", R.node_bytes)),
         I("cmp_r64_r64", "rax", "rbp"), I("jbe_rel32", ("l", "mkapp_ok")),
         I("push_r64", "rdi"), I("push_r64", "rsi"), I("sub_r64_imm", "rsp", 8),
         I("call_rel32", ("l", "grow_heap")),
         I("add_r64_imm", "rsp", 8), I("pop_r64", "rsi"), I("pop_r64", "rdi"),
+    ]
+    if R.gc == "sweep":
+        p += [I("jmp_rel32", ("l", "mkapp"))]      # retry: freelist now
+    p += [
         LBL("mkapp_ok"),
         I("mov_r64_r64", "rax", "rbx"), I("add_r64_imm", "rbx", R.node_bytes),
+        LBL("mkapp_fill"),
         I("mov_m64_imm32", ("m", "rax", 0), 0),
         I("mov_m64_r64", ("m", "rax", 8), "rdi"),
         I("mov_m64_r64", ("m", "rax", 16), "rsi"),
         I("inc_mrip", ("p", "nalloc")), I("ret"),
     ]
+    return p
 
 
 def r_mkapp_p(R: Realization, ctx: Ctx) -> Program:
@@ -454,41 +571,99 @@ def r_mkapp_p(R: Realization, ctx: Ctx) -> Program:
     token mode never resets so it aliases the ordinary bump (mkapp).
     Counted in nalloc."""
     if ctx.get("ir") and R.reclaim == "redirect":
-        return [
-            LBL("mkapp_p"),
+        p: Program = [LBL("mkapp_p")]
+        if R.gc == "sweep":
+            p += [
+                # persist freelist first — ONLY flhead_p: the result
+                # may be referenced by input cells, which must never
+                # point above irstart (the arena is decommitted per
+                # root).  rcx is caller state across the call — same
+                # discipline as mkapp's pop.
+                I("push_r64", "rcx"),
+                I("mov_r64_rip", "rax", ("p", "flhead_p")),
+                I("test_r64_r64", "rax", "rax"),
+                I("je_rel32", ("l", "mkp_pop_done")),
+                I("mov_r64_m64", "rcx", ("m", "rax", 8)),
+                I("mov_rip_r64", ("p", "flhead_p"), "rcx"),
+                I("pop_r64", "rcx"),
+                I("jmp_rel32", ("l", "mkp_fill")),
+                LBL("mkp_pop_done"),
+                I("pop_r64", "rcx"),
+            ]
+        p += [
             I("mov_r64_rip", "r9", ("p", "pcur")),
             I("lea_r64_m64", "rax", ("m", "r9", R.node_bytes)),
             I("mov_r64_rip", "r8", ("p", "pend")),
             I("cmp_r64_r64", "rax", "r8"),
             I("jbe_rel32", ("l", "mkp_ok")),
-            I("jmp_rel32", ("l", "exit4")),         # persist zone full
+        ]
+        if R.gc == "sweep":
+            p += [
+                # persist zone full — collect, then retry exactly once:
+                # a collect that frees nothing concedes (pcur doesn't
+                # shrink, so only a nonempty flhead_p can make progress)
+                I("call_rel32", ("l", "gc_collect")),
+                I("mov_r64_rip", "rax", ("p", "flhead_p")),
+                I("test_r64_r64", "rax", "rax"),
+                I("jne_rel32", ("l", "mkapp_p")),
+                I("jmp_rel32", ("l", "exit4")),         # persist OOM
+            ]
+        else:
+            p += [I("jmp_rel32", ("l", "exit4")),       # persist zone full
+                  ]
+        p += [
             LBL("mkp_ok"),
             I("mov_rip_r64", ("p", "pcur"), "rax"),
             I("mov_r64_r64", "rax", "r9"),
+            LBL("mkp_fill"),
             I("mov_m64_imm32", ("m", "rax", 0), Tag.APP),
             I("mov_m64_r64", ("m", "rax", 8), "rdi"),
             I("mov_m64_r64", ("m", "rax", 16), "rsi"),
             I("inc_mrip", ("p", "nalloc")), I("ret"),
         ]
+        return p
     return [LBL("mkapp_p"), I("jmp_rel32", ("l", "mkapp"))]
 
 
 def r_mkstk(R: Realization, ctx: Ctx) -> Program:
     """mkstk: rdi=value -> rax cons cell, r14=new stack top.
-    Parse-stack cells share the dynamic heap; NOT counted in nalloc."""
-    return [
-        LBL("mkstk"),
+    Parse-stack cells share the dynamic heap; NOT counted in nalloc.
+    gc="sweep" pops the freelist first (mkleaf discipline)."""
+    p: Program = [LBL("mkstk")]
+    if R.gc == "sweep":
+        p += [
+            # rcx may hold a caller cell across the call — preserve it
+            # around the freelist link load (see mkapp)
+            I("push_r64", "rcx"),
+            I("mov_r64_rip", "rax", ("p", "flhead")),
+            I("test_r64_r64", "rax", "rax"),
+            I("je_rel32", ("l", "mkstk_bump_pop")),
+            I("mov_r64_m64", "rcx", ("m", "rax", 8)),   # next free cell
+            I("mov_rip_r64", ("p", "flhead"), "rcx"),
+            I("pop_r64", "rcx"),
+            I("jmp_rel32", ("l", "mkstk_fill")),
+            LBL("mkstk_bump_pop"),
+            I("pop_r64", "rcx"),
+            LBL("mkstk_bump"),
+        ]
+    p += [
         I("lea_r64_m64", "rax", ("m", "rbx", R.node_bytes)),
         I("cmp_r64_r64", "rax", "rbp"), I("jbe_rel32", ("l", "mkstk_ok")),
         I("push_r64", "rdi"), I("call_rel32", ("l", "grow_heap")),
         I("pop_r64", "rdi"),
+    ]
+    if R.gc == "sweep":
+        p += [I("jmp_rel32", ("l", "mkstk"))]      # retry: freelist now
+    p += [
         LBL("mkstk_ok"),
         I("mov_r64_r64", "rax", "rbx"), I("add_r64_imm", "rbx", R.node_bytes),
+        LBL("mkstk_fill"),
         I("mov_m64_imm32", ("m", "rax", 0), STK_TAG),
         I("mov_m64_r64", ("m", "rax", 8), "rdi"),
         I("mov_m64_r64", ("m", "rax", 16), "r14"),
         I("mov_r64_r64", "r14", "rax"), I("ret"),
     ]
+    return p
 
 
 def r_repr(R: Realization, ctx: Ctx) -> Program:
@@ -507,6 +682,291 @@ def r_repr(R: Realization, ctx: Ctx) -> Program:
         I("jmp_rel32", ("l", "repr_l")),
         LBL("repr_d"), I("ret"),
     ]
+
+
+def r_gc_swmark(R: Realization, ctx: Ctx) -> Program:
+    """sw_mark(rdi=cell): mark the reachable closure of a known-
+    unmarked, in-range, aligned cell — Schorr-Waite pointer reversal,
+    no auxiliary stack.  Mark state lives in the tag's hi dword at
+    cell+4: bit0 = marked, bit1 = descent came via .r (return arm).
+    rsi=cur, rdi=prev, rax/rcx/rdx/r11 scratch; r10=irstart, rbx=bump
+    are gc_collect's and survive (sw_mark calls nothing).  IR+persist:
+    r13=pcur0, r14=pcur widen the accept to [pcur0,pcur)∪[irstart,rbx);
+    the zones sit on different 24-lattices (pcur0 is absolute-aligned,
+    irstart only page-aligned), so each branch subtracts its own base
+    before the div alignment check."""
+    irp = bool(ctx.get("ir")) and R.reclaim == "redirect"
+    def ck(lbl_skip, rtag):                 # rdx=candidate child
+        hi = f"sw_ck_hi{rtag}"
+        acc = f"sw_ck_acc{rtag}"
+        head: Program = []
+        if irp:
+            head += [
+                # rdx >= irstart -> arena (jae via swapped jbe)
+                I("cmp_r64_r64", "r10", "rdx"),
+                I("jbe_rel32", ("l", hi)),
+                I("cmp_r64_r64", "rdx", "r13"),
+                I("jb_rel32", ("l", lbl_skip)),       # below pcur0
+                I("cmp_r64_r64", "r14", "rdx"),
+                I("jbe_rel32", ("l", lbl_skip)),      # >= pcur: gap
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r13"),       # persist lattice
+                I("jmp_rel32", ("l", acc)),
+                LBL(hi),
+                # UNSIGNED upper bound: bit63-set stack garbage is
+                # negative under a signed jge and would slip through
+                # to a wild deref
+                I("cmp_r64_r64", "rbx", "rdx"),
+                I("jbe_rel32", ("l", lbl_skip)),      # at/above bump
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r10"),       # arena lattice
+                LBL(acc),
+            ]
+        else:
+            head += [
+                I("cmp_r64_r64", "rdx", "r10"),
+                I("jb_rel32", ("l", lbl_skip)),       # below arena
+                # UNSIGNED upper bound: bit63-set stack garbage is
+                # negative under a signed jge and would slip through
+                # to a wild deref
+                I("cmp_r64_r64", "rbx", "rdx"),
+                I("jbe_rel32", ("l", lbl_skip)),      # at/above bump
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r10"),
+            ]
+        return head + [
+            I("mov_r64_r64", "r11", "rdx"),             # save candidate
+            I("xor_r32_r32", "edx", "edx"),
+            I("mov_r64_imm", "rcx", R.node_bytes),
+            I("div_r64", "rcx"),                        # rax=off/24 rdx=rem
+            I("test_r64_r64", "rdx", "rdx"),
+            I("jne_rel32", ("l", lbl_skip)),            # unaligned
+            I("mov_r64_r64", "rdx", "r11"),             # candidate back
+            I("mov_r32_m32", "eax", ("m", "rdx", 4)),
+            I("and_r64_imm", "rax", 1),
+            I("jne_rel32", ("l", lbl_skip)),            # already marked
+            # mark bits live in the tag's HI dword — a qword store at
+            # +4 would spill into .l's low dword (addrs < 4GB -> l=0)
+            I("mov_r32_imm32", "eax", 1 + 2 * rtag),
+            I("mov_m32_r32", ("m", "rsi", 4), "eax"),
+            I("mov_m64_r64", ("m", "rsi", 8 + 8 * rtag), "rdi"),
+            I("mov_r64_r64", "rdi", "rsi"),             # prev = cur
+            I("mov_r64_r64", "rsi", "rdx"),             # cur = child
+            I("jmp_rel32", ("l", "sw_adv")),
+        ]
+    return [
+        LBL("sw_mark"),
+        I("mov_r64_r64", "rsi", "rdi"),                 # cur = root
+        I("xor_r32_r32", "edi", "edi"),                 # prev = 0
+        LBL("sw_adv"),
+        I("mov_r32_imm32", "eax", 1),                  # mark, rtag=0 —
+        I("mov_m32_r32", ("m", "rsi", 4), "eax"),      # dword store only
+        I("mov_r64_m64", "rdx", ("m", "rsi", 8)),       # child = cur.l
+    ] + ck("sw_try_r", 0) + [
+        LBL("sw_try_r"),
+        I("mov_r64_m64", "rdx", ("m", "rsi", 16)),      # child = cur.r
+    ] + ck("sw_ret", 1) + [
+        LBL("sw_ret"),
+        I("test_r64_r64", "rdi", "rdi"),
+        I("je_rel32", ("l", "sw_done")),
+        I("mov_r32_m32", "eax", ("m", "rdi", 4)),
+        I("and_r64_imm", "rax", 2),
+        I("jne_rel32", ("l", "sw_ret_r")),
+        # returned via .l: grandparent parked in prev.l
+        I("mov_r64_m64", "rdx", ("m", "rdi", 8)),
+        I("mov_m64_r64", ("m", "rdi", 8), "rsi"),       # prev.l = cur
+        I("mov_r64_r64", "rsi", "rdi"),                 # cur = prev
+        I("mov_r64_r64", "rdi", "rdx"),                 # prev = gp
+        I("jmp_rel32", ("l", "sw_try_r")),
+        LBL("sw_ret_r"),
+        # returned via .r: grandparent parked in prev.r
+        I("mov_r64_m64", "rdx", ("m", "rdi", 16)),
+        I("mov_m64_r64", ("m", "rdi", 16), "rsi"),      # prev.r = cur
+        I("mov_r32_imm32", "eax", 1),                   # keep mark, clr rtag
+        I("mov_m32_r32", ("m", "rdi", 4), "eax"),       # (dword — see sw_adv)
+        I("mov_r64_r64", "rsi", "rdi"),
+        I("mov_r64_r64", "rdi", "rdx"),
+        I("jmp_rel32", ("l", "sw_ret")),
+        LBL("sw_done"), I("ret"),
+    ]
+
+
+def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
+    """gc_collect: full mark-sweep of the reduction arena
+    [irstart, rbx).  Roots are conservative: every 24-aligned pointer
+    into the range sitting on the C stack — all cell-capable regs are
+    pushed first so their images join the scanned window.  Non-moving:
+    collection mid-step is safe — every register/stack temp cell keeps
+    its identity.  Dead cells get FREE_TAG and link the flhead chain;
+    live marks are cleared.  rbx/rbp survive; everything else is
+    pushed/restored around the scan.
+
+    IR+persist: the swept space is [pcur0,pcur) ∪ [irstart,rbx) —
+    _fr reducts are mkapp_p'd below irstart precisely so input cells
+    may hold them across arena resets; they die like everything else
+    once unreferenced.  Input cells are the missing root class: an
+    input cell's FWD .l points into the persist zone, so phase 2 scans
+    the input region [permend, pcur0) qword-wise.  Persist dead cells
+    chain flhead_p (mkapp_p pops only that list — an input cell may
+    never point above irstart: ir_bloop decommits the arena per root).
+    """
+    irp = bool(ctx.get("ir")) and R.reclaim == "redirect"
+    regs = ("r15", "r14", "r13", "r12", "rdi", "rsi", "r11", "r10",
+            "r9", "r8", "rdx", "rcx", "rax")
+    p: Program = [LBL("gc_collect")]
+    p += [I("push_r64", r) for r in regs]
+    p += [
+        I("mov_r64_rip", "r10", ("p", "irstart")),
+    ]
+    if irp:
+        p += [
+            # r13 = pcur0 = align24(irroots + 8*irnroots) — the persist
+            # zone's first cell (depack bumps pcur from there)
+            I("mov_r64_rip", "r13", ("p", "irroots")),
+            I("mov_r64_rip", "rax", ("p", "irnroots")),
+            I("shl_r64_imm8", "rax", 3),
+            I("add_r64_r64", "r13", "rax"),
+            I("add_r64_imm", "r13", R.node_bytes - 1),
+            I("and_r64_imm", "r13", -R.node_bytes),
+            I("mov_r64_rip", "r14", ("p", "pcur")),
+            I("mov_r64_rip", "r15", ("p", "permend")),
+        ]
+
+    # one accept body per scan phase — `u` uniquifies the labels:
+    # candidate in rdx -> fall into the mark check or jmp next_lbl
+    def scan_body(next_lbl: str, u: str) -> Program:
+        out: Program = [
+            I("mov_r64_m64", "rdx", ("m", "r8", 0)),    # candidate
+        ]
+        if irp:
+            out += [
+                # rdx >= irstart -> arena (jae via swapped jbe)
+                I("cmp_r64_r64", "r10", "rdx"),
+                I("jbe_rel32", ("l", f"gc_hi{u}")),
+                I("cmp_r64_r64", "rdx", "r13"),
+                I("jb_rel32", ("l", next_lbl)),         # < pcur0
+                I("cmp_r64_r64", "r14", "rdx"),
+                I("jbe_rel32", ("l", next_lbl)),        # >= pcur: gap
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r13"),         # persist lattice
+                I("jmp_rel32", ("l", f"gc_acc{u}")),
+                LBL(f"gc_hi{u}"),
+                I("cmp_r64_r64", "rbx", "rdx"),
+                I("jbe_rel32", ("l", next_lbl)),        # >= bump
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r10"),         # arena lattice
+                LBL(f"gc_acc{u}"),
+            ]
+        else:
+            out += [
+                I("cmp_r64_r64", "rdx", "r10"),
+                I("jb_rel32", ("l", next_lbl)),         # below arena
+                I("cmp_r64_r64", "rbx", "rdx"),       # unsigned bound:
+                I("jbe_rel32", ("l", next_lbl)),      # bit63 ≠ negative
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r10"),
+            ]
+        out += [
+            I("mov_r64_r64", "r11", "rdx"),             # save candidate
+            I("xor_r32_r32", "edx", "edx"),
+            I("mov_r64_imm", "rcx", R.node_bytes),
+            I("div_r64", "rcx"),
+            I("test_r64_r64", "rdx", "rdx"),
+            I("jne_rel32", ("l", next_lbl)),            # unaligned
+            I("mov_r64_r64", "rdx", "r11"),
+            I("mov_r32_m32", "eax", ("m", "rdx", 4)),
+            I("and_r64_imm", "rax", 1),
+            I("jne_rel32", ("l", next_lbl)),            # already marked
+            I("mov_r64_r64", "rdi", "rdx"),
+            I("call_rel32", ("l", "sw_mark")),
+        ]
+        return out
+
+    # one sweep loop per range: dead -> FREE_TAG + `list` chain;
+    # live -> unmark.  rsi accumulates nfree across both.
+    def sweep_body(head_reg: str, end_reg: str, done_lbl: str,
+                   u: str) -> Program:
+        return [
+            I("mov_r64_r64", "rax", head_reg),
+            LBL(f"gc_sw{u}_loop"),
+            I("cmp_r64_r64", "rax", end_reg),
+            I("jge_rel32", ("l", done_lbl)),
+            I("mov_r32_m32", "ecx", ("m", "rax", 4)),
+            I("and_r64_imm", "rcx", 1),
+            I("jne_rel32", ("l", f"gc_sw{u}_live")),
+            I("mov_r64_imm", "rcx", FREE_TAG),          # tag=FREE, flags=0
+            I("mov_m64_r64", ("m", "rax", 0), "rcx"),
+            I("mov_m64_r64", ("m", "rax", 8),
+              "r9" if u == "p" else "rdx"),             # .l = old head
+            I("mov_r64_r64",
+              "r9" if u == "p" else "rdx", "rax"),
+            I("inc_r64", "rsi"),
+            I("jmp_rel32", ("l", f"gc_sw{u}_next")),
+            LBL(f"gc_sw{u}_live"),
+            I("xor_r32_r32", "ecx", "ecx"),             # clear mark+rtag —
+            I("mov_m32_r32", ("m", "rax", 4), "ecx"),   # dword store: a
+            # qword store at +4 would zero .l's low dword (addrs < 4GB)
+            LBL(f"gc_sw{u}_next"),
+            I("add_r64_imm", "rax", R.node_bytes),
+            I("jmp_rel32", ("l", f"gc_sw{u}_loop")),
+        ]
+
+    p += [
+        I("mov_r64_r64", "r8", "rsp"),                  # scan base
+        I("mov_r64_rip", "r9", ("p", "stk0")),          # scan limit
+        # ---- mark phase 1: conservative stack scan ----
+        LBL("gc_scan"),
+        I("cmp_r64_r64", "r8", "r9"),
+        I("jge_rel32", ("l", "gc_iscan_set" if irp else "gc_sweep")),
+    ]
+    p += scan_body("gc_next", "")
+    p += [
+        LBL("gc_next"),
+        I("add_r64_imm", "r8", 8),
+        I("jmp_rel32", ("l", "gc_scan")),
+    ]
+    if irp:
+        # ---- mark phase 2: input region [permend, pcur0) — input
+        # cells FWD into the persist zone, so their fields are roots
+        p += [
+            LBL("gc_iscan_set"),
+            I("mov_r64_r64", "r8", "r15"),              # permend
+            I("mov_r64_r64", "r9", "r13"),              # pcur0
+            LBL("gc_iscan"),
+            I("cmp_r64_r64", "r8", "r9"),
+            I("jge_rel32", ("l", "gc_sweep")),
+        ]
+        p += scan_body("gc_inext", "i")
+        p += [
+            LBL("gc_inext"),
+            I("add_r64_imm", "r8", 8),
+            I("jmp_rel32", ("l", "gc_iscan")),
+        ]
+    # ---- sweep ----
+    p += [
+        LBL("gc_sweep"),
+        I("xor_r32_r32", "edx", "edx"),                 # rdx = flhead
+        I("xor_r32_r32", "esi", "esi"),                 # rsi = nfree
+    ]
+    p += sweep_body("r10", "rbx", "gc_sw_done", "")
+    p += [LBL("gc_sw_done"),
+          I("mov_rip_r64", ("p", "flhead"), "rdx")]
+    if irp:
+        p += [
+            I("xor_r32_r32", "r9d", "r9d"),             # r9 = flhead_p
+        ]
+        p += sweep_body("r13", "r14", "gc_p_done", "p")
+        p += [LBL("gc_p_done"),
+              I("mov_rip_r64", ("p", "flhead_p"), "r9")]
+    p += [
+        I("mov_r64_rip", "rax", ("p", "nfree")),
+        I("add_r64_r64", "rax", "rsi"),
+        I("mov_rip_r64", ("p", "nfree"), "rax"),
+        I("inc_mrip", ("p", "ngc")),
+    ]
+    p += [I("pop_r64", r) for r in reversed(regs)]
+    p += [I("ret")]
+    return p
 
 
 def r_step(R: Realization, ctx: Ctx) -> Program:
@@ -1150,6 +1610,10 @@ def r_ir_entry(R: Realization, ctx: Ctx) -> Program:
     iat = ctx["iat"]
     p: Program = [
         LBL("_start"),
+    ]
+    if R.gc == "sweep":
+        p += [I("mov_rip_r64", ("p", "stk0"), "rsp")]
+    p += [
         I("sub_r64_imm", "rsp", 0x28),
         I("mov_r32_imm32", "ecx", -10), I("call_mrip", iat("GetStdHandle")),
         I("mov_rip_r64", ("p", "hin"), "rax"),
@@ -1735,6 +2199,12 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r32_imm32", "r8d", MEM_DECOMMIT),
         I("call_mrip", iat("VirtualFree")),
         LBL("ir_nofree"),
+    ] + ([
+        # gc: freed cells die with the decommitted span — a stale
+        # flhead would pop cells out of uncommitted pages
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "flhead"), "rax"),
+    ] if R.gc == "sweep" else []) + [
         I("mov_r64_rip", "rbx", ("p", "irstart")),
         I("mov_r64_r64", "rbp", "rbx"),
         # r12 = roots[j]; r15 = this root's step counter
@@ -2359,8 +2829,13 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
     its first chunk, and the bump cursors jump to it."""
     iat = ctx["iat"]
     if R.threads > 1:
+        # VirtualAlloc clobbers the volatile regs (rcx,rdx,r8-r11) —
+        # preserve the whole set so allocator callers keep live cells.
         return [
             LBL("grow_heap"),
+            I("push_r64", "rcx"), I("push_r64", "rdx"),
+            I("push_r64", "r8"), I("push_r64", "r9"),
+            I("push_r64", "r10"), I("push_r64", "r11"),
             I("sub_r64_imm", "rsp", 0x28),
             # in-span room?  rbp+chunk <= ctx.myend -> commit [rbp,chunk)
             I("lea_r64_m64", "rax", ("m", "rbp", R.chunk_bytes)),
@@ -2376,7 +2851,11 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
             I("je_rel32", ("l", "grow_fail")),
             I("mov_r64_imm", "rax", R.chunk_bytes),
             I("add_r64_r64", "rbp", "rax"),
-            I("add_r64_imm", "rsp", 0x28), I("ret"),
+            I("add_r64_imm", "rsp", 0x28),
+            I("pop_r64", "r11"), I("pop_r64", "r10"),
+            I("pop_r64", "r9"), I("pop_r64", "r8"),
+            I("pop_r64", "rdx"), I("pop_r64", "rcx"),
+            I("ret"),
             # ---- span exhausted: claim [slabtop, +mtslab) ----
             LBL("gh_claim"),
             I("mov_r64_rip", "rax", ("p", "mtslab")),
@@ -2401,12 +2880,22 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
             I("je_rel32", ("l", "grow_fail")),
             I("mov_r64_imm", "rax", R.chunk_bytes),
             I("add_r64_r64", "rbp", "rax"),
-            I("add_r64_imm", "rsp", 0x28), I("ret"),
+            I("add_r64_imm", "rsp", 0x28),
+            I("pop_r64", "r11"), I("pop_r64", "r10"),
+            I("pop_r64", "r9"), I("pop_r64", "r8"),
+            I("pop_r64", "rdx"), I("pop_r64", "rcx"),
+            I("ret"),
             LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
             I("call_mrip", iat("ExitProcess")),
         ]
     return [
         LBL("grow_heap"),
+        # VirtualAlloc clobbers the volatile regs (rcx,rdx,r8-r11) —
+        # allocator callers keep live cells there, so grow preserves
+        # the whole volatile set (same contract as token mode).
+        I("push_r64", "rcx"), I("push_r64", "rdx"),
+        I("push_r64", "r8"), I("push_r64", "r9"),
+        I("push_r64", "r10"), I("push_r64", "r11"),
         I("sub_r64_imm", "rsp", 0x28),
         I("mov_r64_r64", "rcx", "rbp"),
         I("mov_r64_imm", "rdx", R.chunk_bytes),
@@ -2415,10 +2904,37 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
         I("call_mrip", iat("VirtualAlloc")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "grow_fail")),
         I("mov_r64_imm", "rax", R.chunk_bytes), I("add_r64_r64", "rbp", "rax"),
-        I("add_r64_imm", "rsp", 0x28), I("ret"),
-        LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
+        I("add_r64_imm", "rsp", 0x28),
+        I("pop_r64", "r11"), I("pop_r64", "r10"),
+        I("pop_r64", "r9"), I("pop_r64", "r8"),
+        I("pop_r64", "rdx"), I("pop_r64", "rcx"),
+        I("ret"),
+        LBL("grow_fail"),
+    ] + ([
+        # gc="sweep": reserved end reached — collect before conceding;
+        # honest exit4 only when a collect frees nothing.  irstart==0
+        # means the tier boundary isn't written yet — nothing
+        # collectable by construction, so concede honestly.
+        I("mov_r64_rip", "rax", ("p", "irstart")),
+        I("test_r64_r64", "rax", "rax"),
+        I("je_rel32", ("l", "grow_oom")),
+        I("call_rel32", ("l", "gc_collect")),
+        I("mov_r64_rip", "rax", ("p", "flhead")),
+        I("test_r64_r64", "rax", "rax"),
+        I("jne_rel32", ("l", "grow_gc")),
+        LBL("grow_oom"),
+        I("mov_r32_imm32", "ecx", 4),
         I("call_mrip", iat("ExitProcess")),
-    ]
+        LBL("grow_gc"),
+        I("add_r64_imm", "rsp", 0x28),
+        I("pop_r64", "r11"), I("pop_r64", "r10"),
+        I("pop_r64", "r9"), I("pop_r64", "r8"),
+        I("pop_r64", "rdx"), I("pop_r64", "rcx"),
+        I("ret"),
+    ] if R.gc == "sweep" else [
+        I("mov_r32_imm32", "ecx", 4),
+        I("call_mrip", iat("ExitProcess")),
+    ])
 
 
 # ======================================================================
@@ -3007,6 +3523,11 @@ _LEGS_IR: Tuple[layers.Leg, ...] = (
         "none":     layers.Impl(),
         "redirect": layers.Impl(slots=DATA_SLOTS_PS, slot_rank=10),
     }),
+    layers.Leg("gc",        "gc",      {
+        "none":  layers.Impl(),
+        "sweep": layers.Impl(("gc_collect", "gc_swmark"),
+                           slots=DATA_SLOTS_GC, slot_rank=15),
+    }),
     layers.Leg("basis_tpl", "fuse_s",  {
         False: layers.Impl(("build_ds",)), True: layers.Impl(),
     }),
@@ -3038,6 +3559,11 @@ _LEGS_TOKEN: Tuple[layers.Leg, ...] = (
     )),
     layers.Leg("persist",   "reclaim", {
         "none": layers.Impl(), "redirect": layers.Impl(),
+    }),
+    layers.Leg("gc",        "gc",      {
+        "none":  layers.Impl(),
+        "sweep": layers.Impl(("gc_collect", "gc_swmark"),
+                           slots=DATA_SLOTS_GC, slot_rank=15),
     }),
     layers.Leg("basis_tpl", "fuse_s",  {
         False: layers.Impl(("build_ds",)), True: layers.Impl(),
@@ -3160,6 +3686,12 @@ def data_slots_ir(R: Realization) -> tuple:
     derived from leg position."""
     return layers.compose_slots(R, _LEGS_IR, DATA_SLOTS_IR)
 
+
+def data_slots_token(R: Realization) -> tuple:
+    """token kernel: same leg-declared slot discipline as the IR
+    record — gc="sweep" adds flhead/stk0/ngc/nfree via its leg."""
+    return layers.compose_slots(R, _LEGS_TOKEN, DATA_SLOTS)
+
 _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
     name[2:]: fn for name, fn in list(globals().items())
     if name.startswith("r_")
@@ -3195,6 +3727,10 @@ def program(R: Realization) -> Program:
     not ad-hoc checks)."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.gc == "sweep" and R.reclaim != "redirect":
+        raise NotRealized(
+            "gc='sweep' requires reclaim='redirect' — the sweep "
+            "range [irstart, rbx) only covers a single reserved arena")
     return _emit(R, layers.compose(R, _LEGS_TOKEN))
 
 
@@ -3216,6 +3752,10 @@ def program_ir(R: Realization) -> Program:
     if R.threads != 1:
         raise NotRealized(
             f"threads={R.threads} needs record x86_64.win64.ir.mt")
+    if R.gc == "sweep" and R.reclaim != "redirect":
+        raise NotRealized(
+            "gc='sweep' requires reclaim='redirect' — the sweep "
+            "range [irstart, rbx) only covers a single reserved arena")
     return _emit(R, routine_names_ir(R))
 
 
@@ -3224,6 +3764,10 @@ def program_ir_mt(R: Realization) -> Program:
     per-thread world is _mt_xform'd to r10-relative ctx fields."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if R.gc != "none":
+        raise NotRealized(
+            f"gc={R.gc!r} not realized under threads>1 — the "
+            "conservative stack scan covers one thread's frames only")
     if R.threads <= 1:
         raise NotRealized("mt record requires threads>1")
     if R.threads > 64:
@@ -3258,7 +3802,7 @@ X86_64_WIN64 = Routines(
     routines=ROUTINES,
     program=program,
     imports=IMPORTS,
-    data_slots=DATA_SLOTS,
+    data_slots=data_slots_token,
 )
 
 
@@ -3324,6 +3868,9 @@ def program_res(R: Realization) -> Program:
     if R.reclaim != "none":
         raise NotRealized(
             f"reclaim={R.reclaim!r} not realized by {ROUTINES_RES}")
+    if R.gc != "none":
+        raise NotRealized(
+            f"gc={R.gc!r} not realized by {ROUTINES_RES}")
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
     if R.io != ("stdin", "stdout"):

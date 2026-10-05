@@ -78,6 +78,7 @@ AXES: Dict[str, Callable] = {
     "threads": lambda R: "mt" if R.threads > 1 else "st",
     "fuse_s":  lambda R: R.fuse_s,
     "reclaim": lambda R: R.reclaim,
+    "gc":      lambda R: R.gc,
 }
 
 

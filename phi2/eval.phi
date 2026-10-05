@@ -73,10 +73,11 @@ walk : <t, s> <-> <r> shape self where {
       subst_lookup<i, s> = b
       walk_res<b, t, s> = r
     }
-  | fresh (c) { t = 'atom(c)  r = t }
-  | fresh (c) { t = 'pair(c)  r = t }
-  | fresh (c) { t = 'sym(c)   r = t }
-  | fresh (c) { t = 'adyn(c)  r = t }
+  | fresh (hit) {
+      nonvar<t> = hit
+      hit = 'yes
+      r = t
+    }
 }
 walk_res : <b, t, s> <-> <r> shape self where {
   | fresh (v) {
@@ -86,14 +87,24 @@ walk_res : <b, t, s> <-> <r> shape self where {
   | b = 'unbound { r = t }
 }
 
-;; --- nonvar probe: the leaf set minus 'var — collapses the two
-;;     three-row mirrors below into single clauses; exclusivity:
-;;     (var,var) hits only rows 1-2 since nonvar<'var> misses ---
+;; --- open-tag domain: every enc node is a PAIR spine over raw
+;;     leaves.  'var is the ONLY subst-driven tag — probes are
+;;     absence-based, not tag-enumerated, so goal nodes ('call,
+;;     'unify, 'def, 'clause, ...) flow through the same machinery
+;;     as value nodes.  pair_probe fires on ANY pair cell ('var
+;;     included); nonvar is its complement. ---
+var_probe : <t> <-> <hit> where {
+  | fresh (i) { t = 'var(i)  hit = 'yes }
+}
 nonvar : <t> <-> <hit> where {
-  | fresh (c) { t = 'atom(c)  hit = 'yes }
-  | fresh (c) { t = 'pair(c)  hit = 'yes }
-  | fresh (c) { t = 'sym(c)   hit = 'yes }
-  | fresh (c) { t = 'adyn(c)  hit = 'yes }
+  | fresh (res) {
+      RUN(var_probe<t>, 1) = res
+      res = []
+      hit = 'yes
+    }
+}
+pair_probe : <t> <-> <hit> where {
+  | fresh (a, b) { t = [a|b]  hit = 'yes }
 }
 
 ;; --- unify on the encoded domain: the triangular-subst mgu.
@@ -107,6 +118,12 @@ unify_enc : <u, v, s> <-> <s2> shape self where {
       unify_w<u2, v2, s> = s2
     }
 }
+;; --- unify on the encoded domain: the triangular-subst mgu.
+;;     Cases by SHAPE not tag: 'var binds; any two pair-cells
+;;     decompose structurally ('pair/'call/'unify/'def/'nvar —
+;;     the open tag set); non-pair non-var leaves equal-compare.
+;;     Exclusivity: 'var is a pair cell, so the structural and
+;;     leaf rows both guard on nonvar. ---
 unify_w : <u, v, s> <-> <s2> shape self where {
   | fresh (i) {
       u = 'var(i)
@@ -129,21 +146,23 @@ unify_w : <u, v, s> <-> <s2> shape self where {
       nonvar<u> = 'yes
       s2 = [[i|u]|s]
     }
-  | fresh (c) {
-      u = 'atom(c)
-      v = 'atom(c)
-      s2 = s
-    }
-  | fresh (c) {
-      u = 'sym(c)
-      v = 'sym(c)
-      s2 = s
-    }
   | fresh (a1, b1, a2, b2, s1) {
-      u = 'pair(a1, b1)
-      v = 'pair(a2, b2)
+      nonvar<u> = 'yes
+      nonvar<v> = 'yes
+      u = [a1|b1]
+      v = [a2|b2]
       unify_enc<a1, a2, s> = s1
       unify_enc<b1, b2, s1> = s2
+    }
+  | fresh (h1, h2) {
+      nonvar<u> = 'yes
+      nonvar<v> = 'yes
+      RUN(pair_probe<u>, 1) = h1
+      RUN(pair_probe<v>, 1) = h2
+      h1 = []
+      h2 = []
+      u = v
+      s2 = s
     }
 }
 
@@ -192,57 +211,34 @@ ren_fc_res : <res, name, ren, n> <-> <o> where {
 
 ;; --- inst: alpha-rename a clause's 'nvar terms to fresh 'var
 ;;     ids.  o = PAIR(ren2, PAIR(n2, node2)). ---
+;; --- inst: alpha-rename 'nvar -> fresh 'var through the OPEN
+;;     tag domain.  Three shapes, not tag rows: 'nvar renames,
+;;     any other pair cell recurses structurally (covers
+;;     'pair/'unify/'call/'cmp/'run/'adyn/'clause/future tags),
+;;     non-pair leaves pass. ---
+nvar_probe : <t> <-> <hit> where {
+  | fresh (x) { t = 'nvar(x)  hit = 'yes }
+}
 inst : <node, ren, n> <-> <o> shape self where {
   | fresh (x, id, r2, n2) {
       node = 'nvar(x)
       ren_fc<x, ren, n> = [id|[r2|n2]]
       o = [r2|[n2|'var(id)]]
     }
-  | fresh (c) {
-      node = 'atom(c)
+  | fresh (a, b, r1, n1, a2, r2, n2, b2, res) {
+      RUN(nvar_probe<node>, 1) = res
+      res = []
+      node = [a|b]
+      inst<a, ren, n> = [r1|[n1|a2]]
+      inst<b, r1, n1> = [r2|[n2|b2]]
+      o = [r2|[n2|[a2|b2]]]
+    }
+  | fresh (res, h) {
+      RUN(nvar_probe<node>, 1) = res
+      res = []
+      RUN(pair_probe<node>, 1) = h
+      h = []
       o = [ren|[n|node]]
-    }
-  | fresh (c) {
-      node = 'sym(c)
-      o = [ren|[n|node]]
-    }
-  | fresh (a, b, r1, n1, a2, r2, n2, b2) {
-      node = 'pair(a, b)
-      inst<a, ren, n> = [r1|[n1|a2]]
-      inst<b, r1, n1> = [r2|[n2|b2]]
-      o = [r2|[n2|'pair(a2, b2)]]
-    }
-  | fresh (a, b, r1, n1, a2, r2, n2, b2) {
-      node = 'unify(a, b)
-      inst<a, ren, n> = [r1|[n1|a2]]
-      inst<b, r1, n1> = [r2|[n2|b2]]
-      o = [r2|[n2|'unify(a2, b2)]]
-    }
-  | fresh (nm, at, ot, r0, n0, nm2, r1, n1, at2, r2, n2, ot2) {
-      node = 'call(nm, at, ot)
-      inst<nm, ren, n> = [r0|[n0|nm2]]
-      inst_list<at, r0, n0> = [r1|[n1|at2]]
-      inst<ot, r1, n1> = [r2|[n2|ot2]]
-      o = [r2|[n2|'call(nm2, at2, ot2)]]
-    }
-  | fresh (op, a, b, r1, n1, a2, r2, n2, b2) {
-      node = 'cmp(op, a, b)
-      inst<a, ren, n> = [r1|[n1|a2]]
-      inst<b, r1, n1> = [r2|[n2|b2]]
-      o = [r2|[n2|'cmp(op, a2, b2)]]
-    }
-  | fresh (bt, dt, r1, n1, b2, r2, n2, d2) {
-      node = 'adyn(bt, dt)
-      inst<bt, ren, n> = [r1|[n1|b2]]
-      inst<dt, r1, n1> = [r2|[n2|d2]]
-      o = [r2|[n2|'adyn(b2, d2)]]
-    }
-  | fresh (g, k, ot, r1, n1, g2, r2, n2, k2, r3, n3, ot2) {
-      node = 'run(g, k, ot)
-      inst<g, ren, n> = [r1|[n1|g2]]
-      inst<k, r1, n1> = [r2|[n2|k2]]
-      inst<ot, r2, n2> = [r3|[n3|ot2]]
-      o = [r3|[n3|'run(g2, k2, ot2)]]
     }
 }
 inst_list : <lst, ren, n> <-> <o> shape self where {
@@ -264,14 +260,18 @@ reify : <t, s> <-> <r> shape self where {
 }
 reify_w : <w, s> <-> <r> shape self where {
   | fresh (a, b, ra, rb) {
-      w = 'pair(a, b)
+      ;; generic pair-cell spine — every enc node ('pair/'call/
+      ;; 'var/'def/...) reifies by structure, not by tag
+      w = [a|b]
       reify<a, s> = ra
       reify<b, s> = rb
-      r = 'pair(ra, rb)
+      r = [ra|rb]
     }
-  | fresh (c) { w = 'atom(c)  r = w }
-  | fresh (c) { w = 'sym(c)   r = w }
-  | fresh (i) { w = 'var(i)   r = w }
+  | fresh (h) {
+      RUN(pair_probe<w>, 1) = h
+      h = []
+      r = w
+    }
 }
 
 ;; --- term equality probe for 'cmp: post-walk operands unify ---
@@ -326,10 +326,13 @@ eval : <env, goal, s, n> <-> <o> shape self where {
       run_res<res, ot, s> = s3
       o = [s3|n]
     }
-  | fresh (nm, at, ot, x, def) {
+  | fresh (nm, at, ot, def) {
+      ;; keys are 'sym NODES (not raw syms): level-agnostic —
+      ;; corpus env_find unifies them as terms at L1; the enc'd
+      ;; copy does 'sym-'sym unify_w at L2.  A raw sym is not an
+      ;; enc-domain value and could never match there.
       goal = 'call(nm, at, ot)
-      nm = 'sym(x)
-      env_find<x, env> = def
+      env_find<nm, env> = def
       eval_call<env, def, at, ot, s, n> = o
     }
 }

@@ -849,6 +849,8 @@ def program(R: Realization) -> Program:
         raise NotRealized(f"order={R.order!r} declared but not realized")
     if R.abi != "linux":
         raise NotRealized(f"abi={R.abi!r} declared but not realized")
+    if getattr(R, "gc", "none") != "none":
+        raise NotRealized(f"gc={R.gc!r} not realized by this kernel")
     ctx = _ctx()
     p: Program = []
     for name in ROUTINES:

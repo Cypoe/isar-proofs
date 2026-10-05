@@ -729,6 +729,8 @@ _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {
 def program(R: Realization) -> Program:
     if R.order != "cd":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if getattr(R, "gc", "none") != "none":
+        raise NotRealized(f"gc={R.gc!r} not realized by the cd kernel")
     ctx = _ctx()
     p: Program = []
     for name in ROUTINES:

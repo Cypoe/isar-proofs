@@ -347,6 +347,22 @@ class Realization:
                                       # rewrites child slots in place (no
                                       # spine churn).  Same IStep semantics —
                                       # the Lean heap formalization.
+    gc: str = "none"                  # "none" = bump arena retains every
+                                      # alloc to exit.  "sweep" = mark-sweep
+                                      # collector for the redirect heap:
+                                      # commit-failure in grow_heap runs a
+                                      # full collection — conservative roots
+                                      # (regs + C-stack window, in-range
+                                      # 24-aligned cell pointers), iterative
+                                      # pointer-reversal mark (tag hi-dword
+                                      # carries MARK/RTAG, swept clears),
+                                      # linear sweep of [irstart, rbx) into
+                                      # a LIFO freelist popped before bump.
+                                      # Requires reclaim="redirect" (the
+                                      # era-ordered single reserved arena);
+                                      # refused on cd/res/mt kernels.  A
+                                      # collection that frees nothing exits
+                                      # 4 — the honest OOM axis survives.
     audit: bool = False               # emit per-rule counters; stats gains a
                                       # `rules=` histogram (redex classes +
                                       # congruence descents) — the instrumented

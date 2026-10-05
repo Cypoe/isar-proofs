@@ -281,6 +281,8 @@ def program(xdu, R) -> Program:
     dialect record (native path: the program is the input, not a term)."""
     if R.order != "lo":
         raise NotRealized(f"order={R.order!r} declared but not realized")
+    if getattr(R, "gc", "none") != "none":
+        raise NotRealized(f"gc={R.gc!r} not realized by the xdu kernel")
     if xdu is None:
         raise ValueError("native path: program(xdu, R) needs an XDU record")
     ctx = _ctx()
