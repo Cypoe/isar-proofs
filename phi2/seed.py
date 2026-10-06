@@ -558,6 +558,100 @@ def term_str(t: int) -> str:
 
 Subst = Dict[object, tuple]
 
+# ---------------------------------------------------------------------------
+# persistent subst map — 64-way HAMT on int var ids (5-bit fanout per
+# level; sequential fresh ids keep depth ~3-4).  unify binds once per
+# step; {**s, ...} copying the whole dict is the measured O(n^2) on
+# deep recursions (full-src pass1: 22s of 30s was dict-splat), and a
+# 2-way Patricia variant still spent ~16 levels per insert.  set/get/
+# contains are effectively O(1); shared structure keeps
+# run()/run_solutions()'s held substs correct under backtracking —
+# the same persistent-map discipline as rel.rs's im::HashMap.
+# ---------------------------------------------------------------------------
+
+_MISS = object()
+_FAN = 6            # bits per level -> 64-way fanout
+_MASK = (1 << _FAN) - 1
+
+
+def _tget(t, k):
+    d = 0
+    while t is not None:
+        if t[0] == 0:
+            return t[2] if t[1] == k else _MISS
+        t = t[1][(k >> d) & _MASK]
+        d += _FAN
+    return _MISS
+
+
+def _tset(t, k, v, d=0):
+    if t is None:
+        return (0, k, v)
+    if t[0] == 0:
+        if t[1] == k:
+            return (0, k, v)
+        # expand single-child chain until the key nibbles differ
+        kk, kv = t[1], t[2]
+        d2 = d
+        while (kk >> d2) & _MASK == (k >> d2) & _MASK:
+            d2 += _FAN
+        ch = [None] * (1 << _FAN)
+        ch[(kk >> d2) & _MASK] = (0, kk, kv)
+        ch[(k >> d2) & _MASK] = (0, k, v)
+        node = (1, tuple(ch))
+        while d2 > d:
+            d2 -= _FAN
+            ch = [None] * (1 << _FAN)
+            ch[(k >> d2) & _MASK] = node
+            node = (1, tuple(ch))
+        return node
+    ch = t[1]
+    slot = (k >> d) & _MASK
+    sub = _tset(ch[slot], k, v, d + _FAN)
+    if sub is ch[slot]:
+        return t
+    nch = list(ch)
+    nch[slot] = sub
+    return (1, tuple(nch))
+
+
+def _titer(t):
+    if t is None:
+        return
+    if t[0] == 0:
+        yield (t[1], t[2])
+        return
+    for c in t[1]:
+        yield from _titer(c)
+
+
+class _PMap:
+    """Persistent int->term map.  dict-shaped for the subst ops the
+    engine uses (`in`, `[]`, `.items()`); .set returns the new map."""
+    __slots__ = ("t",)
+
+    def __init__(self, t=None):
+        self.t = t
+
+    def __contains__(self, k):
+        return _tget(self.t, k) is not _MISS
+
+    def __getitem__(self, k):
+        v = _tget(self.t, k)
+        if v is _MISS:
+            raise KeyError(k)
+        return v
+
+    def items(self):
+        return _titer(self.t)
+
+    def set(self, k, v):
+        return _PMap(_tset(self.t, k, v))
+
+
+def _sbind(s, k, v):
+    return s.set(k, v) if isinstance(s, _PMap) else {**s, k: v}
+
 
 def walk(t: int, s: Subst) -> int:
     while True:
@@ -581,9 +675,9 @@ def unify(u: int, v: int, s: Subst) -> Optional[Subst]:
         return s
     ku, kv = _ND[u], _ND[v]
     if ku[0] == "v":
-        return {**s, ku[1]: v}
+        return _sbind(s, ku[1], v)
     if kv[0] == "v":
-        return {**s, kv[1]: u}
+        return _sbind(s, kv[1], u)
     if ku[0] == "p" and kv[0] == "p":
         s2 = unify(ku[1], kv[1], s)
         return unify(ku[2], kv[2], s2) if s2 is not None else None
@@ -698,6 +792,236 @@ def _conj(gs: List[dict], env, s: Subst, fuel, ren,
         return
     for s1 in _one(gs[0], env, s, fuel, ren, tout):
         yield from _conj(gs[1:], env, s1, fuel, ren, tout)
+
+
+# ---------------------------------------------------------------------------
+# clause-template compile — per-clause programs, built once and cached
+# on the clause dict.  Terms become cprogs: ground subtrees pre-interned
+# to constants, vars become slot indices into a per-activation array.
+# Kills the per-activation lift/ren walk (measured: ~750K lifts and
+# ~1M dict lookups per 60 insns).  Goals compile for unify/cmp/emit/
+# call; rare kinds (run/choice/builtin/nested fresh — none reachable
+# via enc_env anyway) stay raw dicts and see a lazily-built ren.
+#
+# cprog: (0,const tid) (1,slot) (2,cl,cr) (3,)wild (4,dyns) lazy
+#        (5,name,[cprog]) goalterm (6,rootslot,vslot,field) dotted var
+# cgoal: (0,ca,cb) unify (1,op,ca,cb) cmp (2,ct) emit
+#        (3,name,[carg],cout|None) call (9,raw dict) fallback
+# ---------------------------------------------------------------------------
+
+def _cp_prog(node, slot):
+    """dict term node -> cprog; slot = var-name->int allocator."""
+    if node is None:
+        return (0, NIL)
+    if "var" in node:
+        n = node["var"]
+        if "." in n:
+            root, fld = n.split(".", 1)
+            return (6, slot(root), slot(n), fld)
+        return (1, slot(n))
+    if "wild" in node or "type" in node:
+        return (3,)
+    if "sym" in node:
+        return (0, t_sym(node["sym"]))
+    if "atom" in node:
+        return (0, t_atom(node["atom"][0], node["atom"][1]))
+    if "var_lit" in node:
+        return (0, intern_term(node["var_lit"]))
+    if "__term" in node:
+        return (0, intern_term(node["__term"]))
+    if "typed" in node:
+        return _cp_prog(node["typed"][0], slot)
+    if "atom_dyn" in node:
+        be, pe = node["atom_dyn"]
+        es = [_cp_dyn(be, slot), _cp_dyn(pe, slot)]
+        if es[0][0] == 0 and es[1][0] == 0:
+            return (0, t_atom(es[0][1], es[1][1]))
+        return (4, es)
+    if "pair" in node:
+        l = _cp_prog(node["pair"][0], slot)
+        r = _cp_prog(node["pair"][1], slot)
+        if l[0] == 0 and r[0] == 0:
+            return (0, t_pair(l[1], r[1]))   # ground -> intern once
+        return (2, l, r)
+    if "call_term" in node:
+        name, args = node["call_term"]
+        return (5, name, [_cp_prog(a, slot) for a in args])
+    raise EvalError(f"seed: unliftable term node {node!r}")
+
+
+def _cp_dyn(e, slot):
+    if "const" in e:
+        return (0, e["const"])
+    name, d = e["var_delta"]
+    return (1, slot(name), d)
+
+
+def _cp_goal(g: dict, slot):
+    if "unify" in g:
+        return (0, _cp_prog(g["unify"][0], slot),
+                _cp_prog(g["unify"][1], slot))
+    if "cmp" in g:
+        op, na, nb = g["cmp"]
+        return (1, op, _cp_prog(na, slot), _cp_prog(nb, slot))
+    if "emit" in g:
+        return (2, _cp_prog(g["emit"], slot))
+    if "call" in g:
+        c = g["call"]
+        return (3, c["rel"],
+                [_cp_prog(a, slot) for a in c["args"]],
+                _cp_prog(c["out"], slot)
+                if c["out"] is not None else None)
+    return (9, g)
+
+
+def _compile_clause(cl: dict, rel: dict) -> dict:
+    tab: Dict[str, int] = {}
+    nxt = [0]
+
+    def slot(n):
+        i = tab.get(n)
+        if i is None:
+            i = nxt[0]
+            tab[n] = i
+            nxt[0] += 1
+        return i
+
+    cx = {
+        "nv": nxt[0],
+        "pins": [_cp_prog(p, slot) for p in rel["in"]],
+        "pout": _cp_prog(rel["out"][0], slot)
+                if rel["out"] else None,
+    }
+    # fresh vars shadow same-named pattern vars — unconditional new
+    # slot, matching the post-unify ren[n]=fresh() rebind
+    for n in cl["fresh"] or []:
+        tab[n] = nxt[0]
+        nxt[0] += 1
+    cx["gs"] = [_cp_goal(g, slot)
+                for g in (cl["guard"] or []) + cl["goals"]]
+    cx["nv"] = nxt[0]
+    cx["names"] = names = [""] * nxt[0]
+    for n, i in tab.items():
+        names[i] = n
+    cx["raw"] = any(g[0] == 9 for g in cx["gs"])
+    # all goals unify/cmp/emit -> at most one solution: run inline,
+    # no generator machinery (det fast path)
+    cx["det"] = all(g[0] in (0, 1, 2) for g in cx["gs"])
+    return cx
+
+
+def _det_eval(cx, sl, s: Subst, fuel, tout):
+    """run a det clause's goals inline — mirrors _cone semantics:
+    fuel per goal, emit needs a tout, cmp operands ground atoms."""
+    for g in cx["gs"]:
+        fuel[0] -= 1
+        if fuel[0] < 0:
+            return None
+        t = g[0]
+        if t == 0:
+            s = unify(_cp(g[1], sl), _cp(g[2], sl), s)
+            if s is None:
+                return None
+        elif t == 1:
+            op = g[1]
+            a = _force(walk(_cp(g[2], sl), s), s)
+            b = _force(walk(_cp(g[3], sl), s), s)
+            va = _ND[a][2] if _ND[a][0] == "a" else None
+            vb = _ND[b][2] if _ND[b][0] == "a" else None
+            if va is None or vb is None:
+                raise EvalError(
+                    f"cmp {op}: operands must be ground atoms "
+                    f"(got {term_str(a)} {op} {term_str(b)})")
+            if not {"<": va < vb, ">": va > vb, "<=": va <= vb,
+                    ">=": va >= vb, "!=": va != vb}[op]:
+                return None
+        else:  # t == 2 emit
+            if tout is None:
+                raise EvalError(
+                    "emit (! t): no relation output in scope - "
+                    "emit is the clause's extension, it needs a call")
+            s = unify(_cp(g[1], sl), tout, s)
+            if s is None:
+                return None
+    return s
+
+
+def _cp(p, sl):
+    """run a compiled term program against the activation slots."""
+    t = p[0]
+    if t == 0:
+        return p[1]
+    if t == 1:
+        return sl[p[1]]
+    if t == 2:
+        return t_pair(_cp(p[1], sl), _cp(p[2], sl))
+    if t == 3:
+        return fresh()
+    if t == 4:
+        return t_lazy(tuple(t_const(e[1]) if e[0] == 0
+                            else t_delta(sl[e[1]], e[2])
+                            for e in p[1]))
+    if t == 5:
+        return t_goalterm(p[1], [_cp(a, sl) for a in p[2]])
+    v = sl[p[2]]                              # (6) dotted var
+    _FIELDS[_ND[v][1]] = (sl[p[1]], p[3])
+    return v
+
+
+def _cconj(gs, env, s: Subst, fuel, sl, act,
+           tout) -> Iterator[Subst]:
+    if not gs:
+        yield s
+        return
+    for s1 in _cone(gs[0], env, s, fuel, sl, act, tout):
+        yield from _cconj(gs[1:], env, s1, fuel, sl, act, tout)
+
+
+def _cone(g, env, s: Subst, fuel, sl, act, tout) -> Iterator[Subst]:
+    fuel[0] -= 1
+    if fuel[0] < 0:
+        return
+    t = g[0]
+    if t == 0:
+        s2 = unify(_cp(g[1], sl), _cp(g[2], sl), s)
+        if s2 is not None:
+            yield s2
+        return
+    if t == 1:
+        op = g[1]
+        a = _force(walk(_cp(g[2], sl), s), s)
+        b = _force(walk(_cp(g[3], sl), s), s)
+        va = _ND[a][2] if _ND[a][0] == "a" else None
+        vb = _ND[b][2] if _ND[b][0] == "a" else None
+        if va is None or vb is None:
+            raise EvalError(
+                f"cmp {op}: operands must be ground atoms "
+                f"(got {term_str(a)} {op} {term_str(b)})")
+        ok = {"<": va < vb, ">": va > vb, "<=": va <= vb,
+              ">=": va >= vb, "!=": va != vb}[op]
+        if ok:
+            yield s
+        return
+    if t == 2:
+        if tout is None:
+            raise EvalError(
+                "emit (! t): no relation output in scope - "
+                "emit is the clause's extension, it needs a call")
+        s2 = unify(_cp(g[1], sl), tout, s)
+        if s2 is not None:
+            yield s2
+        return
+    if t == 3:
+        tout2 = _cp(g[3], sl) if g[3] is not None else None
+        yield from _rel_call_t(g[1], [_cp(a, sl) for a in g[2]],
+                               tout2, env, s, fuel)
+        return
+    # (9) raw fallback — lazily materialize the name->tid ren
+    ren = act.get("ren")
+    if ren is None:
+        ren = act["ren"] = {n: sl[i]
+                            for i, n in enumerate(act["names"])}
+    yield from _one(g[1], env, s, fuel, ren, tout)
 
 
 def _interleave(a: Iterator, b: Iterator) -> Iterator:
@@ -1068,6 +1392,14 @@ LOWERINGS = {
 
 def _rel_call(name: str, args: List[dict], out_node,
               env, s: Subst, fuel, caller_ren) -> Iterator[Subst]:
+    targs = [lift(a, caller_ren) for a in args]
+    tout = lift(out_node, caller_ren) if out_node is not None \
+        else None
+    yield from _rel_call_t(name, targs, tout, env, s, fuel)
+
+
+def _rel_call_t(name: str, targs, tout,
+                env, s: Subst, fuel) -> Iterator[Subst]:
     rel = env["rels"].get(name)
     if rel is None:
         raise EvalError(f"seed: unbound rel {name!r}")
@@ -1083,13 +1415,10 @@ def _rel_call(name: str, args: List[dict], out_node,
             raise EvalError(
                 f"seed: rel {name!r} declares shape {shape!r} - "
                 f"lowering not realized")
-    if len(args) != len(rel["in"]):
+    if len(targs) != len(rel["in"]):
         raise EvalError(
-            f"seed: {name} arity {len(rel['in'])} != call args "
-            f"{len(args)}")
-    targs = [lift(a, caller_ren) for a in args]
-    tout = lift(out_node, caller_ren) if out_node is not None \
-        else None
+            f"seed: {name} arity {len(targs)} != call args "
+            f"{len(rel['in'])}")
     # --- tabling: a ground call's out-stream is a pure function of
     #     its args (the rel semantics is context-free).  Streams
     #     memoize as they complete; a suspended producer RESUMES for
@@ -1150,11 +1479,139 @@ def _rel_call(name: str, args: List[dict], out_node,
         env["tab"][key] = (vals, None, False, tout)
 
 
+# ---------------------------------------------------------------------------
+# clause dispatch index — a rel whose clauses discriminate on
+# `invar = literal` unifies gets a key->clause-ids map instead of a
+# linear scan.  Discriminator = the (argpos, spine-path) with the
+# most distinct literal keys across clauses.  Keyless clauses always
+# stay candidates ("rest"); an unresolvable arg (var/lazy leaf)
+# falls back to the full scan.  Evaluation-side only — the declared
+# relation is unchanged; this is the structural dispatch `cd` gets
+# free, applied to clause lookup.
+# ---------------------------------------------------------------------------
+
+def _lit_keys(node, path=()):
+    """(path, key) for sym/atom leaves under a literal term node.
+    path = spine of 0=car / 1=cdr picks; key = ('s',name)|(a,b,v)."""
+    if not isinstance(node, dict):
+        return
+    if "sym" in node:
+        yield path, ("s", node["sym"])
+    elif "atom" in node:
+        b, v = node["atom"]
+        yield path, ("a", b, v)
+    elif "pair" in node:
+        yield from _lit_keys(node["pair"][0], path + (0,))
+        yield from _lit_keys(node["pair"][1], path + (1,))
+
+
+def _clause_index(rel: dict):
+    ins = rel["in"]
+    cls = rel["clauses"]
+    if not cls:
+        return None
+    var_pos = {n["var"]: i for i, n in enumerate(ins)
+               if isinstance(n, dict) and "var" in n}
+    if not var_pos:
+        return None
+    cands = {}      # (i, path) -> {key: [clause ids]}
+    keyed = {}      # (i, path) -> {clause ids carrying a key}
+    for ci, cl in enumerate(cls):
+        seen = set()
+        for g in (cl["guard"] or []) + cl["goals"]:
+            if not isinstance(g, dict) or "unify" not in g:
+                continue
+            a, b = g["unify"]
+            if isinstance(a, dict) and "var" in a \
+                    and a["var"] in var_pos:
+                var, lit = a["var"], b
+            elif isinstance(b, dict) and "var" in b \
+                    and b["var"] in var_pos:
+                var, lit = b["var"], a
+            else:
+                continue
+            if var in seen:
+                continue
+            seen.add(var)
+            i = var_pos[var]
+            for path, key in _lit_keys(lit):
+                cands.setdefault((i, path), {}) \
+                     .setdefault(key, []).append(ci)
+                keyed.setdefault((i, path), set()).add(ci)
+    best, bmap = None, None
+    for kp, m in cands.items():
+        if bmap is None or len(m) > len(bmap):
+            best, bmap = kp, m
+    if best is None or len(bmap) < 2:
+        return None
+    i, path = best
+    return {"i": i, "path": path, "map": bmap,
+            "rest": [ci for ci in range(len(cls))
+                     if ci not in keyed[best]]}
+
+
+def _idx_clauses(idx: dict, targs, s: Subst):
+    """Candidate clause ids for this call's args in source order;
+    None = indeterminate (var/lazy leaf) -> scan all clauses."""
+    a = _force(walk(targs[idx["i"]], s), s)
+    for p in idx["path"]:
+        if _ND[a][0] != "p":
+            return None
+        a = _force(walk(_ND[a][1 + p], s), s)
+    k = _ND[a]
+    if k[0] == "v" or k[0] == "lz":
+        return None
+    key = ("s", k[1]) if k[0] == "s" else \
+        ("a", k[1], k[2]) if k[0] == "a" else None
+    if key is None:
+        return idx["rest"]
+    ids = idx["map"].get(key)
+    return idx["rest"] if ids is None else \
+        sorted(set(ids) | set(idx["rest"]))
+
+
 def _rel_body(rel: dict, targs, tout, env, s: Subst,
               fuel) -> Iterator[Subst]:
-    clauses = rel["clauses"] if rel["clauses"] is not None \
-        else [None]
+    clauses = rel["clauses"]
+    if clauses is None:
+        clauses = [None]
+    else:
+        idx = env["idx"].get(rel["name"], 0)
+        if idx == 0:
+            idx = _clause_index(rel)
+            env["idx"][rel["name"]] = idx
+        if idx is not None:
+            sel = _idx_clauses(idx, targs, s)
+            if sel is not None:
+                clauses = [rel["clauses"][ci] for ci in sel]
     for cl in clauses:
+        if cl is not None:
+            cx = cl.get("cx")
+            if cx is None:
+                cx = cl["cx"] = _compile_clause(cl, rel)
+            sl = [fresh() for _ in range(cx["nv"])]
+            act = {"names": cx["names"], "ren": None}
+            s0 = s
+            ok = True
+            for ta, p in zip(targs, cx["pins"]):
+                s0 = unify(ta, _cp(p, sl), s0)
+                if s0 is None:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            if tout is not None and cx["pout"] is not None:
+                s0 = unify(tout, _cp(cx["pout"], sl), s0)
+                if s0 is None:
+                    continue
+            if cx["det"]:
+                s1 = _det_eval(cx, sl, s0, fuel, tout)
+                if s1 is not None:
+                    yield s1
+                continue
+            yield from _cconj(cx["gs"], env, s0, fuel, sl, act,
+                              tout)
+            continue
         ren: Dict[str, tuple] = {}
         s0 = s
         ok = True
@@ -1169,14 +1626,7 @@ def _rel_body(rel: dict, targs, tout, env, s: Subst,
             s0 = unify(tout, lift(rel["out"][0], ren), s0)
             if s0 is None:
                 continue
-        if cl is None:
-            yield s0
-            continue
-        if cl["fresh"]:
-            for n in cl["fresh"]:
-                ren[n] = fresh()
-        yield from _conj((cl["guard"] or []) + cl["goals"],
-                         env, s0, fuel, ren, tout)
+        yield s0
 
 
 def _tab_key(name: str, targs, s):
@@ -1199,7 +1649,7 @@ def _tab_key(name: str, targs, s):
 
 def _env(graph: dict) -> dict:
     return {"rels": {r["name"]: r for r in graph["rels"]},
-            "tab": {}}
+            "tab": {}, "idx": {}}
 
 
 def merge_graphs(graphs: List[dict]) -> dict:
@@ -1226,7 +1676,7 @@ def run(graph: dict, rel: str, args: List[dict], out: dict,
     fuel_cell = [fuel]
     ren: Dict[str, tuple] = {}
     sols = []
-    for s in _rel_call(rel, args, out, env, {}, fuel_cell, ren):
+    for s in _rel_call(rel, args, out, env, _PMap(), fuel_cell, ren):
         sols.append(s)
         if n and len(sols) >= n:
             break
@@ -1241,7 +1691,7 @@ def run_value(graph: dict, rel: str, args: List[tuple],
     ov = fresh()
     sols = []
     for s in _rel_call(rel, [lit(a) for a in args],
-                       lit(ov), env, {}, fuel_cell, ren):
+                       lit(ov), env, _PMap(), fuel_cell, ren):
         sols.append(reify(ov, s))
         if n and len(sols) >= n:
             break
@@ -1256,7 +1706,7 @@ def run_solutions(graph: dict, rel: str, arg_terms: List[tuple],
     ren: Dict[str, tuple] = {}
     sols = []
     for s in _rel_call(rel, [lit(a) for a in arg_terms],
-                       lit(out_term), env, {}, fuel_cell, ren):
+                       lit(out_term), env, _PMap(), fuel_cell, ren):
         sols.append(s)
         if n and len(sols) >= n:
             break
