@@ -272,18 +272,19 @@ def gate_layer_chain() -> bool:
               "stats", "exits", "grow_heap_ir", "mkleaf", "mkapp",
               "mkapp_p", "repr", "step", "st_norm", "st_konst",
               "st_dup", "st_swap", "st_comp", "step_congr",
-              "count_nodes", "emit_nf", "itoa", "build_ds")
+              "freduce", "count_nodes", "emit_nf", "itoa",
+              "build_ds")
     EXP_MT = ("ir_entry", "ir_read", "ir_spawn", "stats", "exits",
               "mt_worker", "ir_depack", "grow_heap_ir", "mkleaf",
               "mkapp", "mkapp_p", "repr", "step", "st_norm",
               "st_konst", "st_dup", "st_swap", "st_comp",
-              "step_congr", "count_nodes", "emit_nf", "itoa",
-              "build_ds")
+              "step_congr", "freduce", "count_nodes", "emit_nf",
+              "itoa", "build_ds")
     EXP_TOK = ("entry", "parse", "reduce", "stats", "exits",
                "grow_heap", "mkleaf", "mkapp", "mkapp_p", "mkstk",
                "repr", "step", "st_norm", "st_konst", "st_dup",
-               "st_swap", "st_comp", "step_congr", "count_nodes",
-               "emit_nf", "itoa", "build_ds")
+               "st_swap", "st_comp", "step_congr", "freduce",
+               "count_nodes", "emit_nf", "itoa", "build_ds")
     EB = ("emit_bytes", "peval", "selidx")
     for legs, R, exp in (
         (rts._LEGS_IR, RR(), EXP_ST),
@@ -298,6 +299,9 @@ def gate_layer_chain() -> bool:
          ("ir_entry", "plex_read") + EXP_ST[1:]),
         (rts._LEGS_IR, RR(dialect="plex.v3", threads=2),
          ("ir_entry", "plex_read") + EXP_MT[1:]),
+        (rts._LEGS_IR, RR(dialect="plex.emit",
+                          io=("stdin", "bytes")),
+         ("ir_entry", "pexec") + EXP_ST[2:] + EB),
         (rts._LEGS_IR, RR(fuse_s=True),
          EXP_ST[:17] + ("st_s",) + EXP_ST[17:-1]),
         (rts._LEGS_TOKEN, R0, EXP_TOK),
@@ -329,7 +333,8 @@ def gate_layer_chain() -> bool:
     # specs/*.json — the contract side
     specs = layers.load_specs()
     if set(s["name"] for s in specs.values()
-           if s["layer"] == "container") != {"pir", "plex.v3"}:
+           if s["layer"] == "container") != \
+            {"pir", "plex.v3", "plex.emit"}:
         return False
     if set(s["name"] for s in specs.values()
            if s["layer"] == "egress") != {"stdout", "bytes", "ir"}:
@@ -341,7 +346,8 @@ def gate_layer_chain() -> bool:
                         n in rts._BUILDERS for n in names):
                     return False
     # every realized dialect axis value has a leg row + a spec
-    if layers.leg_values(rts._LEGS_IR, "dialect") != {"pir", "plex.v3"}:
+    if layers.leg_values(rts._LEGS_IR, "dialect") != \
+            {"pir", "plex.v3", "plex.emit"}:
         return False
 
     # refusals name axis + layer, never silently default
@@ -358,6 +364,17 @@ def gate_layer_chain() -> bool:
             return False
         except Exception as e:                      # noqa: BLE001
             if frag not in str(e):
+                return False
+
+    # plex.emit's cross-axis contract refuses in routine_names_ir
+    for R in (RR(dialect="plex.emit"),
+              RR(dialect="plex.emit", io=("stdin", "bytes"),
+                 threads=2)):
+        try:
+            rts.routine_names_ir(R)
+            return False
+        except Exception as e:                      # noqa: BLE001
+            if "plex.emit" not in str(e):
                 return False
 
     # the emitted programs still build through the composed lists

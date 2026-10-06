@@ -310,12 +310,12 @@ def _selftest() -> int:
 
     d = PROJECTIONS["phi.rel"](cor)
     assert d["graph"]["format"] == "phi.rel/1"
-    assert len(d["rels"]) == 27 and "append" in d["rels"]
+    assert len(d["rels"]) == 30 and "append" in d["rels"]
     # surface is a derived view — it re-parses to the same graph
     assert phi_rel.parse_rel(d["surface"]) == d["graph"]
 
     d = PROJECTIONS["schema"](cor)
-    assert d["admissible"] and d["rels"] == 27
+    assert d["admissible"] and d["rels"] == 30
 
     d = PROJECTIONS["eval"](cor, call="add",
                           args='[{"atom":[8,2]},{"atom":[8,3]}]')
@@ -348,7 +348,7 @@ def _selftest() -> int:
         surf = phi_rel.render_rel(
             phi_rel.read_graph_bundle(before))
         d = SETTERS["phi.rel"](bp, surf)
-        assert d["written"] == bp and d["rels"] == 27
+        assert d["written"] == bp and d["rels"] == 30
         # graph_bundle is deterministic — an identical surface
         # rewrites identical bytes
         assert open(bp, "rb").read() == before

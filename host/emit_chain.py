@@ -987,7 +987,7 @@ def _emit_layout(R: seed.Realization, routines=None, rt=None,
         text_base = target_pe64.text_rva(imports, slots)
     _d = seed.Realization()
     _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-                  "node_bytes", "stack_reserve", "peephole", "dialect"}
+                  "node_bytes", "stack_reserve", "peephole"}
     fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
     return routines, imports, slots, text_base, fixed
 
@@ -1427,7 +1427,7 @@ def pack_emit_program(R: seed.Realization,
     if store is not None:
         _d = seed.Realization()
         _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-                      "node_bytes", "stack_reserve", "peephole", "dialect"}
+                      "node_bytes", "stack_reserve", "peephole"}
         fixed = {k: getattr(R, k)
                  for k in vars(_d) if k not in _prog_axes}
         rn = routines if routines is not None else (
@@ -2051,7 +2051,7 @@ def emit_image(R: seed.Realization,
     # terms via `fixed` so builder-level branches on reclaim/io/payload
     # emit the declared variant instead of silently defaulting.
     _prog_axes = {"fuse_s", "fuel", "read_buf_bytes", "chunk_bytes",
-                  "node_bytes", "stack_reserve", "peephole", "dialect"}
+                  "node_bytes", "stack_reserve", "peephole"}
     fixed = {k: getattr(R, k) for k in vars(_d) if k not in _prog_axes}
     if rt is not None:
         if R.order not in rt.orders:

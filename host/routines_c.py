@@ -167,57 +167,112 @@ def r_build_ds(R: Realization, ctx: Ctx) -> Program:
     ]
 
 
-def r_step(R: Realization, ctx: Ctx) -> Program:
-    """step: LO single step — IStepBasis rule order (normβ, konstβ,
-    dupβ, compβ, swapβ, [sβ iff fuse_s], appL, appR).  Returns 0 on NF."""
+def r_freduce(R: Realization, ctx: Ctx) -> Program:
+    """freduce — the spine-stack LO machine (routines_x86_64_win64
+    freduce mirror): one unwind pushes {n,ph,lrep} frames; a
+    contraction at the tip pops the top-a frames and its rep becomes
+    the new tip — the pending front collapses in place, no root
+    re-walk.  The depth check requires the top-a frames ALL ph0: a
+    ph1 frame is a right-descended ancestor, not a redex parent.  A
+    completed parent's rep is the node itself when both children are
+    unchanged — else one mkapp — so allocation tracks changed spines
+    only, exactly the PE machine's accounting."""
     p: Program = [
-        ("i", "note", "LO step — IStepBasis, seed.step mirror"),
-        FN("static N *", "step", "N *t"),
-        I("if", "t->tag != T_APP"),
-        I("ret", "0"),
+        ("i", "note", "spine-stack LO — same machine as the PE freduce"),
+        ("i", "raw",
+         "typedef struct { N *n; N *lrep; int ph; } Fr;"),
+        ("i", "decl", "static Fr *", "fsp", "0"),
+        ("i", "raw",
+         "static const unsigned long long FR_CAP = 1ull << 22;"),
+        FN("static N *", "freduce", "N *t"),
+        I("if", "!fsp"),
+        I("do", "fsp = (Fr *) malloc(FR_CAP * sizeof(Fr))"),
+        I("if", "!fsp"),
+        I("do", "exit(4)"),
         I("end"),
-        I("decl", "N *", "f", "t->l"),
-        I("decl", "N *", "x", "t->r"),
-        I("if", "f->tag == T_NORM"),
-        I("ret", "x"),
         I("end"),
-        I("if", "f->tag == T_APP"),
-        I("decl", "N *", "fl", "f->l"),
-        I("decl", "N *", "fr", "f->r"),
-        I("if", "fl->tag == T_KONST"),
-        I("ret", "fr"),
+        I("decl", "unsigned long long", "sp", "0"),
+        I("decl", "N *", "tip", "t"),
+        I("decl", "N *", "rep", "0"),
+        I("while", "1"),
+        # ---- INSPECT: unwind the left spine ----
+        I("while", "tip->tag == T_APP"),
+        I("if", "sp == FR_CAP"),
+        I("do", "exit(4)"),
         I("end"),
-        I("if", "fl->tag == T_DUP"),
-        I("ret", "mkapp(mkapp(fr, x), x)"),
+        I("do", "fsp[sp].n = tip; fsp[sp].ph = 0; sp++"),
+        I("assign", "tip", "tip->l"),
         I("end"),
-        I("if", "fl->tag == T_APP"),
-        I("decl", "N *", "fll", "fl->l"),
-        I("decl", "N *", "flr", "fl->r"),
-        I("if", "fll->tag == T_COMP"),
-        I("ret", "mkapp(flr, mkapp(fr, x))"),
+        # ---- CONTRACT at the tip (all top-a frames must be ph0) ----
+        I("assign", "rep", "0"),
+        I("if", "tip->tag == T_NORM && sp >= 1 && fsp[sp-1].ph == 0"),
+        I("do", "rep = fsp[sp-1].n->r; sp--"),
+        I("else"),
+        I("if", "tip->tag == T_KONST && sp >= 2 && fsp[sp-1].ph == 0"
+                " && fsp[sp-2].ph == 0"),
+        I("do", "rep = fsp[sp-1].n->r; sp -= 2"),
+        I("else"),
+        I("if", "tip->tag == T_DUP && sp >= 2 && fsp[sp-1].ph == 0"
+                " && fsp[sp-2].ph == 0"),
+        I("do", "rep = mkapp(mkapp(fsp[sp-1].n->r, fsp[sp-2].n->r),"
+                " fsp[sp-2].n->r); sp -= 2"),
+        I("else"),
+        I("if", "tip->tag == T_COMP && sp >= 3 && fsp[sp-1].ph == 0"
+                " && fsp[sp-2].ph == 0 && fsp[sp-3].ph == 0"),
+        I("do", "rep = mkapp(fsp[sp-1].n->r,"
+                " mkapp(fsp[sp-2].n->r, fsp[sp-3].n->r)); sp -= 3"),
+        I("else"),
+        I("if", "tip->tag == T_SWAP && sp >= 3 && fsp[sp-1].ph == 0"
+                " && fsp[sp-2].ph == 0 && fsp[sp-3].ph == 0"),
+        I("do", "rep = mkapp(mkapp(fsp[sp-1].n->r, fsp[sp-3].n->r),"
+                " fsp[sp-2].n->r); sp -= 3"),
+        I("else"),
         I("end"),
-        I("if", "fll->tag == T_SWAP"),
-        I("ret", "mkapp(mkapp(flr, x), fr)"),
+        I("end"),
+        I("end"),
+        I("end"),
         I("end"),
     ]
     if R.fuse_s:
         p += [
-            I("if", "fll->tag == T_S"),
-            I("ret", "mkapp(mkapp(flr, x), mkapp(fr, x))"),
+            I("if", "tip->tag == T_S && sp >= 3 && fsp[sp-1].ph == 0"
+                    " && fsp[sp-2].ph == 0 && fsp[sp-3].ph == 0"),
+            I("do", "rep = mkapp(mkapp(fsp[sp-1].n->r, fsp[sp-3].n->r),"
+                    " mkapp(fsp[sp-2].n->r, fsp[sp-3].n->r)); sp -= 3"),
             I("end"),
         ]
     p += [
+        I("if", "rep"),
+        I("do", "steps++"),
+    ]
+    if R.fuel is not None:
+        p += [
+            I("if", "steps >= FUEL"),
+            I("do", "exit(2)"),
+            I("end"),
+        ]
+    p += [
+        I("assign", "tip", "rep"),
+        I("continue"),
+        I("end"),
+        # ---- FEED: rep = completed subtree rep ----
+        I("assign", "rep", "tip"),
+        I("while", "1"),
+        I("if", "sp == 0"),
+        I("ret", "rep"),
+        I("end"),
+        I("if", "fsp[sp-1].ph == 0"),
+        I("do", "fsp[sp-1].lrep = rep; fsp[sp-1].ph = 1"),
+        I("assign", "tip", "fsp[sp-1].n->r"),
+        I("do", "break"),
+        I("end"),
+        I("do", "sp--"),
+        I("assign", "rep",
+          "fsp[sp].lrep == fsp[sp].n->l && rep == fsp[sp].n->r"
+          " ? fsp[sp].n : mkapp(fsp[sp].lrep, rep)"),
         I("end"),
         I("end"),
-        I("decl", "N *", "sf", "step(f)"),
-        I("if", "sf"),
-        I("ret", "mkapp(sf, x)"),
-        I("end"),
-        I("decl", "N *", "sx", "step(x)"),
-        I("if", "sx"),
-        I("ret", "mkapp(f, sx)"),
-        I("end"),
-        I("ret", "0"),
+        I("ret", "t"),
         I("end"),
     ]
     return p
@@ -296,19 +351,7 @@ def r_main(R: Realization, ctx: Ctx) -> Program:
     p += [
         I("do", "parse()"),
         I("decl", "N *", "t", "stk ? stk->l : mkleaf(T_NORM)"),
-        I("decl", "N *", "nxt", "0"),
-        I("while", "(nxt = step(t))"),
-        I("assign", "t", "nxt"),
-        I("do", "steps++"),
-    ]
-    if R.fuel is not None:
-        p += [
-            I("if", "steps >= FUEL"),
-            I("do", "exit(2)"),
-            I("end"),
-        ]
-    p += [
-        I("end"),
+        I("assign", "t", "freduce(t)"),
         I("do", "emit_nf(t)"),
         I("do", "putchar('\\n')"),
         I("do", 'fprintf(stderr, "steps=%llu alloc=%llu\\n", '
@@ -322,7 +365,7 @@ def r_main(R: Realization, ctx: Ctx) -> Program:
 # Ordered routine names = emission order (same convention as
 # routines_x86_64_win64).  "build_ds" emits iff not R.fuse_s.
 ROUTINES: Tuple[str, ...] = (
-    "prelude", "alloc", "build_ds", "step", "parse", "emit", "main",
+    "prelude", "alloc", "build_ds", "freduce", "parse", "emit", "main",
 )
 
 _BUILDERS: Dict[str, Callable[[Realization, Ctx], Program]] = {

@@ -82,6 +82,31 @@ DATA_SLOTS_PX: Tuple[Tuple[str, int], ...] = (
     ("plexleft", 8),
 )
 
+# dialect="plex.emit" (schedule executor): the emit bundle's declared
+# stage DAG executes inside the kernel.  pe_secs[kind*16] = payload
+# ptr, [+8] = len (kind-indexed span table; absent sections leave 0).
+# pe_need/pe_done = closure + completion masks, pe_stab = per-stage
+# (frame-index base, frame count), pe_stabv = "bytes frames produced".
+# fr_idx = the frame store's (ptr,len) index region; frame payload
+# bytes append into the egress buffer (eb_out is the store cursor).
+PE_MAX_STAGES = 64
+PE_BUNDLE_CAP = 64 << 20     # committed whole-archive buffer
+PE_IDX_BYTES = 4 << 20       # 256K (ptr,len) frame-index entries
+PE_OUT_BYTES = 16 << 20      # image assembly buffer (== EG_OUT_BYTES)
+DATA_SLOTS_PE: Tuple[Tuple[str, int], ...] = (
+    ("pe_buf", 8), ("pe_len", 8),
+    ("pe_secs", 16 * 16),
+    ("pe_str", 8), ("pe_strl", 8),      # STRINGS pool ptr/len
+    ("pe_nst", 8), ("pe_out", 8),
+    ("pe_ovf", 8), ("pe_ov", 8), ("pe_ovl", 8),
+    ("pe_si", 8), ("pe_eval", 8),
+    ("fr_idx", 8), ("fr_icur", 8), ("fr_ilim", 8),
+    ("pe_obuf", 8), ("pe_ocur", 8), ("pe_olen", 8), ("pe_cur", 8),
+    ("pe_sbase", 8), ("pe_scnt", 8), ("pe_mf", 8),
+    ("pe_need", PE_MAX_STAGES), ("pe_sdone", PE_MAX_STAGES),
+    ("pe_stab", PE_MAX_STAGES * 16), ("pe_stabv", PE_MAX_STAGES),
+)
+
 # packed-IR constants — pinned by docs/adr/0005; keep in sync with
 # spec_term.IR_MAGIC / IR_VERSION / IR_VAR.
 IR_MAGIC = 0x30524950                # "PIR0"
@@ -92,6 +117,19 @@ PLEX_VERSION = 3
 PLEX_HEADER = 12                     # magic+ver+flags+hsize+nsec
 PLEX_DIR_ENT = 32                    # fixed-width directory row
 PLEX_KIND_PIR = 10                   # packed-IR program stream payload
+# emit-schedule sections (dialect="plex.emit" dir-walk)
+PLEX_KIND_STRINGS = 1
+PLEX_KIND_STAGES = 2
+PLEX_KIND_DEPS = 3
+PLEX_KIND_QUERIES = 4
+PLEX_KIND_REALIZATION = 6
+PLEX_KIND_BYTES = 9
+PLEX_KIND_MAP = 11
+PE_SEC_STAGE_ROW = 48                # STAGES row bytes (6 x u64 srefs)
+PE_SEC_DEP_ROW = 8                   # DEPS row bytes (2 x u32)
+PE_SEC_QRY_ROW = 40                  # QUERIES row bytes (5 x u64)
+PE_SEC_MAP_ROW = 16                  # MAP row bytes (4 x u32)
+PE_SEC_KV_ROW = 32                   # REALIZATION row bytes (4 x u64)
 MEM_RESERVE = 0x2000                 # VirtualAlloc MEM_RESERVE
 MEM_COMMIT = 0x1000                  # VirtualAlloc MEM_COMMIT
 MEM_DECOMMIT = 0x4000                # VirtualFree MEM_DECOMMIT
@@ -291,19 +329,10 @@ def r_reduce(R: Realization, ctx: Ctx) -> Program:
     exact output alloc -> emit_nf -> WriteFile stdout."""
     iat = ctx["iat"]
     p: Program = [
-        # ---- reduce loop (r15 = steps) ----
+        # ---- spine-stack LO reduce (r15 = steps, counted inside) ----
         LBL("do_reduce"), I("xor_r32_r32", "r15d", "r15d"),
-        LBL("red_loop"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "red_done")),
-        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
-    ]
-    if R.fuel is not None:
-        p += [
-            I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2")),
-        ]
-    p += [
-        I("jmp_rel32", ("l", "red_loop")),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "freduce")),
+        I("mov_r64_r64", "r12", "rax"),
         # ---- out: count nodes, VirtualAlloc exact, postfix emit, WriteFile ----
         LBL("red_done"),
         I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "count_nodes")),
@@ -1446,6 +1475,445 @@ def r_step_congr(R: Realization, ctx: Ctx) -> Program:
     ]
 
 
+def r_freduce(R: Realization, ctx: Ctx) -> Program:
+    """freduce(rdi=root) -> rax = NF rep, r15 += steps — the
+    spine-stack LO machine: one unwind pushes the left spine as 16B
+    machine-stack frames ([rsp]=node|ph, [rsp+8]=lrep; ph0 = left
+    subtree active; phase rides bit0 of the 24-aligned node ptr).  A
+    contraction at the tip consumes the top-a frames and its rep
+    becomes the new tip — the pending front collapses in place, no
+    root re-walk.  Same IStepBasis order and per-contract step count
+    as step(); step stays emitted for eg_probe.
+
+    The contract-depth check must find the redex root inside the TOP
+    run of ph0 frames: every one of the top-a frames has to be live
+    and ph0 — a ph1 frame is a right-descended ancestor whose pending
+    right subtree is NOT an argument, and the sentinel ends the spine.
+    Frames are C-stack-window conservative roots under gc="sweep" for
+    free.  Perm-region parents: the completion combine replicates
+    st_l_fr/st_r_fr — writable nodes patch both slots, perm/input
+    nodes rebuild via mkapp_p when both reps are persist-storable."""
+    fwd = R.reclaim == "redirect"
+
+    def rep(reg):
+        return [I("mov_r64_r64", "rdi", reg),
+                I("call_rel32", ("l", "repr")),
+                I("mov_r64_r64", reg, "rax")]
+
+    def depth(a: int) -> Program:
+        """the top-a frames all exist and are ph0 (live spine); else
+        the leaf is a completed subtree, not a redex head."""
+        q: Program = []
+        for i in range(a):
+            q += [
+                I("mov_r64_m64", "rax", ("m", "rsp", 16 * i)),
+                I("test_r64_r64", "rax", "rax"),
+                I("je_rel32", ("l", "fr_norm")),
+                I("and_r64_imm", "rax", 1),
+                I("jne_rel32", ("l", "fr_norm")),
+            ]
+        return q
+
+    def fwd_root(lbl_out: str) -> Program:
+        """zone guard + FWD write into r12 (rep in rax): reduction
+        cells always consume; input cells only when the rep is
+        persist-storable; perm cells never (rep flows up unconsumed)."""
+        return [
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", lbl_out)),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jge_rel32", ("l", lbl_out + "_f")),
+            I("cmp_r64_r64", "rax", "r9"),
+            I("jge_rel32", ("l", lbl_out)),
+            LBL(lbl_out + "_f"),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+        ]
+
+    def setup2() -> Program:           # r12=root r13=f rcx=fr r14=x
+        return [
+            I("mov_r64_m64", "r12", ("m", "rsp", 16)),
+            I("and_r64_imm", "r12", -2),
+            I("mov_r64_m64", "r13", ("m", "rsp", 0)),
+            I("and_r64_imm", "r13", -2),
+            I("mov_r64_m64", "rcx", ("m", "r13", 16)),
+            I("mov_r64_m64", "r14", ("m", "r12", 16)),
+        ]
+
+    def setup3() -> Program:   # r12 r13 r14 + rax=fl rcx=fr rdx=fll rsi=flr
+        return [
+            I("mov_r64_m64", "r12", ("m", "rsp", 32)),
+            I("and_r64_imm", "r12", -2),
+            I("mov_r64_m64", "r13", ("m", "rsp", 16)),
+            I("and_r64_imm", "r13", -2),
+            I("mov_r64_m64", "r14", ("m", "r12", 16)),
+            I("mov_r64_m64", "rcx", ("m", "r13", 16)),
+            I("mov_r64_m64", "rax", ("m", "rsp", 0)),
+            I("and_r64_imm", "rax", -2),
+            I("mov_r64_m64", "rdx", ("m", "rax", 8)),
+            I("mov_r64_m64", "rsi", ("m", "rax", 16)),
+        ]
+
+    p: Program = [
+        LBL("freduce"),
+        I("push_r64", "r12"), I("push_r64", "r13"), I("push_r64", "r14"),
+        I("mov_r64_r64", "r12", "rdi"),
+        I("xor_r32_r32", "eax", "eax"),
+        I("push_r64", "rax"), I("push_r64", "rax"),       # sentinel
+        # ---- INSPECT: resolve tip, unwind app left spine ----
+        LBL("fr_insp"),
+    ]
+    if fwd:
+        p += rep("r12")
+    p += [
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.APP),
+        I("jne_rel32", ("l", "fr_leaf")),
+    ]
+    if R.audit:
+        p += _bump("c_left")
+    p += [
+        I("push_r64", "r14"),                            # lrep slot
+        I("push_r64", "r12"),                            # node|ph=0
+        I("mov_r64_m64", "r12", ("m", "r12", 8)),
+        I("jmp_rel32", ("l", "fr_insp")),
+        # ---- LEAF: combinator tag dispatch ----
+        LBL("fr_leaf"),
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.norm),
+        I("je_rel32", ("l", "fr_a1")),
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.konst),
+        I("je_rel32", ("l", "fr_a2k")),
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.dup),
+        I("je_rel32", ("l", "fr_a2d")),
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.comp),
+        I("je_rel32", ("l", "fr_a3c")),
+        I("cmp_m64_imm", ("m", "r12", 0), Tag.swap),
+        I("je_rel32", ("l", "fr_a3w")),
+    ]
+    if R.fuse_s:
+        p += [
+            I("cmp_m64_imm", ("m", "r12", 0), Tag.s),
+            I("je_rel32", ("l", "fr_a3s")),
+        ]
+    p += [I("jmp_rel32", ("l", "fr_norm"))]
+    # ---- normβ: I x -> x ----
+    p += [LBL("fr_a1")] + depth(1) + [
+        I("mov_r64_m64", "r12", ("m", "rsp", 0)),
+        I("and_r64_imm", "r12", -2),
+        I("mov_r64_m64", "r14", ("m", "r12", 16)),
+    ]
+    if R.audit:
+        p += _bump("c_norm")
+    if fwd:
+        p += ([I("mov_r64_r64", "rdi", "r14"),
+               I("call_rel32", ("l", "repr"))]
+              + fwd_root("fr_done1"))
+    else:
+        p += [I("mov_r64_r64", "rax", "r14")]
+    p += [I("jmp_rel32", ("l", "fr_done1"))]
+    # ---- konstβ: K x y -> x ----
+    p += [LBL("fr_a2k")] + depth(2) + setup2()
+    if R.audit:
+        p += _bump("c_konst")
+    if fwd:
+        p += ([I("mov_r64_r64", "rdi", "rcx"),
+               I("call_rel32", ("l", "repr"))]
+              + fwd_root("fr_done2"))
+    else:
+        p += [I("mov_r64_r64", "rax", "rcx")]
+    p += [I("jmp_rel32", ("l", "fr_done2"))]
+    # ---- dupβ: W f x -> f x x ----
+    p += [LBL("fr_a2d")] + depth(2) + setup2()
+    if R.audit:
+        p += _bump("c_dup")
+    if fwd:
+        p += [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "fr_dup_fr")),
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_r64", ("m", "r12", 16), "r14"),
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "fr_done2")),
+            LBL("fr_dup_fr"),
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "fr_done2")),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "fr_done2")),
+        ]
+    else:
+        p += [
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),
+            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),
+            I("jmp_rel32", ("l", "fr_done2")),
+        ]
+    # ---- compβ: B f g x -> f (g x) ----
+    p += [LBL("fr_a3c")] + depth(3)
+    if R.audit:
+        p += _bump("c_comp")
+    p += setup3()
+    if fwd:
+        p += [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "fr_comp_fr")),
+            I("push_r64", "rsi"), I("sub_r64_imm", "rsp", 8),
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),
+            I("add_r64_imm", "rsp", 8), I("pop_r64", "rsi"),
+            I("mov_m64_r64", ("m", "r12", 8), "rsi"),
+            I("mov_m64_r64", ("m", "r12", 16), "rax"),
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "fr_done3")),
+            LBL("fr_comp_fr"),
+            I("push_r64", "rsi"),
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("pop_r64", "rdi"), I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "fr_done3")),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "fr_done3")),
+        ]
+    else:
+        p += [
+            I("push_r64", "rcx"), I("push_r64", "rsi"),
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),
+            I("pop_r64", "rdi"), I("pop_r64", "rdx"),
+            I("mov_r64_r64", "rsi", "rax"),
+            I("call_rel32", ("l", "mkapp")),
+            I("jmp_rel32", ("l", "fr_done3")),
+        ]
+    # ---- swapβ: C f x y -> f y x ----
+    p += [LBL("fr_a3w")] + depth(3)
+    if R.audit:
+        p += _bump("c_swap")
+    p += setup3()
+    if fwd:
+        p += [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "fr_swap_fr")),
+            I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_r64", ("m", "r12", 16), "rcx"),
+            I("mov_r64_r64", "rax", "r12"),
+            I("jmp_rel32", ("l", "fr_done3")),
+            LBL("fr_swap_fr"),
+            I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("mov_r64_r64", "rdi", "rax"), I("mov_r64_r64", "rsi", "rcx"),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r12", "r9"),
+            I("jb_rel32", ("l", "fr_done3")),
+            I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+            I("mov_m64_r64", ("m", "r12", 8), "rax"),
+            I("mov_m64_imm32", ("m", "r12", 16), 0),
+            I("jmp_rel32", ("l", "fr_done3")),
+        ]
+    else:
+        p += [
+            I("push_r64", "rcx"), I("sub_r64_imm", "rsp", 8),
+            I("mov_r64_r64", "rdi", "rsi"), I("mov_r64_r64", "rsi", "r14"),
+            I("call_rel32", ("l", "mkapp")),
+            I("add_r64_imm", "rsp", 8), I("pop_r64", "rsi"),
+            I("mov_r64_r64", "rdi", "rax"),
+            I("call_rel32", ("l", "mkapp")),
+            I("jmp_rel32", ("l", "fr_done3")),
+        ]
+    # ---- sβ: S f g x -> (f x)(g x) ----
+    if R.fuse_s:
+        p += [LBL("fr_a3s")] + depth(3)
+        if R.audit:
+            p += _bump("c_s")
+        p += setup3()
+        if fwd:
+            p += [
+                I("mov_r64_rip", "r9", ("p", "irstart")),
+                I("cmp_r64_r64", "r12", "r9"),
+                I("jb_rel32", ("l", "fr_s_fr")),
+                I("push_r64", "rcx"), I("push_r64", "rsi"),
+                I("mov_r64_r64", "rdi", "rsi"),
+                I("mov_r64_r64", "rsi", "r14"),
+                I("call_rel32", ("l", "mkapp")),
+                I("pop_r64", "rsi"), I("pop_r64", "rcx"),
+                I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
+                I("mov_r64_r64", "rdi", "rcx"),
+                I("mov_r64_r64", "rsi", "r14"),
+                I("call_rel32", ("l", "mkapp")),
+                I("add_r64_imm", "rsp", 8), I("pop_r64", "rcx"),
+                I("mov_m64_r64", ("m", "r12", 8), "rcx"),
+                I("mov_m64_r64", ("m", "r12", 16), "rax"),
+                I("mov_r64_r64", "rax", "r12"),
+                I("jmp_rel32", ("l", "fr_done3")),
+                LBL("fr_s_fr"),
+                I("push_r64", "rcx"), I("push_r64", "rsi"),
+                I("mov_r64_r64", "rdi", "rsi"),
+                I("mov_r64_r64", "rsi", "r14"),
+                I("call_rel32", ("l", "mkapp_p")),
+                I("pop_r64", "rsi"), I("pop_r64", "rcx"),
+                I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
+                I("mov_r64_r64", "rdi", "rcx"),
+                I("mov_r64_r64", "rsi", "r14"),
+                I("call_rel32", ("l", "mkapp_p")),
+                I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
+                I("mov_r64_r64", "rsi", "rax"),
+                I("call_rel32", ("l", "mkapp_p")),
+                I("mov_r64_rip", "r9", ("p", "permend")),
+                I("cmp_r64_r64", "r12", "r9"),
+                I("jb_rel32", ("l", "fr_done3")),
+                I("mov_m64_imm32", ("m", "r12", 0), FWD_TAG),
+                I("mov_m64_r64", ("m", "r12", 8), "rax"),
+                I("mov_m64_imm32", ("m", "r12", 16), 0),
+                I("jmp_rel32", ("l", "fr_done3")),
+            ]
+        else:
+            p += [
+                I("push_r64", "rcx"), I("push_r64", "rsi"),
+                I("mov_r64_r64", "rdi", "rsi"),
+                I("mov_r64_r64", "rsi", "r14"),
+                I("call_rel32", ("l", "mkapp")),
+                I("push_r64", "rax"), I("sub_r64_imm", "rsp", 8),
+                I("mov_r64_m64", "rdi", ("m", "rsp", 24)),
+                I("mov_r64_r64", "rsi", "r14"),
+                I("call_rel32", ("l", "mkapp")),
+                I("add_r64_imm", "rsp", 8), I("pop_r64", "rdi"),
+                I("mov_r64_r64", "rsi", "rax"),
+                I("call_rel32", ("l", "mkapp")),
+                I("add_r64_imm", "rsp", 16),
+                I("jmp_rel32", ("l", "fr_done3")),
+            ]
+    # ---- FEED: r13 = completed subtree rep ----
+    p += [
+        LBL("fr_norm"), I("mov_r64_r64", "r13", "r12"),
+        LBL("fr_feed"),
+        I("mov_r64_m64", "rax", ("m", "rsp", 0)),
+        I("test_r64_r64", "rax", "rax"),
+        I("je_rel32", ("l", "fr_exit")),
+        I("mov_r64_r64", "r14", "rax"), I("and_r64_imm", "r14", -2),
+        I("cmp_r64_r64", "rax", "r14"),
+        I("jne_rel32", ("l", "fr_ph1")),
+    ]
+    p += [
+        I("mov_m64_r64", ("m", "rsp", 8), "r13"),       # lrep
+        I("inc_r64", "rax"),
+        I("mov_m64_r64", ("m", "rsp", 0), "rax"),       # ph=1
+    ]
+    if R.audit:
+        p += _bump("c_right")
+    p += [
+        I("mov_r64_m64", "r12", ("m", "r14", 16)),
+        I("jmp_rel32", ("l", "fr_insp")),
+        # ph1: right subtree rep = r13; combine with lrep.  A parent
+        # whose children are unchanged keeps its own cell — the rep is
+        # the node, no store, no alloc (step's 0-return on NF).
+        LBL("fr_ph1"),
+        I("mov_r64_m64", "rcx", ("m", "rsp", 8)),       # lrep
+        I("mov_r64_m64", "rax", ("m", "r14", 8)),
+        I("cmp_r64_r64", "rcx", "rax"),
+        I("jne_rel32", ("l", "fr_ph1_ch")),
+        I("mov_r64_m64", "rax", ("m", "r14", 16)),
+        I("cmp_r64_r64", "r13", "rax"),
+        I("jne_rel32", ("l", "fr_ph1_ch")),
+        I("mov_r64_r64", "rax", "r14"),
+        I("jmp_rel32", ("l", "fr_ph1_out")),
+        LBL("fr_ph1_ch"),
+    ]
+    if fwd:
+        p += [
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "r14", "r9"),
+            I("jge_rel32", ("l", "fr_ph1_w")),
+            I("mov_r64_rip", "r9", ("p", "permend")),
+            I("cmp_r64_r64", "r14", "r9"),
+            I("jb_rel32", ("l", "fr_ph1_fr")),
+            # input cell: in-place only when both reps persist-storable
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "rcx", "r9"),
+            I("jge_rel32", ("l", "fr_ph1_mk")),
+            I("cmp_r64_r64", "r13", "r9"),
+            I("jge_rel32", ("l", "fr_ph1_mk")),
+            LBL("fr_ph1_w"),
+            I("mov_m64_r64", ("m", "r14", 8), "rcx"),
+            I("mov_m64_r64", ("m", "r14", 16), "r13"),
+            I("mov_r64_r64", "rax", "r14"),
+            I("jmp_rel32", ("l", "fr_ph1_out")),
+            LBL("fr_ph1_mk"),
+            I("mov_r64_r64", "rdi", "rcx"), I("mov_r64_r64", "rsi", "r13"),
+            I("call_rel32", ("l", "mkapp")),
+            I("jmp_rel32", ("l", "fr_ph1_out")),
+            LBL("fr_ph1_fr"),
+            I("mov_r64_r64", "rdi", "rcx"),
+            I("mov_r64_r64", "rsi", "r13"),
+            I("mov_r64_rip", "r9", ("p", "irstart")),
+            I("cmp_r64_r64", "rdi", "r9"),
+            I("jge_rel32", ("l", "fr_ph1_rb")),
+            I("cmp_r64_r64", "rsi", "r9"),
+            I("jge_rel32", ("l", "fr_ph1_rb")),
+            I("call_rel32", ("l", "mkapp_p")),
+            I("jmp_rel32", ("l", "fr_ph1_out")),
+            LBL("fr_ph1_rb"),
+            I("call_rel32", ("l", "mkapp")),
+            LBL("fr_ph1_out"),
+            I("mov_r64_r64", "r13", "rax"),
+            I("add_r64_imm", "rsp", 16),
+            I("jmp_rel32", ("l", "fr_feed")),
+        ]
+    else:
+        p += [
+            LBL("fr_ph1_mk"),
+            I("mov_r64_r64", "rdi", "rcx"),
+            I("mov_r64_r64", "rsi", "r13"),
+            I("call_rel32", ("l", "mkapp")),
+            LBL("fr_ph1_out"),
+            I("mov_r64_r64", "r13", "rax"),
+            I("add_r64_imm", "rsp", 16),
+            I("jmp_rel32", ("l", "fr_feed")),
+        ]
+    # ---- contraction tail + exits ----
+    p += [
+        LBL("fr_done1"), I("add_r64_imm", "rsp", 16),
+        I("jmp_rel32", ("l", "fr_contracted")),
+        LBL("fr_done2"), I("add_r64_imm", "rsp", 32),
+        I("jmp_rel32", ("l", "fr_contracted")),
+        LBL("fr_done3"), I("add_r64_imm", "rsp", 48),
+        LBL("fr_contracted"), I("inc_r64", "r15"),
+    ]
+    if R.fuel is not None:
+        p += [I("cmp_r64_imm", "r15", R.fuel),
+              I("jge_rel32", ("l", "exit2"))]
+    p += [
+        I("mov_r64_r64", "r12", "rax"),
+        I("jmp_rel32", ("l", "fr_insp")),
+        LBL("fr_exit"),
+        I("mov_r64_r64", "rax", "r13"),
+        I("add_r64_imm", "rsp", 16),                  # drop sentinel
+        I("pop_r64", "r14"), I("pop_r64", "r13"), I("pop_r64", "r12"),
+        I("ret"),
+    ]
+    return p
+
+
 def r_count_nodes(R: Realization, ctx: Ctx) -> Program:
     """count_nodes(rdi) -> rax."""
     p: Program = [
@@ -1920,6 +2388,695 @@ def r_plex_read(R: Realization, ctx: Ctx) -> Program:
     return p
 
 
+def r_pexec(R: Realization, ctx: Ctx) -> Program:
+    """pexec (dialect="plex.emit"): kernel-side schedule executor —
+    the emit bundle's declared stage DAG runs inside the kernel, no
+    host orchestration.
+
+    Whole-archive read (bounded, PE_BUNDLE_CAP) -> header + directory
+    validation mirroring plex_read (in-memory) -> REALIZATION rows
+    name the dialect claim ("plex.emit/2" required) and the output
+    stage ("schedule.output", default "emit.pack") -> a DEPS fixpoint
+    computes the output's closure -> stages run in declared order:
+    each closure stage's QUERIES row yields an "off:len" blob token
+    into the BYTES pool (the PIR payload for the canonical emit.term
+    stage), the stream is validated and depacked+reduced in place via
+    the shared ir_depack/ir_bloop pipeline (ir_bdone returns to
+    pe_snext under this dialect, and emit_bytes flushes to the frame
+    store instead of stdout).  exe.bytes stages append (ptr,len)
+    frame entries; exe.term/exe.ir stages reduce eval-only (MAP never
+    references them — the frame store holds byte frames only).
+    Finally MAP rows for the output stage splice its own frames with
+    declared foreign frames into pe_obuf; the image leaves as one
+    [u32le len][bytes] frame.
+
+    Loop state lives in .data slots — the pipeline clobbers every
+    register.  Refusals (exit3) mirror run_emit_bundle: malformed
+    container/directory, missing STRINGS/STAGES/QUERIES/BYTES,
+    missing or wrong dialect claim, output stage absent, deps cycle /
+    unsatisfied dep, closure stage with no stream or a duplicate
+    query row, malformed "off:len" token or out-of-pool span, bad
+    stream header, non-monotonic/out-of-bounds MAP rows, MAP src
+    outside the closure or with no byte frames.  exit4 OOM, exit5
+    frame-store/image-buffer bound.  Digest verification stays a
+    host-side audit — the kernel trusts declared spans, not hashes."""
+    iat = ctx["iat"]
+
+    def _sec(k: int) -> Program:
+        """rax = pe_secs[k].ptr, rdx = pe_secs[k].len (abs ptr into the
+        bundle, or 0 when absent)."""
+        return [
+            I("lea_r64_rip", "r10", ("p", "pe_secs")),
+            I("mov_r64_m64", "rax", ("m", "r10", k * 16)),
+            I("mov_r64_m64", "rdx", ("m", "r10", k * 16 + 8)),
+        ]
+
+    def _eq_lit(off_reg: str, len_reg: str, lit: bytes,
+                fail: str, ok: str) -> Program:
+        """string-pool ref (off_reg,len_reg) == literal -> jmp ok else
+        fail.  Bounds-checks the ref before reading."""
+        n = len(lit)
+        q = [I("cmp_r64_imm", len_reg, n), I("jne_rel32", ("l", fail)),
+             I("mov_r64_r64", "rax", off_reg), I("add_r64_imm", "rax", n),
+             I("mov_r64_rip", "rcx", ("p", "pe_strl")),
+             I("cmp_r64_r64", "rcx", "rax"), I("jl_rel32", ("l", "exit3")),
+             I("mov_r64_rip", "rax", ("p", "pe_str")),
+             I("add_r64_r64", "rax", off_reg)]
+        i = 0
+        while n - i >= 8:
+            q += [I("mov_r64_m64", "rcx", ("m", "rax", i)),
+                  I("mov_r64_imm", "rdx", int.from_bytes(lit[i:i + 8],
+                                                       "little")),
+                  I("cmp_r64_r64", "rcx", "rdx"),
+                  I("jne_rel32", ("l", fail))]
+            i += 8
+        if i < n and n >= 8:                        # overlapping tail
+            q += [I("mov_r64_m64", "rcx", ("m", "rax", n - 8)),
+                  I("mov_r64_imm", "rdx", int.from_bytes(lit[n - 8:],
+                                                       "little")),
+                  I("cmp_r64_r64", "rcx", "rdx"),
+                  I("jne_rel32", ("l", fail))]
+        else:
+            for j in range(i, n):
+                q += [I("movzx_r32_m8", "ecx", ("m", "rax", j)),
+                      I("cmp_r64_imm", "rcx", lit[j]),
+                      I("jne_rel32", ("l", fail))]
+        return q + [I("jmp_rel32", ("l", ok))]
+
+    # need[i] / done[i] / stabv[i] byte-array ops keyed by stage idx
+    def _flag(arr: str, idx_reg: str) -> Program:
+        return [I("lea_r64_rip", "r10", ("p", arr)),
+                I("add_r64_r64", "r10", idx_reg)]
+
+    p: Program = [
+        LBL("pexec"),
+        # ---- regions: bundle buffer, frame index, image buffer ----
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_imm", "rdx", PE_BUNDLE_CAP),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "pe_buf"), "rax"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_imm", "rdx", PE_IDX_BYTES),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "fr_idx"), "rax"),
+        I("mov_rip_r64", ("p", "fr_icur"), "rax"),
+        I("mov_r64_imm", "rdx", PE_IDX_BYTES),
+        I("add_r64_r64", "rax", "rdx"),
+        I("mov_rip_r64", ("p", "fr_ilim"), "rax"),
+        I("xor_r32_r32", "ecx", "ecx"),
+        I("mov_r64_imm", "rdx", PE_OUT_BYTES),
+        I("mov_r32_imm32", "r8d", VA_COMMIT_RESERVE),
+        I("mov_r32_imm32", "r9d", PAGE_RW),
+        I("call_mrip", iat("VirtualAlloc")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+        I("mov_rip_r64", ("p", "pe_obuf"), "rax"),
+        I("mov_rip_r64", ("p", "pe_ocur"), "rax"),
+        # ---- read all of stdin into pe_buf (bounded) ----
+        I("xor_r32_r32", "r12d", "r12d"),
+        LBL("pe_rd"),
+        I("mov_r64_imm", "rax", PE_BUNDLE_CAP),
+        I("sub_r64_r64", "rax", "r12"),
+        I("je_rel32", ("l", "exit3")),            # archive > cap
+        I("mov_r64_imm", "rcx", R.read_buf_bytes),
+        I("cmp_r64_r64", "rax", "rcx"), I("jbe_rel32", ("l", "pe_rdn")),
+        I("mov_r64_r64", "rax", "rcx"),
+        LBL("pe_rdn"),
+        I("mov_r64_rip", "rcx", ("p", "hin")),
+        I("mov_r64_rip", "rdx", ("p", "pe_buf")),
+        I("add_r64_r64", "rdx", "r12"),
+        I("mov_r64_r64", "r8", "rax"),
+        I("lea_r64_rip", "r9", ("p", "nread")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("ReadFile")),
+        # pipes report EOF as FALSE/ERROR_BROKEN_PIPE, files as
+        # nread==0 — either way the stream is done; an empty stream
+        # falls through to the header check and refuses there
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "pe_rdd")),
+        LBL("pe_rdok"),
+        I("mov_r64_rip", "rax", ("p", "nread")),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "pe_rdd")),
+        I("add_r64_r64", "r12", "rax"),
+        I("jmp_rel32", ("l", "pe_rd")),
+        LBL("pe_rdd"),
+        I("mov_rip_r64", ("p", "pe_len"), "r12"),
+        # ---- header: magic / version / nsec / hsize ----
+        I("cmp_r64_imm", "r12", PLEX_HEADER), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "r13", ("p", "pe_buf")),
+        I("mov_r32_m32", "eax", ("m", "r13", 0)),
+        I("mov_r32_imm32", "ecx", PLEX_MAGIC), I("cmp_r64_r64", "rax", "rcx"),
+        I("jne_rel32", ("l", "exit3")),
+        I("movzx_r32_m8", "eax", ("m", "r13", 4)),
+        I("cmp_r64_imm", "rax", PLEX_VERSION), I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "ecx", ("m", "r13", 8)),
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r13", 6)),
+        I("and_r64_imm", "rax", 0xFFFF),
+        I("mov_r64_r64", "r13", "rax"),          # hsize
+        I("mov_r64_r64", "r14", "rcx"), I("shl_r64_imm8", "r14", 5),
+        I("lea_r64_m64", "rax", ("m", "r14", PLEX_HEADER)),
+        I("cmp_r64_r64", "r13", "rax"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rax", "r13"), I("and_r64_imm", "rax", 7),
+        I("jne_rel32", ("l", "exit3")),
+        I("cmp_r64_r64", "r12", "r13"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "r15", "rcx"),          # nsec
+        # ---- directory walk: validate rows, cache kind-indexed spans ----
+        I("mov_r64_rip", "r12", ("p", "pe_buf")),
+        I("add_r64_imm", "r12", PLEX_HEADER),
+        LBL("pe_drow"),
+        I("movzx_r32_m8", "eax", ("m", "r12", 0)),
+        I("cmp_r64_imm", "rax", 1), I("je_rel32", ("l", "pe_dt")),
+        I("cmp_r64_imm", "rax", 4), I("je_rel32", ("l", "pe_dt")),
+        I("cmp_r64_imm", "rax", 8), I("jne_rel32", ("l", "exit3")),
+        LBL("pe_dt"),
+        I("mov_r64_r64", "r8", "rax"),
+        I("movzx_r32_m8", "ecx", ("m", "r12", 1)),
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "exit3")),
+        I("cmp_r64_imm", "r8", 4), I("je_rel32", ("l", "pe_dm4")),
+        I("cmp_r64_imm", "r8", 8), I("je_rel32", ("l", "pe_dm8")),
+        I("jmp_rel32", ("l", "pe_dms")),
+        LBL("pe_dm4"), I("shl_r64_imm8", "rcx", 2),
+        I("jmp_rel32", ("l", "pe_dms")),
+        LBL("pe_dm8"), I("shl_r64_imm8", "rcx", 3),
+        LBL("pe_dms"),
+        I("mov_r64_m64", "rax", ("m", "r12", 16)),
+        I("xor_r32_r32", "edx", "edx"), I("div_r64", "rcx"),
+        I("test_r64_r64", "rdx", "rdx"), I("jne_rel32", ("l", "exit3")),
+        I("mov_r64_m64", "rsi", ("m", "r12", 24)),
+        I("cmp_r64_r64", "rax", "rsi"), I("jne_rel32", ("l", "exit3")),
+        I("mov_r64_m64", "rax", ("m", "r12", 8)),      # off
+        I("mov_r64_r64", "rdx", "rax"), I("and_r64_imm", "rdx", 7),
+        I("jne_rel32", ("l", "exit3")),
+        I("cmp_r64_r64", "rax", "r13"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_m64", "rdx", ("m", "r12", 16)),     # len
+        I("add_r64_r64", "rdx", "rax"),
+        I("mov_r64_rip", "rcx", ("p", "pe_len")),
+        I("cmp_r64_r64", "rcx", "rdx"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "edi", ("m", "r12", 2)),
+        I("and_r64_imm", "rdi", 0xFFFF),               # kind
+        I("cmp_r64_imm", "rdi", 16), I("jge_rel32", ("l", "pe_dn")),
+        I("mov_r64_r64", "rdx", "rdi"), I("shl_r64_imm8", "rdx", 4),
+        I("lea_r64_rip", "rcx", ("p", "pe_secs")),
+        I("add_r64_r64", "rdx", "rcx"),
+        I("cmp_m64_imm", ("m", "rdx", 0), 0), I("jne_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rcx", ("p", "pe_buf")),
+        I("add_r64_r64", "rcx", "rax"),
+        I("mov_m64_r64", ("m", "rdx", 0), "rcx"),      # abs payload ptr
+        I("mov_r64_m64", "rcx", ("m", "r12", 16)),
+        I("mov_m64_r64", ("m", "rdx", 8), "rcx"),      # len
+        I("cmp_r64_imm", "rdi", PLEX_KIND_STAGES),
+        I("jne_rel32", ("l", "pe_dn")),
+        I("mov_r64_m64", "rcx", ("m", "r12", 24)),     # rows = nstages
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_imm", "rax", PE_MAX_STAGES),
+        I("cmp_r64_r64", "rax", "rcx"), I("jl_rel32", ("l", "exit3")),
+        I("mov_rip_r64", ("p", "pe_nst"), "rcx"),
+        LBL("pe_dn"),
+        I("add_r64_imm", "r12", PLEX_DIR_ENT),
+        I("dec_r64", "r15"), I("jne_rel32", ("l", "pe_drow")),
+        # required sections: STRINGS, STAGES, QUERIES, BYTES
+        I("lea_r64_rip", "r10", ("p", "pe_secs")),
+        I("cmp_m64_imm", ("m", "r10", PLEX_KIND_STRINGS * 16), 0),
+        I("je_rel32", ("l", "exit3")),
+        I("cmp_m64_imm", ("m", "r10", PLEX_KIND_STAGES * 16), 0),
+        I("je_rel32", ("l", "exit3")),
+        I("cmp_m64_imm", ("m", "r10", PLEX_KIND_QUERIES * 16), 0),
+        I("je_rel32", ("l", "exit3")),
+        I("cmp_m64_imm", ("m", "r10", PLEX_KIND_BYTES * 16), 0),
+        I("je_rel32", ("l", "exit3")),
+        # STRINGS span -> named slots (refs resolve against it)
+        I("mov_r64_m64", "rax", ("m", "r10", PLEX_KIND_STRINGS * 16)),
+        I("mov_rip_r64", ("p", "pe_str"), "rax"),
+        I("mov_r64_m64", "rax", ("m", "r10", PLEX_KIND_STRINGS * 16 + 8)),
+        I("mov_rip_r64", ("p", "pe_strl"), "rax"),
+        # ---- REALIZATION: dialect must claim "plex.emit/2" ----
+        I("mov_r64_m64", "r12", ("m", "r10", PLEX_KIND_REALIZATION * 16)),
+        I("mov_r64_m64", "r14", ("m", "r10", PLEX_KIND_REALIZATION * 16 + 8)),
+        I("test_r64_r64", "r12", "r12"), I("je_rel32", ("l", "exit3")),
+        LBL("pe_kvloop"),
+        I("test_r64_r64", "r14", "r14"), I("je_rel32", ("l", "exit3")),
+        # key ref (off,len) == "dialect"?
+        I("mov_r64_m64", "r8", ("m", "r12", 0)),
+        I("mov_r64_m64", "r9", ("m", "r12", 8)),
+        I("cmp_r64_imm", "r9", 7), I("jne_rel32", ("l", "pe_kvn")),
+        I("mov_r64_r64", "rax", "r8"), I("add_r64_imm", "rax", 7),
+        I("mov_r64_rip", "rcx", ("p", "pe_strl")),
+        I("cmp_r64_r64", "rcx", "rax"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "pe_str")), I("add_r64_r64", "rax", "r8"),
+        I("mov_r32_m32", "ecx", ("m", "rax", 0)),        # "dial"
+        I("mov_r32_imm32", "edx", int.from_bytes(b"dial", "little")),
+        I("cmp_r64_r64", "rcx", "rdx"), I("jne_rel32", ("l", "pe_kvn")),
+        I("mov_r32_m32", "ecx", ("m", "rax", 3)),        # "lect"
+        I("mov_r32_imm32", "edx", int.from_bytes(b"lect", "little")),
+        I("cmp_r64_r64", "rcx", "rdx"), I("jne_rel32", ("l", "pe_kvn")),
+        # key matches -> value must be "plex.emit/2"
+        I("mov_r64_m64", "r8", ("m", "r12", 16)),
+        I("mov_r64_m64", "r9", ("m", "r12", 24)),
+        *_eq_lit("r8", "r9", b"plex.emit/2", "exit3", "pe_kvd"),
+        LBL("pe_kvd"),
+        I("jmp_rel32", ("l", "pe_kvout")),
+        LBL("pe_kvn"),
+        I("add_r64_imm", "r12", PE_SEC_KV_ROW),
+        I("sub_r64_imm", "r14", PE_SEC_KV_ROW), I("jmp_rel32", ("l", "pe_kvloop")),
+        LBL("pe_kvout"),
+        # ---- schedule.output -> value ref (pe_ov/pe_ovl, pe_ovf set) ----
+        I("lea_r64_rip", "r10", ("p", "pe_secs")),
+        I("mov_r64_m64", "r12", ("m", "r10", PLEX_KIND_REALIZATION * 16)),
+        I("mov_r64_m64", "r14", ("m", "r10", PLEX_KIND_REALIZATION * 16 + 8)),
+        LBL("pe_ovloop"),
+        I("test_r64_r64", "r14", "r14"), I("je_rel32", ("l", "pe_ovdef")),
+        I("mov_r64_m64", "r8", ("m", "r12", 0)),
+        I("mov_r64_m64", "r9", ("m", "r12", 8)),
+        *_eq_lit("r8", "r9", b"schedule.output", "pe_ovn", "pe_ovhit"),
+        LBL("pe_ovhit"),
+        I("mov_r64_m64", "rax", ("m", "r12", 16)),
+        I("mov_rip_r64", ("p", "pe_ov"), "rax"),
+        I("mov_r64_m64", "rax", ("m", "r12", 24)),
+        I("mov_rip_r64", ("p", "pe_ovl"), "rax"),
+        I("mov_r64_imm", "rax", 1),
+        I("mov_rip_r64", ("p", "pe_ovf"), "rax"),
+        I("jmp_rel32", ("l", "pe_ovdef")),
+        LBL("pe_ovn"),
+        I("add_r64_imm", "r12", PE_SEC_KV_ROW),
+        I("sub_r64_imm", "r14", PE_SEC_KV_ROW),
+        I("jmp_rel32", ("l", "pe_ovloop")),
+        LBL("pe_ovdef"),
+        # ---- find output stage: stage name == schedule.output ----
+        *_sec(PLEX_KIND_STAGES),
+        I("mov_r64_r64", "r12", "rax"),            # stage rows base
+        I("xor_r32_r32", "r15d", "r15d"),          # i
+        LBL("pe_osloop"),
+        I("mov_r64_rip", "rax", ("p", "pe_nst")),
+        I("cmp_r64_r64", "r15", "rax"), I("jge_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rax", "r15"),            # row = base + i*48
+        I("add_r64_r64", "rax", "rax"),
+        I("add_r64_r64", "rax", "r15"),
+        I("shl_r64_imm8", "rax", 4),
+        I("add_r64_r64", "rax", "r12"),
+        I("mov_r64_m64", "r8", ("m", "rax", 0)),   # name (off,len)
+        I("mov_r64_m64", "r9", ("m", "rax", 8)),
+        # bound the ref before any compare
+        I("mov_r64_r64", "rcx", "r8"), I("add_r64_r64", "rcx", "r9"),
+        I("mov_r64_rip", "rdx", ("p", "pe_strl")),
+        I("cmp_r64_r64", "rdx", "rcx"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "pe_ovf")),
+        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "pe_ovcmp")),
+        *_eq_lit("r8", "r9", b"emit.pack", "pe_osnext", "pe_osfound"),
+        LBL("pe_ovcmp"),
+        # byte-compare name vs pe_str[pe_ov : pe_ov+pe_ovl]
+        I("mov_r64_rip", "rax", ("p", "pe_ovl")),
+        I("cmp_r64_r64", "r9", "rax"), I("jne_rel32", ("l", "pe_osnext")),
+        I("mov_r64_rip", "rax", ("p", "pe_ov")),
+        I("add_r64_r64", "rax", "r9"),             # voff+vlen bound
+        I("mov_r64_rip", "rcx", ("p", "pe_strl")),
+        I("cmp_r64_r64", "rcx", "rax"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rsi", ("p", "pe_str")), I("add_r64_r64", "rsi", "r8"),
+        I("mov_r64_rip", "rdi", ("p", "pe_str")),
+        I("mov_r64_rip", "rax", ("p", "pe_ov")), I("add_r64_r64", "rdi", "rax"),
+        I("mov_r64_r64", "rcx", "r9"),
+        LBL("pe_ovbl"),
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "pe_osfound")),
+        I("movzx_r32_m8", "eax", ("m", "rsi", 0)),
+        I("movzx_r32_m8", "edx", ("m", "rdi", 0)),
+        I("cmp_r64_r64", "rax", "rdx"), I("jne_rel32", ("l", "pe_osnext")),
+        I("inc_r64", "rsi"), I("inc_r64", "rdi"), I("dec_r64", "rcx"),
+        I("jmp_rel32", ("l", "pe_ovbl")),
+        LBL("pe_osnext"),
+        I("inc_r64", "r15"), I("jmp_rel32", ("l", "pe_osloop")),
+        LBL("pe_osfound"),
+        I("mov_rip_r64", ("p", "pe_out"), "r15"),
+        # ---- dep closure: need[out]=1, fixpoint over DEPS rows ----
+        *_flag("pe_need", "r15"),
+        I("mov_m8_imm8", ("m", "r10", 0), 1),
+        LBL("pe_fp"),
+        *_sec(PLEX_KIND_DEPS),
+        I("mov_r64_r64", "r12", "rax"),            # dep rows cursor
+        I("mov_r64_r64", "r13", "rdx"),            # dep bytes remaining
+        I("xor_r32_r32", "r15d", "r15d"),          # changed flag
+        LBL("pe_fpl"),
+        I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "pe_fpd")),
+        I("mov_r32_m32", "eax", ("m", "r12", 0)),  # a (dependent)
+        I("mov_r32_m32", "ecx", ("m", "r12", 4)),  # d (prereq)
+        I("mov_r64_rip", "rdx", ("p", "pe_nst")),
+        I("cmp_r64_r64", "rax", "rdx"), I("jge_rel32", ("l", "exit3")),
+        I("cmp_r64_r64", "rcx", "rdx"), I("jge_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "r8", "rcx"),             # keep d
+        *_flag("pe_need", "rax"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "pe_fpn")),
+        *_flag("pe_need", "r8"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "pe_fpn")),
+        I("mov_m8_imm8", ("m", "r10", 0), 1),
+        I("mov_r64_imm", "r15", 1),
+        LBL("pe_fpn"),
+        I("add_r64_imm", "r12", PE_SEC_DEP_ROW),
+        I("sub_r64_imm", "r13", PE_SEC_DEP_ROW),
+        I("jmp_rel32", ("l", "pe_fpl")),
+        LBL("pe_fpd"),
+        I("test_r64_r64", "r15", "r15"), I("jne_rel32", ("l", "pe_fp")),
+        # ---- structural pre-pass: every needed stage has >=1 stream ----
+        I("xor_r32_r32", "r15d", "r15d"),
+        LBL("pe_pp"),
+        I("mov_r64_rip", "rax", ("p", "pe_nst")),
+        I("cmp_r64_r64", "r15", "rax"), I("jge_rel32", ("l", "pe_ppd")),
+        *_flag("pe_need", "r15"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "pe_ppn")),
+        *_sec(PLEX_KIND_QUERIES),
+        I("mov_r64_r64", "r12", "rax"), I("mov_r64_r64", "r13", "rdx"),
+        LBL("pe_ppq"),
+        I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r12", 0)),
+        I("cmp_r64_r64", "rax", "r15"), I("je_rel32", ("l", "pe_ppn")),
+        I("add_r64_imm", "r12", PE_SEC_QRY_ROW),
+        I("sub_r64_imm", "r13", PE_SEC_QRY_ROW),
+        I("jmp_rel32", ("l", "pe_ppq")),
+        LBL("pe_ppn"),
+        I("inc_r64", "r15"), I("jmp_rel32", ("l", "pe_pp")),
+        LBL("pe_ppd"),
+        # ---- stage loop (loop state in .data — the pipeline clobbers
+        # registers).  pe_si = stage cursor. ----
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "pe_si"), "rax"),
+        LBL("pe_sloop"),
+        I("mov_r64_rip", "r15", ("p", "pe_si")),
+        I("mov_r64_rip", "rax", ("p", "pe_nst")),
+        I("cmp_r64_r64", "r15", "rax"), I("jge_rel32", ("l", "pe_out_sp")),
+        *_flag("pe_need", "r15"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "pe_sadv")),
+        # deps of this stage must be done already (declared order is
+        # topological; a cycle or forward dep can never satisfy this)
+        *_sec(PLEX_KIND_DEPS),
+        I("mov_r64_r64", "r12", "rax"), I("mov_r64_r64", "r13", "rdx"),
+        LBL("pe_ddep"),
+        I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "pe_ddeps")),
+        I("mov_r32_m32", "eax", ("m", "r12", 0)),
+        I("cmp_r64_r64", "rax", "r15"), I("jne_rel32", ("l", "pe_ddepn")),
+        I("mov_r32_m32", "ecx", ("m", "r12", 4)),
+        *_flag("pe_sdone", "rcx"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        LBL("pe_ddepn"),
+        I("add_r64_imm", "r12", PE_SEC_DEP_ROW),
+        I("sub_r64_imm", "r13", PE_SEC_DEP_ROW),
+        I("jmp_rel32", ("l", "pe_ddep")),
+        LBL("pe_ddeps"),
+        # find this stage's query row — exactly one (dup -> refuse)
+        *_sec(PLEX_KIND_QUERIES),
+        I("mov_r64_r64", "r12", "rax"), I("mov_r64_r64", "r13", "rdx"),
+        I("xor_r32_r32", "r14d", "r14d"),          # matched ptr or 0
+        LBL("pe_qscan"),
+        I("test_r64_r64", "r13", "r13"), I("je_rel32", ("l", "pe_qdone")),
+        I("mov_r32_m32", "eax", ("m", "r12", 0)),
+        I("cmp_r64_r64", "rax", "r15"), I("jne_rel32", ("l", "pe_qnext")),
+        I("test_r64_r64", "r14", "r14"), I("jne_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "r14", "r12"),
+        LBL("pe_qnext"),
+        I("add_r64_imm", "r12", PE_SEC_QRY_ROW),
+        I("sub_r64_imm", "r13", PE_SEC_QRY_ROW),
+        I("jmp_rel32", ("l", "pe_qscan")),
+        LBL("pe_qdone"),
+        I("test_r64_r64", "r14", "r14"), I("je_rel32", ("l", "exit3")),
+        # stage row base -> rsi ; name ref -> r8/r9 ; runner -> r12/r13
+        I("mov_r64_r64", "rax", "r15"),
+        I("add_r64_r64", "rax", "rax"), I("add_r64_r64", "rax", "r15"),
+        I("shl_r64_imm8", "rax", 4),
+        # rsi = stages payload + i*48 (pe_secs[2].ptr)
+        I("lea_r64_rip", "r10", ("p", "pe_secs")),
+        I("mov_r64_m64", "rsi", ("m", "r10", PLEX_KIND_STAGES * 16)),
+        I("add_r64_r64", "rsi", "rax"),
+        I("mov_r64_m64", "r8", ("m", "rsi", 0)),
+        I("mov_r64_m64", "r9", ("m", "rsi", 8)),
+        I("mov_r64_m64", "r12", ("m", "rsi", 32)),  # runner ref
+        I("mov_r64_m64", "r13", ("m", "rsi", 40)),
+        # runner == "exe.bytes" -> pe_eval=0 else eval-only
+        *_eq_lit("r12", "r13", b"exe.bytes", "pe_ev1", "pe_ev0"),
+        LBL("pe_ev0"),
+        I("xor_r32_r32", "eax", "eax"),
+        I("jmp_rel32", ("l", "pe_evs")),
+        LBL("pe_ev1"),
+        I("mov_r64_imm", "rax", 1),
+        LBL("pe_evs"),
+        I("mov_rip_r64", ("p", "pe_eval"), "rax"),
+        # pool select: name == "emit.term" -> PIR else BYTES
+        *_eq_lit("r8", "r9", b"emit.term", "pe_poolb", "pe_poolp"),
+        LBL("pe_poolp"),
+        *_sec(PLEX_KIND_PIR), I("jmp_rel32", ("l", "pe_pools")),
+        LBL("pe_poolb"),
+        *_sec(PLEX_KIND_BYTES),
+        LBL("pe_pools"),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "r8", "rax"),             # pool base
+        I("mov_r64_r64", "r9", "rdx"),             # pool len
+        # parse the blob token "off:len" (query row r3/r4)
+        I("mov_r64_m64", "rax", ("m", "r14", 24)), # tok off
+        I("mov_r64_m64", "rcx", ("m", "r14", 32)), # tok len
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "exit3")),
+        I("add_r64_r64", "rax", "rcx"),
+        I("mov_r64_rip", "rdx", ("p", "pe_strl")),
+        I("cmp_r64_r64", "rdx", "rax"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rsi", ("p", "pe_str")),
+        I("mov_r64_m64", "rax", ("m", "r14", 24)),
+        I("add_r64_r64", "rsi", "rax"),            # rsi = tok chars
+        # r10=off acc, r11=len acc, rdi=colon flag, rcx=chars left
+        I("xor_r32_r32", "r10d", "r10d"),
+        I("xor_r32_r32", "r11d", "r11d"),
+        I("xor_r32_r32", "edi", "edi"),
+        LBL("pe_tok"),
+        I("test_r64_r64", "rcx", "rcx"), I("je_rel32", ("l", "pe_tokd")),
+        I("movzx_r32_m8", "eax", ("m", "rsi", 0)),
+        I("cmp_r64_imm", "rax", 0x3A),             # ':'
+        I("jne_rel32", ("l", "pe_tokn")),
+        I("test_r64_r64", "rdi", "rdi"), I("jne_rel32", ("l", "exit3")),
+        I("mov_r64_imm", "rdi", 1),
+        I("jmp_rel32", ("l", "pe_tokc")),
+        LBL("pe_tokn"),
+        I("sub_r64_imm", "rax", 0x30),
+        I("cmp_r64_imm", "rax", 9), I("jbe_rel32", ("l", "pe_tokd9")),
+        I("jmp_rel32", ("l", "exit3")),
+        LBL("pe_tokd9"),
+        I("test_r64_r64", "rdi", "rdi"), I("jne_rel32", ("l", "pe_tokl")),
+        # r10 = r10*10 + digit (overflow guard at 2^60)
+        I("mov_r64_imm", "rdx", 1 << 60),
+        I("cmp_r64_r64", "r10", "rdx"), I("jge_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rdx", "r10"), I("shl_r64_imm8", "rdx", 3),
+        I("add_r64_r64", "rdx", "r10"), I("add_r64_r64", "rdx", "r10"),
+        I("add_r64_r64", "rdx", "rax"), I("mov_r64_r64", "r10", "rdx"),
+        I("jmp_rel32", ("l", "pe_tokc")),
+        LBL("pe_tokl"),
+        I("mov_r64_imm", "rdx", 1 << 60),
+        I("cmp_r64_r64", "r11", "rdx"), I("jge_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rdx", "r11"), I("shl_r64_imm8", "rdx", 3),
+        I("add_r64_r64", "rdx", "r11"), I("add_r64_r64", "rdx", "r11"),
+        I("add_r64_r64", "rdx", "rax"), I("mov_r64_r64", "r11", "rdx"),
+        LBL("pe_tokc"),
+        I("inc_r64", "rsi"), I("dec_r64", "rcx"),
+        I("jmp_rel32", ("l", "pe_tok")),
+        LBL("pe_tokd"),
+        I("test_r64_r64", "rdi", "rdi"), I("je_rel32", ("l", "exit3")),
+        # span bounds: r10 + r11 <= pool len (r9)
+        I("cmp_r64_r64", "r9", "r10"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rax", "r9"), I("sub_r64_r64", "rax", "r10"),
+        I("cmp_r64_r64", "rax", "r11"), I("jl_rel32", ("l", "exit3")),
+        I("add_r64_r64", "r8", "r10"),             # r8 = span base
+        # ---- stream header validate (mirror ir_sloop) ----
+        I("cmp_r64_imm", "r11", 16), I("jl_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r8", 0)),
+        I("mov_r32_imm32", "ecx", IR_MAGIC), I("cmp_r64_r64", "rax", "rcx"),
+        I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r8", 4)),
+        I("cmp_r64_imm", "rax", IR_VERSION), I("jne_rel32", ("l", "exit3")),
+        I("mov_r32_m32", "eax", ("m", "r8", 8)),
+        I("cmp_r64_imm", "rax", 0x7FFFFFFF), I("jge_rel32", ("l", "exit3")),
+        I("mov_rip_r64", ("p", "irnodes"), "rax"),
+        I("mov_r32_m32", "ecx", ("m", "r8", 12)),
+        I("cmp_r64_imm", "rcx", 0x7FFFFFFF), I("jge_rel32", ("l", "exit3")),
+        I("mov_rip_r64", ("p", "irnroots"), "rcx"),
+        # span must be exactly 16 + 4*nr + 9*nn — no trailing stream
+        I("mov_r64_r64", "rdx", "rax"), I("shl_r64_imm8", "rax", 3),
+        I("add_r64_r64", "rax", "rdx"),            # 9*nn
+        I("shl_r64_imm8", "rcx", 2), I("add_r64_r64", "rax", "rcx"),
+        I("add_r64_imm", "rax", 16),
+        I("cmp_r64_r64", "rax", "r11"), I("jne_rel32", ("l", "exit3")),
+        I("add_r64_imm", "r8", 16),
+        I("mov_rip_r64", ("p", "irbuf"), "r8"),
+        # frame-index base for this stage; stabv marks bytes egress
+        I("mov_r64_r64", "rax", "r15"),
+        I("shl_r64_imm8", "rax", 4),
+        I("lea_r64_rip", "rcx", ("p", "pe_stab")), I("add_r64_r64", "rcx", "rax"),
+        I("mov_r64_rip", "rax", ("p", "fr_icur")),
+        I("mov_m64_r64", ("m", "rcx", 0), "rax"),
+        *_flag("pe_sdone", "r15"),
+        I("mov_m8_imm8", ("m", "r10", 0), 1),
+        # run the stream: depack -> per-root reduce (+store) -> pe_snext
+        I("jmp_rel32", ("l", "ir_depack")),
+        # ---- stage done (ir_bdone returns here) ----
+        LBL("pe_snext"),
+        I("mov_r64_rip", "r15", ("p", "pe_si")),
+        I("mov_r64_r64", "rax", "r15"), I("shl_r64_imm8", "rax", 4),
+        I("lea_r64_rip", "rcx", ("p", "pe_stab")), I("add_r64_r64", "rcx", "rax"),
+        I("mov_r64_rip", "rax", ("p", "fr_icur")),
+        I("mov_r64_m64", "rdx", ("m", "rcx", 0)),
+        I("sub_r64_r64", "rax", "rdx"),
+        I("xor_r32_r32", "edx", "edx"),
+        I("mov_r64_imm", "rcx", 16), I("div_r64", "rcx"),
+        I("mov_r64_r64", "rdx", "rax"),
+        I("mov_r64_rip", "rax", ("p", "pe_si")),
+        I("shl_r64_imm8", "rax", 4),
+        I("lea_r64_rip", "rcx", ("p", "pe_stab")), I("add_r64_r64", "rcx", "rax"),
+        I("mov_m64_r64", ("m", "rcx", 8), "rdx"),
+        I("mov_r64_rip", "rax", ("p", "pe_eval")),
+        I("test_r64_r64", "rax", "rax"), I("jne_rel32", ("l", "pe_sn")),
+        *_flag("pe_stabv", "r15"),
+        I("mov_m8_imm8", ("m", "r10", 0), 1),
+        LBL("pe_sn"),
+        LBL("pe_sadv"),
+        I("inc_r64", "r15"), I("mov_rip_r64", ("p", "pe_si"), "r15"),
+        I("jmp_rel32", ("l", "pe_sloop")),
+        # ---- MAP-declared output assembly ----
+        LBL("pe_out_sp"),
+        I("mov_r64_rip", "rax", ("p", "pe_out")),
+        *_flag("pe_stabv", "rax"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "pe_out")), I("shl_r64_imm8", "rax", 4),
+        I("lea_r64_rip", "rcx", ("p", "pe_stab")), I("add_r64_r64", "rcx", "rax"),
+        I("mov_r64_m64", "r12", ("m", "rcx", 0)),  # obase
+        I("mov_r64_m64", "r13", ("m", "rcx", 8)),  # ocnt
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "pe_cur"), "rax"),
+        *_sec(PLEX_KIND_MAP),
+        I("mov_r64_r64", "r14", "rax"),            # map cursor
+        I("mov_r64_r64", "r15", "rdx"),            # map bytes left
+        LBL("pe_mloop"),
+        I("test_r64_r64", "r15", "r15"), I("je_rel32", ("l", "pe_mtail")),
+        I("mov_r32_m32", "eax", ("m", "r14", 0)),  # stage
+        I("mov_r64_rip", "rcx", ("p", "pe_out")),
+        I("cmp_r64_r64", "rax", "rcx"), I("jne_rel32", ("l", "pe_mnext")),
+        I("mov_r32_m32", "r8d", ("m", "r14", 4)),  # at
+        I("mov_r32_m32", "r9d", ("m", "r14", 8)),  # src
+        I("cmp_r64_r64", "r13", "r8"), I("jl_rel32", ("l", "exit3")),
+        I("mov_r64_rip", "rax", ("p", "pe_cur")),
+        I("cmp_r64_r64", "r8", "rax"), I("jl_rel32", ("l", "exit3")),
+        # own frames [pe_cur, at) -> image
+        LBL("pe_own"),
+        I("mov_r64_rip", "rax", ("p", "pe_cur")),
+        I("cmp_r64_r64", "rax", "r8"), I("jge_rel32", ("l", "pe_ownd")),
+        I("shl_r64_imm8", "rax", 4), I("add_r64_r64", "rax", "r12"),
+        I("mov_r64_m64", "r10", ("m", "rax", 0)),
+        I("mov_r64_m64", "r11", ("m", "rax", 8)),
+        I("call_rel32", ("l", "pe_copy")),
+        I("mov_r64_rip", "rax", ("p", "pe_cur")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "pe_cur"), "rax"),
+        I("jmp_rel32", ("l", "pe_own")),
+        LBL("pe_ownd"),
+        I("mov_rip_r64", ("p", "pe_cur"), "r8"),
+        # sf is re-read here — pe_copy inside pe_own clobbers rdi
+        I("mov_r32_m32", "edi", ("m", "r14", 12)),
+        # src stage: in closure, produced byte frames
+        I("mov_r64_rip", "rax", ("p", "pe_nst")),
+        I("cmp_r64_r64", "r9", "rax"), I("jge_rel32", ("l", "exit3")),
+        *_flag("pe_need", "r9"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        *_flag("pe_stabv", "r9"),
+        I("movzx_r32_m8", "eax", ("m", "r10", 0)),
+        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
+        I("mov_r64_r64", "rax", "r9"), I("shl_r64_imm8", "rax", 4),
+        I("lea_r64_rip", "rcx", ("p", "pe_stab")), I("add_r64_r64", "rcx", "rax"),
+        I("mov_r64_m64", "rsi", ("m", "rcx", 0)),  # src idx base
+        I("mov_r64_m64", "rax", ("m", "rcx", 8)),  # src count
+        I("mov_rip_r64", ("p", "pe_sbase"), "rsi"),
+        I("mov_rip_r64", ("p", "pe_scnt"), "rax"),
+        # sf == MAP_ALL (u32 max) -> whole-stream splice; an imm32
+        # cmp would sign-extend — compare against the imm64
+        I("mov_r64_imm", "rcx", 0xFFFFFFFF),
+        I("cmp_r64_r64", "rdi", "rcx"),
+        I("je_rel32", ("l", "pe_mall")),
+        I("cmp_r64_r64", "rdi", "rax"), I("jge_rel32", ("l", "exit3")),
+        # single frame sf
+        I("shl_r64_imm8", "rdi", 4), I("add_r64_r64", "rdi", "rsi"),
+        I("mov_r64_m64", "r10", ("m", "rdi", 0)),
+        I("mov_r64_m64", "r11", ("m", "rdi", 8)),
+        I("call_rel32", ("l", "pe_copy")),
+        I("jmp_rel32", ("l", "pe_mnext")),
+        # whole-stream splice: frames 0..scnt-1 (pe_copy clobbers
+        # caller regs — loop state lives in slots)
+        LBL("pe_mall"),
+        I("xor_r32_r32", "eax", "eax"),
+        I("mov_rip_r64", ("p", "pe_mf"), "rax"),
+        LBL("pe_mall_l"),
+        I("mov_r64_rip", "rax", ("p", "pe_mf")),
+        I("mov_r64_rip", "rcx", ("p", "pe_scnt")),
+        I("cmp_r64_r64", "rax", "rcx"), I("jge_rel32", ("l", "pe_mnext")),
+        I("shl_r64_imm8", "rax", 4),
+        I("mov_r64_rip", "rdx", ("p", "pe_sbase")),
+        I("add_r64_r64", "rdx", "rax"),
+        I("mov_r64_m64", "r10", ("m", "rdx", 0)),
+        I("mov_r64_m64", "r11", ("m", "rdx", 8)),
+        I("call_rel32", ("l", "pe_copy")),
+        I("mov_r64_rip", "rax", ("p", "pe_mf")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "pe_mf"), "rax"),
+        I("jmp_rel32", ("l", "pe_mall_l")),
+        LBL("pe_mnext"),
+        I("add_r64_imm", "r14", PE_SEC_MAP_ROW),
+        I("sub_r64_imm", "r15", PE_SEC_MAP_ROW),
+        I("jmp_rel32", ("l", "pe_mloop")),
+        # own tail frames
+        LBL("pe_mtail"),
+        LBL("pe_own2"),
+        I("mov_r64_rip", "rax", ("p", "pe_cur")),
+        I("cmp_r64_r64", "rax", "r13"), I("jge_rel32", ("l", "pe_emit")),
+        I("shl_r64_imm8", "rax", 4), I("add_r64_r64", "rax", "r12"),
+        I("mov_r64_m64", "r10", ("m", "rax", 0)),
+        I("mov_r64_m64", "r11", ("m", "rax", 8)),
+        I("call_rel32", ("l", "pe_copy")),
+        I("mov_r64_rip", "rax", ("p", "pe_cur")), I("inc_r64", "rax"),
+        I("mov_rip_r64", ("p", "pe_cur"), "rax"),
+        I("jmp_rel32", ("l", "pe_own2")),
+        # ---- emit the image as one [u32le len][bytes] frame ----
+        LBL("pe_emit"),
+        I("mov_r64_rip", "rax", ("p", "pe_ocur")),
+        I("mov_r64_rip", "rcx", ("p", "pe_obuf")),
+        I("sub_r64_r64", "rax", "rcx"),
+        I("mov_rip_r64", ("p", "pe_olen"), "rax"),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("lea_r64_rip", "rdx", ("p", "pe_olen")),
+        I("mov_r32_imm32", "r8d", 4),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        I("mov_r64_rip", "rcx", ("p", "hout")),
+        I("mov_r64_rip", "rdx", ("p", "pe_obuf")),
+        I("mov_r64_rip", "r8", ("p", "pe_olen")),
+        I("lea_r64_rip", "r9", ("p", "nw")),
+        I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
+        I("call_mrip", iat("WriteFile")),
+        I("jmp_rel32", ("l", "ir_sdone")),
+        # ---- pe_copy(r10=src, r11=len): append to pe_obuf at pe_ocur
+        # clobbers rax,rcx,rsi,rdi — callers keep live state in .data ----
+        LBL("pe_copy"),
+        I("mov_r64_rip", "rdi", ("p", "pe_ocur")),
+        I("mov_r64_rip", "rax", ("p", "pe_obuf")),
+        I("add_r64_imm", "rax", PE_OUT_BYTES),
+        I("mov_r64_r64", "rcx", "rdi"), I("add_r64_r64", "rcx", "r11"),
+        I("cmp_r64_r64", "rax", "rcx"), I("jl_rel32", ("l", "exit5")),
+        I("mov_r64_r64", "rsi", "r10"),
+        I("mov_r64_r64", "rcx", "r11"),
+        I("rep_movsb"),
+        I("mov_rip_r64", ("p", "pe_ocur"), "rdi"),
+        I("ret"),
+    ]
+    return p
+
+
 def r_ir_read(R: Realization, ctx: Ctx) -> Program:
     """ir_sloop: one packed-IR stream element per iteration — 16B header
     read-exactly (clean EOF -> ir_sdone, partial -> exit3), then the
@@ -2212,15 +3369,8 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rcx", ("p", "irroots")), I("add_r64_r64", "rax", "rcx"),
         I("mov_r64_m64", "r12", ("m", "rax", 0)),
         I("xor_r32_r32", "r15d", "r15d"),
-        LBL("ir_rloop"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_red_done")),
-        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
-    ]
-    if R.fuel is not None:
-        p += [I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2"))]
-    p += [
-        I("jmp_rel32", ("l", "ir_rloop")),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "freduce")),
+        I("mov_r64_r64", "r12", "rax"),
         # ---- per-root output: NF line (term) or byte frame (bytes) ----
         LBL("ir_red_done"),
         I("mov_r64_rip", "rax", ("p", "irsteps")),
@@ -2230,7 +3380,18 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
     if R.io[1] == "bytes":
         # the kernel decodes the byte-list NF itself: one
         # [u32le len][bytes] frame per root, in root order
-        p += [I("call_rel32", ("l", "emit_bytes"))]
+        if R.dialect == "plex.emit":
+            # executor: frames append to the store; eval-only stages
+            # (exe.term/exe.ir runners) reduce without materializing
+            p += [
+                I("mov_r64_rip", "rax", ("p", "pe_eval")),
+                I("test_r64_r64", "rax", "rax"),
+                I("jne_rel32", ("l", "ir_nox")),
+                I("call_rel32", ("l", "emit_bytes")),
+                LBL("ir_nox"),
+            ]
+        else:
+            p += [I("call_rel32", ("l", "emit_bytes"))]
     elif R.io[1] == "ir":
         # the NF leaves the kernel as its own PIR blob: one
         # [u32le len][PIR] frame per root — a stage output that the
@@ -2264,14 +3425,27 @@ def r_ir_reduce(R: Realization, ctx: Ctx) -> Program:
         I("jmp_rel32", ("l", "ir_bloop")),
         # stream done: release its region, count it, next stream
         LBL("ir_bdone"),
-        I("mov_r64_rip", "rcx", ("p", "irbuf")),
-        I("xor_r32_r32", "edx", "edx"),
-        I("mov_r32_imm32", "r8d", MEM_RELEASE),
-        I("call_mrip", iat("VirtualFree")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
-        I("mov_r64_rip", "rax", ("p", "irnstreams")), I("inc_r64", "rax"),
-        I("mov_rip_r64", ("p", "irnstreams"), "rax"),
-        I("jmp_rel32", ("l", "ir_sloop")),
+    ]
+    if R.dialect == "plex.emit":
+        # executor: irbuf is a span of the in-memory bundle — not a
+        # VA region, nothing to free; return to pexec's stage loop
+        p += [
+            I("mov_r64_rip", "rax", ("p", "irnstreams")), I("inc_r64", "rax"),
+            I("mov_rip_r64", ("p", "irnstreams"), "rax"),
+            I("jmp_rel32", ("l", "pe_snext")),
+        ]
+    else:
+        p += [
+            I("mov_r64_rip", "rcx", ("p", "irbuf")),
+            I("xor_r32_r32", "edx", "edx"),
+            I("mov_r32_imm32", "r8d", MEM_RELEASE),
+            I("call_mrip", iat("VirtualFree")),
+            I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit4")),
+            I("mov_r64_rip", "rax", ("p", "irnstreams")), I("inc_r64", "rax"),
+            I("mov_rip_r64", ("p", "irnstreams"), "rax"),
+            I("jmp_rel32", ("l", "ir_sloop")),
+        ]
+    p += [
         LBL("ir_sdone"),
         I("mov_r64_rip", "rax", ("p", "irnstreams")),
         I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "exit3")),
@@ -2508,15 +3682,8 @@ def r_mt_worker(R: Realization, ctx: Ctx) -> Program:
         I("add_r64_r64", "rax", "rcx"),
         I("mov_r64_m64", "r12", ("m", "rax", 0)),
         I("xor_r32_r32", "r15d", "r15d"),
-        LBL("ir_rloop"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_red_done")),
-        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
-    ]
-    if R.fuel is not None:
-        p += [I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2"))]
-    p += [
-        I("jmp_rel32", ("l", "ir_rloop")),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "freduce")),
+        I("mov_r64_r64", "r12", "rax"),
         LBL("ir_red_done"),
         I("mov_r64_m64", "rax", ("m", "r10", MT_CTX["irsteps"])),
         I("add_r64_r64", "rax", "r15"),
@@ -2769,15 +3936,8 @@ def r_res_reduce(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "r12", ("p", "resarg")),
         LBL("res_rooted"),
         I("xor_r32_r32", "r15d", "r15d"),
-        LBL("ir_rloop"),
-        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "step")),
-        I("test_r64_r64", "rax", "rax"), I("je_rel32", ("l", "ir_red_done")),
-        I("mov_r64_r64", "r12", "rax"), I("inc_r64", "r15"),
-    ]
-    if R.fuel is not None:
-        p += [I("cmp_r64_imm", "r15", R.fuel), I("jge_rel32", ("l", "exit2"))]
-    p += [
-        I("jmp_rel32", ("l", "ir_rloop")),
+        I("mov_r64_r64", "rdi", "r12"), I("call_rel32", ("l", "freduce")),
+        I("mov_r64_r64", "r12", "rax"),
         LBL("ir_red_done"),
         I("mov_r64_rip", "rax", ("p", "irsteps")),
         I("add_r64_r64", "rax", "r15"),
@@ -3147,7 +4307,22 @@ def r_emit_bytes(R: Realization, ctx: Ctx) -> Program:
         I("mov_r64_rip", "rax", ("p", "eb_out")),
         I("mov_r64_r64", "rdx", "r14"), I("sub_r64_r64", "rdx", "rax"),
     ]
-    if R.threads > 1:
+    if R.dialect == "plex.emit":
+        # executor store-mode: the frame stays in the egress buffer —
+        # record (ptr,len) in fr_idx, advance the store cursor (eb_out
+        # doubles as it), bound the index region.  splice reads the
+        # entries later.
+        p += [
+            I("mov_r64_rip", "rcx", ("p", "fr_icur")),
+            I("mov_r64_rip", "rsi", ("p", "fr_ilim")),
+            I("cmp_r64_r64", "rcx", "rsi"), I("jge_rel32", ("l", "exit5")),
+            I("mov_m64_r64", ("m", "rcx", 0), "rax"),
+            I("mov_m64_r64", ("m", "rcx", 8), "rdx"),
+            I("add_r64_imm", "rcx", 16),
+            I("mov_rip_r64", ("p", "fr_icur"), "rcx"),
+            I("mov_rip_r64", ("p", "eb_out"), "r14"),
+        ]
+    elif R.threads > 1:
         # MT: append [u32 len][payload] to this thread's frame buffer —
         # the worker set eb_out = outcur+4, so the len slot is outcur
         # itself and the payload already sits where it belongs.
@@ -3404,7 +4579,7 @@ ROUTINES: Tuple[str, ...] = (
     "entry", "parse", "reduce", "stats", "exits",
     "grow_heap", "mkleaf", "mkapp", "mkapp_p", "mkstk", "repr",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
-    "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
+    "step_congr", "freduce", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
 
 # IR variant: same reducer core, different front end — no token parser,
@@ -3414,7 +4589,7 @@ ROUTINES_IR: Tuple[str, ...] = (
     "ir_entry", "ir_read", "ir_depack", "ir_reduce", "stats", "exits",
     "grow_heap_ir", "mkleaf", "mkapp", "mkapp_p", "repr",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
-    "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
+    "step_congr", "freduce", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
 
 # MT variant (R.threads>1): ir_reduce's per-root loop becomes
@@ -3426,7 +4601,7 @@ ROUTINES_IR_MT: Tuple[str, ...] = (
     "ir_entry", "ir_read", "ir_spawn", "stats", "exits", "mt_worker",
     "ir_depack", "grow_heap_ir", "mkleaf", "mkapp", "mkapp_p", "repr",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp",
-    "st_s", "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
+    "st_s", "step_congr", "freduce", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
 
 IMPORTS_IR: Tuple[str, ...] = IMPORTS + ("VirtualFree",)
@@ -3492,11 +4667,19 @@ def _slots_ei(R: Realization) -> tuple:
 _LEGS_IR: Tuple[layers.Leg, ...] = (
     layers.Leg("head",      None,      ("ir_entry",)),
     layers.Leg("container", "dialect", {
-        "pir":     layers.Impl(),
-        "plex.v3": layers.Impl(("plex_read",),
-                               slots=DATA_SLOTS_PX, slot_rank=20),
+        "pir":       layers.Impl(),
+        "plex.v3":   layers.Impl(("plex_read",),
+                                 slots=DATA_SLOTS_PX, slot_rank=20),
+        "plex.emit": layers.Impl(("pexec",),
+                                 slots=DATA_SLOTS_PE, slot_rank=20),
     }),
-    layers.Leg("encoding",  None,      ("ir_read",)),
+    layers.Leg("encoding",  "dialect", {
+        "pir":       layers.Impl(("ir_read",)),
+        "plex.v3":   layers.Impl(("ir_read",)),
+        # pexec IS the encoding under a schedule bundle: stage streams
+        # are archive spans, not stdin — no ir_sloop leg emitted
+        "plex.emit": layers.Impl(),
+    }),
     layers.Leg("driver",    "threads", {
         "st": layers.Impl(("ir_depack", "ir_reduce")),
         "mt": layers.Impl(("ir_spawn",),
@@ -3517,7 +4700,7 @@ _LEGS_IR: Tuple[layers.Leg, ...] = (
         False: layers.Impl(), True: layers.Impl(("st_s",)),
     }),
     layers.Leg("core_b",    None,      (
-        "step_congr", "count_nodes", "emit_nf", "itoa",
+        "step_congr", "freduce", "count_nodes", "emit_nf", "itoa",
     )),
     layers.Leg("persist",   "reclaim", {
         "none":     layers.Impl(),
@@ -3555,7 +4738,7 @@ _LEGS_TOKEN: Tuple[layers.Leg, ...] = (
         False: layers.Impl(), True: layers.Impl(("st_s",)),
     }),
     layers.Leg("core_b",    None,      (
-        "step_congr", "count_nodes", "emit_nf", "itoa",
+        "step_congr", "freduce", "count_nodes", "emit_nf", "itoa",
     )),
     layers.Leg("persist",   "reclaim", {
         "none": layers.Impl(), "redirect": layers.Impl(),
@@ -3621,7 +4804,7 @@ _MT_DEPACK_REN = {"permend": "cellbase"}
 _MT_THREADED = frozenset({
     "ir_depack", "grow_heap_ir", "mkleaf", "mkapp", "mkapp_p", "repr",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp",
-    "st_s", "step_congr", "count_nodes", "emit_nf", "itoa",
+    "st_s", "step_congr", "freduce", "count_nodes", "emit_nf", "itoa",
     "emit_bytes", "emit_ir", "peval", "selidx",
 })
 
@@ -3737,9 +4920,22 @@ def program(R: Realization) -> Program:
 def routine_names_ir(R: Realization) -> Tuple[str, ...]:
     """the record's routine list for R — composed from _LEGS_IR:
     container leg picks the ingest front end (plex.v3 inserts
-    plex_read after ir_entry), driver legs pick st/mt, egress leg
-    picks io[1], fuse_s legs pick the basis tail.  Every axis value
-    the family doesn't realize refuses at its leg, named."""
+    plex_read after ir_entry; plex.emit emits the pexec schedule
+    executor), driver legs pick st/mt, egress leg picks io[1],
+    fuse_s legs pick the basis tail.  Every axis value the family
+    doesn't realize refuses at its leg, named."""
+    if R.dialect == "plex.emit":
+        if R.io != ("stdin", "bytes"):
+            raise NotRealized(
+                f"dialect='plex.emit' requires io=('stdin','bytes') "
+                f"— the executor's egress is byte frames, "
+                f"got io={R.io!r}")
+        if R.threads != 1:
+            raise NotRealized(
+                "dialect='plex.emit' realizes serial schedule "
+                "execution — threads>1 not realized (per-stage "
+                "parallelism is a schedule realization, not the "
+                "executor's)")
     return layers.compose(R, _LEGS_IR)
 
 
@@ -3849,7 +5045,7 @@ ROUTINES_RES: Tuple[str, ...] = (
     "res_entry", "ir_read", "ir_depack", "res_reduce", "stats", "exits",
     "grow_heap_ir", "mkleaf", "mkapp", "res_depack",
     "step", "st_norm", "st_konst", "st_dup", "st_swap", "st_comp", "st_s",
-    "step_congr", "count_nodes", "emit_nf", "itoa", "build_ds",
+    "step_congr", "freduce", "count_nodes", "emit_nf", "itoa", "build_ds",
 )
 
 

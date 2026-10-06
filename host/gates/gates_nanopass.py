@@ -72,6 +72,9 @@ if __name__ == "__main__":
         ("kernel .plex v3 ingest", lambda: kern.gate_plex_ingest(
             tempfile.mkdtemp(prefix="nanopass_plexin_"))),
         ("kernel layer composition", kern.gate_layer_chain),
+        ("kernel plex.emit schedule exec",
+         lambda: emit.gate_pexec_schedule(
+             tempfile.mkdtemp(prefix="nanopass_pexec_"))),
         ("emit schedule serialized", lambda: emit.gate_emit_schedule(
             tempfile.mkdtemp(prefix="nanopass_sched_"))),
         ("phi.rel verbatim parse + bundle", rel.gate_rel_parse_verbatim),

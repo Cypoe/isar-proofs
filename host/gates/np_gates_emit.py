@@ -155,6 +155,73 @@ def gate_selfhost_fixpoint(tmpdir: str) -> bool:
     return p.returncode == 5 and p.stdout == outs[0]
 
 
+def gate_pexec_schedule(tmpdir: str) -> bool:
+    """Phase-8c — the schedule executor IS the kernel
+    (dialect='plex.emit').
+
+    pexec consumes the emit.plex bundle in-process: v3 directory
+    validation, output-stage dep closure off DEPS, declared-order
+    depack + freduce of each stage's BYTES-pool span (emit.term
+    rides KIND_PIR), per-stage frame store, MAP-declared positional
+    splices, one [u32 len][bytes] egress frame.  No Python between
+    the archive and the image — spawn + file write only.
+
+    Asserts: the executor's image is byte-identical to emit_native
+    (cross-route observation — the staged DAG vs the monolithic
+    oracle); refusals — a truncated bundle, a MAP src_frame out of
+    range, and a stage stream span that fails the PIR length
+    relation all exit rc=3."""
+    import struct
+    import subprocess
+    import plex_bundle as pb
+    Rex = seed.Realization(dialect="plex.emit", io=("stdin", "bytes"),
+                           reclaim="redirect", gc="sweep")
+    exe = ec.ir_exe_for(Rex)
+    path = ec.write_emit_bundle(
+        os.path.join(tmpdir, "emit.plex"), seed.Realization())
+    data = open(path, "rb").read()
+    p = subprocess.run([exe], input=data, capture_output=True,
+                       timeout=3600)
+    if p.returncode != 0 or len(p.stdout) < 4:
+        return False
+    n = struct.unpack_from("<I", p.stdout, 0)[0]
+    if n != len(p.stdout) - 4:
+        return False
+    if p.stdout[4:] != ec.emit_native():
+        return False
+    # refusal: truncated archive
+    if subprocess.run([exe], input=data[:len(data) // 2],
+                      capture_output=True).returncode != 3:
+        return False
+    # refusal: MAP row src_frame out of range
+    b = pb.read_bundle(data)
+    msec = b.section(pb.KIND_MAP)
+    bad = bytearray(data)
+    struct.pack_into("<I", bad, msec.offset + 12, 7)
+    if subprocess.run([exe], input=bytes(bad),
+                      capture_output=True).returncode != 3:
+        return False
+    # refusal: a stage stream that fails the PIR span relation —
+    # bump n_nodes inside emit.link's stream header in the pool
+    bsec = b.section(pb.KIND_BYTES)
+    names = [s[0] for s in b.stage_rows()]
+    li = names.index("emit.link")
+    for s_i, _dig, tok in b.query_rows():
+        if s_i == li:
+            off, _ln = (int(x) for x in tok.split(":"))
+            bad = bytearray(data)
+            nn_addr = bsec.offset + off + 8   # PIR hdr: n_nodes
+            nn = struct.unpack_from("<I", bad, nn_addr)[0]
+            struct.pack_into("<I", bad, nn_addr, nn + 1)
+            if subprocess.run([exe], input=bytes(bad),
+                              capture_output=True).returncode != 3:
+                return False
+            break
+    else:
+        return False
+    return True
+
+
 def gate_emit_bundle(tmpdir: str) -> bool:
     """Phase-7 — emit.plex as the executable emit archive.
 

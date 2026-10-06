@@ -720,7 +720,8 @@
     },
     "dialect": {
       "pir": "realized",
-      "plex.v3": "realized"
+      "plex.v3": "realized",
+      "plex.emit": "realized"
     },
     "stack": {
       "machine": "realized",

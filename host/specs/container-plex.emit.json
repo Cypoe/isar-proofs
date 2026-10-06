@@ -1,0 +1,9 @@
+{"name": "plex.emit",
+ "layer": "container",
+ "in": "bytes",
+ "out": "pe-image",
+ "axis": "dialect",
+ "status": "realized",
+ "impl": {"x86_64.win64": ["pexec"]},
+ "refuses": "bad magic, version != 3, hsize misaligned or < directory end, truncated header/directory, cell type not in {1,4,8}, arity 0, length != rows*arity*type, unaligned or sub-hsize offset, missing STRINGS/STAGES/DEPS/QUERIES/BYTES/MAP sections, dialect claim other than \"plex.emit/2\" in REALIZATION, missing output stage, stage rows outside the dependency closure, bad or out-of-pool \"off:len\" query tokens, PIR streams whose length != 16+4*nr+9*nn, output stage without byte frames, MAP rows whose src stage is absent/uncomputed/bytes-less or whose src_frame exceeds the frame count, output image over capacity (rc=3, rc=5)",
+ "doc": ".plex emit bundle (plex.emit/2) — kernel-side schedule executor: validates the v3 archive, computes the output stage's dependency closure from DEPS rows, executes every needed stage in declared order (depack + freduce on the stage's BYTES-pool span; emit.term rides the KIND_PIR section), stores each stage's byte frames, applies MAP rows as positional splices, then emits the image as one [u32 len][bytes] frame. io=('stdin','bytes') only; serial — per-stage parallelism is a schedule realization, not the executor's."}
