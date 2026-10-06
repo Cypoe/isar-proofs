@@ -1,0 +1,27 @@
+{
+  "bundle.default.plex": {
+    "bytes": 726232,
+    "desc": "emit.plex schedule fixture (default R)",
+    "sha256": "39e7f8cf97235a16a396d9c05ee8fbd0a297f6220509c60628644e58749e7016"
+  },
+  "image.default.bin": {
+    "bytes": 4608,
+    "desc": "R() default record, emit_native oracle",
+    "sha256": "4d37d8ff7fe5c1bab9690b0df6703ee11dcf5d24fe92984d74d752cb45b507ee"
+  },
+  "image.fuse_s.bin": {
+    "bytes": 4608,
+    "desc": "R(fuse_s=True), emit_native oracle",
+    "sha256": "dcc66fa4f9d67e3c3112351e12b258c451c3a3c1c9d72c9e8371d50e4175ec43"
+  },
+  "image.ir.bin": {
+    "bytes": 9216,
+    "desc": "IR kernel record (bytes+sweep), emit_native",
+    "sha256": "a45ece6f55a642f3628e9b0ee9fe22ea8608b9ddd2f32c2333d87bcf24cf5b94"
+  },
+  "pexec.exe": {
+    "bytes": 13824,
+    "desc": "pexec executor exe (dialect=plex.emit record), emit_native",
+    "sha256": "73fd68dc819f17cce95c9c1c78b90d4adff3fd2f1fe1aae9961a8de3473f5785"
+  }
+}

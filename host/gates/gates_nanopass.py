@@ -75,6 +75,8 @@ if __name__ == "__main__":
         ("kernel plex.emit schedule exec",
          lambda: emit.gate_pexec_schedule(
              tempfile.mkdtemp(prefix="nanopass_pexec_"))),
+        ("emit host independence", lambda: emit.gate_host_independence(
+            tempfile.mkdtemp(prefix="nanopass_hostind_"))),
         ("emit schedule serialized", lambda: emit.gate_emit_schedule(
             tempfile.mkdtemp(prefix="nanopass_sched_"))),
         ("phi.rel verbatim parse + bundle", rel.gate_rel_parse_verbatim),

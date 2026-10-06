@@ -84,6 +84,7 @@
 - **fuse_s**: False=realized, True=realized
 - **alloc**: bump-chunked=realized, arena=declared
 - **reclaim**: none=realized, redirect=realized, refcount=declared, mark-sweep=declared
+- **gc**: none=realized, sweep=realized
 - **dialect**: pir=realized, plex.v3=realized, plex.emit=realized
 - **stack**: machine=realized, explicit=declared
 - **io**: stdin/stdout=realized, memory=declared

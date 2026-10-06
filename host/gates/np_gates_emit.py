@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
 
 import emit_chain as ec                                        # noqa: E402
+import fixtures                                                # noqa: E402
 import routines_x86_64_win64 as rts                            # noqa: E402
 import seed                                                    # noqa: E402
 import spec_term as st                                         # noqa: E402
@@ -107,12 +108,12 @@ def gate_selfhost_fixpoint(tmpdir: str) -> bool:
     Evidence category: construction-seam byte comparison (fixpoint,
     oracle) + cross-realization observation (probe parity)."""
     import subprocess
-    # .lo record — the staged schedule against the emit_native oracle
-    # (workers=4 exercises the strided chunk pool — scheduling only,
-    # the mt-equiv gate is the parity witness)
+    # .lo record — the staged schedule against the committed golden
+    # image (workers=4 exercises the strided chunk pool — scheduling
+    # only, the mt-equiv gate is the parity witness)
     img_lo, ev_lo = ec.emit_frames(seed.Realization(), staged=True,
                                    workers=4)
-    if img_lo != ec.emit_native():
+    if img_lo != fixtures.golden("image.default"):
         return False
     # fixpoint — the bytes kernel reproduces its own image
     Rb = seed.Realization(reclaim="redirect", io=("stdin", "bytes"))
@@ -166,20 +167,26 @@ def gate_pexec_schedule(tmpdir: str) -> bool:
     splices, one [u32 len][bytes] egress frame.  No Python between
     the archive and the image — spawn + file write only.
 
-    Asserts: the executor's image is byte-identical to emit_native
-    (cross-route observation — the staged DAG vs the monolithic
-    oracle); refusals — a truncated bundle, a MAP src_frame out of
+    Golden-fixture discipline: comparison is against the committed
+    snapshot (fixtures.golden), never a live oracle — host emit
+    machinery is the refresh path only.  A freshly emitted executor
+    must still equal the committed pexec.exe (emit-pipeline drift
+    check).  Refusals — a truncated bundle, a MAP src_frame out of
     range, and a stage stream span that fails the PIR length
     relation all exit rc=3."""
     import struct
     import subprocess
     import plex_bundle as pb
+    # emit-side drift: the current source must still emit the
+    # committed executor byte-identically
     Rex = seed.Realization(dialect="plex.emit", io=("stdin", "bytes"),
                            reclaim="redirect", gc="sweep")
     exe = ec.ir_exe_for(Rex)
-    path = ec.write_emit_bundle(
-        os.path.join(tmpdir, "emit.plex"), seed.Realization())
-    data = open(path, "rb").read()
+    if open(exe, "rb").read() != fixtures.golden("pexec.exe"):
+        return False
+    # host-independent execution: committed executor + committed
+    # bundle -> committed image; nothing emitted at gate time
+    data = fixtures.golden("bundle.default")
     p = subprocess.run([exe], input=data, capture_output=True,
                        timeout=3600)
     if p.returncode != 0 or len(p.stdout) < 4:
@@ -187,7 +194,7 @@ def gate_pexec_schedule(tmpdir: str) -> bool:
     n = struct.unpack_from("<I", p.stdout, 0)[0]
     if n != len(p.stdout) - 4:
         return False
-    if p.stdout[4:] != ec.emit_native():
+    if p.stdout[4:] != fixtures.golden("image.default"):
         return False
     # refusal: truncated archive
     if subprocess.run([exe], input=data[:len(data) // 2],
@@ -218,6 +225,79 @@ def gate_pexec_schedule(tmpdir: str) -> bool:
                 return False
             break
     else:
+        return False
+    return True
+
+
+def gate_host_independence(tmpdir: str) -> bool:
+    """Phase-8d — the host-independence checklist.  The emitted
+    artifacts carry the schedule without host emit machinery in the
+    execution path; the phi2/rel.rs status table is the task list —
+    closed rows are verified here, open rows must stay NAMED (a
+    missing refusal or a silently-changed corpus is failure, not
+    progress).
+
+    verified:
+      executor   the committed pexec.exe + committed
+                 bundle.default.plex -> golden image.default, with a
+                 steps= observation — running-program evidence, not
+                 byte comparison only
+      gc axis    'gc' registered on the toolchain; sweep realized on
+                 the win64 IR kernel (native cogen's realization)
+      digests    streams.digest=sha256 declared inside the bundle's
+                 own REALIZATION rows (decision 064 as data)
+    named open:
+      gc off-win64      the C emitter refuses gc!=none BY NAME —
+                        the collector is win64-realized only
+      corpus batch      primitives are a deliberate decision —
+                        corpus rel count pinned at 30; adding
+                        byte-add must update this gate
+      program equiv     observational equivalence of generated
+                        programs beyond image+step parity — the
+                        cross_verify harness is the declared witness
+    """
+    import subprocess
+    import plex_bundle as pb
+    # --- realized: schedule execution needs zero host emission ----
+    exe = fixtures.golden_path("pexec.exe")
+    data = fixtures.golden("bundle.default")
+    p = subprocess.run([exe], input=data, capture_output=True,
+                       timeout=3600)
+    if p.returncode != 0:
+        return False
+    if p.stdout[4:] != fixtures.golden("image.default"):
+        return False
+    if b"steps=" not in p.stderr:
+        return False
+    # --- the gc'd realization is on the toolchain contract --------
+    ax = toolchain.strategy_axes().get("gc")
+    if not ax or ax.get("sweep") != "realized":
+        return False
+    import routines_c
+    try:
+        routines_c.program(seed.Realization(gc="sweep"))
+        return False
+    except toolchain.NotRealized as e:
+        if "gc" not in str(e):
+            return False
+    # --- the digest decision rides inside the bundle --------------
+    real = pb.read_bundle(data).kv_rows(pb.KIND_REALIZATION)
+    if real.get("streams.digest") != "sha256":
+        return False
+    # --- open items stay named ------------------------------------
+    # corpus batch primitives: adding byte-add changes the corpus —
+    # pinned rel count forces that change through this gate
+    import dialect
+    cor = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "corpus", "stdlib.phi")
+    if len(dialect.PROJECTIONS["phi.rel"](cor)["rels"]) != 30:
+        return False
+    # program equivalence: the running-programs harness is declared —
+    # PE<->C host parity exists; systematic equivalence of emitted
+    # artifact chains is the named open item
+    if not os.path.exists(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "cross_verify.py")):
         return False
     return True
 
@@ -259,7 +339,7 @@ def gate_emit_bundle(tmpdir: str) -> bool:
                         "emit.symtab", "emit.assemble", "emit.pack"}:
         return False
     img, ev = ec.run_emit_bundle(path, timeout=3600)
-    if img != ec.emit_native():
+    if img != fixtures.golden("image.default"):
         return False
     # corruption: flip a byte inside a stream span -> digest refuse
     data = bytearray(open(path, "rb").read())
@@ -330,7 +410,7 @@ def gate_emit_schedule(tmpdir: str) -> bool:
             != "emit.pack":
         return False
     img, _ev = ec.run_emit_bundle(path, timeout=3600)
-    if img != ec.emit_native():
+    if img != fixtures.golden("image.default"):
         return False
     # forge 1 — MAP src frame out of range -> refusal at assembly
     data = bytearray(open(path, "rb").read())

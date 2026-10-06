@@ -1601,6 +1601,12 @@ def write_emit_bundle(path: str, R: seed.Realization,
         # root count run serial even under workers>1 (regimes:
         # parallel wins only when W(n) > setup+merge overheads)
         real["schedule.min_parallel_roots"] = "16"
+        # digest contract as data: the QUERIES digest column is
+        # sha256 of the declared span — normative data, so a
+        # consumer can always verify; whether it MUST is the
+        # consumer's declared level (Python replay verifies; the
+        # pexec kernel checks structure only — decision 064)
+        real["streams.digest"] = "sha256"
     comp = toolchain.components()["routines"].get(real["routines"])
     caps = dict(comp.data).get("caps") if comp is not None else None
     streams = emit_schedule_streams(
@@ -1631,9 +1637,16 @@ def emit_bundle_streams(bundle) -> Dict[str, bytes]:
     """emit.plex (plex.emit/2) -> {stage_name: PIR stream}: the
     QUERIES rows' `off:len` blob tokens sliced out of their pool —
     `emit.term` spans the KIND_PIR section (the canonical payload),
-    every other stream spans the BYTES pool.  Digests verified — a
-    malformed span or digest mismatch refuses."""
+    every other stream spans the BYTES pool.  Digests verified per
+    the declared `streams.digest` REALIZATION row — an undeclared or
+    unknown digest regime refuses naming the axis; a malformed span
+    or digest mismatch refuses."""
     import plex_bundle as pb
+    algo = bundle.kv_rows(pb.KIND_REALIZATION).get("streams.digest")
+    if algo != "sha256":
+        raise toolchain.NotRealized(
+            f"emit bundle streams.digest {algo!r} — the digest axis "
+            f"realizes 'sha256' only")
     pool = bundle.bytes_pool()
     psec = bundle.section(pb.KIND_PIR)
     ppool = psec.payload(bundle.data) if psec is not None else b""

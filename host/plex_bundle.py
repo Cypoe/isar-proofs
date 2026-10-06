@@ -36,7 +36,14 @@ Section kinds (the contract role table):
     2 STAGES       u64 arity 6: (name, artifact, runner) string refs —
                    the manifest's stage DAG nodes
     3 DEPS         u32 arity 2: (stage_idx, dep_stage_idx) — COO edges
-    4 QUERIES      u64 arity 5: stage_idx + (digest, blob) string refs
+    4 QUERIES      u64 arity 5: stage_idx + (digest, blob) string refs —
+                   digest strings are normative content digests of the
+                   blob span, algorithm declared by the REALIZATION row
+                   `streams.digest` (sha256 for plex.emit/2 emit
+                   bundles).  Verification level is the consumer's
+                   declared contract: the Python replay verifies every
+                   span; kernel executors (dialect="plex.emit") check
+                   structure only — declared in decision 064
     5 CAPS         u64 arity 5: tag(0=port,1=os binding) + key ref +
                    val ref (mode / comma ports / "" = intrinsic)
     6 REALIZATION  u64 arity 4: (key, val) string refs — R fields +

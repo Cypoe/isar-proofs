@@ -718,6 +718,10 @@
       "refcount": "declared",
       "mark-sweep": "declared"
     },
+    "gc": {
+      "none": "realized",
+      "sweep": "realized"
+    },
     "dialect": {
       "pir": "realized",
       "plex.v3": "realized",
