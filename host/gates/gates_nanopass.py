@@ -87,6 +87,8 @@ if __name__ == "__main__":
         ("phi.rel nibble carry chain", rel.gate_rel_carry_chain),
         ("phi.rel phi_boot congruence", rel.gate_rel_boot_congruence),
         ("phi.rel basis-term unify", rel.gate_rel_basis_unify),
+        ("phi2 native eval<menv> enc2 — gc=sweep fasmg byte",
+         rel.gate_rel_native_menv_enc2),
     ]
     only = {s for a in sys.argv[1:] if a.startswith("--only=")
             for s in a.split("=", 1)[1].lower().split(",")}

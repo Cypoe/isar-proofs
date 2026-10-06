@@ -54,7 +54,7 @@ def gate_rel_parse_verbatim() -> bool:
 
 
 def gate_rel_schema_admissible() -> bool:
-    """stdlib corpus is admissible construction (27 rels, every
+    """stdlib corpus is admissible construction (30 rels, every
     edge bound); the raw patent corpus refuses by name — the
     sketch's nibble_half_add gap is evidence, not a bug."""
     g = _corpus()
@@ -62,7 +62,7 @@ def gate_rel_schema_admissible() -> bool:
         rel_schema.check(g)
     except rel_schema.SchemaRefusal:
         return False
-    if len(g["rels"]) != 27:
+    if len(g["rels"]) != 30:
         return False
     rels = []
     for fn in ("phi-lang.phi", "phi-stdlib.phi",
@@ -210,3 +210,182 @@ def gate_rel_basis_unify() -> bool:
         " (\\s2. s2) " + rel_witness._FAIL + ")")
     return rel_witness._cmp(got, rel_witness._expect(
         rel_witness._FAIL))
+
+
+def _phi2seed():
+    """phi2/seed.py is a corpus engine, not a host dep — load it
+    file-scoped so the module table stays clean."""
+    import importlib.util
+    sp = importlib.util.spec_from_file_location(
+        "phi2seed", os.path.join(_REPO, "phi2", "seed.py"))
+    m = importlib.util.module_from_spec(sp)
+    sys.modules["phi2seed"] = m
+    sp.loader.exec_module(m)
+    return m
+
+
+def gate_rel_native_menv_enc2() -> bool:
+    """native eval<menv> under gc=sweep emits a real x86 byte: the
+    unrolled corpus evaluator (machine_term) interprets the
+    generated assemble_x86_win64 map env and computes
+    enc2<'op('ret)> = [0xC3] — byte-identical to fasmg's flat-
+    binary oracle.  The collapsed cogen leg (frag 0025): the map
+    is declared data, the evaluator is the corpus eval — Python
+    only packs the term and reifies the subst.  Refusals stay
+    loud: missing fasmg names the oracle axis; fuel/OOM exits are
+    rc=2/4 — never a silent pass."""
+    import subprocess
+    sys.path.insert(0, os.path.join(_REPO, "seed"))
+    import emit_chain as ec
+    import spec_term as st
+    import graph_runtime as G
+    import reduce as R
+    import seed as hseed
+    import isa_x86_64 as ix
+
+    ps = _phi2seed()
+    ps._init_prelude()
+    S, NIL, tp, ta = ps.t_sym, ps.NIL, ps.t_pair, ps.t_atom
+
+    def eT(tag, *xs):
+        o = xs[-1] if xs else NIL
+        for x in reversed(xs[:-1]):
+            o = tp(x, o)
+        return tp(S(tag), o)
+
+    def eP(a, b):
+        return tp(S("pair"), tp(a, b))
+
+    def _esym(x):
+        return tp(S("sym"), S(x))
+
+    def eAtom2(b, v):
+        return tp(S("atom"), tp(ta(8, b), ta(8, v)))
+
+    def enc_t(t):
+        k = ps._ND[ps._force(t, NIL)]
+        if k[0] == "p":
+            return eP(enc_t(k[1]), enc_t(k[2]))
+        if k[0] == "s":
+            return _esym(k[1])
+        return eAtom2(k[1], k[2])
+
+    std = os.path.join(_REPO, "phi2", "std")
+    mapg = ps.load_corpus(
+        [os.path.join(std, f + ".plex") for f in
+         ("arith_nibble_carry", "arith_peano_succ",
+          "lists_append_mapfold", "lists_member_assoc",
+          "unify_terms_core", "meta_call_run")]
+        + [os.path.join(_REPO, "phi2", "maps",
+                        "assemble_x86_win64.plex")])
+    # prune to enc2's call-closure — env_find cost is linear in
+    # env size; the rels themselves stay declared data
+    byname = {r["name"]: r for r in mapg["rels"]}
+    seen, wl = set(), ["enc2"]
+    while wl:
+        n = wl.pop()
+        if n in seen or n not in byname:
+            continue
+        seen.add(n)
+        for cl in byname[n]["clauses"] or []:
+            for g in (cl["guard"] or []) + cl["goals"]:
+                if isinstance(g, dict) and "call" in g:
+                    wl.append(g["call"]["rel"])
+    mapg["rels"] = [r for r in mapg["rels"] if r["name"] in seen]
+    env = ps.enc_env(mapg)
+
+    zero8 = NIL
+    for _ in range(8):
+        zero8 = tp(ta(4, 0), zero8)
+    ov = tp(S("var"), ta(8, 0))
+    nil_e = enc_t(NIL)
+    z8e = enc_t(zero8)
+
+    def enc2_goal(opterm):
+        at = tp(enc_t(opterm), tp(nil_e, tp(z8e, NIL)))
+        return tp(S("call"), tp(_esym("enc2"), tp(at, ov)))
+
+    cases = [(eT("op", S("push_r64"), S("rbp")), "push rbp"),
+             (eT("op", S("ret")), "ret")]
+
+    M = ps.machine_term(8192)
+    envS = ps.enc_sub(env)
+    n1e = ps.enc_sub(ta(8, 1))
+    Ts = []
+    for opterm, _asm in cases:
+        call = ps.mcall(M, "eval", envS, ps.enc_sub(enc2_goal(opterm)),
+                        ps._PRE["dnil"], n1e)
+        Ts.append(ps._to_host_T(ps.mcall(M, "take", ps._nat(1), call)))
+
+    Rz = hseed.Realization(reclaim="redirect", gc="sweep",
+                           io=("stdin", "stdout"),
+                           fuel=2_000_000_000,
+                           ir_arena_bytes=2 << 30)
+    cp = subprocess.run([ec.ir_exe_for(Rz)],
+                        input=st.pack_ir(*Ts), capture_output=True,
+                        timeout=600)
+    if cp.returncode != 0:
+        raise RuntimeError(
+            f"ir batch rc={cp.returncode} stderr={cp.stderr!r}")
+    lines = cp.stdout.decode().splitlines()
+    if len(lines) != len(Ts):
+        return False
+    import tower
+    gg = G.Graph()
+    nfts = [gg.import_tree(tower.quote_surface(
+        hseed._parse_native_out(ln))) for ln in lines]
+
+    marks = (R.I, R.app(R.KK, R.I), R.app(R.KK, R.KK),
+             R.app(R.KK, R.I))
+
+    def sol_subst(i):
+        """first sol's subst: {var-id: term} off the PAIR spine."""
+        dec = ps._dec_stream(gg, i, 8000, marks)
+        if not dec or dec[0][0] != "p":
+            return None
+        subst = {}
+        cur = dec[0][1]
+        while cur[0] == "p":
+            kv = cur[1]
+            if kv[0] == "p" and kv[1][0] == "a" and kv[1][1] == 8:
+                subst[kv[1][2]] = kv[2]
+            cur = cur[2]
+        return subst
+
+    def reify(t, subst, d=0):
+        if d > 60 or t[0] != "p":
+            return t
+        if t[1] == ("s", "var"):
+            j = t[2][2]
+            return reify(subst[j], subst, d + 1) if j in subst else t
+        if t[1] == ("s", "pair"):
+            return ("p", reify(t[2][1], subst, d + 1),
+                    reify(t[2][2], subst, d + 1))
+        if t[1] == ("s", "atom"):
+            return ("a", t[2][1][2], t[2][2][2])
+        return t
+
+    def as_bytes(v, subst):
+        out, t = [], reify(v, subst)
+        while t[0] == "p":
+            h = t[1]
+            if h[0] != "a" or h[1] != 8:
+                return None
+            out.append(h[2])
+            t = t[2]
+        return out or None
+
+    for i, (_opterm, asm) in zip(nfts, cases):
+        subst = sol_subst(i)
+        if subst is None:
+            return False
+        got = None
+        for v in subst.values():
+            got = as_bytes(v, subst)
+            if got:
+                break
+        if not got:
+            return False
+        if bytes(got) != ix._fasmg(ix._FASM_HDR + asm + "\n"):
+            return False
+    return True
