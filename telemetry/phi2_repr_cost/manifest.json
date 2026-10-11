@@ -1,0 +1,17 @@
+{
+  "README.md": {
+    "bytes": 2175,
+    "desc": "dataset semantics, probe shapes, reproduction notes",
+    "sha256": "20530f301ee447e95dc56785a5e8ade7cbf926497471cd7947b8c486b6e55aeb"
+  },
+  "nibble_map_9bb305a.plex": {
+    "bytes": 379992,
+    "desc": "byte-for-byte pin of git:9bb305a phi2/maps/assemble_x86_win64.plex (nibble-domain 'before' map)",
+    "sha256": "e5235bdebc22e8f8a39fd796dc720efa12848aef0d7e110e3b70283b9e8bab20"
+  },
+  "rows.jsonl": {
+    "bytes": 5468,
+    "desc": "native eval<menv> probe telemetry, nibble-map (9bb305a) vs byte-map (cfbfcca); sols field = decoded take-1 stream count",
+    "sha256": "22a3aef9f502fa19f96fe2da7bd277622c9b021f6b937629eb4e91fa015b98b2"
+  }
+}

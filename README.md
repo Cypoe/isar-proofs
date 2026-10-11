@@ -52,7 +52,7 @@ Different formalisms are the views/decoders; the quotient is the shared observat
 
 10c. **[FASMView.lean](src/ISAR/FASMView.lean)** — FASM presentation = bytecode `Instruction` carrier; host owns fasmg-ish text. Phase 4b.
 
-11. **[ViewIndependence.lean](ViewIndependence.lean)** — `ObservationalIsomorphism`, **No Preferred Syntax Theorem** (`no_preferred_syntax`), reflexivity/symmetry/transitivity.
+11. **[ViewIndependence.lean](ViewIndependence.lean)** — `ObservationalIsomorphism`, **No Preferred Syntax Theorem** (`no_preferred_syntax`), reflexivity/symmetry/transitivity. Scope note: the theorem holds *inside* the `Kernel` interface, whose `decode` still lands in `ISKSubtype` — views are equidistant modulo that fixed anchor, not free of it.
 
 12. **[ReverseRosetta.lean](ReverseRosetta.lean)** — `closure_preserved_under_reachability` (forward invariance), `referentially_open_requires_anchor` (referential openness).
 
