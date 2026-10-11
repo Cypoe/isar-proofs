@@ -1,8 +1,8 @@
 {
   "README.md": {
-    "bytes": 2175,
-    "desc": "dataset semantics, probe shapes, reproduction notes",
-    "sha256": "20530f301ee447e95dc56785a5e8ade7cbf926497471cd7947b8c486b6e55aeb"
+    "bytes": 3195,
+    "desc": "dataset semantics, probe shapes, mechanism analysis, reproduction notes",
+    "sha256": "e85ad1ab29383e327626172b53583f1a7bb5087ca53d05522622dcaa0ebf2dcb"
   },
   "nibble_map_9bb305a.plex": {
     "bytes": 379992,
@@ -10,8 +10,8 @@
     "sha256": "e5235bdebc22e8f8a39fd796dc720efa12848aef0d7e110e3b70283b9e8bab20"
   },
   "rows.jsonl": {
-    "bytes": 5468,
-    "desc": "native eval<menv> probe telemetry, nibble-map (9bb305a) vs byte-map (cfbfcca); sols field = decoded take-1 stream count",
-    "sha256": "22a3aef9f502fa19f96fe2da7bd277622c9b021f6b937629eb4e91fa015b98b2"
+    "bytes": 6054,
+    "desc": "native eval<menv> probe telemetry, nibble-map (9bb305a) vs byte-map (cfbfcca), full-std env; sols = decoded take-1 count; rc 2=fuel-cap 4=OOM",
+    "sha256": "19e2783b72f4588466a2b9d58fb9f736c8a4f0738e986d15cfad87d56a1809b3"
   }
 }
