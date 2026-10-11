@@ -64,7 +64,9 @@ def atom(bits: int, value: int) -> dict:
 
 def atom_dyn(bits: dict, payload: dict) -> dict:
     """ATOM with non-const fields: bits/payload as {const:v} or
-    {var_delta:[name, d]} (patent's ATOM(n, data) / ATOM(4, n+1))."""
+    {var_delta:[name, d]} / {var_add:[a,b]} / {var_sub:[a,b]}
+    (patent's ATOM(n, data) / ATOM(4, n+1); var-var is the 'adyn/
+    'adsub axis, decision 065)."""
     return {"atom_dyn": [bits, payload]}
 
 
@@ -153,7 +155,8 @@ def _to_int(s: str) -> int:
 
 
 def _aexpr(p: _P) -> dict:
-    """ATOM payload: int | var | var±int (patent's n+1 idiom)."""
+    """ATOM payload: int | var | var±int | var±var (patent's n+1
+    idiom; var-var declares the batch-arithmetic axis, 065)."""
     t = p.next()
     if t[0] == "int":
         return {"const": _to_int(t[1])}
@@ -164,13 +167,18 @@ def _aexpr(p: _P) -> dict:
             # n-1 lexes as ident + int(-1) — the unspaced delta idiom
             return {"var_delta": [name, _to_int(p.next()[1])]}
         if p.at("+") or p.at("-"):
-            sign = 1 if p.next()[1] == "+" else -1
+            sign = p.next()[1]
             n = p.next()
+            if n[0] == "ident":
+                return {"var_add" if sign == "+" else "var_sub":
+                        [name, n[1]]}
             if n[0] != "int":
                 raise RelError(
-                    f"phi.rel: atom expr {name}±{n[1]!r} — "
-                    f"expected int")
-            return {"var_delta": [name, sign * _to_int(n[1])]}
+                    f"phi.rel: atom expr {name}{sign}{n[1]!r} — "
+                    f"expected int or var")
+            return {"var_delta": [name,
+                                  (1 if sign == "+" else -1)
+                                  * _to_int(n[1])]}
         return {"var_delta": [name, 0]}
     raise RelError(f"phi.rel: bad ATOM payload {t[1]!r} "
                    f"at line {t[2]}")
@@ -556,6 +564,10 @@ def _aexpr_s(e: dict) -> str:
         if d == 0:
             return n
         return f"{n}{'+' if d > 0 else ''}{d}"
+    if "var_add" in e:
+        return f"{e['var_add'][0]}+{e['var_add'][1]}"
+    if "var_sub" in e:
+        return f"{e['var_sub'][0]}-{e['var_sub'][1]}"
     raise RelError(f"render: bad ATOM payload {e!r}")
 
 

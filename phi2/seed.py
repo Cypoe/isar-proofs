@@ -405,6 +405,8 @@ def _gnd(k) -> bool:
         return all(_GR[a] for a in k[2])
     if t == "d":
         return _GR[k[1]]
+    if t == "va" or t == "vs":
+        return _GR[k[1]] and _GR[k[2]]
     return t not in ("v", "lz")
 
 
@@ -434,6 +436,53 @@ def t_const(c: int) -> int:
 
 def t_delta(v: int, d: int) -> int:
     return _nd("d", intern_term(v), d)
+
+
+def t_vadd(a: int, b: int) -> int:
+    """lazy field: walked-atom(a) + walked-atom(b)."""
+    return _nd("va", intern_term(a), intern_term(b))
+
+
+def t_vsub(a: int, b: int) -> int:
+    """lazy field: walked-atom(a) - walked-atom(b)."""
+    return _nd("vs", intern_term(a), intern_term(b))
+
+
+def _afield(e: dict, lk) -> int:
+    """atom_dyn field node -> lazy field node c/d/va/vs."""
+    if "const" in e:
+        return t_const(e["const"])
+    if "var_delta" in e:
+        n, d = e["var_delta"]
+        return t_delta(lk(n), d)
+    if "var_add" in e:
+        a, b = e["var_add"]
+        return t_vadd(lk(a), lk(b))
+    if "var_sub" in e:
+        a, b = e["var_sub"]
+        return t_vsub(lk(a), lk(b))
+    raise EvalError(f"seed: bad atom_dyn field {e!r}")
+
+
+def _afield_int(e: dict, binds) -> Optional[int]:
+    """atom_dyn field -> int when every operand is atom-bound."""
+    if "const" in e:
+        return e["const"]
+    if "var_delta" in e:
+        n, d = e["var_delta"]
+        v = binds.get(n)
+        return _ND[v][2] + d if v is not None and \
+            _ND[v][0] == "a" else None
+    k = "var_add" if "var_add" in e else \
+        "var_sub" if "var_sub" in e else None
+    if k is None:
+        return None
+    va, vb = binds.get(e[k][0]), binds.get(e[k][1])
+    if va is not None and _ND[va][0] == "a" and \
+            vb is not None and _ND[vb][0] == "a":
+        return _ND[va][2] + _ND[vb][2] if k == "var_add" \
+            else max(0, _ND[va][2] - _ND[vb][2])
+    return None
 
 
 def t_reldef(name: str) -> int:
@@ -488,6 +537,10 @@ def intern_term(t) -> int:
             return t_lazy(tuple(
                 t_const(e[1]) if e[0] == "const"
                 else t_delta(intern_term(e[1]), e[2])
+                if e[0] == "delta"
+                else t_vadd(intern_term(e[1]), intern_term(e[2]))
+                if e[0] == "vadd"
+                else t_vsub(intern_term(e[1]), intern_term(e[2]))
                 for e in t[1:]))
         if tag == "reldef":
             return t_reldef(t[1])
@@ -517,6 +570,10 @@ def thaw(t: int) -> tuple:
         return ("atom_lazy",) + tuple(
             ("const", _ND[e][1]) if _ND[e][0] == "c"
             else ("delta", thaw(_ND[e][1]), _ND[e][2])
+            if _ND[e][0] == "d"
+            else ("vadd", thaw(_ND[e][1]), thaw(_ND[e][2]))
+            if _ND[e][0] == "va"
+            else ("vsub", thaw(_ND[e][1]), thaw(_ND[e][2]))
             for e in k[1:])
     if tag == "rd":
         return ("reldef", k[1])
@@ -747,22 +804,15 @@ def lift(node, ren: Dict[str, int]) -> int:
 
 
 def _aval(e: dict, ren) -> Optional[int]:
-    if "const" in e:
-        return e["const"]
-    name, d = e["var_delta"]
-    v = ren.get(name)
-    if v is not None and _ND[v][0] == "a":
-        return _ND[v][2] + d
-    return None
+    return _afield_int(e, ren)
 
 
 def _lazy_e(e: dict, ren):
-    if "const" in e:
-        return t_const(e["const"])
-    name, d = e["var_delta"]
-    if name not in ren:
-        ren[name] = fresh()
-    return t_delta(ren[name], d)
+    def lk(n):
+        if n not in ren:
+            ren[n] = fresh()
+        return ren[n]
+    return _afield(e, lk)
 
 
 def _force(t: int, s: Subst) -> int:
@@ -774,10 +824,22 @@ def _force(t: int, s: Subst) -> int:
         if ek[0] == "c":
             out.append(ek[1])
             continue
-        v = _force(walk(ek[1], s), s)
-        if _ND[v][0] != "a":
-            return t
-        out.append(_ND[v][2] + ek[2])
+        if ek[0] == "d":
+            vs, d = (ek[1],), ek[2]
+        else:                          # va / vs
+            vs, d = ek[1:], 0
+        acc = None
+        for vt in vs:
+            v = _force(walk(vt, s), s)
+            if _ND[v][0] != "a":
+                return t
+            if acc is None:
+                acc = _ND[v][2]
+            elif ek[0] == "vs":
+                acc = max(0, acc - _ND[v][2])   # peano floor
+            else:
+                acc += _ND[v][2]
+        out.append(acc + d)
     return t_atom(out[0], out[1])
 
 
@@ -852,8 +914,14 @@ def _cp_prog(node, slot):
 def _cp_dyn(e, slot):
     if "const" in e:
         return (0, e["const"])
-    name, d = e["var_delta"]
-    return (1, slot(name), d)
+    if "var_delta" in e:
+        name, d = e["var_delta"]
+        return (1, slot(name), d)
+    if "var_add" in e:
+        return (2, slot(e["var_add"][0]), slot(e["var_add"][1]))
+    if "var_sub" in e:
+        return (3, slot(e["var_sub"][0]), slot(e["var_sub"][1]))
+    raise EvalError(f"seed: unliftable atom_dyn field {e!r}")
 
 
 def _cp_goal(g: dict, slot):
@@ -958,9 +1026,12 @@ def _cp(p, sl):
     if t == 3:
         return fresh()
     if t == 4:
-        return t_lazy(tuple(t_const(e[1]) if e[0] == 0
-                            else t_delta(sl[e[1]], e[2])
-                            for e in p[1]))
+        return t_lazy(tuple(
+            t_const(e[1]) if e[0] == 0
+            else t_delta(sl[e[1]], e[2]) if e[0] == 1
+            else t_vadd(sl[e[1]], sl[e[2]]) if e[0] == 2
+            else t_vsub(sl[e[1]], sl[e[2]])
+            for e in p[1]))
     if t == 5:
         return t_goalterm(p[1], [_cp(a, sl) for a in p[2]])
     v = sl[p[2]]                              # (6) dotted var
@@ -1154,14 +1225,7 @@ def _pat_lift(node):
         return t_atom(node["atom"][0], node["atom"][1])
     if "atom_dyn" in node:
         be, pe = node["atom_dyn"]
-        out = []
-        for e in (be, pe):
-            if "const" in e:
-                out.append(t_const(e["const"]))
-            else:
-                name, d = e["var_delta"]
-                out.append(t_delta(t_var(name), d))
-        return t_lazy(tuple(out))
+        return t_lazy((_afield(be, t_var), _afield(pe, t_var)))
     if "pair" in node:
         return t_pair(_pat_lift(node["pair"][0]),
                       _pat_lift(node["pair"][1]))
@@ -1184,8 +1248,12 @@ def _tvars(t: int) -> Iterator[int]:
         yield from _tvars(k[2])
     elif k[0] == "lz":
         for e in k[1:]:
-            if _ND[e][0] == "d":
-                yield from _tvars(_ND[e][1])
+            ek = _ND[e]
+            if ek[0] == "d":
+                yield from _tvars(ek[1])
+            elif ek[0] in ("va", "vs"):
+                yield from _tvars(ek[1])
+                yield from _tvars(ek[2])
 
 
 def _rtuple(terms: list):
@@ -1216,25 +1284,11 @@ def _instantiate(node, binds: Dict[object, int]) -> int:
         return t_atom(node["atom"][0], node["atom"][1])
     if "atom_dyn" in node:
         be, pe = node["atom_dyn"]
-        out = []
-        ok = True
-        for e in (be, pe):
-            if "const" in e:
-                out.append(e["const"])
-                continue
-            name, d = e["var_delta"]
-            v = binds.get(name)
-            if v is not None and _ND[v][0] == "a":
-                out.append(_ND[v][2] + d)
-            else:
-                ok = False
-        if ok:
+        out = [_afield_int(be, binds), _afield_int(pe, binds)]
+        if out[0] is not None and out[1] is not None:
             return t_atom(out[0], out[1])
         return t_lazy(tuple(
-            t_const(e["const"]) if "const" in e else
-            t_delta(binds.get(e["var_delta"][0],
-                              t_var(e["var_delta"][0])),
-                    e["var_delta"][1])
+            _afield(e, lambda n: binds.get(n, t_var(n)))
             for e in (be, pe)))
     if "pair" in node:
         return t_pair(_instantiate(node["pair"][0], binds),
@@ -1767,7 +1821,20 @@ def enc_term(t: dict, wc: list):
             raise EvalError("enc: non-T[8] atom_dyn — 'adyn axis")
         if "const" in ve:
             return _e("atom", t_atom(8, 8), t_atom(8, ve["const"]))
+        if "var_add" in ve:
+            a, b = ve["var_add"]
+            return _e("adyn", _e("nvar", t_sym(a)),
+                      _e("nvar", t_sym(b)))
+        if "var_sub" in ve:
+            a, b = ve["var_sub"]
+            return _e("adsub", _e("nvar", t_sym(a)),
+                      _e("nvar", t_sym(b)))
         name, d = ve["var_delta"]
+        if d < 0:
+            # negative delta is 'adsub — natadd's peano base would
+            # clamp _nat_lc(d<0) to z and silently keep the base
+            return _e("adsub", _e("nvar", t_sym(name)),
+                      _e("atom", t_atom(8, 8), t_atom(8, -d)))
         return _e("adyn", _e("nvar", t_sym(name)),
                   _e("atom", t_atom(8, 8), t_atom(8, d)))
     if "pair" in t:
@@ -2073,9 +2140,9 @@ def enc_sub(t: int) -> int:
 # --- machine fn tuple: declared order (the T index) ----------------
 _FNAMES = (
     "bind", "append", "take", "eq_nat", "eq_leaf", "eq_term",
-    "isnil", "is_var", "is_nvar", "is_pair", "is_adyn",
+    "isnil", "is_var", "is_nvar", "is_pair", "is_adyn", "is_adsub",
     "subst_lookup", "walk", "unify_w", "unify_enc", "adyn_res",
-    "natadd", "env_find", "next_id", "ren_find", "ren_fc",
+    "natadd", "natsub", "env_find", "next_id", "ren_find", "ren_fc",
     "inst", "inst_list", "reify", "reify_w", "unify_args",
     "eval", "eval_call", "eval_clauses", "eval_clause",
     "eval_body",
@@ -2278,6 +2345,7 @@ def _build_machine_lts():
     lts["is_var"] = L("T", "t")(_tagchk(v("t"), "var"))
     lts["is_nvar"] = L("T", "t")(_tagchk(v("t"), "nvar"))
     lts["is_adyn"] = L("T", "t")(_tagchk(v("t"), "adyn"))
+    lts["is_adsub"] = L("T", "t")(_tagchk(v("t"), "adsub"))
     lts["is_pair"] = L("T", "t")(
         _case3(v("t"), L("bv")(lp("ff")), L("n")(lp("ff")),
                L("c")(lp("tt"))))
@@ -2372,29 +2440,47 @@ def _build_machine_lts():
                                           "unify_w", v("u2"), v("v2"),
                                           v("s")))))))))))
 
-    # adyn_res : t s -> stream(term); 'adyn(bt,dt) with both walked
-    # to 'atom cells -> 'atom(bi, vi+dvi); otherwise t
+    # adyn_res : t s -> stream(term); 'adyn(bt,dt) / 'adsub(bt,dt)
+    # with both operands walked to 'atom cells -> 'atom(bi, va±dvi);
+    # otherwise t
+    def _adyn_case(adder):
+        return _case3(
+            v("t"),
+            L("bv")(_dnil()),
+            L("n")(_dnil()),
+            L("cell")(_apps(
+                _payload(_apps(lp("snd"), v("cell"))),
+                L("bt", "dt")(
+                _fcall("bind", _fcall("walk", v("bt"), v("s")),
+                       L("wb")(_fcall(
+                           "bind",
+                           _fcall("walk", v("dt"), v("s")),
+                           L("wd")(_adyn_combine(
+                               v("wb"), v("wd"), adder)))))))))
     lts["adyn_res"] = L("T", "t", "s")(
         _apps(_fcall("is_adyn", v("t")),
-              _case3(v("t"),
-                     L("bv")(_dnil()),
-                     L("n")(_dnil()),
-                     L("cell")(_apps(
-                         _payload(_apps(lp("snd"), v("cell"))),
-                         L("bt", "dt")(
-                         _fcall("bind", _fcall("walk", v("bt"), v("s")),
-                                L("wb")(_fcall(
-                                    "bind",
-                                    _fcall("walk", v("dt"), v("s")),
-                                    L("wd")(_adyn_combine(
-                                        v("wb"), v("wd")))))))))),
-              _stream(v("t"))))
+              _adyn_case("natadd"),
+              _apps(_fcall("is_adsub", v("t")),
+                    _adyn_case("natsub"),
+                    _stream(v("t")))))
 
     # natadd : a b -> stream(atom leaf, a.bits, va+vb) - peano on va
     lts["natadd"] = L("T", "a", "b")(
         _case3(v("a"),
                L("bva")(_case3(v("b"),
                               L("bvb")(_natadd_body(v("bva"), v("b"))),
+                              L("n")(_dnil()),
+                              L("c")(_dnil()))),
+               L("n")(_dnil()),
+               L("c")(_dnil())))
+
+    # natsub : a b -> stream(atom leaf, a.bits, va-vb) - peano on vb,
+    # floors at z (peano naturals have no negatives)
+    lts["natsub"] = L("T", "a", "b")(
+        _case3(v("a"),
+               L("bva")(_case3(v("b"),
+                              L("bvb")(_natsub_body(v("bva"), v("bvb"),
+                                                    v("a"))),
                               L("n")(_dnil()),
                               L("c")(_dnil()))),
                L("n")(_dnil()),
@@ -2604,26 +2690,29 @@ def _build_machine_lts():
                      _fcall("inst_list", v("ins"), _dnil(), v("n")),
                L("o1")(_fcall(
                    "bind",
-                   _fcall("inst", v("outP"), _o_fst(v("o1")),
-                          _o_mid(v("o1"))),
-                   L("o2")(_fcall(
+                   _fcall("unify_args", _o_tail(v("o1")),
+                          v("at"), v("s")),
+                   L("s1")(_fcall(
                        "bind",
-                       _fcall("inst_list",
-                              _apps(lp("snd"), _payload(v("cl"))),
-                              _o_fst(v("o2")), _o_mid(v("o2"))),
-                       L("o3")(_fcall(
+                       _fcall("inst", v("outP"), _o_fst(v("o1")),
+                              _o_mid(v("o1"))),
+                       L("o2")(_fcall(
                            "bind",
-                           _fcall("unify_args", _o_tail(v("o1")),
-                                  v("at"), v("s")),
-                           L("s1")(_fcall(
+                           _fcall("unify_enc", v("ot"),
+                                  _o_tail(v("o2")), v("s1")),
+                           L("s3")(_fcall(
                                "bind",
-                               _fcall("unify_enc", v("ot"),
-                                      _o_tail(v("o2")), v("s1")),
-                               L("s3")(_fcall("eval_body", v("env"),
+                               _fcall("inst_list",
+                                      _apps(lp("snd"),
+                                            _payload(v("cl"))),
+                                      _o_fst(v("o2")),
+                                      _o_mid(v("o2"))),
+                               L("o3")(_fcall("eval_body", v("env"),
                                              _o_tail(v("o3")), v("s3"),
                                              _o_mid(v("o3")))))))
-                       )))
-               ))),
+                       ))
+                   ))
+               )),
               _dnil()))
 
     # eval_clauses : try each clause, append results (disjunction)
@@ -2746,20 +2835,43 @@ def _natadd_body(bva, bterm):
                                           v("r"))))))))))))
 
 
-def _adyn_combine(wb, wd):
-    """IR: wb/wd 'atom cells -> stream['atom(bi, va+vd)] via natadd.
-    'atom-node = cell(mksym'atom', cell(bi,vi)); the inner cell's
-    payload is p2(bi,vi)."""
+def _adyn_combine(wb, wd, adder="natadd"):
+    """IR: wb/wd 'atom cells -> stream['atom(bi, va±vd)] via the
+    adder ('natadd/'natsub).  'atom-node = cell(mksym'atom',
+    cell(bi,vi)); the inner cell's payload is p2(bi,vi)."""
     v, a = lv, la
     L = _lams
     bi = _apps(lp("fst"), _payload(_apps(lp("snd"), _payload(wb))))
     vi = _apps(lp("snd"), _payload(_apps(lp("snd"), _payload(wb))))
     dvi = _apps(lp("snd"), _payload(_apps(lp("snd"), _payload(wd))))
     return _fcall("bind",
-                  _fcall("natadd", vi, dvi),
+                  _fcall(adder, vi, dvi),
                   L("nv2")(_stream(_apps(
                       lp("mkcell"), _mksym_id("atom"),
                       _mkcell(bi, v("nv2"))))))
+
+
+def _natsub_body(bva, bvb, aterm):
+    """IR: a - b as peano on b's value: z -> a ; s k ->
+    mkatom(ba, pred(natsub(a, mkatom(0,k)).val)).  Floors at z:
+    pred(z) = z, so recursion past zero keeps 0."""
+    v, a = lv, la
+    L = _lams
+    return _apps(bva, L("ba", "va")(
+        _apps(bvb, L("bb", "vb")(
+            _apps(v("vb"),
+                  _stream(aterm),
+                  L("k")(_fcall("bind",
+                                _fcall("natsub", aterm,
+                                       _apps(lp("mkatom"),
+                                             _nat_lc(0), v("k"))),
+                                L("r")(_stream(_apps(
+                                    lp("mkatom"), v("ba"),
+                                    _apps(
+                                        _apps(lp("snd"),
+                                              _payload(v("r"))),
+                                        lp("z"),
+                                        L("pk")(v("pk")))))))))))))
 
 
 def machine_term(fuel: int) -> int:
@@ -2767,9 +2879,10 @@ def machine_term(fuel: int) -> int:
     lts = _build_machine_lts()
     ar = {"bind": 2, "append": 2, "take": 2, "eq_nat": 2,
           "eq_leaf": 2, "eq_term": 2, "isnil": 1, "is_var": 1,
-          "is_nvar": 1, "is_pair": 1, "is_adyn": 1,
+          "is_nvar": 1, "is_pair": 1, "is_adyn": 1, "is_adsub": 1,
           "subst_lookup": 2, "walk": 2, "unify_w": 3, "unify_enc": 3,
-          "adyn_res": 2, "natadd": 2, "env_find": 2, "next_id": 1,
+          "adyn_res": 2, "natadd": 2, "natsub": 2, "env_find": 2,
+          "next_id": 1,
           "ren_find": 2, "ren_fc": 3, "inst": 3, "inst_list": 3,
           "reify": 2, "reify_w": 2, "unify_args": 3, "eval": 4,
           "eval_call": 6, "eval_clauses": 7, "eval_clause": 7,

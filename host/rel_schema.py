@@ -111,6 +111,11 @@ def _check_term(t, where: str):
                 and isinstance(v[0], str) and isinstance(v[1], int)):
             raise SchemaRefusal(
                 f"{where}: var_delta wants [name, int], got {v!r}")
+    elif k in ("var_add", "var_sub"):
+        if not (isinstance(v, list) and len(v) == 2
+                and isinstance(v[0], str) and isinstance(v[1], str)):
+            raise SchemaRefusal(
+                f"{where}: {k} wants [name, name], got {v!r}")
     elif k == "const":
         if not isinstance(v, int):
             raise SchemaRefusal(f"{where}: const not int: {v!r}")

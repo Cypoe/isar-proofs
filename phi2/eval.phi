@@ -42,6 +42,15 @@ adyn_res : <t, s> <-> <r> where {
       add<vi, dvi> = nv2
       r = 'atom([bi|nv2])
     }
+  | fresh (bt, dt, wb, wd, bi, vi, di, dvi, nv2) {
+      t = 'adsub(bt, dt)
+      walk<bt, s> = wb
+      walk<dt, s> = wd
+      wb = 'atom([bi|vi])
+      wd = 'atom([di|dvi])
+      sub<vi, dvi> = nv2
+      r = 'atom([bi|nv2])
+    }
   | fresh (hit) {
       RUN(adyn_probe<t>, 1) = hit
       hit = []
@@ -50,6 +59,7 @@ adyn_res : <t, s> <-> <r> where {
 }
 adyn_probe : <t> <-> <hit> where {
   | fresh (bt, dt) { t = 'adyn(bt, dt)  hit = 'yes }
+  | fresh (bt, dt) { t = 'adsub(bt, dt)  hit = 'yes }
 }
 
 ;; --- subst lookup: first binding wins; unbound is a value ---
@@ -358,10 +368,10 @@ eval_clause : <env, cl, ins, outP, at, ot, s, n> <-> <o> shape self where {
            r3, n3, goals2, s1, s3) {
       cl = 'clause(goals)
       inst_list<ins, [], n> = [r1|[n1|ins2]]
-      inst<outP, r1, n1> = [r2|[n2|outP2]]
-      inst_list<goals, r2, n2> = [r3|[n3|goals2]]
       unify_args<ins2, at, s> = s1
+      inst<outP, r1, n1> = [r2|[n2|outP2]]
       unify_enc<ot, outP2, s1> = s3
+      inst_list<goals, r2, n2> = [r3|[n3|goals2]]
       eval_body<env, goals2, s3, n3> = o
     }
 }

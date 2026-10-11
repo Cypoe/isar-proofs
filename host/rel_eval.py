@@ -212,23 +212,16 @@ def lift(node, ren: Dict[str, tuple]):
 
 
 def _aval(e: dict, ren) -> Optional[int]:
-    if "const" in e:
-        return e["const"]
-    name, d = e["var_delta"]
-    v = ren.get(name)
-    if isinstance(v, tuple) and v[0] == "atom":
-        return v[2] + d
-    return None
+    return _afield_int(e, ren)
 
 
 def _lazy_e(e: dict, ren):
     """atom_dyn field -> self-contained lazy expr."""
-    if "const" in e:
-        return ("const", e["const"])
-    name, d = e["var_delta"]
-    if name not in ren:
-        ren[name] = fresh()
-    return ("delta", ren[name], d)
+    def lk(n):
+        if n not in ren:
+            ren[n] = fresh()
+        return ren[n]
+    return _afield(e, lk)
 
 
 def _force(t, s: Subst):
@@ -240,11 +233,23 @@ def _force(t, s: Subst):
         if e[0] == "const":
             out.append(e[1])
             continue
-        v = walk(e[1], s)
-        v = _force(v, s) if isinstance(v, tuple) else v
-        if not (isinstance(v, tuple) and v[0] == "atom"):
-            return t
-        out.append(v[2] + e[2])
+        if e[0] == "delta":
+            vs, d = (e[1],), e[2]
+        else:                          # vadd / vsub
+            vs, d = e[1:], 0
+        acc = None
+        for i, vt in enumerate(vs):
+            v = walk(vt, s)
+            v = _force(v, s) if isinstance(v, tuple) else v
+            if not (isinstance(v, tuple) and v[0] == "atom"):
+                return t
+            if acc is None:
+                acc = v[2]
+            elif e[0] == "vsub":
+                acc = max(0, acc - v[2])   # peano floor — no negatives
+            else:
+                acc += v[2]
+        out.append(acc + d)
     return t_atom(out[0], out[1])
 
 
@@ -399,14 +404,8 @@ def _pat_lift(node):
         return t_atom(node["atom"][0], node["atom"][1])
     if "atom_dyn" in node:
         be, pe = node["atom_dyn"]
-        out = []
-        for e in (be, pe):
-            if "const" in e:
-                out.append(("const", e["const"]))
-            else:
-                name, d = e["var_delta"]
-                out.append(("delta", ("var", name), d))
-        return ("atom_lazy", *out)
+        return ("atom_lazy", _afield(be, _pat_var),
+                            _afield(pe, _pat_var))
     if "pair" in node:
         return t_pair(_pat_lift(node["pair"][0]),
                       _pat_lift(node["pair"][1]))
@@ -417,6 +416,49 @@ def _pat_lift(node):
     if "sym" in node:
         return t_sym(node["sym"])
     raise EvalError(f"rel_eval: unliftable pattern node {node!r}")
+
+
+def _pat_var(name: str):
+    return ("var", name)
+
+
+def _afield(e: dict, lookup):
+    """atom_dyn field node -> lazy field: (const,v) | (delta,t,d)
+    | (vadd,ta,tb) | (vsub,ta,tb).  lookup: surface name -> var
+    term at this level (ren slot, bind slot, or surface pat var)."""
+    if "const" in e:
+        return ("const", e["const"])
+    if "var_delta" in e:
+        n, d = e["var_delta"]
+        return ("delta", lookup(n), d)
+    if "var_add" in e:
+        a, b = e["var_add"]
+        return ("vadd", lookup(a), lookup(b))
+    if "var_sub" in e:
+        a, b = e["var_sub"]
+        return ("vsub", lookup(a), lookup(b))
+    raise EvalError(f"rel_eval: bad atom_dyn field {e!r}")
+
+
+def _afield_int(e: dict, binds) -> Optional[int]:
+    """atom_dyn field -> int when its vars are atom-bound."""
+    if "const" in e:
+        return e["const"]
+    if "var_delta" in e:
+        n, d = e["var_delta"]
+        v = binds.get(n)
+        return v[2] + d if isinstance(v, tuple) and \
+            v[0] == "atom" else None
+    k = "var_add" if "var_add" in e else \
+        "var_sub" if "var_sub" in e else None
+    if k is None:
+        return None
+    va, vb = binds.get(e[k][0]), binds.get(e[k][1])
+    if isinstance(va, tuple) and va[0] == "atom" and \
+            isinstance(vb, tuple) and vb[0] == "atom":
+        return va[2] + vb[2] if k == "var_add" else \
+            max(0, va[2] - vb[2])
+    return None
 
 
 def _tvars(t) -> Iterator[tuple]:
@@ -430,8 +472,11 @@ def _tvars(t) -> Iterator[tuple]:
             yield from _tvars(t[2])
         elif t[0] == "atom_lazy":
             for e in t[1:]:
-                if e[0] == "delta":
-                    yield from _tvars(e[1])
+                if e[0] != "const":
+                    for vt in e[1:]:
+                        if isinstance(vt, int):
+                            continue
+                        yield from _tvars(vt)
 
 
 def _rtuple(terms: list):
@@ -468,26 +513,12 @@ def _instantiate(node, binds: Dict[str, tuple]):
         return t_atom(node["atom"][0], node["atom"][1])
     if "atom_dyn" in node:
         be, pe = node["atom_dyn"]
-        out = []
-        ok = True
-        for e in (be, pe):
-            if "const" in e:
-                out.append(e["const"])
-                continue
-            name, d = e["var_delta"]
-            v = binds.get(name)
-            if isinstance(v, tuple) and v[0] == "atom":
-                out.append(v[2] + d)
-            else:
-                ok = False
-        if ok:
+        out = [_afield_int(be, binds), _afield_int(pe, binds)]
+        if out[0] is not None and out[1] is not None:
             return t_atom(out[0], out[1])
-        return ("atom_lazy", *[
-            ("const", e["const"]) if "const" in e else
-            ("delta", binds.get(e["var_delta"][0],
-                                ("var", e["var_delta"][0])),
-             e["var_delta"][1])
-            for e in (be, pe)])
+        return ("atom_lazy",
+                _afield(be, lambda n: binds.get(n, ("var", n))),
+                _afield(pe, lambda n: binds.get(n, ("var", n))))
     if "pair" in node:
         return t_pair(_instantiate(node["pair"][0], binds),
                       _instantiate(node["pair"][1], binds))

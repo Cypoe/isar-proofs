@@ -30,3 +30,4 @@ seed/build/
 emit_work/
 nul
 *.rel.plex
+_scratch/
