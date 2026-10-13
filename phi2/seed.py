@@ -2141,8 +2141,9 @@ def enc_sub(t: int) -> int:
 _FNAMES = (
     "bind", "append", "take", "eq_nat", "eq_leaf", "eq_term",
     "isnil", "is_var", "is_nvar", "is_pair", "is_adyn", "is_adsub",
-    "subst_lookup", "walk", "unify_w", "unify_enc", "adyn_res",
-    "natadd", "natsub", "env_find", "next_id", "ren_find", "ren_fc",
+    "sget", "sput", "sput_new", "binc",
+    "walk", "unify_w", "unify_enc", "adyn_res",
+    "natadd", "natsub", "env_find", "ren_find", "ren_fc",
     "inst", "inst_list", "reify", "reify_w", "unify_args",
     "eval", "eval_call", "eval_clauses", "eval_clause",
     "eval_body",
@@ -2233,6 +2234,20 @@ def _payload(t):
 def _varid(t):
     """IR node: 'var(i)'s id leaf = snd of the cell payload."""
     return _apps(lp("snd"), _payload(t))
+
+
+def _bitval(t):
+    """IR node: val nat of an enc'd 'atom([1|b]) bit cell —
+    snd(payload) thrice: sym, inner cell, leaf -> b."""
+    return _apps(lp("snd"), _payload(
+        _apps(lp("snd"), _payload(
+            _apps(lp("snd"), _payload(t))))))
+
+
+def _mkbit(b):
+    """IR node: enc'd 'atom([1|b]) bit cell (tagged pair)."""
+    return _mkcell(_mksym_id("atom"),
+                   _mkcell(_mkatom_l(8, 1), _mkatom_l(8, b)))
 
 
 def _cellpl_body(cellnode, h):
@@ -2350,26 +2365,112 @@ def _build_machine_lts():
         _case3(v("t"), L("bv")(lp("ff")), L("n")(lp("ff")),
                L("c")(lp("tt"))))
 
-    # subst_lookup : k lst -> stream(term) - corpus clause order:
-    # hit -> 'bound(v) ; key-miss -> recurse ; [] -> 'unbound
-    lts["subst_lookup"] = L("T", "k", "lst")(
-        _case3(v("lst"),
-               L("bv")(_apps(
-                   _fcall("isnil", v("lst")),
-                   _stream(_mksym_id("unbound")),
-                   _dnil())),
+    # subst = binary trie keyed on little-endian bit-list ids
+    # (corpus sget/sput/sput_new/binc).  node = mkcell(L,
+    # mkcell(V, R)), V = [] or mkcell(v, []); empty trie = [].
+    def _bitsel(t, zt, ot):
+        """IR: on id head 'atom([1|b]) cell — zt if val=0, else ot."""
+        return _apps(_eqnat(_bitval(t), _nat_lc(0)), zt, ot)
+
+    _unbound = _stream(_mksym_id("unbound"))
+
+    # sget : k t -> stream('bound(v)|'unbound)
+    _sg_knil = _apps(
+        _fcall("isnil", v("k")),
+        _case3(v("V"),
+               L("bv2")(_unbound),
+               L("n2")(_dnil()),
+               L("vc")(_cellpl_body(v("vc"), L("vv", "vr")(
+                   _stream(_mkcell(_mksym_id("bound"), v("vv"))))))),
+        _dnil())
+    _sg_kcell = _cellpl_body(v("kc"), L("b", "kb")(
+        _bitsel(v("b"),
+                _fcall("sget", v("kb"), v("L")),
+                _fcall("sget", v("kb"), v("R")))))
+    _sg_node = _cellpl_body(v("cell"), L("L", "VR")(
+        _cellpl_body(_payload(v("VR")), L("V", "R")(
+            _case3(v("k"),
+                   L("bv")(_sg_knil),
+                   L("n2")(_dnil()),
+                   L("kc")(_sg_kcell))))))
+    lts["sget"] = L("T", "k", "t")(
+        _case3(v("t"),
+               L("bv")(_apps(_fcall("isnil", v("t")),
+                             _unbound, _dnil())),
                L("n")(_dnil()),
-               L("cell")(_cellpl_body(v("cell"), L("ent", "rest")(
-                   _case3(v("ent"),
-                          L("bv")(_dnil()),
-                          L("n")(_dnil()),
-                          L("kv")(_apps(v("kv"), L("k2", "vv")(
-                              _apps(_fcall("eq_leaf", v("k"), v("k2")),
-                                    _stream(_mkcell(_mksym_id("bound"),
-                                                    v("vv"))),
-                                    _fcall("subst_lookup",
-                                           v("k"), v("rest"))))))))
-               ))))
+               L("cell")(_sg_node)))
+
+    # sput : k v t -> stream(trie2) — persistent path-copy insert
+    _sp_putV = _stream(_mkcell(v("L"),
+                               _mkcell(_mkcell(v("v"), _dnil()),
+                                       v("R"))))
+    _sp_L2 = L("L2")(_stream(_mkcell(v("L2"),
+                                     _mkcell(v("V"), v("R")))))
+    _sp_R2 = L("R2")(_stream(_mkcell(v("L"),
+                                     _mkcell(v("V"), v("R2")))))
+    _sp_node = _cellpl_body(v("cell"), L("L", "VR")(
+        _cellpl_body(_payload(v("VR")), L("V", "R")(
+            _case3(v("k"),
+                   L("bv")(_apps(_fcall("isnil", v("k")),
+                                 _sp_putV, _dnil())),
+                   L("n2")(_dnil()),
+                   L("kc")(_cellpl_body(v("kc"), L("b", "kb")(
+                       _bitsel(v("b"),
+                               _fcall("bind",
+                                      _fcall("sput", v("kb"),
+                                             v("v"), v("L")),
+                                      _sp_L2),
+                               _fcall("bind",
+                                      _fcall("sput", v("kb"),
+                                             v("v"), v("R")),
+                                      _sp_R2))))))))))
+    lts["sput"] = L("T", "k", "v", "t")(
+        _case3(v("t"),
+               L("bv")(_apps(_fcall("isnil", v("t")),
+                             _fcall("sput_new", v("k"), v("v")),
+                             _dnil())),
+               L("n")(_dnil()),
+               L("cell")(_sp_node)))
+
+    # sput_new : k v -> stream(trie) — fresh spine ending [v]
+    _sn_L2 = L("L2")(_stream(_mkcell(v("L2"),
+                                     _mkcell(_dnil(), _dnil()))))
+    _sn_R2 = L("R2")(_stream(_mkcell(_dnil(),
+                                     _mkcell(_dnil(), v("R2")))))
+    lts["sput_new"] = L("T", "k", "v")(
+        _case3(v("k"),
+               L("bv")(_apps(_fcall("isnil", v("k")),
+                             _stream(_mkcell(
+                                 _dnil(),
+                                 _mkcell(_mkcell(v("v"), _dnil()),
+                                         _dnil()))),
+                             _dnil())),
+               L("n")(_dnil()),
+               L("cell")(_cellpl_body(v("cell"), L("b", "kb")(
+                   _bitsel(v("b"),
+                           _fcall("bind",
+                                  _fcall("sput_new", v("kb"),
+                                         v("v")),
+                                  _sn_L2),
+                           _fcall("bind",
+                                  _fcall("sput_new", v("kb"),
+                                         v("v")),
+                                  _sn_R2)))))))
+
+    # binc : n -> stream(bitlist) — little-endian carry increment
+    lts["binc"] = L("T", "n")(
+        _case3(v("n"),
+               L("bv")(_apps(_fcall("isnil", v("n")),
+                             _stream(_mkcell(_mkbit(1), _dnil())),
+                             _dnil())),
+               L("n")(_dnil()),
+               L("cell")(_cellpl_body(v("cell"), L("b", "r")(
+                   _apps(_eqnat(_bitval(v("b")), _nat_lc(0)),
+                         _stream(_mkcell(_mkbit(1), v("r"))),
+                         _fcall("bind", _fcall("binc", v("r")),
+                                L("r2")(_stream(
+                                    _mkcell(_mkbit(0),
+                                            v("r2")))))))))))
 
     # walk : t s -> stream(term); 'var -> bound?recurse:t ; else t
     _walk_hit = L("b")(_case3(v("b"),
@@ -2385,7 +2486,7 @@ def _build_machine_lts():
     lts["walk"] = L("T", "t", "s")(
         _apps(_fcall("is_var", v("t")),
               _fcall("bind",
-                     _fcall("subst_lookup", _varid(v("t")), v("s")),
+                     _fcall("sget", _varid(v("t")), v("s")),
                      _walk_hit),
               _stream(v("t"))))
 
@@ -2393,17 +2494,16 @@ def _build_machine_lts():
     lts["unify_w"] = L("T", "u", "v", "s")(
         _apps(_fcall("is_var", v("u")),
               _apps(_fcall("is_var", v("v")),
-                    _apps(_fcall("eq_leaf", _varid(v("u")),
+                    _apps(_fcall("eq_term", _varid(v("u")),
                                  _varid(v("v"))),
                           _stream(v("s")),
-                          _stream(_mkcell(_mkcell(_varid(v("u")),
-                                                  v("v")),
-                                          v("s")))),
-                    _stream(_mkcell(_mkcell(_varid(v("u")), v("v")),
-                                    v("s")))),
+                          _fcall("sput", _varid(v("u")),
+                                 v("v"), v("s"))),
+                    _fcall("sput", _varid(v("u")),
+                           v("v"), v("s"))),
               _apps(_fcall("is_var", v("v")),
-                    _stream(_mkcell(_mkcell(_varid(v("v")), v("u")),
-                                    v("s"))),
+                    _fcall("sput", _varid(v("v")),
+                           v("u"), v("s")),
                     _apps(_fcall("is_pair", v("u")),
                           _apps(_fcall("is_pair", v("v")),
                                 _fcall("bind",
@@ -2525,12 +2625,6 @@ def _build_machine_lts():
         """PAIR(x, PAIR(y, z)) -> z"""
         return _apps(lp("snd"), _payload(_o_snd(t)))
 
-    # next_id : n -> stream[atom(8, v+1)]
-    lts["next_id"] = L("T", "n")(
-        _stream(_apps(lp("mkatom"), _nat_lc(8),
-                      _apps(lp("sn"),
-                            _apps(lp("snd"), _payload(v("n")))))))
-
     # ren_find : name ren -> stream[id] - corpus two-clause order:
     # hit AND recurse both derive
     lts["ren_find"] = L("T", "nm", "ren")(
@@ -2553,12 +2647,12 @@ def _build_machine_lts():
 
     # ren_fc : nm ren n -> stream[[id|[ren|n]] | miss-cons]
     # corpus: RUN(ren_find,1) -> res ; [id|_] -> [id|[ren|n]] ;
-    #         [] -> next_id, [n|[[[nm|n]|ren]|n2]]
+    #         [] -> binc, [n|[[[nm|n]|ren]|n2]]  (n = bit-list)
     _rf_res = _fcall("take", _nat_lc(1),
                      _fcall("ren_find", v("nm"), v("ren")))
     lts["ren_fc"] = L("T", "nm", "ren", "n")(
         _apps(_fcall("isnil", _rf_res),
-              _fcall("bind", _fcall("next_id", v("n")),
+              _fcall("bind", _fcall("binc", v("n")),
                      L("n2")(_stream(_mkcell(
                          v("n"),
                          _mkcell(_mkcell(_mkcell(v("nm"), v("n")),
@@ -2880,9 +2974,9 @@ def machine_term(fuel: int) -> int:
     ar = {"bind": 2, "append": 2, "take": 2, "eq_nat": 2,
           "eq_leaf": 2, "eq_term": 2, "isnil": 1, "is_var": 1,
           "is_nvar": 1, "is_pair": 1, "is_adyn": 1, "is_adsub": 1,
-          "subst_lookup": 2, "walk": 2, "unify_w": 3, "unify_enc": 3,
+          "sget": 2, "sput": 3, "sput_new": 2, "binc": 1,
+          "walk": 2, "unify_w": 3, "unify_enc": 3,
           "adyn_res": 2, "natadd": 2, "natsub": 2, "env_find": 2,
-          "next_id": 1,
           "ren_find": 2, "ren_fc": 3, "inst": 3, "inst_list": 3,
           "reify": 2, "reify_w": 2, "unify_args": 3, "eval": 4,
           "eval_call": 6, "eval_clauses": 7, "eval_clause": 7,
@@ -3163,8 +3257,20 @@ def _selftest() -> int:
             return t_pair(S("atom"), t_pair(t_atom(8, b),
                                            t_atom(8, v)))
 
+        def eBits(i):
+            """corpus-domain little-endian bit list of i —
+            ['atom([1|b])..|[]] spine ending NIL atom(0,0)."""
+            cells = []
+            while i > 0:
+                cells.append(eAtom(1, i & 1))
+                i >>= 1
+            o = NIL
+            for c in reversed(cells):
+                o = t_pair(c, o)
+            return o
+
         def eVar(i):
-            return t_pair(S("var"), t_atom(8, i))
+            return t_pair(S("var"), eBits(i))
 
         def eNvar(x):
             return t_pair(S("nvar"), S(x))
@@ -3181,6 +3287,17 @@ def _selftest() -> int:
                 o = t_pair(x, o)
             return o
 
+        def _ebits_dec(t):
+            """thawed corpus bit-list -> int (LSB first)."""
+            n, sh = 0, 0
+            while isinstance(t, tuple) and t[0] == "pair" and \
+                    isinstance(t[1], tuple) and t[1][0] == "pair" and \
+                    t[1][1] == ("sym", "atom"):
+                n |= (t[1][2][2][2] << sh)
+                sh += 1
+                t = t[2]
+            return n
+
         def dec(e):
             if e[0] == "pair" and e[1][0] == "sym":
                 k = e[1][1]
@@ -3189,7 +3306,7 @@ def _selftest() -> int:
                 if k == "pair":
                     return ("pair", dec(e[2][1]), dec(e[2][2]))
                 if k == "var":
-                    return ("var", e[2][2])
+                    return ("var", _ebits_dec(e[2]))
                 if k == "sym":
                     return ("sym", e[2][1])
             raise ValueError(e)
@@ -3218,7 +3335,7 @@ def _selftest() -> int:
             t_pair(eList(eVar(90), eVar(91)), ewant)))
         _reset_fresh()
         sols = run_value(eg, "eval", [env, goal, NIL,
-                                      t_atom(8, 1)], n=3)
+                                      eBits(1)], n=3)
         splits = []
         for sp in sols:
             s2 = _ND[sp][1]
@@ -3248,7 +3365,7 @@ def _selftest() -> int:
                          ePair(eAtom(8, 2), NILe)), eVar(97))))
         _reset_fresh()
         rs = run_value(sg, "eval", [env2, goal, NIL,
-                                    t_atom(8, 1)], n=1)
+                                    eBits(1)], n=1)
         assert len(rs) == 1
         rout = run_value(sg, "reify", [eVar(97), _ND[rs[0]][1]],
                          n=1)[0]
@@ -3259,7 +3376,7 @@ def _selftest() -> int:
                          ePair(eAtom(8, 2), NILe)), eVar(98))))
         _reset_fresh()
         oos = run_value(sg, "eval", [env1, goal, NIL,
-                                     t_atom(8, 1)], n=1)
+                                     eBits(1)], n=1)
         oout = run_value(sg, "reify", [eVar(98),
                                        _ND[oos[0]][1]], n=1)[0]
         assert rout == oout, (rout, oout)
@@ -3412,7 +3529,7 @@ def _selftest() -> int:
                   eList(eAtom(8, 1), elist), eVar(0))
         _reset_fresh()
         hit = run_value(eg, "eval", [senv, goal, NIL,
-                                     t_atom(8, 1)], n=1)
+                                     eBits(1)], n=1)
         assert len(hit) == 1
         o = run_value(eg, "reify", [eVar(0), _ND[hit[0]][1]], n=1)
         assert o == [eT("pair", eSym("bound"), eAtom(8, 7))], o
@@ -3420,7 +3537,7 @@ def _selftest() -> int:
                    eList(eAtom(8, 9), elist), eVar(0))
         _reset_fresh()
         miss = run_value(eg, "eval", [senv, goal2, NIL,
-                                      t_atom(8, 1)], n=1)
+                                      eBits(1)], n=1)
         assert len(miss) == 1
         o2 = run_value(eg, "reify", [eVar(0), _ND[miss[0]][1]],
                        n=1)
@@ -3440,69 +3557,57 @@ def _selftest() -> int:
                 eList(eSym("b"), alist), eVar(0))
         _reset_fresh()
         mh = run_value(eg, "eval", [menv, mg, NIL,
-                                    t_atom(8, 1)], n=1)
+                                    eBits(1)], n=1)
         assert len(mh) == 1
         mo = run_value(eg, "reify", [eVar(0), _ND[mh[0]][1]], n=1)
         assert mo == [eAtom(8, 20)], mo
-        # whole eval.plex enc's as data too — the 25-rel env is
+        # whole eval.plex enc's as data too — the 31-rel env is
         # the self-description substrate for L2 interpretation
         env1 = enc_env(eg)
-        # L2 foothold: enc'd eval interprets a grammar-2 'unify
-        # goal over the fully enc'd self-env.  Level law: inner
-        # env is a 'pair-spine of 'pair('sym-key, enc_t(def))
-        # cells ending the enc'd empty list ('atom(0,0)-node);
-        # goal nodes are 'pair('sym'tag', right-nested-args);
-        # top-level out slots stay corpus-level 'var nodes.
-        def eP(a, b): return t_pair(S("pair"), t_pair(a, b))
-        def eSym2(x): return t_pair(S("sym"), S(x))
-        def eAtom2(b, v): return t_pair(S("atom"),
-                                        t_pair(t_atom(8, b),
-                                               t_atom(8, v)))
-        NILe = eAtom2(0, 0)
-        def enc_t(t):
-            t = _force(t, NIL)
-            k = _ND[t]
-            if k[0] == "p":
-                return eP(enc_t(k[1]), enc_t(k[2]))
-            if k[0] == "s":
-                return eSym2(k[1])
-            if k[0] == "a":
-                return eAtom2(k[1], k[2])
-            raise AssertionError("enc_t " + str(k))
-        ienv = NILe
-        ents = []
-        cur = env1
-        while _ND[cur][0] == "p":
-            e = _ND[_ND[cur][1]]
-            ents.append((e[1], enc_t(e[2])))
-            cur = _ND[cur][2]
-        for k, d in reversed(ents):
-            ienv = eP(eP(k, d), ienv)
-        gvar = eP(eSym2("var"), eAtom2(8, 90))
-        g2 = eP(eSym2("unify"), eP(eAtom2(8, 5), gvar))
-        at = NIL
-        for x in reversed([ienv, g2, NILe, t_atom(8, 1)]):
-            at = t_pair(x, at)
-        g1 = t_pair(S("call"),
-                    t_pair(eSym("eval"), t_pair(at, eVar(91))))
+        # L2 foothold — honest form.  The enc'd-eval goal shape
+        # ('pair-LEAF 'unify-nodes against an enc'd ienv) asserted
+        # len(sols)==1, but its sols were template-exploration
+        # artifacts: inner 'call dispatch needs corpus inst to
+        # rename enc'd 'nvar cells, which it can't (inst recurses
+        # 'pair structure; 'nvar patterns stay literal).  The
+        # query 'var was never bound — interpreter^2 via
+        # inst'd-enc'd-defs is open (frag 0016 family).
+        # What IS verified here: corpus eval solving 'unify over
+        # bit-list 'var ids — the goal var's binding decoded from
+        # the returned trie subst via reify+thaw.
+        g = t_pair(S("unify"), t_pair(t_atom(8, 5), eVar(90)))
         _reset_fresh()
-        l2 = run_value(eg, "eval", [env1, g1, NIL,
-                                    t_atom(8, 1)], n=1,
-                       fuel=500000)
-        assert len(l2) == 1, "L2 'unify through enc'd eval"
-        sd = ("enc'd subst_lookup hit+miss, enc'er bundle->env, "
-              "L2 'unify via enc'd eval")
+        l2 = run_value(eg, "eval", [env1, g, NIL, eBits(1)],
+                       n=1, fuel=500000)
+        assert len(l2) == 1, "corpus-eval 'unify via trie subst"
+        rv = run_value(eg, "reify", [eVar(90), _ND[l2[0]][1]],
+                       n=1)
+        assert rv and thaw(rv[0]) == ("atom", 8, 5), \
+            "corpus-eval binds 'var90 -> 'atom(8,5)"
+        sd = ("enc'd alist hit+miss, enc'er bundle->env, "
+              "corpus-eval 'unify trie-bind decode-verified")
         # H0 foothold: the combinator machine (lowered rels,
         # bracketed I/K/S, F^fuel(BOT) tuple) through the host
         # graph runtime, observational decode.  Cheap leaves so
         # the machine path has a standing check.
-        assert h0_call("next_id", [enc_sub(t_atom(8, 0))],
-                       mfuel=8) == [("a", 8, 1)]
-        assert h0_call("subst_lookup",
-                       [enc_sub(t_atom(8, 7)),
+        assert h0_call("binc", [enc_sub(eBits(0))],
+                       mfuel=32) != []
+        assert h0_call("sget",
+                       [enc_sub(eBits(0)),
                         enc_sub(t_atom(0, 0))],
-                       mfuel=8) == [("s", "unbound")]
-        sd += ", H0 next_id+subst_lookup"
+                       mfuel=32) == [("s", "unbound")]
+        # trie for {[1] -> 'atom(8,7)}: root [[]|[[]|R]],
+        # R = [[]|[[v]|[]]] with v = 'atom(8,7)
+        innr = t_pair(NIL, t_pair(t_pair(t_atom(8, 7), NIL),
+                                  NIL))
+        tr1 = t_pair(NIL, t_pair(NIL, innr))
+        assert h0_call("sget",
+                       [enc_sub(eBits(1)), enc_sub(tr1)],
+                       mfuel=64) == [("p", ("s", "bound"),
+                                      ("a", 8, 7))]
+        assert h0_call("binc", [enc_sub(eBits(3))],
+                       mfuel=64) != []
+        sd += ", H0 sget+sput/binc"
     # corpus files if present
     std = os.path.join(here, "std")
     if os.path.isdir(std):

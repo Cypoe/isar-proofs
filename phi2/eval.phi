@@ -4,7 +4,7 @@
 ;;
 ;; Encoding contract (enc), in 'tag sugar:
 ;;   ("atom",b,v)  -> 'atom(ATOM(8,b), ATOM(8,v))
-;;   ("var",i)     -> 'var(i)            ;; i = fresh id
+;;   ("var",i)     -> 'var(i)            ;; i = bit-list id
 ;;   ("nvar", 'x)  -> 'nvar('x)          ;; name-var, AST
 ;;   ("pair",a,b)  -> 'pair(a, b)
 ;;   ("sym",n)     -> 'sym('n)
@@ -15,8 +15,11 @@
 ;; def:    'def(inPatList, outPat, clauseList)
 ;; clause: 'clause(goalList)
 ;; env:    PAIR-spine of PAIR(nameSym, defTerm)
-;; subst:  PAIR-spine of PAIR(ATOM(8,id), encTerm), newest first
-;; ren:    PAIR-spine of PAIR(nameSym, ATOM(8,id))
+;; subst:  binary trie, node [L|[V|R]], V=[] or [v],
+;;         keyed on little-endian bit-list ids (LSB first);
+;;         overwrite ≡ assoc newest-first shadowing
+;; ids:    bit list of 'atom([1|b]) cells ending 'atom(0,0)
+;; ren:    PAIR-spine of PAIR(nameSym, bitListId)
 ;;
 ;; Exclusivity: disjunction explores every matching clause, so
 ;; overlapping patterns must be exclusive by construction — guards
@@ -25,8 +28,8 @@
 ;; exactly one clause.
 ;; uses: std/arith_peano_succ
 
-;; --- atom counter for fresh ids ---
-next_id : <n: T[8]> <-> <ATOM(8, n+1)>
+;; --- fresh ids are bit lists incremented by binc (below);
+;;     the retired atom-counter next_id lived here ---
 
 ;; --- 'adyn resolution: enc'd ATOM(var±k) dynamic exprs.  After
 ;;     walk, 'adyn(base, delta) with both operands walked to
@@ -62,25 +65,124 @@ adyn_probe : <t> <-> <hit> where {
   | fresh (bt, dt) { t = 'adsub(bt, dt)  hit = 'yes }
 }
 
-;; --- subst lookup: first binding wins; unbound is a value ---
-subst_lookup : <k, lst> <-> <r> shape self where {
-  | fresh (v, rest) {
-      lst = [[k|v]|rest]
+;; --- subst: binary trie keyed on little-endian bit-list var
+;;     ids.  node = [L|[V|R]] with V=[] or [v]; empty trie = [].
+;;     Sequential ids keep LSB-first tries balanced by
+;;     construction — no rotations in a relational encoding.
+;;     Trie overwrite ≡ assoc first-match shadowing. ---
+sget : <k, t> <-> <r> shape self where {
+  | t = [] { r = 'unbound }
+  | fresh (L, v, R) {
+      k = []
+      t = [L|[[v|_]|R]]
       r = 'bound(v)
     }
-  | fresh (k2, rest) {
-      lst = [[k2|_]|rest]
-      k != k2
-      subst_lookup<k, rest> = r
+  | fresh (L, R) {
+      k = []
+      t = [L|[[]|R]]
+      r = 'unbound
     }
-  | lst = [] { r = 'unbound }
+  | fresh (V, L, R, kb) {
+      k = ['atom([1|0])|kb]
+      t = [L|[V|R]]
+      sget<kb, L> = r
+    }
+  | fresh (V, L, R, kb) {
+      k = ['atom([1|1])|kb]
+      t = [L|[V|R]]
+      sget<kb, R> = r
+    }
+}
+sput : <k, v, t> <-> <t2> shape self where {
+  | fresh (V, L, R) {
+      k = []
+      t = [L|[V|R]]
+      t2 = [L|[[v]|R]]
+    }
+  | fresh (V, L, R, kb, L2) {
+      k = ['atom([1|0])|kb]
+      t = [L|[V|R]]
+      sput<kb, v, L> = L2
+      t2 = [L2|[V|R]]
+    }
+  | fresh (V, L, R, kb, R2) {
+      k = ['atom([1|1])|kb]
+      t = [L|[V|R]]
+      sput<kb, v, R> = R2
+      t2 = [L|[V|R2]]
+    }
+  | t = [] {
+      sput_new<k, v> = t2
+    }
+}
+sput_new : <k, v> <-> <t> shape self where {
+  | k = [] { t = [[]|[[v]|[]]] }
+  | fresh (kb, L2) {
+      k = ['atom([1|0])|kb]
+      sput_new<kb, v> = L2
+      t = [L2|[[]|[]]]
+    }
+  | fresh (kb, R2) {
+      k = ['atom([1|1])|kb]
+      sput_new<kb, v> = R2
+      t = [[]|[[]|R2]]
+    }
+}
+;; --- binc: little-endian carry increment on bit-list ids ---
+binc : <n> <-> <n2> shape self where {
+  | n = [] { n2 = ['atom([1|1])] }
+  | fresh (r) {
+      n = ['atom([1|0])|r]
+      n2 = ['atom([1|1])|r]
+    }
+  | fresh (r, r2) {
+      n = ['atom([1|1])|r]
+      binc<r> = r2
+      n2 = ['atom([1|0])|r2]
+    }
+}
+;; --- beq: total structural equality on bit-list ids (cmp
+;;     takes atoms only, so id equality is a probe relation).
+;;     yields exactly one of 'yes/'no for ground bit-lists —
+;;     deterministic, so unify_w can call it directly instead
+;;     of RUN-collecting a nested eval per var-var unify. ---
+beq : <a, b> <-> <r> shape self where {
+  | a = [] { b = []  r = 'yes }
+  | fresh (xb, bt) {
+      a = []
+      b = ['atom([1|xb])|bt]
+      r = 'no
+    }
+  | fresh (xa, at) {
+      a = ['atom([1|xa])|at]
+      b = []
+      r = 'no
+    }
+  | fresh (at, bt) {
+      a = ['atom([1|0])|at]
+      b = ['atom([1|0])|bt]
+      beq<at, bt> = r
+    }
+  | fresh (at, bt) {
+      a = ['atom([1|1])|at]
+      b = ['atom([1|1])|bt]
+      beq<at, bt> = r
+    }
+  | a = ['atom([1|0])|_] {
+      b = ['atom([1|1])|_]
+      r = 'no
+    }
+  | a = ['atom([1|1])|_] {
+      b = ['atom([1|0])|_]
+      r = 'no
+    }
 }
 
 ;; --- walk: chase var bindings through the subst ---
 walk : <t, s> <-> <r> shape self where {
   | fresh (i, b) {
       t = 'var(i)
-      subst_lookup<i, s> = b
+      sget<i, s> = b
       walk_res<b, t, s> = r
     }
   | fresh (hit) {
@@ -140,21 +242,25 @@ unify_w : <u, v, s> <-> <s2> shape self where {
       v = 'var(i)
       s2 = s
     }
-  | fresh (i, j) {
+  | fresh (i, j, t2, r) {
       u = 'var(i)
       v = 'var(j)
-      i != j
-      s2 = [[i|v]|s]
+      beq<i, j> = r
+      r = 'no
+      sput<i, v, s> = t2
+      s2 = t2
     }
-  | fresh (i) {
+  | fresh (i, t2) {
       u = 'var(i)
       nonvar<v> = 'yes
-      s2 = [[i|v]|s]
+      sput<i, v, s> = t2
+      s2 = t2
     }
-  | fresh (i) {
+  | fresh (i, t2) {
       v = 'var(i)
       nonvar<u> = 'yes
-      s2 = [[i|u]|s]
+      sput<i, u, s> = t2
+      s2 = t2
     }
   | fresh (a1, b1, a2, b2, s1) {
       nonvar<u> = 'yes
@@ -214,7 +320,7 @@ ren_fc_res : <res, name, ren, n> <-> <o> where {
     }
   | fresh (n2) {
       res = []
-      next_id<n> = n2
+      binc<n> = n2
       o = [n|[[[name|n]|ren]|n2]]
     }
 }

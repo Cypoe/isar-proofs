@@ -43,6 +43,29 @@ bundles + the map bundle (see trap note below).
   identical — the op-2 marginal inside `pass1[ret,ret]` is
   accumulated subst depth. 769 ops ⇒ ~10^14 steps ⇒ unreachable.
 
+## Third pass: trie subst (frag 0027) — quadratic cleared
+
+`eval.phi`'s subst is now a declared-data binary trie keyed on
+little-endian bit-list ids (`sget`/`sput`/`sput_new`/`binc`; `beq`
+total on bit lists so var-var unify needs no `RUN` eval). New
+rows tagged `trie` / `trie-persist-wall`:
+
+- `pass1 [ret,ret]` 816,333,786 steps sols=1 (was rc=2 cap);
+  `pass1 [push;ret]` 848,245,370 sols=1 (was rc=2 cap);
+  `assemble [push;ret]` 2,701,513,499 sols=1, bytes `55 c3`
+  fasmg-MATCH; `assemble [lab;call;ret]` 2,715,233,833 sols=1,
+  bytes `e8 fb ff ff ff c3` fasmg-MATCH.
+- Marginal ~constant ≈410M/op through 8 ops (ret8 =
+  3,280,724,518): the quadratic is gone.
+- New wall: `persist_bytes` (256 MiB default) — the input-tier
+  reduct cache below `irstart`. Multi-op eval fills it → `exit4`
+  at ~230 s invariant to `ir_arena_bytes` (2/8/16 GiB). Sizing
+  axis: 1 GiB covers 2-op `assemble`; 2 GiB covers 8-op `pass1`.
+  i32-immediate ceiling ≈2 GiB.
+- Trie overhead costs ~+20% steps on small substs
+  (`enc2_len ret` 483M vs 397M assoc) — per-bit descent only
+  wins beyond ~100 bindings.
+
 ## Measurement traps (recorded)
 
 1. **Absent-rel envs fail silently as empty streams** (~1.2M steps).

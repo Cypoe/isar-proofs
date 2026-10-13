@@ -8,7 +8,7 @@
 ;;          capability loader, a declared baseline not a silent
 ;;          default).  bind prepends caps: capabilities shadow the
 ;;          program env, newest-first.
-;;   arg  = the single input term; out reifies 'var(0), the
+;;   arg  = the single input term; out reifies 'var([]), the
 ;;          convention apply/realize already use.
 ;;
 ;; Loader families: 'graph is realized — the corpus eval IS the
@@ -23,10 +23,10 @@ runtime : <img, caps, arg> <-> <out> where {
     loader_of<caps> = l
     l = 'graph
     bind<caps, env> = env2
-    goal = 'call('sym(entry), [arg], 'var(0))
-    eval<env2, goal, [], 1> = res
+    goal = 'call('sym(entry), [arg], 'var([]))
+    eval<env2, goal, [], ['atom([1|1])]> = res
     res = [s2|_]
-    reify<'var(0), s2> = out
+    reify<'var([]), s2> = out
   }
 }
 

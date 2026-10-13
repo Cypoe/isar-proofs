@@ -297,7 +297,20 @@ def gate_rel_native_menv_enc2() -> bool:
     zero8 = NIL
     for _ in range(8):
         zero8 = tp(ta(4, 0), zero8)
-    ov = tp(S("var"), ta(8, 0))
+
+    def eBits(i):
+        """little-endian bit-list id: ['atom([1|b])..|[]]."""
+        cells = []
+        while i > 0:
+            cells.append(tp(S("atom"), tp(ta(8, 1),
+                                          ta(8, i & 1))))
+            i >>= 1
+        o = ta(0, 0)
+        for c in reversed(cells):
+            o = tp(c, o)
+        return o
+
+    ov = tp(S("var"), eBits(0))
     nil_e = enc_t(NIL)
     z8e = enc_t(zero8)
 
@@ -310,7 +323,7 @@ def gate_rel_native_menv_enc2() -> bool:
 
     M = ps.machine_term(8192)
     envS = ps.enc_sub(env)
-    n1e = ps.enc_sub(ta(8, 1))
+    n1e = ps.enc_sub(eBits(1))
     Ts = []
     for opterm, _asm in cases:
         call = ps.mcall(M, "eval", envS, ps.enc_sub(enc2_goal(opterm)),
@@ -339,24 +352,41 @@ def gate_rel_native_menv_enc2() -> bool:
              R.app(R.KK, R.I))
 
     def sol_subst(i):
-        """first sol's subst: {var-id: term} off the PAIR spine."""
+        """first sol's subst: {var-id: term} off the bit-trie
+        (node [L|[V|R]]; ids are little-endian bit lists)."""
         dec = ps._dec_stream(gg, i, 8000, marks)
         if not dec or dec[0][0] != "p":
             return None
         subst = {}
-        cur = dec[0][1]
-        while cur[0] == "p":
-            kv = cur[1]
-            if kv[0] == "p" and kv[1][0] == "a" and kv[1][1] == 8:
-                subst[kv[1][2]] = kv[2]
-            cur = cur[2]
+
+        def walk(tr, acc, sh):
+            if not isinstance(tr, tuple) or tr[0] != "p":
+                return
+            L, V, R = tr[1], tr[2][1], tr[2][2]
+            if isinstance(V, tuple) and V[0] == "p":
+                subst[acc] = V[1]
+            walk(L, acc, sh + 1)
+            walk(R, acc + (1 << sh), sh + 1)
+
+        walk(dec[0][1], 0, 0)
         return subst
+
+    def bits_dec(t):
+        """decoded bit-list term -> int (LSB first)."""
+        n, sh = 0, 0
+        while isinstance(t, tuple) and t[0] == "p" and \
+                isinstance(t[1], tuple) and t[1][0] == "p" and \
+                t[1][1] == ("s", "atom"):
+            n |= (t[1][2][2][2] << sh)
+            sh += 1
+            t = t[2]
+        return n
 
     def reify(t, subst, d=0):
         if d > 60 or t[0] != "p":
             return t
         if t[1] == ("s", "var"):
-            j = t[2][2]
+            j = bits_dec(t[2])
             return reify(subst[j], subst, d + 1) if j in subst else t
         if t[1] == ("s", "pair"):
             return ("p", reify(t[2][1], subst, d + 1),

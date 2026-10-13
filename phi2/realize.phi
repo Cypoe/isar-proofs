@@ -39,9 +39,9 @@ rfold : <qmaps, maps, acc> <-> <out> shape self where {
 apply : <mapT, ain> <-> <aout> where {
   fresh (menv, entry, ov, goal, res, s2) {
     mapT = 'map(menv, entry)
-    ov = 'var(0)
+    ov = 'var([])
     goal = 'call('sym(entry), [ain], ov)
-    eval<menv, goal, [], 1> = res
+    eval<menv, goal, [], ['atom([1|1])]> = res
     res = [s2|_]
     reify<ov, s2> = aout
   }
