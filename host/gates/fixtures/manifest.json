@@ -2,7 +2,7 @@
   "bundle.default.plex": {
     "bytes": 726232,
     "desc": "emit.plex schedule fixture (default R)",
-    "sha256": "39e7f8cf97235a16a396d9c05ee8fbd0a297f6220509c60628644e58749e7016"
+    "sha256": "042bc556fb451993034b86f445fb0db49dccf9f5924efc2493bbafb6105cf1b6"
   },
   "image.default.bin": {
     "bytes": 4608,
@@ -17,11 +17,11 @@
   "image.ir.bin": {
     "bytes": 9216,
     "desc": "IR kernel record (bytes+sweep), emit_native",
-    "sha256": "a45ece6f55a642f3628e9b0ee9fe22ea8608b9ddd2f32c2333d87bcf24cf5b94"
+    "sha256": "c061ad5255fd9056691607c2f5b918ae836f48330ee72c374861557087edc60a"
   },
   "pexec.exe": {
     "bytes": 13824,
     "desc": "pexec executor exe (dialect=plex.emit record), emit_native",
-    "sha256": "73fd68dc819f17cce95c9c1c78b90d4adff3fd2f1fe1aae9961a8de3473f5785"
+    "sha256": "b8aff0b1163ed6e27b38867a2c484be6f1fb6de7b6a34c1921ea8b1d707539c3"
   }
 }

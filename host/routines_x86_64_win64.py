@@ -3229,7 +3229,10 @@ def r_ir_depack(R: Realization, ctx: Ctx) -> Program:
         I("and_r64_imm", "rax", -R.node_bytes),
         I("mov_rip_r64", ("p", "pcur"), "rax"),        # pcur = align24(end)
         I("mov_r64_r64", "rcx", "rax"),
-        I("add_r64_imm", "rcx", R.persist_bytes),
+        # persist_bytes exceeds signed imm32 for large zones — go through
+        # a 64-bit immediate rather than add_r64_imm.
+        I("mov_r64_imm", "rdx", R.persist_bytes),
+        I("add_r64_r64", "rcx", "rdx"),
         I("mov_rip_r64", ("p", "pend"), "rcx"),        # pend = pcur + cap
         I("mov_r64_r64", "rax", "rcx"),
     ] if R.reclaim == "redirect" else []) + [
