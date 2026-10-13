@@ -7,7 +7,7 @@ tags: [phi2, eval, pass1, assemble, full-src, persist, redirect,
        gc-sweep, oom, megaplan-7, freeze, decision-066]
 ---
 
-# 0028 — full-src verdict: pass1 OOMs on the persist zone at 16 GiB; the wall is superlinear frontier growth, not sizing; MEGAPLAN §7 misses
+# 0028 — full-src verdict: pass1 OOMs on the persist zone at 16 GiB; the wall is pinned input-descended closures, not sizing; MEGAPLAN §7 misses
 
 ## What was measured
 
@@ -30,22 +30,40 @@ near-empty (working set flat at persist size — the zone commits
 eagerly at depack). The OOM is the persist allocator's
 collect-then-concede path, not `ir_arena_bytes`.
 
-## The mechanism
+## The mechanism (corrected 2026-10-13 after `pfree` instrumentation)
 
-Two of the numbers are a discriminator pair: halving the persist
-cap does not halve the survival time — it cuts it by ~6.6×, and
-raising it 7.5× buys ~13.5× more time. OOM-time grows *faster* than
-the cap, i.e. **the live input-tier frontier grows superlinearly in
-steps**. The persist zone holds reducts of input-reachable cells so
-input cells may point at them; over a single long root the
-reachable-from-input frontier accumulates choicepoint/stream
-structure roughly quadratically in op count. It is the *live* bound
-for a redirect+IR eval, not the arena.
+My first read — "superlinear frontier growth" fitted from three
+wall-times — was wrong. Instrumented stderr (`stats_p` on
+exit2/exit4, `pfree=pend−pcur`) shows the real picture:
 
-Extrapolation: `pass1` completion needs persist ≫16 GiB (the fill
-curve has no inflection in evidence — each sizing step buys
-~√progress). `assemble` is ~3.2× `pass1`'s steps at probe scale —
-strictly harder, not run at full-src.
+- The zone **saturates early and stays saturated**: `pass1 ret64`
+  @1 GiB hits `pfree=16` by 500M steps and pins there through 2G+
+  steps (gc=89, still alive — `flhead_p` recycling keeps pace).
+  `fullsrc pass1` @2.1 GiB hits `pfree=8` by 1G steps.
+- `alloc ≈ 1.5×steps`, `free ≈ alloc` — the dynamic GC reclaims
+  essentially everything; the dynamic arena is near-empty the whole
+  run. All real pressure lives below `irstart`.
+- `ret16` @256 MiB: `steps=1.2G alloc=1.8G gc=977 free=1.8G
+  pfree=16` — the concede is the first collect that frees ~nothing.
+
+Root cause is in the mark phase: `gc_collect` treats the **entire
+input region `[permend, pcur0)` as roots** ("input cells FWD into
+the persist zone, so their fields are roots"). Every input cell is
+a permanent root → every input-descended reduct is pinned forever.
+live-persist = the cumulative closure of everything the eval has
+forced out of the input graph — monotone, unbounded. For a
+metacircular eval the program-under-interpretation *is* input data,
+so the pinned closure is the whole derivation.
+
+That is the pay-once design working as built — it exists for
+*streams of small roots* (shared M/env amortizing across a batch).
+A single 774-item take-1 root is exactly the shape it cannot serve:
+the memoized closure grows for the whole run, so **no finite cap
+suffices** — the three OOM wall-times (277s@1G, 1841s@2.1G,
+24891s@16G) are just when the pinned closure crossed each cap.
+
+`assemble` is ~3.2× `pass1`'s steps at probe scale — strictly
+harder, not run at full-src.
 
 ## What changed on the way
 

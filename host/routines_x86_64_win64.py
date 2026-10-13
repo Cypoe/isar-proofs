@@ -364,9 +364,17 @@ def _stats_str(p: Program, s: str) -> None:
 
 
 def r_stats(R: Realization, ctx: Ctx) -> Program:
-    """stderr line `steps=N alloc=M` via scratch buffer + itoa."""
+    """stderr line `steps=N alloc=M ...` — the leg just calls the
+    shared stats_p subroutine (emitted in the exits leg so exit2/exit4
+    can report the same counters before conceding)."""
+    return [I("call_rel32", ("l", "stats_p"))]
+
+
+def _stats_p_body(R: Realization, ctx: Ctx) -> Program:
+    """stats_p: the stderr stat line as a subroutine; ends in ret."""
     iat = ctx["iat"]
     p: Program = [
+        LBL("stats_p"),
         I("lea_r64_rip", "rsi", ("p", "scratch")),
     ]
     _stats_str(p, "steps=")
@@ -400,6 +408,15 @@ def r_stats(R: Realization, ctx: Ctx) -> Program:
         _stats_str(p, " free=")
         p += [I("mov_r64_rip", "rdi", ("p", "nfree")),
               I("call_rel32", ("l", "itoa"))]
+    if R.reclaim == "redirect":
+        # persist headroom pend-pcur — the input-tier zone's fill
+        # level; pfree undercounts recycled flhead_p cells but tracks
+        # the concede path exactly.
+        _stats_str(p, " pfree=")
+        p += [I("mov_r64_rip", "rdi", ("p", "pend")),
+              I("mov_r64_rip", "rax", ("p", "pcur")),
+              I("sub_r64_r64", "rdi", "rax"),
+              I("call_rel32", ("l", "itoa"))]
     p += [
         I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
         I("mov_r64_rip", "rcx", ("p", "herr")),
@@ -408,23 +425,29 @@ def r_stats(R: Realization, ctx: Ctx) -> Program:
         I("lea_r64_rip", "r9", ("p", "nw")),
         I("mov_m64_imm32", ("m", "rsp", 0x20), 0),
         I("call_mrip", iat("WriteFile")),
+        I("ret"),
     ]
     return p
 
 
 def r_exits(R: Realization, ctx: Ctx) -> Program:
     """exit 0; exit2 fuel exhausted, exit3 bad input, exit4 OOM,
-    exit5 (bytes mode) malformed byte-list NF / decode probe."""
+    exit5 (bytes mode) malformed byte-list NF / decode probe.
+    exit2/exit4 report stats_p first — a conceding run's counters
+    (steps, alloc, pfree) are the diagnostic, not the bare code."""
     iat = ctx["iat"]
     p: Program = [
         I("xor_r32_r32", "ecx", "ecx"), I("call_mrip", iat("ExitProcess")),
-        LBL("exit2"), I("mov_r32_imm32", "ecx", 2), I("call_mrip", iat("ExitProcess")),
+        LBL("exit2"), I("call_rel32", ("l", "stats_p")),
+        I("mov_r32_imm32", "ecx", 2), I("call_mrip", iat("ExitProcess")),
         LBL("exit3"), I("mov_r32_imm32", "ecx", 3), I("call_mrip", iat("ExitProcess")),
-        LBL("exit4"), I("mov_r32_imm32", "ecx", 4), I("call_mrip", iat("ExitProcess")),
+        LBL("exit4"), I("call_rel32", ("l", "stats_p")),
+        I("mov_r32_imm32", "ecx", 4), I("call_mrip", iat("ExitProcess")),
     ]
     if R.io[1] == "bytes":
         p += [LBL("exit5"), I("mov_r32_imm32", "ecx", 5),
               I("call_mrip", iat("ExitProcess"))]
+    p += _stats_p_body(R, ctx)
     return p
 
 

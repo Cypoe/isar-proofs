@@ -77,13 +77,23 @@ widened to imm64 (`4720a08`). Full-src (769 items, take-1,
 | 2.147 GiB | rc=4 @ 1841.3 s | rc=4 @ 1923.1 s |
 | 16 GiB | rc=4 @ 24890.9 s | — |
 
-OOM-time grows faster than the cap (~6.6× then ~13.5× per
-~2.1×/7.5×): the live input-tier frontier grows superlinearly in
-steps — the persist zone is the *live bound* of a single-root
-redirect+IR eval, not a sizing parameter. Dynamic arena sat
-near-empty throughout (WS flat at persist size). MEGAPLAN §7
-misses at the full-src scale; closing it is a retention-model
-decision (new substrate), explicitly outside the freeze.
+Instrumented (`stats_p` on exit2/exit4 + `pfree=`): the zone
+saturates early and rides the `flhead_p` recycling boundary
+(`pfree`=16 saturated at 500M steps on ret64@1GiB, still alive at
+2G+); `alloc≈1.5×steps`, `free≈alloc` — the dynamic arena reclaims
+nearly everything. The concede is the first collect that frees
+~nothing (`ret16`@256MiB: `gc=977` before rc=4).
+
+Mechanism: `gc_collect` marks **every input cell `[permend,pcur0)`
+as a root** — input-descended reducts (FWD'd into persist) are
+pinned forever, so live-persist = the cumulative derivation
+closure, monotone and unbounded for a single long root. The
+pay-once memoization is built for *streams of small roots*; a
+774-item take-1 is the shape it cannot serve. The OOM wall-times
+are where the pinned closure crossed each cap — no finite cap
+suffices. MEGAPLAN §7 misses at the full-src scale; closing it is
+a retention-model decision (mark roots = the live root's cells,
+not all input), i.e. new substrate — outside the freeze.
 
 ## Measurement traps (recorded)
 

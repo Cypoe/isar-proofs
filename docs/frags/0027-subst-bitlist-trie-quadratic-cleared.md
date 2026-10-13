@@ -121,6 +121,6 @@ reduction machinery, not subst.
 ---
 
 *Postscript 2026-10-13*: the in-flight full-src runs resolved —
-`pass1` and `assemble` both OOM the persist zone, superlinearly in
-the cap; 16 GiB persists to 24891 s before conceding. §7 misses;
-the record is frag 0028.
+`pass1` and `assemble` both OOM the persist zone (input-descended
+reducts are pinned as roots; the pinned closure grows for the
+whole run — no cap suffices). §7 misses; the record is frag 0028.
