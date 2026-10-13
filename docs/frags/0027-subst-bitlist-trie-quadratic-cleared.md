@@ -117,3 +117,10 @@ reduction machinery, not subst.
 - `_scratch/_telemetry.py`, `_probe_assemble.py`,
   `_fullsrc_native.py` — probe rows + fasmg checks.
 - `telemetry/phi2_repr_cost/` — rows appended, README updated.
+
+---
+
+*Postscript 2026-10-13*: the in-flight full-src runs resolved —
+`pass1` and `assemble` both OOM the persist zone, superlinearly in
+the cap; 16 GiB persists to 24891 s before conceding. §7 misses;
+the record is frag 0028.

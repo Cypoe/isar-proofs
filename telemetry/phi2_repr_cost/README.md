@@ -61,10 +61,29 @@ rows tagged `trie` / `trie-persist-wall`:
   reduct cache below `irstart`. Multi-op eval fills it → `exit4`
   at ~230 s invariant to `ir_arena_bytes` (2/8/16 GiB). Sizing
   axis: 1 GiB covers 2-op `assemble`; 2 GiB covers 8-op `pass1`.
-  i32-immediate ceiling ≈2 GiB.
 - Trie overhead costs ~+20% steps on small substs
   (`enc2_len ret` 483M vs 397M assoc) — per-bit descent only
   wins beyond ~100 bindings.
+
+## Fourth pass: full-src — the persist wall is structural (frag 0028)
+
+The imm32 ceiling on `persist_bytes` was an encoding accident —
+widened to imm64 (`4720a08`). Full-src (769 items, take-1,
+`fuel=None`) then gave a clean discriminator series:
+
+| persist | pass1 full-src | assemble full-src |
+|---|---|---|
+| 1 GiB | rc=4 @ 277.0 s | — |
+| 2.147 GiB | rc=4 @ 1841.3 s | rc=4 @ 1923.1 s |
+| 16 GiB | rc=4 @ 24890.9 s | — |
+
+OOM-time grows faster than the cap (~6.6× then ~13.5× per
+~2.1×/7.5×): the live input-tier frontier grows superlinearly in
+steps — the persist zone is the *live bound* of a single-root
+redirect+IR eval, not a sizing parameter. Dynamic arena sat
+near-empty throughout (WS flat at persist size). MEGAPLAN §7
+misses at the full-src scale; closing it is a retention-model
+decision (new substrate), explicitly outside the freeze.
 
 ## Measurement traps (recorded)
 
