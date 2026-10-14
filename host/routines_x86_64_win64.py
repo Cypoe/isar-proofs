@@ -72,6 +72,8 @@ DATA_SLOTS_GC: Tuple[Tuple[str, int], ...] = (
     ("flhead_p", 8),   # IR+persist: swept persist cells recycle ONLY
                        # via mkapp_p — an input cell may never point
                        # into the arena (ir_bloop decommits it per root)
+    ("npfree", 8),     # persist cells freed by the last collect
+    ("npfwd", 8),      # live persist cells that are FWD routing cells
 )
 
 # dialect="plex.v3" (ADR-0006 ingest): the kernel depacks the archive
@@ -417,6 +419,34 @@ def _stats_p_body(R: Realization, ctx: Ctx) -> Program:
               I("mov_r64_rip", "rax", ("p", "pcur")),
               I("sub_r64_r64", "rdi", "rax"),
               I("call_rel32", ("l", "itoa"))]
+        if R.gc == "sweep" and ctx.get("ir"):
+            # plive = live persist bytes at the last collect ≈
+            # (pcur - pcur0) - npfree*24 — the discriminator between
+            # "genuinely live derivation" and "dead-but-pinned".
+            _stats_str(p, " plive=")
+            p += [
+                I("mov_r64_rip", "rdi", ("p", "pcur")),
+                I("mov_r64_rip", "rax", ("p", "irroots")),
+                I("mov_r64_rip", "rcx", ("p", "irnroots")),
+                I("shl_r64_imm8", "rcx", 3),
+                I("add_r64_r64", "rax", "rcx"),
+                I("add_r64_imm", "rax", R.node_bytes - 1),
+                I("and_r64_imm", "rax", -R.node_bytes),   # pcur0
+                I("sub_r64_r64", "rdi", "rax"),           # span bytes
+                I("mov_r64_rip", "rax", ("p", "npfree")),
+            ] + _mul24() + [
+                I("sub_r64_r64", "rdi", "rax"),
+                I("call_rel32", ("l", "itoa")),
+            ]
+            _stats_str(p, " plast=")
+            p += [I("mov_r64_rip", "rdi", ("p", "npfree")),
+                  I("call_rel32", ("l", "itoa"))]
+            # pfwd: live persist cells that are FWD routing cells —
+            # chain intermediates are reachable but transparent;
+            # pfwd/plive large => path compression would collapse it
+            _stats_str(p, " pfwd=")
+            p += [I("mov_r64_rip", "rdi", ("p", "npfwd")),
+                  I("call_rel32", ("l", "itoa"))]
     p += [
         I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
         I("mov_r64_rip", "rcx", ("p", "herr")),
@@ -624,6 +654,20 @@ def r_mkapp_p(R: Realization, ctx: Ctx) -> Program:
     Counted in nalloc."""
     if ctx.get("ir") and R.reclaim == "redirect":
         p: Program = [LBL("mkapp_p")]
+        p += [
+            # last root of the stream: no future root exists, so no
+            # decommit can strand an input/persist FWD into the dynamic
+            # arena — route reducts to the ordinary heap and let GC
+            # reclaim the derivation.  Persist exists for cross-root
+            # memoization; on the last root there is nothing to memoize
+            # for, and the zone otherwise pins the whole history.
+            I("mov_r64_rip", "rax", ("p", "irj")),
+            I("inc_r64", "rax"),
+            I("mov_r64_rip", "r8", ("p", "irnroots")),  # r8 clobbered
+            I("cmp_r64_r64", "r8", "rax"),          #    below anyway
+            I("jbe_rel32", ("l", "mkapp")),          # irnroots<=irj+1:
+                                                     #  -> last root
+        ]
         if R.gc == "sweep":
             p += [
                 # persist freelist first — ONLY flhead_p: the result
@@ -743,13 +787,17 @@ def r_gc_swmark(R: Realization, ctx: Ctx) -> Program:
     cell+4: bit0 = marked, bit1 = descent came via .r (return arm).
     rsi=cur, rdi=prev, rax/rcx/rdx/r11 scratch; r10=irstart, rbx=bump
     are gc_collect's and survive (sw_mark calls nothing).  IR+persist:
-    r13=pcur0, r14=pcur widen the accept to [pcur0,pcur)∪[irstart,rbx);
-    the zones sit on different 24-lattices (pcur0 is absolute-aligned,
+    r13=pcur0, r14=pcur, r15=permend, r12=irroots widen the accept to
+    [permend,irroots)∪[pcur0,pcur)∪[irstart,rbx); the zones sit on
+    different 24-lattices (permend and pcur0 are 24-aligned bases,
     irstart only page-aligned), so each branch subtracts its own base
-    before the div alignment check."""
+    before the div alignment check.  Input cells participate in
+    marking — reachable input cells root their FWD reducts — but are
+    never swept; gc_collect clears their mark bits post-collect."""
     irp = bool(ctx.get("ir")) and R.reclaim == "redirect"
     def ck(lbl_skip, rtag):                 # rdx=candidate child
         hi = f"sw_ck_hi{rtag}"
+        lo = f"sw_ck_lo{rtag}"
         acc = f"sw_ck_acc{rtag}"
         head: Program = []
         if irp:
@@ -758,11 +806,19 @@ def r_gc_swmark(R: Realization, ctx: Ctx) -> Program:
                 I("cmp_r64_r64", "r10", "rdx"),
                 I("jbe_rel32", ("l", hi)),
                 I("cmp_r64_r64", "rdx", "r13"),
-                I("jb_rel32", ("l", lbl_skip)),       # below pcur0
+                I("jb_rel32", ("l", lo)),           # below pcur0
                 I("cmp_r64_r64", "r14", "rdx"),
                 I("jbe_rel32", ("l", lbl_skip)),      # >= pcur: gap
                 I("mov_r64_r64", "rax", "rdx"),
                 I("sub_r64_r64", "rax", "r13"),       # persist lattice
+                I("jmp_rel32", ("l", acc)),
+                LBL(lo),                            # input tier:
+                I("cmp_r64_r64", "rdx", "r15"),       # [permend,
+                I("jb_rel32", ("l", lbl_skip)),       #   irroots) —
+                I("cmp_r64_r64", "r12", "rdx"),       # the root table
+                I("jbe_rel32", ("l", lbl_skip)),      # is not a cell
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r15"),       # input lattice
                 I("jmp_rel32", ("l", acc)),
                 LBL(hi),
                 # UNSIGNED upper bound: bit63-set stack garbage is
@@ -856,11 +912,18 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
     IR+persist: the swept space is [pcur0,pcur) ∪ [irstart,rbx) —
     _fr reducts are mkapp_p'd below irstart precisely so input cells
     may hold them across arena resets; they die like everything else
-    once unreferenced.  Input cells are the missing root class: an
-    input cell's FWD .l points into the persist zone, so phase 2 scans
-    the input region [permend, pcur0) qword-wise.  Persist dead cells
-    chain flhead_p (mkapp_p pops only that list — an input cell may
-    never point above irstart: ir_bloop decommits the arena per root).
+    once unreferenced.  Input cells are roots only BY REACHABILITY:
+    phase 2 scans the remaining-roots table [irj, irnroots) and
+    marking traverses input cells (ck accepts [permend,irroots)),
+    so an input cell pins its FWD reduct exactly while some live
+    root can reach it — the designed "once per stream" semantics.
+    Dead input cells' FWDs dangle unread (input reachability is
+    monotone-decreasing: edges to them are only copied, never
+    created fresh).  Persist dead cells chain flhead_p (mkapp_p
+    pops only that list — an input cell may never point above
+    irstart: ir_bloop decommits the arena per root).  Post-sweep,
+    a clear pass over [permend,irroots) resets input mark bits —
+    input cells are marked by traversal but never swept.
     """
     irp = bool(ctx.get("ir")) and R.reclaim == "redirect"
     regs = ("r15", "r14", "r13", "r12", "rdi", "rsi", "r11", "r10",
@@ -882,8 +945,11 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
             I("and_r64_imm", "r13", -R.node_bytes),
             I("mov_r64_rip", "r14", ("p", "pcur")),
             I("mov_r64_rip", "r15", ("p", "permend")),
+            I("mov_r64_rip", "r12", ("p", "irroots")),  # input cells end
+            I("xor_r32_r32", "eax", "eax"),
+            I("mov_rip_r64", ("p", "npfree"), "rax"),   # per-collect
+            I("mov_rip_r64", ("p", "npfwd"), "rax"),
         ]
-
     # one accept body per scan phase — `u` uniquifies the labels:
     # candidate in rdx -> fall into the mark check or jmp next_lbl
     def scan_body(next_lbl: str, u: str) -> Program:
@@ -896,11 +962,19 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
                 I("cmp_r64_r64", "r10", "rdx"),
                 I("jbe_rel32", ("l", f"gc_hi{u}")),
                 I("cmp_r64_r64", "rdx", "r13"),
-                I("jb_rel32", ("l", next_lbl)),         # < pcur0
+                I("jb_rel32", ("l", f"gc_in{u}")),      # < pcur0
                 I("cmp_r64_r64", "r14", "rdx"),
                 I("jbe_rel32", ("l", next_lbl)),        # >= pcur: gap
                 I("mov_r64_r64", "rax", "rdx"),
                 I("sub_r64_r64", "rax", "r13"),         # persist lattice
+                I("jmp_rel32", ("l", f"gc_acc{u}")),
+                LBL(f"gc_in{u}"),                       # input tier:
+                I("cmp_r64_r64", "rdx", "r15"),           # [permend,
+                I("jb_rel32", ("l", next_lbl)),           #   irroots) —
+                I("cmp_r64_r64", "r12", "rdx"),           # markable but
+                I("jbe_rel32", ("l", next_lbl)),          # never swept
+                I("mov_r64_r64", "rax", "rdx"),
+                I("sub_r64_r64", "rax", "r15"),         # input lattice
                 I("jmp_rel32", ("l", f"gc_acc{u}")),
                 LBL(f"gc_hi{u}"),
                 I("cmp_r64_r64", "rbx", "rdx"),
@@ -953,11 +1027,22 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
             I("mov_r64_r64",
               "r9" if u == "p" else "rdx", "rax"),
             I("inc_r64", "rsi"),
+        ] + ([
+            I("inc_mrip", ("p", "npfree")),      # persist frees counted
+        ] if u == "p" else []) + [
             I("jmp_rel32", ("l", f"gc_sw{u}_next")),
             LBL(f"gc_sw{u}_live"),
             I("xor_r32_r32", "ecx", "ecx"),             # clear mark+rtag —
             I("mov_m32_r32", ("m", "rax", 4), "ecx"),   # dword store: a
             # qword store at +4 would zero .l's low dword (addrs < 4GB)
+        ] + ([
+            # live persist cell: count FWD routing cells — they are
+            # reachable but semantically transparent (repr skips them)
+            I("cmp_m64_imm", ("m", "rax", 0), FWD_TAG),
+            I("jne_rel32", ("l", f"gc_sw{u}_nfwd")),
+            I("inc_mrip", ("p", "npfwd")),
+            LBL(f"gc_sw{u}_nfwd"),
+        ] if u == "p" else []) + [
             LBL(f"gc_sw{u}_next"),
             I("add_r64_imm", "rax", R.node_bytes),
             I("jmp_rel32", ("l", f"gc_sw{u}_loop")),
@@ -978,12 +1063,22 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
         I("jmp_rel32", ("l", "gc_scan")),
     ]
     if irp:
-        # ---- mark phase 2: input region [permend, pcur0) — input
-        # cells FWD into the persist zone, so their fields are roots
+        # ---- mark phase 2: remaining-roots table [irj, irnroots) —
+        # the stream roots whose input closures pin persist cells.
+        # Input cells themselves are reached transitively through
+        # marking (ck accepts [permend,irroots)); a completed or
+        # never-referenced input cell's FWD reduct is collectable —
+        # its dangling FWD is never read: input reachability is
+        # monotone-decreasing (new edges only copy existing ones).
         p += [
             LBL("gc_iscan_set"),
-            I("mov_r64_r64", "r8", "r15"),              # permend
-            I("mov_r64_r64", "r9", "r13"),              # pcur0
+            I("mov_r64_rip", "r8", ("p", "irj")),
+            I("shl_r64_imm8", "r8", 3),
+            I("mov_r64_rip", "r9", ("p", "irroots")),
+            I("add_r64_r64", "r8", "r9"),               # &roots[irj]
+            I("mov_r64_rip", "rax", ("p", "irnroots")),
+            I("shl_r64_imm8", "rax", 3),
+            I("add_r64_r64", "r9", "rax"),              # &roots[nroots]
             LBL("gc_iscan"),
             I("cmp_r64_r64", "r8", "r9"),
             I("jge_rel32", ("l", "gc_sweep")),
@@ -1010,6 +1105,19 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
         p += sweep_body("r13", "r14", "gc_p_done", "p")
         p += [LBL("gc_p_done"),
               I("mov_rip_r64", ("p", "flhead_p"), "r9")]
+        p += [
+            # input cells are marked by traversal but never swept —
+            # clear their mark/rtag bits for the next collect
+            I("mov_r64_r64", "rax", "r15"),              # permend
+            I("xor_r32_r32", "ecx", "ecx"),
+            LBL("gc_iclr"),
+            I("cmp_r64_r64", "rax", "r12"),              # irroots
+            I("jge_rel32", ("l", "gc_iclr_done")),
+            I("mov_m32_r32", ("m", "rax", 4), "ecx"),
+            I("add_r64_imm", "rax", R.node_bytes),
+            I("jmp_rel32", ("l", "gc_iclr")),
+            LBL("gc_iclr_done"),
+        ]
     p += [
         I("mov_r64_rip", "rax", ("p", "nfree")),
         I("add_r64_r64", "rax", "rsi"),

@@ -103,3 +103,12 @@ Frozen honestly:
   the current realization set. A reclaim leg without the
   persist-pin, or multi-root scheduling, is a design decision above
   this frag.
+
+## Postscript 2026-10-14 — resolved by frag 0029
+
+The "pinned closure" was confirmed but *not* as dead structure —
+`plive` proved the memo table genuinely reachable at concede. The
+fix was upstream of marking: route the **final** root's
+input-tier reducts into the dynamic arena (no future root can read
+its FWDs). Persist is untouched on single-root evals; the §7 bound
+moved from space to time. See frag 0029.

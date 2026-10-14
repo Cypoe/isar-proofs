@@ -114,3 +114,30 @@ Runner: `_scratch/_telemetry.py` (uncommitted tooling; the `.plex`
 fixtures + this manifest pin everything data-side). Goal shape:
 `'call('sym rel, pair(arg-list, 'var 0))` enc'd term, eval env =
 call-cone closure of the probe root over `phi2/std/*.plex` + map.
+
+## Fifth pass: the wall was an allocator-policy bug — fixed (frag 0029)
+
+The "mark roots = the live root's cells" fix was implemented as
+the experiment: scan `[irj, irnroots)` only, traverse through
+input cells, clear input marks post-collect. **Refuted** — live
+persist at concede was cap−16 (`plast=0`): the memo table is
+genuinely reachable, not dead-pinned.
+
+The effective fix: **final-root dynamic routing**. Persist exists
+because input cells must not point above `irstart` (per-root
+decommit); the last root's FWDs have no future reader, so
+`r_mkapp_p` routes `irj == irnroots-1` reducts to `mkapp`. Result:
+`ret16 @256MiB` went rc=4@656s → rc=2@33s with `pfree`=full,
+`plive=0`, gc=9. Full-src `pass1` fuel-caps at 2G steps in ~34s
+and survived >35G steps under a 4 GiB arena — the bound moved
+from space to wall-clock. Rows tagged `fix` carry the new stats.
+
+## Sixth pass: what remains — step-count substrate
+
+Live set is bounded; the cost is now **~410M reductions per source
+op** ×774 ≈ ~320G steps ≈ hours. That is the eval.phi-on-
+machine_term metacircular expansion, identical step count in the
+Python witness. Levers: clause compilation vs interpreted
+dispatch; an inet-shaped host substrate instead of SKI-as-
+substrate (SKI was the Lean-proof shorthand, not the model —
+decision 067 direction note).
