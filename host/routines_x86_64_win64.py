@@ -524,6 +524,10 @@ def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
             I("test_r64_r64", "rax", "rax"),
             I("jne_rel32", ("l", "grow_gc")),
             LBL("grow_oom"),
+            # arena concede: report counters before exiting — an
+            # unsweepable full arena (or a VirtualAlloc commit failure
+            # under host pressure) must not exit blind like it used to.
+            I("call_rel32", ("l", "stats_p")),
             I("mov_r32_imm32", "ecx", 4),
             I("call_mrip", iat("ExitProcess")),
             LBL("grow_gc"),
@@ -533,6 +537,7 @@ def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
             I("pop_r64", "rdx"), I("pop_r64", "rcx"),
             I("ret"),
         ] if R.gc == "sweep" else [
+            I("call_rel32", ("l", "stats_p")),
             I("mov_r32_imm32", "ecx", 4),
             I("call_mrip", iat("ExitProcess")),
         ])
@@ -555,7 +560,9 @@ def r_grow_heap(R: Realization, ctx: Ctx) -> Program:
         I("pop_r64", "r9"), I("pop_r64", "r8"),
         I("pop_r64", "rdx"), I("pop_r64", "rcx"),
         I("ret"),
-        LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
+        LBL("grow_fail"),
+        I("call_rel32", ("l", "stats_p")),
+        I("mov_r32_imm32", "ecx", 4),
         I("call_mrip", iat("ExitProcess")),
     ]
 
@@ -4179,7 +4186,9 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
             I("pop_r64", "r9"), I("pop_r64", "r8"),
             I("pop_r64", "rdx"), I("pop_r64", "rcx"),
             I("ret"),
-            LBL("grow_fail"), I("mov_r32_imm32", "ecx", 4),
+            LBL("grow_fail"),
+            I("call_rel32", ("l", "stats_p")),
+            I("mov_r32_imm32", "ecx", 4),
             I("call_mrip", iat("ExitProcess")),
         ]
     return [
@@ -4217,6 +4226,10 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
         I("test_r64_r64", "rax", "rax"),
         I("jne_rel32", ("l", "grow_gc")),
         LBL("grow_oom"),
+        # arena concede: report counters — a full unsweepable arena
+        # or a VirtualAlloc commit failure under host memory pressure
+        # must not exit blind.
+        I("call_rel32", ("l", "stats_p")),
         I("mov_r32_imm32", "ecx", 4),
         I("call_mrip", iat("ExitProcess")),
         LBL("grow_gc"),
@@ -4226,6 +4239,7 @@ def r_grow_heap_ir(R: Realization, ctx: Ctx) -> Program:
         I("pop_r64", "rdx"), I("pop_r64", "rcx"),
         I("ret"),
     ] if R.gc == "sweep" else [
+        I("call_rel32", ("l", "stats_p")),
         I("mov_r32_imm32", "ecx", 4),
         I("call_mrip", iat("ExitProcess")),
     ])
