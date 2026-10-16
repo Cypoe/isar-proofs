@@ -70,3 +70,26 @@ confirmed by `pfree=268435456`/`plive=0` across the former death
 points. The persist zone was being used as a general heap for a
 single giant root — a shape it was never designed for. §7 is
 re-opened as a *runtime* criterion, not a space bound.
+
+## Postscript 2026-10-14 — multi-root completion (7c35f43)
+
+Live-set composition at concede (`ndlive`/`ndfwd`/`ndapp`/`ndleaf`
+/`ndvar` histogram): ~69% APP spine + ~31% FWD, all reachable —
+the relational eval's pending-alternative structure, linear in
+steps. `repr` path compression landed (head→tail splice; ~10%
+live reduction, doesn't change the growth).
+
+**Multi-root decomposition completes**: 779 roots (one `take 1
+pass1(item, pc0)` per item), persist=1GiB inside arena=4GiB —
+779/779 sols, 121G steps, WS ~1.1GB, gc=5879, persist rode near
+cap but collected ~20M cells on demand. Cross-root memoization
+cut ~60% vs the ~320G monolithic estimate — the pay-once cache
+finally paying for its designed shape.
+
+Caveats: (a) persist sits *inside* the `ir_arena_bytes`
+reservation — `irstart = pagealign(pcur0 + persist_bytes)`, so
+arena must exceed persist + input + roots (a 1GiB+1GiB config
+dies at ~73M steps on commit failure — silent-looking until
+grow-leg stats landed in `453dfcf`); (b) chunk pcs are all 0 —
+byte-correct concatenation needs per-chunk pc args; the run is a
+space/completion proof, not yet the byte-verified oracle match.

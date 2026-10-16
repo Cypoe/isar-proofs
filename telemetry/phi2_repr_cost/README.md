@@ -141,3 +141,12 @@ Python witness. Levers: clause compilation vs interpreted
 dispatch; an inet-shaped host substrate instead of SKI-as-
 substrate (SKI was the Lean-proof shorthand, not the model —
 decision 067 direction note).
+
+## Seventh pass: multi-root completion (frag 0029 postscript)
+
+779-root full-src `pass1` (chunk=1): **779/779 sols, 121G steps,
+WS ~1.1GB, ~40min** — persist=1GiB inside arena=4GiB, gc=5879.
+Live composition histogram: 69% APP spine / 31% FWD / 0% leaves —
+the choicepoint structure is the reachable set. Layout caveat:
+persist is carved from the arena reservation; arena must exceed
+persist + input + roots.
