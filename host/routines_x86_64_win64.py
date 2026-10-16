@@ -74,6 +74,11 @@ DATA_SLOTS_GC: Tuple[Tuple[str, int], ...] = (
                        # into the arena (ir_bloop decommits it per root)
     ("npfree", 8),     # persist cells freed by the last collect
     ("npfwd", 8),      # live persist cells that are FWD routing cells
+    ("ndlive", 8),     # live dynamic cells counted by the last collect
+    ("ndfwd", 8),      # live dynamic cells that are FWD routing cells
+    ("ndapp", 8),      # live dynamic cells with tag APP (spine)
+    ("ndleaf", 8),     # live dynamic cells with atom tags 1..6
+    ("ndvar", 8),      # live dynamic cells with tag VAR (0xFE)
 )
 
 # dialect="plex.v3" (ADR-0006 ingest): the kernel depacks the archive
@@ -447,6 +452,23 @@ def _stats_p_body(R: Realization, ctx: Ctx) -> Program:
             _stats_str(p, " pfwd=")
             p += [I("mov_r64_rip", "rdi", ("p", "npfwd")),
                   I("call_rel32", ("l", "itoa"))]
+            # dlive/dfwd: live dynamic cells (all / FWD routing) —
+            # the post-final-root-routing retention discriminator
+            _stats_str(p, " dlive=")
+            p += [I("mov_r64_rip", "rdi", ("p", "ndlive")),
+                  I("call_rel32", ("l", "itoa"))]
+            _stats_str(p, " dfwd=")
+            p += [I("mov_r64_rip", "rdi", ("p", "ndfwd")),
+                  I("call_rel32", ("l", "itoa"))]
+            _stats_str(p, " dapp=")
+            p += [I("mov_r64_rip", "rdi", ("p", "ndapp")),
+                  I("call_rel32", ("l", "itoa"))]
+            _stats_str(p, " dleaf=")
+            p += [I("mov_r64_rip", "rdi", ("p", "ndleaf")),
+                  I("call_rel32", ("l", "itoa"))]
+            _stats_str(p, " dvar=")
+            p += [I("mov_r64_rip", "rdi", ("p", "ndvar")),
+                  I("call_rel32", ("l", "itoa"))]
     p += [
         I("mov_m8_imm8", ("m", "rsi", 0), 0x0A), I("inc_r64", "rsi"),
         I("mov_r64_rip", "rcx", ("p", "herr")),
@@ -774,7 +796,11 @@ def r_repr(R: Realization, ctx: Ctx) -> Program:
     `Heap.repr` — every reader resolves on entry.  FWD cells always
     store a rep at creation, so chains only grow when a rep later
     collapses itself; clobbers rax+rdi only (rcx holds `fr` across the
-    step dispatch)."""
+    step dispatch).  Path compression: when the walk found a tail
+    different from the argument, splice the head cell's .l straight
+    to it — rax==rdi iff rdi wasn't FWD, and FWD .l is only ever
+    read through repr, so chain intermediates become unreachable
+    garbage for the collector instead of permanent live links."""
     return [
         LBL("repr"),
         I("mov_r64_r64", "rax", "rdi"),
@@ -783,7 +809,11 @@ def r_repr(R: Realization, ctx: Ctx) -> Program:
         I("jne_rel32", ("l", "repr_d")),
         I("mov_r64_m64", "rax", ("m", "rax", 8)),
         I("jmp_rel32", ("l", "repr_l")),
-        LBL("repr_d"), I("ret"),
+        LBL("repr_d"),
+        I("cmp_r64_r64", "rax", "rdi"),
+        I("je_rel32", ("l", "repr_ret")),
+        I("mov_m64_r64", ("m", "rdi", 8), "rax"),   # splice head->tail
+        LBL("repr_ret"), I("ret"),
     ]
 
 
@@ -956,6 +986,11 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
             I("xor_r32_r32", "eax", "eax"),
             I("mov_rip_r64", ("p", "npfree"), "rax"),   # per-collect
             I("mov_rip_r64", ("p", "npfwd"), "rax"),
+            I("mov_rip_r64", ("p", "ndlive"), "rax"),
+            I("mov_rip_r64", ("p", "ndfwd"), "rax"),
+            I("mov_rip_r64", ("p", "ndapp"), "rax"),
+            I("mov_rip_r64", ("p", "ndleaf"), "rax"),
+            I("mov_rip_r64", ("p", "ndvar"), "rax"),
         ]
     # one accept body per scan phase — `u` uniquifies the labels:
     # candidate in rdx -> fall into the mark check or jmp next_lbl
@@ -1049,7 +1084,35 @@ def r_gc_collect(R: Realization, ctx: Ctx) -> Program:
             I("jne_rel32", ("l", f"gc_sw{u}_nfwd")),
             I("inc_mrip", ("p", "npfwd")),
             LBL(f"gc_sw{u}_nfwd"),
-        ] if u == "p" else []) + [
+        ] if u == "p" else [
+            # live dynamic cell: ndlive counts all, then a tag
+            # histogram — FWD routing cells, APP spine cells, atom
+            # leaves 1..6, VAR (0xFE) — splits chain links vs spine
+            # retention vs term data (the post-0029 question)
+            I("inc_mrip", ("p", "ndlive")),
+            I("mov_r32_m32", "ecx", ("m", "rax", 0)),   # tag
+            I("cmp_r64_imm", "rcx", FWD_TAG),
+            I("jne_rel32", ("l", f"gc_sw{u}_nfwd")),
+            I("inc_mrip", ("p", "ndfwd")),
+            I("jmp_rel32", ("l", f"gc_sw{u}_tdone")),
+            LBL(f"gc_sw{u}_nfwd"),
+            I("test_r64_r64", "rcx", "rcx"),            # tag 0 = APP
+            I("jne_rel32", ("l", f"gc_sw{u}_t_napp")),
+            I("inc_mrip", ("p", "ndapp")),
+            I("jmp_rel32", ("l", f"gc_sw{u}_tdone")),
+            LBL(f"gc_sw{u}_t_napp"),
+            I("cmp_r64_imm", "rcx", 0xFE),              # IR_VAR
+            I("jne_rel32", ("l", f"gc_sw{u}_t_nvar")),
+            I("inc_mrip", ("p", "ndvar")),
+            I("jmp_rel32", ("l", f"gc_sw{u}_tdone")),
+            LBL(f"gc_sw{u}_t_nvar"),
+            I("cmp_r64_imm", "rcx", 6),                 # atoms 1..6
+            I("jbe_rel32", ("l", f"gc_sw{u}_t_leaf")),
+            I("jmp_rel32", ("l", f"gc_sw{u}_tdone")),
+            LBL(f"gc_sw{u}_t_leaf"),
+            I("inc_mrip", ("p", "ndleaf")),
+            LBL(f"gc_sw{u}_tdone"),
+        ]) + [
             LBL(f"gc_sw{u}_next"),
             I("add_r64_imm", "rax", R.node_bytes),
             I("jmp_rel32", ("l", f"gc_sw{u}_loop")),
