@@ -17,6 +17,7 @@ import ISAR.ReverseRosetta
 import ISAR.TRSView
 import ISAR.BytecodeView
 import ISAR.IotaView
+import ISAR.FlowView
 import ISAR.QuantityKernel
 import ISAR.Futamura
 import ISAR.ISARMatrices
