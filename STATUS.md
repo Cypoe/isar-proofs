@@ -31,8 +31,8 @@ The formal core now has: confluence and unique NFs; `cd` as a **normalizing stra
 
 ### Where to go next (priority order)
 
-1. **1993 polyvariant mix / cogen product** — still open as *full* mix. **CoGen + FasmRealize landed:** `host/cogen.py` choose/emit; IdentityRealize + FasmRealize; `host/fasm_dialect.py`; Lean `CoGen` / `FASMView`. Do not stretch `JGS_PE` into a compiler-generator. Native fasmg/CPU loaders are **next** (decision 011) — not required for Phase 4b.
-2. **Mine-adopt** — `try_adopt`: OperEq match a known QuotientMap (identity / bytecode / fasm) or refuse (explicit map required).
+1. **1993 polyvariant mix / cogen product** — still open as *full* mix; **demoted** (2026-10-21): mix serves self-application Futamura-2/3, and the stratified route already provides cogen as an explicit provider — `host/cogen.py` choose/emit; IdentityRealize + FasmRealize; `host/fasm_dialect.py`; Lean `CoGen` / `FASMView`. `JonesOptimal` stays as the cost criterion. Do not stretch `JGS_PE` into a compiler-generator. Native fasmg/CPU loaders are **next** (decision 011) — not required for Phase 4b.
+2. ~~**Mine-adopt**~~ — **landed** (`f85f592`; frag 0031): `try_adopt`/`try_adopt_piece` in `host/mine_adopt.py`, `selftests[8]` + `selftests[29]` (`gates/observational_suite`), all green. Honest bound: adoption is probe-sampled M-class, not a proof — per-map NF-commutation in Lean is the strengthening when a map must outlive sampling.
 3. **Nonempty SARI dynamics** — `R_empty` is a theorem. A nonempty `R` needs a relation that is *not* already collapsed by `OperationalEq` / joinability. Do not change `OperationalEq` to fake a step.
 4. **Metric, then completion** — UAT freeze is the decision. Do not claim `ISAR_UAT` proved or restate `KernelAddressLimit` as `Metric.Completion` before a metric exists.
 5. **Keep named** — `quantityToNat` (full `Quantity`) and `exp_exp_not_holonomic`. `QuantityCore` does not replace the four axioms.
