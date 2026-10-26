@@ -1,0 +1,12 @@
+{"name": "koru.flow",
+ "layer": "dialect",
+ "in": "KProg (wire-expressible flow grammar: graph × entry × args)",
+ "out": "Option KResult (branch × payload, three-case)",
+ "axis": "dialect",
+ "status": "declared",
+ "impl": {"lean": ["ISAR.FlowView (codec, proved)",
+                   "ISAR.FlowDialect (runK/evalKProg, runK_mono, FlowEvalCongruent)",
+                   "ISAR.KoruDialect (layers, wfProg, SelfHosting)"],
+          "host": ["host/koru/* (declared mirror + refusals)"]},
+ "refuses": ".k surface parse (no surface), C99 emission (declared backend), unasserted thunk leaf, unhandled branch, catchall in bare dispatch, void+arms, bind-on-void-payload, non-bool guard, type error, zero float denominator, fuel exhausted",
+ "doc": "The koru dialect's second+third rung: real eval semantics over the FlowView wire grammar (faithful port of w:/src/koru FlowKernel onto the K-grammar, rational-pair floats declared as the wire-level divergence) plus the layer registry — encoding/grammar realized in Lean, syntax/emission declared with refusal paths. Deferred obligations stated, not claimed: FlowEvalCongruent (ISK evaluator rung) and SelfHostingC99 (compiler fixpoint)."}

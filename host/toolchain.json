@@ -23,6 +23,11 @@
     "phi.rel": {
       "note": "host-side realized: phi_rel.parse_rel, rel_schema.check, rel_eval miniKanren; no dialect record — rel-graph is data over the substrate, not a compiled surface"
     },
+    "koru.flow": {
+      "module": "koru.spec",
+      "record": "KORU_FLOW",
+      "note": "koru flow/tor dialect leg — semantics is ISAR.FlowDialect+KoruDialect (Lean); encoding+grammar+semantics realized there, .k surface and C99 backend declared with refusal paths"
+    },
     "packed.ir": {
       "module": "spec_term",
       "record": "ir_map",
