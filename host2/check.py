@@ -17,6 +17,12 @@ The pipeline per case row in `specs/cases.json`:
           (residual |* catchall dispatch; koru binds residuals
           through metatypes, outside the wire)
   claim : krun claim -> "ok ..." | forged -> "drift" exit 4
+  witness : every emitted claim re-decided by the AUTHORITY's
+          mechanized semantics — w:/src/koru's FlowCheck over
+          FlowKernel (koru/flowcheck row in realizations.json);
+          conformance corpus all-MATCH, forged corpus all-REJECT.
+          This is the eval.c-is-runK witness: two independent
+          evaluators agreeing on the same wire
   emit  : krun kemit.claim --emit claim -> row's expected emit text
           ("refuse" for out-of-subset rows)
   cc    : emitted .c compiled by the assembly.json c99 toolchain row,
@@ -236,6 +242,79 @@ def gate():
             for key in sorted(pcases):
                 run_case(f"{folder}/{key}", pcases[key], pfile, pdir,
                          casename=key)
+
+    # ---- FlowCheck witness leg: the AUTHORITY's mechanized
+    # semantics (w:/src/koru FlowKernel via FlowCheck) re-decides
+    # every emitted claim — krun agreeing with it on the same wire
+    # is the eval.c-is-runK witness.  Forged rows go to the --forged
+    # corpus (all must REJECT).  Paths+toolchain live in
+    # realizations.json; missing pieces skip, never fail. ----
+    fc = None
+    for row in _load("realizations.json")["rows"]:
+        if row["id"] == "koru/flowcheck":
+            mech = row.get("arm", {}).get("mechanism")
+            if (mech and os.path.exists(mech["kernel"])
+                    and os.path.exists(mech["checker"])
+                    and shutil.which("elan")):
+                fc = mech
+            break
+    if fc is None:
+        skip("witness.flowcheck",
+             "koru flowcheck toolchain not on this machine")
+    else:
+        odir = os.path.join(BUILD, "flowcheck-oleans")
+        os.makedirs(odir, exist_ok=True)
+        k_olean = os.path.join(odir, "FlowKernel.olean")
+        built_kernel = (os.path.exists(k_olean)
+                        and os.path.getmtime(k_olean)
+                        >= os.path.getmtime(fc["kernel"]))
+        fc_dir = os.path.dirname(fc["kernel"])
+        if not built_kernel:
+            r = subprocess.run(
+                ["elan", "run", fc["toolchain"], "lean",
+                 "-o", k_olean, fc["kernel"]],
+                capture_output=True, text=True, cwd=fc_dir)
+            built_kernel = r.returncode == 0
+            if not built_kernel:
+                bad("witness.flowcheck.build",
+                    f"FlowKernel.olean: {r.stderr.strip()[:160]}")
+        if built_kernel:
+            env = {**os.environ, "LEAN_PATH": odir}
+            conf, forg = set(), set()
+            pools = [(cases, "")]
+            if os.path.isdir(PORTED):
+                for folder in sorted(os.listdir(PORTED)):
+                    pfile = os.path.join(PORTED, folder, "cases.json")
+                    if os.path.isfile(pfile):
+                        with open(pfile, encoding="utf-8") as f:
+                            pools.append(
+                                (json.load(f)["cases"], f"{folder}-"))
+            for pool, prefix in pools:
+                for key in sorted(pool):
+                    cp = os.path.join(BUILD, f"{prefix}{key}.claim")
+                    if os.path.exists(cp):
+                        line = open(cp, encoding="utf-8").read().strip()
+                        (forg if pool[key].get("forged")
+                         else conf).add(line)
+            for tag, lines, extra in (("conformance", conf, []),
+                                      ("forged", forg, ["--forged"])):
+                if not lines:
+                    continue
+                cf = os.path.join(BUILD, f"flowcheck-{tag}.corpus")
+                with open(cf, "w", encoding="utf-8") as f:
+                    f.write("\n".join(sorted(lines)) + "\n")
+                r = subprocess.run(
+                    ["elan", "run", fc["toolchain"], "lean", "--run",
+                     fc["checker"], *extra, cf],
+                    capture_output=True, text=True, env=env,
+                    cwd=fc_dir)
+                tail = (r.stdout.strip().splitlines() or [""])[-1]
+                if r.returncode == 0:
+                    ok(f"witness.{tag}", tail.strip()[:90])
+                else:
+                    bad(f"witness.{tag}",
+                        f"exit={r.returncode} {tail.strip()[:120]} "
+                        f"{r.stderr.strip()[:120]}")
 
     # ---- emit legs: kemit's claim + --emit against every case claim ----
     if kemit_claim is None:

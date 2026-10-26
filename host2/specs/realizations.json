@@ -5,7 +5,9 @@
     {
       "id": "koru/authority",
       "interface": "koru-parse",
-      "stack": ["koru"],
+      "stack": [
+        "koru"
+      ],
       "arm": {
         "mechanism": "W:\\src\\koru\\zig-out\\bin\\koruc",
         "evidence": "gate leg: every generated + ported .k passes `koruc -c`; missing on a machine = skip, not fail",
@@ -15,7 +17,10 @@
     {
       "id": "host2/koru-parse",
       "interface": "koru-parse",
-      "stack": ["host2", "c99"],
+      "stack": [
+        "host2",
+        "c99"
+      ],
       "arm": {
         "mechanism": "host2/korufe.exe (C99)",
         "evidence": "gate leg: korufe FILE.k -> ast.json; every generated corpus .k passes koruc -c",
@@ -25,7 +30,10 @@
     {
       "id": "host2/flow-eval",
       "interface": "flow-eval",
-      "stack": ["host2", "c99"],
+      "stack": [
+        "host2",
+        "c99"
+      ],
       "arm": {
         "mechanism": "host2/build/krun.exe (C99)",
         "evidence": "gate leg: claim -> decided result | drift | refuse",
@@ -35,7 +43,10 @@
     {
       "id": "host2/lower",
       "interface": "ast-lower",
-      "stack": ["host2", "c99"],
+      "stack": [
+        "host2",
+        "c99"
+      ],
       "arm": {
         "mechanism": "host2/korufe.exe --lower (C99)",
         "evidence": "gate leg: ast.json + case row -> [flow-eval] claim",
@@ -45,7 +56,10 @@
     {
       "id": "host2/emit-c99",
       "interface": "emit-c99",
-      "stack": ["koru", "host2"],
+      "stack": [
+        "koru",
+        "host2"
+      ],
       "arm": {
         "mechanism": "kemit.k as data under krun --emit",
         "evidence": "gate legs: emit per accept case + cc + runtime",
@@ -55,7 +69,10 @@
     {
       "id": "host2/koru-parse-lean",
       "interface": "koru-parse",
-      "stack": ["host2", "lean"],
+      "stack": [
+        "host2",
+        "lean"
+      ],
       "arm": {
         "mechanism": null,
         "evidence": "refuse",
@@ -65,7 +82,9 @@
     {
       "id": "host2/flow-eval-lean",
       "interface": "flow-eval",
-      "stack": ["lean"],
+      "stack": [
+        "lean"
+      ],
       "arm": {
         "mechanism": "runK in src/ISAR/FlowDialect.lean (native_decide fixtures)",
         "evidence": "15 compile-time fixtures in FlowDialect.lean",
@@ -75,11 +94,32 @@
     {
       "id": "host2/selfhost-fixpoint",
       "interface": "selfhost-corpus",
-      "stack": ["koru", "host2", "c99"],
+      "stack": [
+        "koru",
+        "host2",
+        "c99"
+      ],
       "arm": {
         "mechanism": "kemit.k emitted via krun, compiled by assembly c99 row",
         "evidence": "gate emit+cc+run legs over koruEmitCorpus",
         "delta": "corpus-level witness; forall-src theorem (SelfHostingC99) is the later rung"
+      }
+    },
+    {
+      "id": "koru/flowcheck",
+      "interface": "flow-witness",
+      "stack": [
+        "koru",
+        "lean"
+      ],
+      "arm": {
+        "mechanism": {
+          "kernel": "W:/src/koru/verify/semantics/FlowKernel.lean",
+          "checker": "W:/src/koru/verify/semantics/FlowCheck.lean",
+          "toolchain": "leanprover/lean4:v4.31.0"
+        },
+        "evidence": "gate leg: every emitted [flow-eval] claim is re-decided by the AUTHORITY's mechanized semantics (FlowKernel via FlowCheck, corpus mode); forged claims go to --forged corpus (all must REJECT). Missing toolchain/files = skip, not fail.",
+        "delta": "the upstream checker, not our port: C-krun agreeing with FlowCheck on the same claims is the eval.c-is-runK witness"
       }
     }
   ]
