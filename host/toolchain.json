@@ -26,7 +26,7 @@
     "koru.flow": {
       "module": "koru.spec",
       "record": "KORU_FLOW",
-      "note": "koru flow/tor dialect leg — semantics is ISAR.FlowDialect+KoruDialect (Lean); encoding+grammar+semantics realized there, C99 backend realized for declared subset (emitC99, fixpoint koru_emit_fixpoint), .k surface declared with refusal path; native witness substrate lives in host2/ (separate root — runK twin + quote twin + .kv wire + fixture gate)"
+      "note": "koru flow/tor dialect leg — semantics is ISAR.FlowDialect+KoruDialect (Lean); encoding+grammar+semantics realized there, C99 backend realized for declared subset (emitC99, fixpoint koru_emit_fixpoint), .k surface declared with refusal path; native witness substrate lives in host2/ (separate root — src/krun.c C99 checker twin of runK + quoteProg over generated .k [flow-eval] claims, check.py gate)"
     },
     "packed.ir": {
       "module": "spec_term",

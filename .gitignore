@@ -31,3 +31,4 @@ emit_work/
 nul
 *.rel.plex
 _scratch/
+host2/build/

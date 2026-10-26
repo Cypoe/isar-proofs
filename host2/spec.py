@@ -9,39 +9,44 @@ from __future__ import annotations
 
 HOST2 = {
     "pipeline": "koru.host2",
-    "substrate": "python3 stdlib-only witness twin of ISAR.FlowDialect.runK",
-    "wire": ".kv (kv-json v1) — canonical writer: "
-            "tools/DumpKoruFixtures.lean; reader+validator: kwire",
+    "substrate": "C99 (clang -std=c99 -Werror) — src/krun.c, the "
+                 "witness twin of ISAR.FlowDialect.runK; CompCert-"
+                 "subset discipline (no VLA/_Complex/nested fns)",
+    "wire": "[flow-eval] .k claims — same format FlowCheck.lean "
+            "decides and golden.txt lists; generator: "
+            "tools/DumpKoruFixtures.lean",
     "components": {
-        "run": {
+        "checker": {
             "status": "realized",
-            "impl": "run.py — runK/evalKE/evalKBin/evalKUn/"
-                    "evalKBuiltin twin, all refusal shapes",
-        },
-        "quote": {
-            "status": "realized",
-            "impl": "quote.py — quoteProg twin (KProg -> KVal)",
+            "impl": "src/krun.c — s-expr reader, total decoders, "
+                    "runK/evalKE twin, quoteProg twin; claim mode "
+                    "re-decides, emit mode quotes SRC and invokes "
+                    "the compiler program's entry",
         },
         "emission": {
             "status": "data",
-            "impl": "specs/koru-fixtures.json programs.kemit — the "
-                    "compiler program is data evaluated by run, "
-                    "never reimplemented in python",
+            "impl": "specs/corpus/kemit.k — the compiler is a claim "
+                    "file evaluated by the C witness, never "
+                    "reimplemented in C",
         },
         "gate": {
             "status": "realized",
-            "impl": "fixtures.py — quote/eval/kemit/cc legs vs the "
-                    "generated fixture file",
+            "impl": "check.py — build/claim/forged/emit/cc legs "
+                    "over the generated .k corpus (21 legs)",
         },
     },
-    "witness_contract": "data crosses (fixture json), logic never "
-                        "does — host2 reproduces Lean decisions "
-                        "independently, byte-for-byte where strings",
+    "witness_contract": "data crosses (.k claim files), logic never "
+                        "does — the C checker re-decides every claim "
+                        "independently; forged claims drift-fail",
     "deferred": {
-        "surface": ".k parse — declared only, refuses everywhere",
         "full_fixpoint": "SelfHostingC99 at forall-src strength is "
                          "the Lean obligation; host2 witnesses the "
                          "same corpus the Lean theorem checks",
+        "krun_as_target": "krun.c itself is the handwritten "
+                          "bootstrap — it dies when a machine-"
+                          "checked evaluator (CompCert leg) replaces "
+                          "it; until then it is the one piece of "
+                          "host logic",
     },
 }
 
