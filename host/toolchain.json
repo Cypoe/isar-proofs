@@ -26,7 +26,7 @@
     "koru.flow": {
       "module": "koru.spec",
       "record": "KORU_FLOW",
-      "note": "koru flow/tor dialect leg — semantics is ISAR.FlowDialect+KoruDialect (Lean); encoding+grammar+semantics realized there, C99 backend realized for declared subset (emitC99, fixpoint koru_emit_fixpoint); native witness substrate lives in host2/ (separate root — src/korufe/{lex,parse,astio,lower}.c real-koru-subset frontend TUs: .k surface -> program.ast.json canon -> [flow-eval] claim; src/krun/{sx,wire,eval,quote}.c C99 checker twins of runK + quoteProg; Lean companions beside each .c compile via the Host2 lib; ported corpus specs/ported/*/; declared spec rows in host2/specs/ quotient-maps+realizations+assembly+cases.json; check.py gate)"
+      "note": "koru flow/tor dialect leg — semantics is ISAR.FlowDialect+KoruDialect (Lean); encoding+grammar+semantics realized there, C99 backend realized for declared subset (emitC99, fixpoint koru_emit_fixpoint); native witness substrate lives in host2/ (separate root — src/korufe/{lex,parse,astio,lower}.c real-koru-subset frontend TUs: .k surface -> program.ast.json canon -> [flow-eval] claim; src/krun/{sx,wire,eval,quote}.c C99 checker twins of runK + quoteProg; Lean companions beside each .c compile via the Host2 lib; suite: specs/tests/<GGG>_<group>/<NNN>_<leaf>/{input.k,cases.json} generated, specs/benches+ported authored; declared spec rows in host2/specs/ quotient-maps+realizations+assembly.json; check.py gate incl. FlowCheck witness leg)"
     },
     "packed.ir": {
       "module": "spec_term",

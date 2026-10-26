@@ -1,0 +1,1 @@
+{"cases":{"100_kemit":{"entry":"emit","fuel":64,"args":{},"expect":"refuse","emit":"refuse","file":"input.k","emit_prog":true}}}

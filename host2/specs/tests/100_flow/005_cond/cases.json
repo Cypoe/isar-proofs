@@ -1,0 +1,1 @@
+{"cases":{"005_cond":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":7}},"emit":"refuse","file":"input.k"}}}

@@ -1,0 +1,1 @@
+{"cases":{"007_cell":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":3}},"emit":"refuse","file":"input.k"}}}

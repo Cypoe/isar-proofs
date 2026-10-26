@@ -8,19 +8,23 @@ Writes the host2 corpus as **real koru source** `.k` files plus a
 
     lake env lean --run tools/DumpKoruFixtures.lean
 
-writes `host2/specs/corpus/case-*.k`, `kemit.k`, `case-forged.k` —
-authored-syntax files in koru's own surface (`tor`, `->`, `=`, `|`),
-and `host2/specs/cases.json` carrying the per-case spec rows:
-entry call, fuel, expected result, expected emit text, oracle.
+writes `host2/specs/tests/<GGG>_<group>/<NNN>_<leaf>/` leaf folders —
+`input.k` authored-syntax files in koru's own surface (`tor`, `->`,
+`=`, `|`) plus a per-leaf `cases.json` spec row: entry call, fuel,
+expected result, expected emit text, oracle.  Groups: `200_emit`
+(the emission-fixpoint corpus), `100_flow` (the flow-grammar
+corpus), `900_wire` (rows with no surface spelling — the claim is
+generated data), `800_forged` (asserted-wrong expectations).
 
-The `.k` files are GENERATED from `koruEmitCorpus` — one source of
-truth, no drift.  They are parsed by `host2/src/korufe.c` into the
-canonical `program.ast.json` shape and lowered by the same tool into
-`[flow-eval]` claims — the s-expression wire is the *lower* layer,
-never the authored surface.  `cases.json` rows are the spec: the gate
-joins file ↔ ast ↔ claim ↔ decided result ↔ emitted C ↔ runtime.
+The `.k` files are GENERATED from `koruEmitCorpus` —
+one source of truth, no drift.  They are parsed by
+`host2/src/korufe/` into the canonical `program.ast.json` shape and
+lowered by the same tool into `[flow-eval]` claims — the s-expression
+wire is the *lower* layer, never the authored surface.  `cases.json`
+rows are the spec: the gate joins file ↔ ast ↔ claim ↔ decided
+result ↔ emitted C ↔ runtime.
 
-`case-forged.k` has its spec row claim result 6 where the program
+`800_forged/000_wrong_expect` asserts result 6 where the program
 decides 5 — `krun` must DRIFT it, proving claims are re-decided.
 -/
 
@@ -460,48 +464,72 @@ def caseRow (fuel : Nat) (p : ISAR.KProg) (o : ISAR.KOracle := [])
     ++ ",\"expect\":" ++ kExpectJson (ISAR.evalKProg p o fuel)
     ++ ",\"emit\":" ++ kEmitJson p ++ extra ++ "}"
 
+/-- `i` zero-padded to 3 digits — the `NNN` of the leaf convention. -/
+def pad3 (i : Nat) : String :=
+  let s := toString i
+  "".pushn '0' (3 - s.length) ++ s
+
+/-- Write one leaf folder: `input.k` (surface rows) + `cases.json`
+carrying exactly one row keyed by the leaf's bare name.  A wire leaf
+passes `file := false` — the row carries the generated `claim`
+instead and no surface file is written. -/
+def writeLeaf (group leaf row : String) (src : Option String)
+    : IO Unit := do
+  let dir := "host2/specs/tests/" ++ group ++ "/" ++ leaf
+  IO.FS.createDirAll dir
+  match src with
+  | some s => IO.FS.writeFile (dir ++ "/input.k") s
+  | none => pure ()
+  IO.FS.writeFile (dir ++ "/cases.json")
+    ("{\"cases\":{\"" ++ leaf ++ "\":" ++ row ++ "}}\n")
+
 def main : IO Unit := do
   let fuel := 64
-  let dir := "host2/specs/corpus"
-  let mut rows : List String := []
+  -- 200_emit — the emission-fixpoint corpus: accept + every refusal
+  -- shape kEmit owns, each as a named leaf
+  let emitNames := ["accept_int", "accept_neg", "refuse_entry",
+    "refuse_args", "refuse_graph", "refuse_expr", "refuse_float",
+    "refuse_thunk"]
   for (p, i) in ISAR.koruEmitCorpus.zipIdx do
-    let key := "case-" ++ toString i
-    IO.FS.writeFile (dir ++ "/" ++ key ++ ".k") (kProgSrc key p)
-    rows := rows ++ ["\"" ++ key ++ "\":" ++ caseRow fuel p []
-      (",\"file\":\"" ++ key ++ ".k\"")]
-  -- the flow-grammar corpus: every arm/dispatch shape the subset
-  -- spells, each row carrying its asserted oracle leaves
+    let leaf := pad3 i ++ "_" ++ emitNames.getD i "unnamed"
+    writeLeaf "200_emit" leaf
+      (caseRow fuel p [] ",\"file\":\"input.k\"")
+      (some (kProgSrc leaf p))
+  -- 100_flow — the flow-grammar corpus: every arm/dispatch shape the
+  -- subset spells, oracle leaves riding the row.  Wire-only rows
+  -- (no surface spelling) land in 900_wire with their own sequence.
+  let mut fi := 0
+  let mut wi := 0
   for (key, r) in ISAR.koruFlowCorpus do
+    let base := (key.drop 5).toString.map fun c =>
+      if c == '-' then '_' else c
     if r.wire then
-      -- no koru surface spells this program — the row carries the
-      -- generated claim itself; check.py feeds it straight to krun
-      rows := rows ++ ["\"" ++ key ++ "\":" ++ caseRow fuel r.prog r.oracle
-        (",\"claim\":\"" ++ jsonEsc
-          (claimSxO r.prog fuel (ISAR.evalKProg r.prog r.oracle fuel)
-            r.oracle) ++ "\"")]
+      let leaf := pad3 wi ++ "_" ++ base
+      wi := wi + 1
+      writeLeaf "900_wire" leaf
+        (caseRow fuel r.prog r.oracle
+          (",\"claim\":\"" ++ jsonEsc
+            (claimSxO r.prog fuel (ISAR.evalKProg r.prog r.oracle fuel)
+              r.oracle) ++ "\""))
+        none
     else
-      IO.FS.writeFile (dir ++ "/" ++ key ++ ".k")
-        (kProgSrc key r.prog r.decls)
-      rows := rows ++ ["\"" ++ key ++ "\":" ++ caseRow fuel r.prog r.oracle
-        (",\"file\":\"" ++ key ++ ".k\"")]
-  IO.FS.writeFile (dir ++ "/kemit.k") kemitFile
-  -- kemit's own row: entry emit, no args → `src` unbound → refuse;
-  -- emit_prog marks it as the emitter, not an emission target
-  rows := rows ++ ["\"kemit\":{\"entry\":\"emit\",\"fuel\":" ++ toString fuel
-    ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
-    ++ ",\"file\":\"kemit.k\",\"emit_prog\":true}"]
-  -- the forged case: case-0's program with an asserted-wrong result —
-  -- krun must DRIFT, proving claims are re-decided
+      let leaf := pad3 fi ++ "_" ++ base
+      fi := fi + 1
+      writeLeaf "100_flow" leaf
+        (caseRow fuel r.prog r.oracle ",\"file\":\"input.k\"")
+        (some (kProgSrc leaf r.prog r.decls))
+  -- kemit: the compiler as a koru program — emit_prog marks the row
+  -- as the emitter, not an emission target
+  writeLeaf "200_emit" "100_kemit"
+    ("{\"entry\":\"emit\",\"fuel\":" ++ toString fuel
+      ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
+      ++ ",\"file\":\"input.k\",\"emit_prog\":true}")
+    (some kemitFile)
+  -- 800_forged — an asserted-wrong expectation over a deciding
+  -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
-  IO.FS.writeFile (dir ++ "/case-forged.k") (kProgSrc "case-forged" forged)
-  rows := rows ++ ["\"case-forged\":{\"entry\":\"main\",\"fuel\":"
-    ++ toString fuel ++ ",\"args\":{}"
-    ++ ",\"expect\":{\"bare\":{\"int\":6}},\"emit\":\"refuse\""
-    ++ ",\"file\":\"case-forged.k\",\"forged\":true}"]
-  IO.FS.writeFile "host2/specs/cases.json"
-    ("{\"cases\":{" ++ String.intercalate "," rows ++ "}}\n")
-  -- stale generated .k files from earlier corpora must not linger:
-  -- wire rows deliberately write no surface file
-  for key in ["flow-catchall-bare", "flow-catchall-tag"] do
-    let stale := dir ++ "/" ++ key ++ ".k"
-    if ← System.FilePath.pathExists stale then IO.FS.removeFile stale
+  writeLeaf "800_forged" "000_wrong_expect"
+    ("{\"entry\":\"main\",\"fuel\":" ++ toString fuel ++ ",\"args\":{}"
+      ++ ",\"expect\":{\"bare\":{\"int\":6}},\"emit\":\"refuse\""
+      ++ ",\"file\":\"input.k\",\"forged\":true}")
+    (some (kProgSrc "000_wrong_expect" forged))

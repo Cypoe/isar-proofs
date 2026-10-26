@@ -40,7 +40,7 @@
       "id": "kprog-to-c99",
       "in": "quoted KProg (subset: main = bare (lit (int i)))",
       "out": "C99 source text | none (refuse)",
-      "by": "kemit.k evaluated as data under krun --emit",
+      "by": "specs/tests/200_emit/100_kemit/input.k evaluated as data under krun --emit",
       "ref": "emitC99 in src/ISAR/KoruDialect.lean + kEmit shapeOk conjuncts (KoruEmit.lean)",
       "notes": "the compiler is a koru program, not host code; refusals are structural (navigation none), agreeing with emitC99's match failure."
     },

@@ -1,0 +1,1 @@
+{"cases":{"001_catchall_bare":{"entry":"main","fuel":64,"args":{},"expect":"refuse","emit":"refuse","claim":"[flow-eval] ((entry main) (fuel 64) (result refuse) (graph (def main (subflow (head tick) (arm catchall (node (produce (lit (int 9))))))) (def tick (bare (lit (int 5))))) (oracle))"}}}

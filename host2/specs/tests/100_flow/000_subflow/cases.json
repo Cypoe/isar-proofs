@@ -1,0 +1,1 @@
+{"cases":{"000_subflow":{"entry":"main","fuel":64,"args":{},"oracle":[{"name":"tick","args":{"n":{"int":5}},"result":{"tag":"go","payload":{"int":5}}}],"expect":{"bare":{"int":3}},"emit":"refuse","file":"input.k"}}}

@@ -61,7 +61,7 @@
         "host2"
       ],
       "arm": {
-        "mechanism": "kemit.k as data under krun --emit",
+        "mechanism": "specs/tests/200_emit/100_kemit/input.k as data under krun --emit",
         "evidence": "gate legs: emit per accept case + cc + runtime",
         "delta": "single-entry bare-int-literal subset; growth = match arm + shapeOk conjunct + corpus row"
       }
@@ -100,7 +100,7 @@
         "c99"
       ],
       "arm": {
-        "mechanism": "kemit.k emitted via krun, compiled by assembly c99 row",
+        "mechanism": "100_kemit/input.k emitted via krun, compiled by assembly c99 row",
         "evidence": "gate emit+cc+run legs over koruEmitCorpus",
         "delta": "corpus-level witness; forall-src theorem (SelfHostingC99) is the later rung"
       }

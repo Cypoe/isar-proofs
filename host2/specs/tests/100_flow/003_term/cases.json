@@ -1,0 +1,1 @@
+{"cases":{"003_term":{"entry":"main","fuel":64,"args":{},"oracle":[{"name":"tick","args":{},"result":{"tag":"go","payload":{"int":0}}}],"expect":{"void":true},"emit":"refuse","file":"input.k"}}}

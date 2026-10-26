@@ -1,0 +1,1 @@
+{"cases":{"000_wrong_expect":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":6}},"emit":"refuse","file":"input.k","forged":true}}}
