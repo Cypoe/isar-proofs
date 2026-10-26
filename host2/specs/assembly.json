@@ -1,0 +1,45 @@
+{
+  "spec": "koru/assembly",
+  "note": "Target catalog: rows are data, not branches. The cc leg of the gate reads toolchain+flags+constraints from the c99 row. Missing target row = refuse that emission leg.",
+  "targets": [
+    {
+      "id": "c99",
+      "artifact": ".c",
+      "realized": true,
+      "toolchain": {
+        "cc": "clang",
+        "flags": ["-std=c99", "-Wall", "-Wextra", "-Werror", "-O0"],
+        "link": "direct",
+        "run": "exit DWORD"
+      },
+      "constraints": [
+        "compcert-accepted-subset",
+        "no-vla",
+        "no-_Complex",
+        "no-nested-functions",
+        "int64-as-long-long"
+      ],
+      "emission": {
+        "subset": "single-entry graph, main = bare (lit (int i))",
+        "shape": "int main(void) { return <i>; }",
+        "refuse": "all other shapes -> none"
+      }
+    },
+    {
+      "id": "x86_64-pe",
+      "artifact": ".exe",
+      "realized": false,
+      "via": "c99 + clang link",
+      "constraints": ["same c99 subset"],
+      "notes": "the observed runtime today is exactly this leg; a koru-spelled backend is a future row"
+    },
+    {
+      "id": "compcert",
+      "artifact": "machine code via machine-checked C semantics",
+      "realized": false,
+      "via": "c99 row output through CompCert",
+      "constraints": ["requires emitted subset to stay inside CompCert-accepted C99"],
+      "notes": "the machine-checked assembly leg: KProg -> C99 -> CompCert -> image; declared, not yet wired"
+    }
+  ]
+}

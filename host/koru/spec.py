@@ -38,9 +38,12 @@ KORU_FLOW = {
                     "port of w:/src/koru/verify/semantics/FlowKernel.lean)",
         },
         "syntax": {
-            "status": "declared",
-            "impl": "koruSurface.parse = fun _ => none -- no .k parser",
-            "refuses": "every parse",
+            "status": "realized elsewhere",
+            "impl": "no parser in this mirror; the realized .k "
+                    "surface is host2/src/korufe.c (C99, declared "
+                    "subset: .k -> program.ast.json -> claim); "
+                    "koruSurface.parse = fun _ => none in Lean",
+            "refuses": "every parse host-side",
         },
         "emission": {
             "status": "realized (subset)",

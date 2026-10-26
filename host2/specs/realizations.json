@@ -1,0 +1,76 @@
+{
+  "spec": "koru/realizations",
+  "note": "Realization catalog in the std/realize vocabulary: interface -> row -> arm binding -> mechanism. An arm with mechanism=null is a declared provider gap; the gate refuses paths that need it.",
+  "rows": [
+    {
+      "id": "host2/koru-parse",
+      "interface": "koru-parse",
+      "stack": ["host2", "c99"],
+      "arm": {
+        "mechanism": "host2/korufe.exe (C99)",
+        "evidence": "gate leg: korufe FILE.k -> ast.json",
+        "delta": "declared subset; koruc is the full-language authority"
+      }
+    },
+    {
+      "id": "host2/flow-eval",
+      "interface": "flow-eval",
+      "stack": ["host2", "c99"],
+      "arm": {
+        "mechanism": "host2/build/krun.exe (C99)",
+        "evidence": "gate leg: claim -> decided result | drift | refuse",
+        "delta": "exact rationals + int64 checked arithmetic, documented divergences from Int/Rat"
+      }
+    },
+    {
+      "id": "host2/lower",
+      "interface": "ast-lower",
+      "stack": ["host2", "c99"],
+      "arm": {
+        "mechanism": "host2/korufe.exe --lower (C99)",
+        "evidence": "gate leg: ast.json + case row -> [flow-eval] claim",
+        "delta": "refuses out-of-subset items and missing case rows"
+      }
+    },
+    {
+      "id": "host2/emit-c99",
+      "interface": "emit-c99",
+      "stack": ["koru", "host2"],
+      "arm": {
+        "mechanism": "kemit.k as data under krun --emit",
+        "evidence": "gate legs: emit per accept case + cc + runtime",
+        "delta": "single-entry bare-int-literal subset; growth = match arm + shapeOk conjunct + corpus row"
+      }
+    },
+    {
+      "id": "host2/koru-parse-lean",
+      "interface": "koru-parse",
+      "stack": ["host2", "lean"],
+      "arm": {
+        "mechanism": null,
+        "evidence": "refuse",
+        "gap": "no Lean-side surface parser; koruc owns the authority"
+      }
+    },
+    {
+      "id": "host2/flow-eval-lean",
+      "interface": "flow-eval",
+      "stack": ["lean"],
+      "arm": {
+        "mechanism": "runK in src/ISAR/FlowDialect.lean (native_decide fixtures)",
+        "evidence": "15 compile-time fixtures in FlowDialect.lean",
+        "delta": "reference semantics, not a host target"
+      }
+    },
+    {
+      "id": "host2/selfhost-fixpoint",
+      "interface": "selfhost-corpus",
+      "stack": ["koru", "host2", "c99"],
+      "arm": {
+        "mechanism": "kemit.k emitted via krun, compiled by assembly c99 row",
+        "evidence": "gate emit+cc+run legs over koruEmitCorpus",
+        "delta": "corpus-level witness; forall-src theorem (SelfHostingC99) is the later rung"
+      }
+    }
+  ]
+}

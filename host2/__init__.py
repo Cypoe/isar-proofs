@@ -1,22 +1,32 @@
 """host2 — the koru-side host pipeline.
 
 Separate root from host/ on purpose: host/ is the plex/ISAR pipeline;
-host2 is koru's own substrate.  It owns exactly ONE piece of logic —
-src/krun.c, the C99 witness twin of ISAR.FlowDialect.runK — plus:
+host2 is koru's own substrate.  Its logic is exactly two C99 tools —
+the rest is koru programs run AS DATA:
 
-  src/krun.c      the C witness: s-expr reader, total decoders,
+  src/korufe.c    the surface frontend: real koru syntax (.k,
+                  tor/->/=/| arms, guards, labels) -> program.ast.json
+                  (canonical shape, koruc --ast-json's layout) ->
+                  --lower -> [flow-eval] claim; refuse-by-default
+  src/krun.c      the claim witness: s-expr reader, total decoders,
                   runK/evalKE twin, quoteProg twin; claim mode
                   re-decides, --emit mode feeds a quoted program to
                   a compiler claim's entry
-  specs/corpus/   generated .k [flow-eval] claims (writer lives in
-                  Lean: tools/DumpKoruFixtures.lean — never edited)
-  check.py        the witness gate: build/claim/forged/emit/cc legs
+  specs/          the declared rows: cases.json (generated),
+                  quotient-maps.json, realizations.json,
+                  assembly.json — pipeline maps, realization
+                  interface/row/arm catalog, target toolchain rows
+  specs/corpus/   generated .k files in REAL koru syntax (writer
+                  lives in Lean: tools/DumpKoruFixtures.lean)
+  check.py        the witness gate: parse/lower/claim/emit/cc legs +
+                  refusal probes; orchestration only
   spec.py         the host2 registry record (HOST2)
 
 Everything else — emission today, the compiler tomorrow — is koru
-programs run AS DATA inside the evaluator, not C.  krun.c is the
-handwritten bootstrap that dies when a machine-checked-compiled
-evaluator replaces it.
+programs run as data inside the evaluator, not C.  korufe+krun are
+the handwritten bootstrap that die when koru-spelled and machine-
+checked-compiled legs replace them.
 
-Data crosses boundaries (the .k claim files), logic never does.
+Data crosses boundaries (.k source, ast.json, claims, spec rows),
+logic never does.
 """

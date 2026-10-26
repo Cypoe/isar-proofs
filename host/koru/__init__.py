@@ -19,6 +19,7 @@ Layers (each declared data, each refuses by name where unrealized):
 
   encoding  — the tagged-tree codec table (mirrors encProg tags)
   grammar   — wfProg static walls (entry/invoke/jump resolution)
-  syntax    — the `.k` surface (unrealized: refuses)
+  syntax    — the `.k` surface (refuses host-side; the realized leg
+              is host2/src/korufe.c — C99, declared subset)
   targets   — registered backend rows (c99 declared; emits nothing)
 """
