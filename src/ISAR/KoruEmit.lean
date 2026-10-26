@@ -232,9 +232,12 @@ def produced : KExpr :=
   qcat (.lit (.str "int main(void) { return ")) (
        qcat (qitoa intN) (.lit (.str "; }")))
 
-/-- A navigation that cannot succeed — the refusal arm. `field` on
-an int is a type error → `none`. -/
-def refused : KExpr := .field (.lit (.int 0)) "x"
+/-- A navigation that cannot succeed — the refusal arm. `src` is a
+quoted program cell; `__missing` is never a field → `none`.  Spelled
+this way (rather than `(0).x`) because real koru refuses
+field-access on a literal in produce position as call-shaped
+(KORU104). -/
+def refused : KExpr := .field (.var "src") "__missing"
 
 end KEmit
 
@@ -293,5 +296,227 @@ theorem koru_emit_fixpoint :
              List.not_mem_nil, or_false] at h
   rcases h with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
     native_decide
+
+/-! ## The flow-grammar corpus — the whole declared subset, gated
+
+`koruEmitCorpus` covers the *emission* fixpoint's shapes. This corpus
+covers the *flow grammar*: every arm node (`produce`/`retCtor`/
+`invoke`/`jump`/terminal), every dispatch path (tag/bare/catchall/
+void), guards, labels, oracle leaves — the shapes `korufe` parses and
+`krun` decides. Each row carries its own oracle (asserted-call
+leaves ride the case row, matching the wire's `(oracle (leaf …))`);
+`expect` is generated from `evalKProg`, and `koru_flow_evals` pins
+the decided outcomes as a checked fact.
+
+Emission expectation for every row is `refuse` — all of these are
+outside `emitC99`'s single-shape subset; their emit legs assert the
+refusal. -/
+
+/-- The `tor`-line contract real koru requires — declared params and
+branch arms (PARSE006 / KORU021 parity). Declared data, not
+inferred: the corpus author states the contract the surface printer
+spells and `korufe` checks call-arg names and arm branches against
+it. `branches` entries are `name` + optional payload type. -/
+structure KDecl where
+  /-- `false` = no `tor` line — a legal koru implicit decl (impls
+  and call sites are unconstrained when no decl exists). -/
+  declared : Bool := true
+  params : List (String × String) := []
+  branches : List (String × Option String) := []
+
+/-- One flow-grammar corpus row: program + asserted oracle leaves +
+the declared `tor` contracts the surface file must carry. -/
+structure KFlowRow where
+  prog : KProg
+  oracle : KOracle := []
+  decls : List (String × KDecl) := []
+  /-- `true` when the program has no koru surface spelling in the
+  subset — the corpus carries the `[flow-eval]` claim as generated
+  data rather than a `.k` file.  (Residual `|*` produce arms need a
+  metatype binding upstream; the wire's bare catchall has none.) -/
+  wire : Bool := false
+
+/-- Subflow + oracle leaf + `when` guard + invoke continuation:
+`tick(n:5)` leafs `(go 5)`; guard passes → `dec(4)` → `3`. -/
+def flowSubflow : KFlowRow where
+  prog := ⟨[
+      ("main", .subflow {
+          preLabel := none
+          head := ("tick", [("n", .lit (.int 5))])
+          arms := [ .mk "go" false (some "i")
+            (some (.bin .lt (.lit (.int 0)) (.var "i")))
+            (some (.invoke "dec"
+              [("n", .bin .sub (.var "i") (.lit (.int 1)))])) []
+          , .mk "go" false (some "i") none
+            (some (.produce (.var "i"))) [] ] })
+    , ("tick", .thunk)
+    , ("dec", .bare (.bin .sub (.var "n") (.lit (.int 1)))) ],
+    "main", []⟩
+  oracle := [(("tick", [("n", .int 5)]), ⟨some "go", some (.int 5)⟩)]
+  decls := [ ("tick", { params := [("n", "i64")]
+                      , branches := [("go", some "i64"), ("stop", none)] })
+           , ("dec", { params := [("n", "i64")] }) ]
+
+/-- `#loop` + `@loop` jump: oracle leafs per arg-tuple; the jump
+re-enters with `i-1`; guard exit produces `0`. -/
+def flowLoop : KFlowRow where
+  prog := ⟨[
+      ("count", .subflow {
+          preLabel := some "loop"
+          head := ("tick", [("i", .var "i")])
+          arms := [ .mk "next" false (some "i")
+            (some (.bin .lt (.lit (.int 0)) (.var "i")))
+            (some (.jump "loop"
+              [("i", .bin .sub (.var "i") (.lit (.int 1)))])) []
+          , .mk "next" false (some "i") none
+            (some (.produce (.var "i"))) [] ] })
+    , ("tick", .thunk) ],
+    "count", [("i", .int 2)]⟩
+  oracle := [ (("tick", [("i", .int 2)]), ⟨some "next", some (.int 2)⟩)
+           , (("tick", [("i", .int 1)]), ⟨some "next", some (.int 1)⟩)
+           , (("tick", [("i", .int 0)]), ⟨some "next", some (.int 0)⟩) ]
+  decls := [ ("tick", { params := [("i", "i64")]
+                      , branches := [("next", some "i64"), ("stop", none)] }) ]
+
+/-- `=>` retCtor + tag dispatch: `sign` produces a bare bool; the
+guarded `ok` arms are the walker's bare-dispatch convention (names
+decorative, guards select — the KORU021-relaxed shape). `classify`
+declares `pos`/`neg` for the `=>` arms; `main` dispatches on them. -/
+def flowCtor : KFlowRow where
+  prog := ⟨[
+      ("classify", .subflow {
+          preLabel := none
+          head := ("sign", [("x", .var "x")])
+          arms := [ .mk "ok" false (some "p") (some (.var "p"))
+            (some (.retCtor "pos" (.var "x"))) []
+          , .mk "ok" false (some "_") none
+            (some (.retCtor "neg" (.var "x"))) [] ] })
+    , ("sign", .bare (.bin .lt (.var "x") (.lit (.int 0))))
+    , ("main", .subflow {
+          preLabel := none
+          head := ("classify", [("x", .lit (.int (-5)))])
+          arms := [ .mk "pos" false (some "v") none
+            (some (.produce (.var "v"))) []
+          , .mk "neg" false (some "v") none
+            (some (.produce (.var "v"))) [] ] }) ],
+    "main", []⟩
+  decls := [ ("sign", { declared := false })
+           , ("classify", { params := [("x", "i64")]
+                          , branches := [("pos", some "i64")
+                                        ,("neg", some "i64")] }) ]
+
+/-- Terminal arm: `| go` with no step ends the chain — `.done`
+surfaces as a VOID result `{none, none}`. -/
+def flowTerm : KFlowRow where
+  prog := ⟨[
+      ("main", .subflow {
+          preLabel := none
+          head := ("tick", [])
+          arms := [ .mk "go" false none none none [] ] })
+    , ("tick", .thunk) ],
+    "main", []⟩
+  oracle := [(("tick", []), ⟨some "go", some (.int 0)⟩)]
+  decls := [ ("tick", { branches := [("go", some "i64"), ("stop", none)] }) ]
+
+/-- Catchall skipped on tag dispatch: `*` never equals a produced
+tag — the named `go` arm wins.  `wire := true`: `|* ->` is refused
+upstream (residuals bind through metatypes), so the corpus carries
+the claim, not a `.k`. -/
+def flowCatchTag : KFlowRow where
+  prog := ⟨[
+      ("main", .subflow {
+          preLabel := none
+          head := ("tick", [])
+          arms := [ .mk "" true none none
+            (some (.produce (.lit (.int 1)))) []
+          , .mk "go" false none none
+            (some (.produce (.lit (.int 2)))) [] ] })
+    , ("tick", .thunk) ],
+    "main", []⟩
+  oracle := [(("tick", []), ⟨some "go", some (.int 0)⟩)]
+  decls := [ ("tick", { branches := [("go", some "i64"), ("stop", none)] }) ]
+  wire := true
+
+/-- Catchall hit during bare dispatch refuses outright — the
+walker's loud wall. `wire := true`: same residual-arm axis as
+flowCatchTag — `dispatchBare` + catchall refuses, and no koru
+surface spells that dispatch arm. -/
+def flowCatchBare : KFlowRow where
+  prog := ⟨[
+      ("main", .subflow {
+          preLabel := none
+          head := ("tick", [])
+          arms := [ .mk "" true none none
+            (some (.produce (.lit (.int 9)))) [] ] })
+    , ("tick", .bare (.lit (.int 5))) ],
+    "main", []⟩
+  decls := [ ("tick", { declared := false }) ]
+  wire := true
+
+/-- Thunk head with an empty oracle — the trust boundary refuses. -/
+def flowThunkMiss : KFlowRow where
+  prog := ⟨[
+      ("main", .subflow {
+          preLabel := none
+          head := ("tick", [])
+          arms := [ .mk "go" false none none
+            (some (.produce (.lit (.int 1)))) [] ] })
+    , ("tick", .thunk) ],
+    "main", []⟩
+  decls := [ ("tick", { branches := [("go", some "i64"), ("stop", none)] }) ]
+
+/-- `if(c) a else b` — the conditional expression. -/
+def flowCond : KFlowRow where
+  prog := ⟨[ ("main", .bare (.cond (.lit (.bool true))
+      (.lit (.int 7)) (.lit (.int 8)))) ], "main", []⟩
+
+/-- `++` — string concat. -/
+def flowConcat : KFlowRow where
+  prog := ⟨[ ("main", .bare (.bin .concat
+      (.lit (.str "a")) (.lit (.str "b")))) ], "main", []⟩
+
+/-- `{x: e}.x` — cell literal + field access. -/
+def flowCell : KFlowRow where
+  prog := ⟨[ ("main", .bare (.field (.lit (.cell [("x", .int 3)]))
+      "x")) ], "main", []⟩
+
+/-- `[a, b][i]` — array literal + index. -/
+def flowIndex : KFlowRow where
+  prog := ⟨[ ("main", .bare (.index
+      (.lit (.arr [.int 10, .int 20])) (.lit (.int 1)))) ], "main", []⟩
+
+/-- The corpus as (key, row) pairs — keys become case-row ids and
+`flow-*.k` file names. -/
+def koruFlowCorpus : List (String × KFlowRow) :=
+  [ ("flow-subflow", flowSubflow)
+  , ("flow-loop", flowLoop)
+  , ("flow-ctor", flowCtor)
+  , ("flow-term", flowTerm)
+  , ("flow-catchall-tag", flowCatchTag)
+  , ("flow-catchall-bare", flowCatchBare)
+  , ("flow-thunk-miss", flowThunkMiss)
+  , ("flow-cond", flowCond)
+  , ("flow-concat", flowConcat)
+  , ("flow-cell", flowCell)
+  , ("flow-index", flowIndex) ]
+
+/-- The decided outcomes, pinned: what `runK` decides per row is
+exactly this — the generated `expect` rows are checked facts, not
+hopes. -/
+theorem koru_flow_evals :
+    (koruFlowCorpus.map fun (_, r) =>
+        evalKProg r.prog r.oracle 64) ==
+    [ some ⟨none, some (.int 3)⟩            -- subflow
+    , some ⟨none, some (.int 0)⟩            -- loop
+    , some ⟨none, some (.int (-5))⟩         -- ctor
+    , some ⟨none, none⟩                     -- term → void
+    , some ⟨none, some (.int 2)⟩            -- catchall-tag
+    , none                                  -- catchall-bare
+    , none                                  -- thunk-miss
+    , some ⟨none, some (.int 7)⟩            -- cond
+    , some ⟨none, some (.str "ab")⟩         -- concat
+    , some ⟨none, some (.int 3)⟩            -- cell
+    , some ⟨none, some (.int 20)⟩ ] := by   -- index
+  native_decide
 
 end ISAR

@@ -8,8 +8,8 @@
       "stack": ["host2", "c99"],
       "arm": {
         "mechanism": "host2/korufe.exe (C99)",
-        "evidence": "gate leg: korufe FILE.k -> ast.json",
-        "delta": "declared subset; koruc is the full-language authority"
+        "evidence": "gate leg: korufe FILE.k -> ast.json; every generated corpus .k passes koruc -c",
+        "delta": "declared subset; koruc is the full-language authority. Parity refusals mirrored: |* residuals, x: x puns, one-variant unions, when( call-shape, expr-position calls (KORU104)"
       }
     },
     {

@@ -132,6 +132,25 @@ def claimSx (p : ISAR.KProg) (fuel : Nat) (expected : Option ISAR.KResult) : Str
     ++ ") (graph" ++ sxDecls p.graph
     ++ ") (oracle))"
 
+/-- One oracle leaf — `(leaf name ((arg val) ...) result)`. -/
+def sxLeaf (leaf : (String × List (String × ISAR.KVal)) × ISAR.KResult)
+    : String :=
+  "(leaf " ++ sxName leaf.1.1 ++ " ("
+    ++ String.intercalate " "
+      (leaf.1.2.map fun (n, v) => "(" ++ sxName n ++ " " ++ sxVal v ++ ")")
+    ++ ") " ++ sxResult leaf.2 ++ ")"
+
+/-- The claim for a wire row — same `[flow-eval]` shape korufe
+produces, authored directly because no `.k` spells the program. -/
+def claimSxO (p : ISAR.KProg) (fuel : Nat)
+    (expected : Option ISAR.KResult) (o : ISAR.KOracle) : String :=
+  "[flow-eval] ((entry " ++ sxName p.entry ++ sxArgs p.args
+    ++ ") (fuel " ++ toString fuel
+    ++ ") (result " ++ sxExpected expected
+    ++ ") (graph" ++ sxDecls p.graph
+    ++ ") (oracle" ++ String.intercalate "" (o.map fun l => " " ++ sxLeaf l)
+    ++ "))"
+
 /-! ## Koru surface printer — `KProg` → real `.k` syntax
 
 The mirror of `korufe`'s parse: every shape printed here must parse
@@ -217,20 +236,43 @@ def kExprSrc : ISAR.KExpr → String
   | .field o n => kPostSrc o ++ "." ++ sxName n
   | .index o i => kPostSrc o ++ "[" ++ kExprSrc i ++ "]"
   | .builtin n args =>
-      sxName n ++ "(" ++ String.intercalate ", " (kExprsSrc args) ++ ")"
+      "@" ++ sxName n ++ "(" ++ String.intercalate ", " (kExprsSrc args) ++ ")"
 
 def kExprsSrc : List ISAR.KExpr → List String
   | [] => [] | x :: xs => kExprSrc x :: kExprsSrc xs
 end
 
+/-- Koru puns: `f(x)` binds param `x` from a bare `x`; the pun name
+is the expr's trailing ident (`f(p.x)` puns to `x`).  `n: e` where
+`e` puns to `n` is a refused redundancy (PARSE005) — emit the pun. -/
+def punName : ISAR.KExpr → Option String
+  | .var v => some v
+  | .field _ f => some f
+  | _ => none
+
 def kNamedExprsSrc (args : List (String × ISAR.KExpr)) : String :=
   String.intercalate ", " (go args) where
   go : List (String × ISAR.KExpr) → List String
     | [] => []
-    | (n, e) :: xs => (sxName n ++ ": " ++ kExprSrc e) :: go xs
+    | (n, e) :: xs =>
+        (match punName e with
+         | some p => if p == n then kExprSrc e
+           else sxName n ++ ": " ++ kExprSrc e
+         | none => sxName n ++ ": " ++ kExprSrc e) :: go xs
 
+/-- Guard position: koru's `when <cond>` reads to the next `->`/`|>`/
+`=>` delimiter — a parenthesised compound stays correct; a top-level
+binop spells bare (`when 0 < i`, koru's own idiom). -/
+def kGuardSrc : ISAR.KExpr → String
+  | .bin op a b =>
+      kExprSrc a ++ " " ++ binSym op ++ " " ++ kExprSrc b
+  | e => kExprSrc e
+
+/-- One arm line incl. its `|`/`|*` marker — the residual arm is
+glued `|*` in real koru (`| *` is the retired deref spelling). -/
 def kArmSrc (a : ISAR.KArm) : String :=
-  let head := if a.catchall then "*"
+  let head := if a.catchall then
+      panic! "residual |* arm has no koru surface in the subset — wire row"
     else if a.branch == "" then
       panic! "bare-dispatch arm has no koru surface in the subset"
     else sxName a.branch
@@ -239,7 +281,7 @@ def kArmSrc (a : ISAR.KArm) : String :=
     | some b => " " ++ sxName b
   let whenf := match a.cond with
     | none => ""
-    | some e => " when(" ++ kExprSrc e ++ ")"
+    | some e => " when " ++ kGuardSrc e
   let nodef := match a.node with
     | none => ""
     | some .terminal => ""
@@ -254,12 +296,12 @@ def kArmSrc (a : ISAR.KArm) : String :=
         " |> @" ++ sxName l ++ "(" ++ kNamedExprsSrc args ++ ")"
   match a.conts with
   | _ :: _ => panic! "nested continuation arms have no koru surface in the subset"
-  | [] => head ++ bindf ++ whenf ++ nodef
+  | [] => (if a.catchall then "|*" else "| ") ++ head ++ bindf ++ whenf ++ nodef
 
 def kFlowSrc (f : ISAR.KFlow) : String :=
   (match f.preLabel with | none => "" | some l => "#" ++ sxName l ++ " ")
     ++ sxName f.head.1 ++ "(" ++ kNamedExprsSrc f.head.2 ++ ")"
-    ++ String.intercalate "" (f.arms.map fun a => "\n| " ++ kArmSrc a)
+    ++ String.intercalate "" (f.arms.map fun a => "\n" ++ kArmSrc a)
 
 /-- Field declarations for a `tor` — value-typed from entry args.
 `arr`/`cell` args have no koru spelling in the subset; panic. -/
@@ -269,9 +311,18 @@ def kArgTy : ISAR.KVal → String
   | .arr _ => panic! "arr arg type has no koru spelling in the subset"
   | .cell _ => panic! "cell arg type has no koru spelling in the subset"
 
-def kDeclFields (args : List (String × ISAR.KVal)) : String :=
+def kDeclFieldsT (args : List (String × String)) : String :=
   "{" ++ String.intercalate ", "
-    (args.map fun (n, v) => sxName n ++ ": " ++ kArgTy v) ++ "}"
+    (args.map fun (n, t) => sxName n ++ ": " ++ t) ++ "}"
+
+def kDeclFields (args : List (String × ISAR.KVal)) : String :=
+  kDeclFieldsT (args.map fun (n, v) => (n, kArgTy v))
+
+/-- `| br ty` rows under a `tor` — the branch decls koruc requires
+(KORU021). `none` payload type spells `| br`. -/
+def kBranchesSrc (bs : List (String × Option String)) : String :=
+  String.intercalate "" (bs.map fun (b, ty) =>
+    "\n| " ++ b ++ match ty with | some t => " " ++ t | none => "")
 
 /-- Return annotation for literal bare impls — honest koru where the
 type is statically obvious; omitted otherwise (koru infers). -/
@@ -282,26 +333,46 @@ def kRetTy : ISAR.KExpr → String
   | .lit (.str _) => " -> string"
   | _ => ""
 
-/-- A `tor` declaration plus its impl, for one graph entry.  The
-entry's arg types come from the program's `args` field; other
-callables declare `{}` — wire signatures are untyped, the fields are
-descriptive surface. -/
-def kCallableSrc (name : String) (args : List (String × ISAR.KVal))
+/-- Resolve a callable's declared contract: an explicit decls entry
+wins; the entry callable derives params from `p.args`; everything
+else declares `{}`. -/
+def kDeclOf (decls : List (String × ISAR.KDecl)) (entry : String)
+    (eargs : List (String × ISAR.KVal)) (n : String) : ISAR.KDecl :=
+  match decls.find? (·.1 == n) with
+  | some (_, d) => d
+  | none => if n == entry
+      then { params := eargs.map fun (a, v) => (a, kArgTy v) } else {}
+
+/-- A `tor` declaration plus its impl, for one graph entry.  Params
+and branch rows come from the resolved `KDecl` — the contract real
+koru checks at PARSE006/KORU021.  `declared := false` emits no `tor`
+line — a legal implicit decl (impl/callable only). -/
+def kCallableSrc (name : String) (d : ISAR.KDecl)
     : ISAR.KCallable → String
   | .bare e =>
-      "tor " ++ sxName name ++ " " ++ kDeclFields args ++ kRetTy e
-        ++ "\n" ++ sxName name ++ " -> " ++ kExprSrc e
-  | .thunk => "tor " ++ sxName name ++ " " ++ kDeclFields args
+      (if d.declared then
+        "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params ++ kRetTy e
+          ++ kBranchesSrc d.branches ++ "\n" else "")
+        ++ sxName name ++ " -> " ++ kExprSrc e
+  | .thunk =>
+      if d.declared then
+        "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params
+          ++ kBranchesSrc d.branches
+      else ""
   | .subflow f =>
-      "tor " ++ sxName name ++ " " ++ kDeclFields args
-        ++ "\n" ++ sxName name ++ " = " ++ kFlowSrc f
+      (if d.declared then
+        "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params
+          ++ kBranchesSrc d.branches ++ "\n" else "")
+        ++ sxName name ++ " = " ++ kFlowSrc f
 
 /-- A whole corpus `.k` file: `tor` decls + impls in graph order.
-Entry callables get arg fields from `p.args`; others declare `{}`. -/
-def kProgSrc (name : String) (p : ISAR.KProg) : String :=
+Decl contracts come from the row's `decls`; the entry callable falls
+back to `p.args`; others default to `{}`. -/
+def kProgSrc (name : String) (p : ISAR.KProg)
+    (decls : List (String × ISAR.KDecl) := []) : String :=
   "// " ++ name ++ " — generated by tools/DumpKoruFixtures.lean, do not edit\n"
     ++ String.intercalate "\n\n" (p.graph.map fun (n, c) =>
-        kCallableSrc n (if n == p.entry then p.args else []) c)
+        kCallableSrc n (kDeclOf decls p.entry p.args n) c)
     ++ "\n"
 
 /-- `kemit.k`: the compiler program spelled in koru.  `emit` takes a
@@ -347,13 +418,16 @@ def kNamedValsJson : List (String × ISAR.KVal) → List String
   | (n, v) :: xs => ("\"" ++ jsonEsc n ++ "\":" ++ kValJson v) :: kNamedValsJson xs
 end
 
+def kResultJson : ISAR.KResult → String
+  | ⟨none, none⟩ => "{\"void\":true}"
+  | ⟨none, some v⟩ => "{\"bare\":" ++ kValJson v ++ "}"
+  | ⟨some b, none⟩ => "{\"tag\":\"" ++ jsonEsc b ++ "\"}"
+  | ⟨some b, some v⟩ =>
+      "{\"tag\":\"" ++ jsonEsc b ++ "\",\"payload\":" ++ kValJson v ++ "}"
+
 def kExpectJson : Option ISAR.KResult → String
   | none => "\"refuse\""
-  | some ⟨none, none⟩ => "{\"void\":true}"
-  | some ⟨none, some v⟩ => "{\"bare\":" ++ kValJson v ++ "}"
-  | some ⟨some b, none⟩ => "{\"tag\":\"" ++ jsonEsc b ++ "\"}"
-  | some ⟨some b, some v⟩ =>
-      "{\"tag\":\"" ++ jsonEsc b ++ "\",\"payload\":" ++ kValJson v ++ "}"
+  | some r => kResultJson r
 
 def kArgsJson (args : List (String × ISAR.KVal)) : String :=
   "{" ++ String.intercalate ","
@@ -364,13 +438,26 @@ def kEmitJson (p : ISAR.KProg) : String :=
   | some s => "\"" ++ jsonEsc s ++ "\""
   | none => "\"refuse\""
 
+/-- One oracle leaf — asserted-call row `(name,args) → result`. -/
+def kLeafJson (leaf : (String × List (String × ISAR.KVal)) × ISAR.KResult)
+    : String :=
+  "{\"name\":\"" ++ jsonEsc leaf.1.1
+    ++ "\",\"args\":" ++ kArgsJson leaf.1.2
+    ++ ",\"result\":" ++ kResultJson leaf.2 ++ "}"
+
+def kOracleJson (o : ISAR.KOracle) : String :=
+  "[" ++ String.intercalate "," (o.map kLeafJson) ++ "]"
+
 /-- The spec row for one corpus member. `expect` is the kernel's own
-decided result — the claim asserts what `runK` decides, never a hoped
-value (case-forged's row is hand-asserted instead). -/
-def caseRow (fuel : Nat) (p : ISAR.KProg) (extra : String := "") : String :=
+decided result under the row's oracle — the claim asserts what `runK`
+decides, never a hoped value (case-forged's row is hand-asserted
+instead). -/
+def caseRow (fuel : Nat) (p : ISAR.KProg) (o : ISAR.KOracle := [])
+    (extra : String := "") : String :=
   "{\"entry\":\"" ++ jsonEsc p.entry ++ "\",\"fuel\":" ++ toString fuel
     ++ ",\"args\":" ++ kArgsJson p.args
-    ++ ",\"expect\":" ++ kExpectJson (ISAR.evalKProg p [] fuel)
+    ++ (if o.isEmpty then "" else ",\"oracle\":" ++ kOracleJson o)
+    ++ ",\"expect\":" ++ kExpectJson (ISAR.evalKProg p o fuel)
     ++ ",\"emit\":" ++ kEmitJson p ++ extra ++ "}"
 
 def main : IO Unit := do
@@ -380,8 +467,23 @@ def main : IO Unit := do
   for (p, i) in ISAR.koruEmitCorpus.zipIdx do
     let key := "case-" ++ toString i
     IO.FS.writeFile (dir ++ "/" ++ key ++ ".k") (kProgSrc key p)
-    rows := rows ++ ["\"" ++ key ++ "\":" ++ caseRow fuel p
+    rows := rows ++ ["\"" ++ key ++ "\":" ++ caseRow fuel p []
       (",\"file\":\"" ++ key ++ ".k\"")]
+  -- the flow-grammar corpus: every arm/dispatch shape the subset
+  -- spells, each row carrying its asserted oracle leaves
+  for (key, r) in ISAR.koruFlowCorpus do
+    if r.wire then
+      -- no koru surface spells this program — the row carries the
+      -- generated claim itself; check.py feeds it straight to krun
+      rows := rows ++ ["\"" ++ key ++ "\":" ++ caseRow fuel r.prog r.oracle
+        (",\"claim\":\"" ++ jsonEsc
+          (claimSxO r.prog fuel (ISAR.evalKProg r.prog r.oracle fuel)
+            r.oracle) ++ "\"")]
+    else
+      IO.FS.writeFile (dir ++ "/" ++ key ++ ".k")
+        (kProgSrc key r.prog r.decls)
+      rows := rows ++ ["\"" ++ key ++ "\":" ++ caseRow fuel r.prog r.oracle
+        (",\"file\":\"" ++ key ++ ".k\"")]
   IO.FS.writeFile (dir ++ "/kemit.k") kemitFile
   -- kemit's own row: entry emit, no args → `src` unbound → refuse;
   -- emit_prog marks it as the emitter, not an emission target
@@ -398,3 +500,8 @@ def main : IO Unit := do
     ++ ",\"file\":\"case-forged.k\",\"forged\":true}"]
   IO.FS.writeFile "host2/specs/cases.json"
     ("{\"cases\":{" ++ String.intercalate "," rows ++ "}}\n")
+  -- stale generated .k files from earlier corpora must not linger:
+  -- wire rows deliberately write no surface file
+  for key in ["flow-catchall-bare", "flow-catchall-tag"] do
+    let stale := dir ++ "/" ++ key ++ ".k"
+    if ← System.FilePath.pathExists stale then IO.FS.removeFile stale

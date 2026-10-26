@@ -9,7 +9,7 @@
       "by": "host2/src/korufe.c :: parse",
       "ref": "koruc --ast-json / --ast-canon (w:/src/koru, authority for full language)",
       "subset": true,
-      "notes": "declared subset only: tor decls, -> impls, = flows, | arms (=>/->/|>/@ steps, when guards, catchall), literal/cell/arr/cond/unary/binary/field/index/builtin exprs. proc bodies, ~-annotations, ! as bare-dispatch, impl-of-toplevel flows refuse."
+      "notes": "declared subset only: tor decls (params, >=2-branch unions or bare returns), -> impls, decl-less impls (implicit events), = flows, | arms (=>/->/|>/@ steps, bare `when <cond>` guards), literal/cell/arr/cond/unary/binary/field/index/@builtin exprs. Refuses with koruc parity: residual |* arms (koru binds residual records through metatypes — no wire concept; | * spaced is the retired deref), redundant x: x puns, one-variant unions, when( call-shape, name(...) calls inside expressions (KORU104 — builtins spell @name). Also: proc bodies, ~-annotations, ! as, top-level flows, {{}} interp refuse."
     },
     {
       "id": "koru.ast-to-flow",
@@ -18,7 +18,7 @@
       "by": "host2/src/korufe.c :: lower",
       "ref": "FlowCheck.lean (w:/src/koru/verify/semantics) wire decoders",
       "subset": true,
-      "notes": "immediate_impl -> (bare E), flow impl_of -> (subflow ...), event_decl without impl -> thunk, => b -> (ctor b (lit (cell))) carrying koru's empty-cell payload. Entry args/oracle/expect ride the case row, not the file."
+      "notes": "immediate_impl -> (bare E), flow impl_of -> (subflow ...), event_decl without impl -> thunk, => b -> (ctor b (lit (cell))) carrying koru's empty-cell payload. Entry args/oracle/expect ride the case row, not the file. Declared-param args resolve by koru's pun/positional rules; declared tors constrain args (PARSE006 parity) and arm branches (KORU021 parity). Rows carrying 'claim' are wire rows — programs (residual-arm catchall dispatch) with no surface spelling; the claim is generated data, not parsed source."
     },
     {
       "id": "flow-to-result",

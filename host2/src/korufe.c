@@ -60,6 +60,7 @@ typedef struct {
     int kind;      /* 0 ident 1 int 2 float 3 str 4 punct 5 eof 6 nl */
     char *text;
     int line;
+    long pos;      /* byte offset — glued-punct adjacency (|*) */
 } Tk;
 
 typedef struct { Tk *t; int n, i; } Tks;
@@ -93,6 +94,7 @@ static Tks *lex_k(const char *src, const char *file, char **err) {
                payloads and item boundaries are line-scoped */
             GROW_TS
             ts->t[n].kind = 6; ts->t[n].text = "nl"; ts->t[n].line = line;
+            ts->t[n].pos = p - src;
             n++; line++; p++;
             continue;
         }
@@ -108,7 +110,7 @@ static Tks *lex_k(const char *src, const char *file, char **err) {
                    (*p >= '0' && *p <= '9') || *p == '_') p++;
             ts->t[n].kind = 0;
             ts->t[n].text = xstrndup(b, (size_t)(p - b));
-            ts->t[n].line = line; n++;
+            ts->t[n].line = line; ts->t[n].pos = b - src; n++;
             continue;
         }
         if (c >= '0' && c <= '9') {
@@ -121,7 +123,7 @@ static Tks *lex_k(const char *src, const char *file, char **err) {
             }
             ts->t[n].kind = isf ? 2 : 1;
             ts->t[n].text = xstrndup(b, (size_t)(p - b));
-            ts->t[n].line = line; n++;
+            ts->t[n].line = line; ts->t[n].pos = b - src; n++;
             continue;
         }
         if (c == '"') {
@@ -138,18 +140,18 @@ static Tks *lex_k(const char *src, const char *file, char **err) {
             p++;
             ts->t[n].kind = 3;
             ts->t[n].text = xstrndup(b, (size_t)(p - b));
-            ts->t[n].line = line; n++;
+            ts->t[n].line = line; ts->t[n].pos = b - src; n++;
             continue;
         }
         if (punct1(c)) {
             if (p[1] && punct2((char[]){c, p[1], 0})) {
                 ts->t[n].kind = 4;
                 ts->t[n].text = xstrndup(p, 2);
-                ts->t[n].line = line; n++; p += 2;
+                ts->t[n].line = line; ts->t[n].pos = p - src; n++; p += 2;
             } else {
                 ts->t[n].kind = 4;
                 ts->t[n].text = xstrndup(p, 1);
-                ts->t[n].line = line; n++; p++;
+                ts->t[n].line = line; ts->t[n].pos = p - src; n++; p++;
             }
             continue;
         }
@@ -166,7 +168,8 @@ static Tks *lex_k(const char *src, const char *file, char **err) {
         { Tk *nt = xmalloc(cap * sizeof(Tk));
           memcpy(nt, ts->t, n * sizeof(Tk)); ts->t = nt; }
     }
-    ts->t[n].kind = 5; ts->t[n].text = "eof"; ts->t[n].line = line; n++;
+    ts->t[n].kind = 5; ts->t[n].text = "eof"; ts->t[n].line = line;
+    ts->t[n].pos = p - src; n++;
     ts->n = n; ts->i = 0;
     return ts;
 }
@@ -199,6 +202,7 @@ static int fail_at(Tks *s, char **err, const char *msg) {
    exactly what the JSON reader reads back. */
 
 typedef struct KExpr KExpr;
+typedef struct { char *n; KExpr *e; } NArg;
 struct KExpr {
     int tag;              /* 0 lit 1 var 2 bin 3 un 4 cond 5 field 6 index
                              7 builtin 8 call(invocation) */
@@ -207,7 +211,7 @@ struct KExpr {
     char *s;              /* str / var / field name / call-or-builtin name */
     int op;               /* bin/un op codes (wire numbering) */
     KExpr *a, *bb, *c;
-    struct { char *n; KExpr *e; } *args; int nargs;   /* call args */
+    NArg *args; int nargs;                          /* call args */
     KExpr **xs; int nxs;                              /* arr literal */
     struct { char *n; KExpr *e; } *fs; int nfs;       /* cell literal */
 };
@@ -218,7 +222,7 @@ struct KExpr {
 typedef struct {
     char *qual;            /* NULL = local */
     char *name;
-    struct { char *n; KExpr *e; } *args; int nargs;
+    NArg *args; int nargs;
 } Inv;
 
 typedef struct ArmD ArmD;
@@ -323,7 +327,33 @@ static int parse_rat(const char *s, int64_t *on, int64_t *od) {
 }
 
 static KExpr *parse_expr(Tks *s, char **err);
+static int is_ident_tk(Tks *s);
 static KExpr *parse_postfix(Tks *s, char **err);
+
+/* koru puns: `f(x)` binds param `x` from a bare `x`; the pun name
+   is the expr's trailing ident (var or field tail).  Defined with
+   the lowering helpers; used at parse for PARSE005 parity. */
+static char *pun_name(KExpr *e);
+
+/* `name: expr` where expr puns to `name` is refused upstream
+   (PARSE005 redundant explicit label); a repeated label in one call
+   is likewise refused. */
+static int check_arg_label(Tks *s, char *an, KExpr *ae,
+                           NArg *prev, int nprev, char **err) {
+    int k;
+    if (!an) return 1;
+    if (pun_name(ae) && !strcmp(pun_name(ae), an)) {
+        fail_at(s, err, "redundant explicit label — the value "
+                        "already puns to this param");
+        return 0;
+    }
+    for (k = 0; k < nprev; k++)
+        if (prev[k].n && !strcmp(prev[k].n, an)) {
+            fail_at(s, err, "duplicate arg label in call");
+            return 0;
+        }
+    return 1;
+}
 
 static KExpr *parse_call_args(Tks *s, char **err, KExpr *e /* the call node */) {
     /* ( name: expr, expr, name: expr ) — named or positional */
@@ -347,6 +377,8 @@ static KExpr *parse_call_args(Tks *s, char **err, KExpr *e /* the call node */) 
               memcpy(na, e->args, e->nargs * sizeof(*e->args));
               e->args = na; }
         }
+        if (!check_arg_label(s, an, ae, e->args, e->nargs, err))
+            return 0;
         e->args[e->nargs].n = an;
         e->args[e->nargs].e = ae;
         e->nargs++;
@@ -427,6 +459,18 @@ static KExpr *parse_primary(Tks *s, char **err) {
         }
         if (!eat(s, "}")) { fail_at(s, err, "expected '}'"); return 0; }
         return e;
+    }
+    if (at(s, "@")) {
+        /* `@name(args)` — koru's builtin-call spelling.  Builtins are
+           admitted inside expressions where a bare `name(...)` is a
+           tor call and refuses upstream (KORU104). */
+        KExpr *e = ke_new(0);
+        e->tag = 7;
+        s->i++;
+        if (!is_ident_tk(s)) { fail_at(s, err, "builtin name after '@'"); return 0; }
+        e->s = xstrdup(next_tk(s)->text);
+        if (!eat(s, "(")) { fail_at(s, err, "'(' after @builtin"); return 0; }
+        return parse_call_args(s, err, e);
     }
     if (at(s, "if")) {
         KExpr *e = ke_new(4);
@@ -677,6 +721,9 @@ static Inv *parse_inv(Tks *s, char **err, int allow_label) {
                       memcpy(na, v->args, v->nargs * sizeof(*v->args));
                       v->args = na; }
                 }
+                if (!check_arg_label(s, an, ae,
+                                     v->args, v->nargs, err))
+                    return 0;
                 v->args[v->nargs].n = an;
                 v->args[v->nargs].e = ae;
                 v->nargs++;
@@ -699,27 +746,48 @@ static Inv *parse_inv(Tks *s, char **err, int allow_label) {
 }
 
 static ArmD *parse_arm(Tks *s, char **err) {
-    /* consumed the leading '|' already */
+    /* consumed the leading '|' already — s->t[s->i-1] is it */
+    long pipe_pos = s->i > 0 ? s->t[s->i - 1].pos : -1;
     ArmD *a = xmalloc(sizeof(ArmD));
     memset(a, 0, sizeof *a);
     a->kind = -1;
     a->branch = "";
     snl(s);
-    if (eat(s, "*")) {
-        a->catchall = 1; a->branch = "*";
+    if (at(s, "*")) {
+        /* koru's residual arm is `|* Meta e |>` — it binds the
+           residual RECORD through a metatype, a shape the wire
+           catchall does not carry.  Spaced `| *` is the retired
+           deref glyph upstream.  Both refuse here. */
+        if (peek(s)->pos != pipe_pos + 1)
+            fail_at(s, err, "'| *' is the retired deref spelling — "
+                            "the residual arm is glued '|*'");
+        else
+            fail_at(s, err, "residual '|*' has no subset spelling — "
+                            "koru binds it through a metatype "
+                            "(`|* Meta e |>`)");
+        return 0;
     } else if (is_ident_tk(s)) {
         a->branch = xstrdup(next_tk(s)->text);
     } else {
         fail_at(s, err, "arm branch or catchall");
         return 0;
     }
-    if (is_ident_tk(s))                       /* bind */
+    if (is_ident_tk(s) && !at(s, "when"))     /* bind — `when` is
+                                               the guard keyword */
         a->bind = xstrdup(next_tk(s)->text);
-    if (eat(s, "when")) {                     /* guard */
-        if (!eat(s, "(")) { fail_at(s, err, "'(' after when"); return 0; }
+    if (at(s, "when")) {                      /* guard */
+        /* bare `when <cond>` — koru reads the condition to the next
+           `->`/`|>`/`=>` delimiter.  Glued `when(` is call-shaped
+           upstream (an unguarded arm → SHAPE002), so refuse it. */
+        long wpos = peek(s)->pos;
+        s->i++;
+        if (at(s, "(") && peek(s)->pos == wpos + 4) {
+            fail_at(s, err, "'when(' reads as a call upstream — "
+                            "spell 'when <cond>'");
+            return 0;
+        }
         a->cond = parse_expr(s, err);
         if (!a->cond) return 0;
-        if (!eat(s, ")")) { fail_at(s, err, "')' after when"); return 0; }
     }
     /* step */
     if (at(s, "=>")) {
@@ -881,6 +949,25 @@ static Item *parse_program(Tks *s, char **err) {
                           it->branches = nb; }
                     }
                     it->branches[it->nbranches++] = xstrdup(next_tk(s)->text);
+                    {   /* identity payload `| go i64` — same-line type */
+                        int bl = s->t[s->i - 1].line;
+                        if (s->i < s->n && s->t[s->i].kind == 0 &&
+                            s->t[s->i].line == bl) {
+                            s->i++;
+                            while (at(s, ".") || at(s, "/")) {
+                                s->i++;
+                                if (is_ident_tk(s)) s->i++;
+                            }
+                            if (at(s, "[")) {           /* type params */
+                                int depth = 0;
+                                do {
+                                    if (at(s, "[")) depth++;
+                                    if (at(s, "]")) depth--;
+                                    s->i++;
+                                } while (depth > 0 && !at_kind(s, 5));
+                            }
+                        }
+                    }
                     if (at(s, "(") || at(s, "{")) {   /* payload decl — skip */
                         char open = peek(s)->text[0];
                         char close = open == '(' ? ')' : '}';
@@ -891,6 +978,13 @@ static Item *parse_program(Tks *s, char **err) {
                             s->i++;
                         } while (depth > 0 && !at_kind(s, 5));
                     }
+                }
+                /* koruc refuses a one-variant tag union outright —
+                   bare return or >=2 branches are the legal shapes */
+                if (it->nbranches == 1) {
+                    fail_at(s, err, "one-variant union — spell a bare "
+                                    "return or add a second branch");
+                    return 0;
                 }
             }
             if (eat(s, "->")) {              /* return type */
@@ -1050,6 +1144,9 @@ static void expr_src_b(KExpr *e, Buf *b) {
         expr_src_b(e->bb, b); bput(b, " else "); expr_src_b(e->c, b); break;
     case 5: expr_src_b(e->a, b); bputf(b, ".%s", e->s); break;
     case 6: expr_src_b(e->a, b); bput(b, "["); expr_src_b(e->bb, b); bput(b, "]"); break;
+    case 7:
+        bput(b, "@");   /* builtin_call spells @name(...) */
+        /* fallthrough */
     case 8:
         bput(b, e->s); bput(b, "(");
         for (i = 0; i < e->nargs; i++) {
@@ -1417,11 +1514,10 @@ static void sx_expr(KExpr *e, Buf *b, char **err) {
         bputf(b, " %s)", e->s); break;
     case 6: bput(b, "(index "); sx_expr(e->a, b, err); bput(b, " ");
         sx_expr(e->bb, b, err); bput(b, ")"); break;
-    case 8:
+    case 7:
         if (!is_builtin(e->s)) {
-            *err = xasprintf("invocation '", e->s);
-            *err = xasprintf(*err, "' inside expression — callables "
-                           "invoke through flow nodes, not exprs");
+            *err = xasprintf("unknown builtin '@", e->s);
+            *err = xasprintf(*err, "'");
             return;
         }
         bputf(b, "(builtin %s", e->s);
@@ -1434,6 +1530,13 @@ static void sx_expr(KExpr *e, Buf *b, char **err) {
             if (*err) return;
         }
         bput(b, ")"); break;
+    case 8:
+        *err = xasprintf("call '", e->s);
+        *err = xasprintf(*err, "(...)' inside expression — calls are "
+                       "not expressions (KORU104); builtins spell "
+                       "@name(...), callables invoke through flow "
+                       "nodes");
+        return;
     }
 }
 
@@ -1595,6 +1698,160 @@ static int arm_from_ast(Jv *c, ArmD *a, char **err) {
     return 1;
 }
 
+/* ---- declared-contract checks (koruc PARSE006 / KORU021 parity)
+   The `tor` decl is the contract — but ONLY when one exists: impls
+   and invocations without tors are legal koru (implicit events,
+   unchecked).  A declared tor constrains invoke arg names ⊆ params
+   (PARSE006) and arm branch names ⊆ declared branches — including
+   "available: (none)" when the decl is bare (KORU021).  `=>` targets
+   ⊆ the enclosing impl's branches; `@label` must name the flow's own
+   `#label`.  Named arms on a branchless/undeclared producer keep the
+   walker's decorative-names convention — admitted, arbitrated by the
+   evaluator.  ----*/
+
+typedef struct {
+    char *n; int has_impl; int declared;
+    char **params; int nparams;
+    char **branches; int nbranches;
+} DeclSeen;
+
+static DeclSeen *decl_find(DeclSeen *ds, int n, const char *name) {
+    int i;
+    for (i = 0; i < n; i++) if (!strcmp(ds[i].n, name)) return &ds[i];
+    return 0;
+}
+static int name_in(char **xs, int n, const char *s) {
+    int i;
+    for (i = 0; i < n; i++) if (xs[i] && !strcmp(xs[i], s)) return 1;
+    return 0;
+}
+static char *errcat2(char *a, const char *b) { return xasprintf(a, b); }
+
+/* koru arg naming: an unlabelled `x` puns to the param of the same
+   name — the pun name is the expr's trailing ident (var or field
+   tail: `f(p.x)` puns to `x`).  A non-pun positional binds the
+   callee's param at its index (needs a decl); unnameable positional
+   args refuse — the wire carries named args only. */
+static char *pun_name(KExpr *e) {
+    if (e->tag == 1 || e->tag == 5) return e->s;
+    return 0;
+}
+
+static int resolve_args(DeclSeen *d, Inv *v, char **err) {
+    int i;
+    for (i = 0; i < v->nargs; i++) {
+        if (v->args[i].n) continue;
+        char *pun = pun_name(v->args[i].e);
+        if (pun && (!d || !d->declared ||
+                    name_in(d->params, d->nparams, pun))) {
+            v->args[i].n = pun;
+        } else if (d && d->declared && i < d->nparams) {
+            v->args[i].n = d->params[i];
+        } else {
+            *err = errcat2(xstrdup("cannot name positional arg on '"),
+                           v->name);
+            *err = errcat2(*err, "' — decl-less or out of range "
+                                 "(spell `name: expr`)");
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int check_inv_args(DeclSeen *ds, int n, Inv *v, char **err) {
+    DeclSeen *d;
+    int i;
+    if (!v->name) { *err = xstrdup("invoke without target"); return 0; }
+    if (v->qual && v->qual[0] == '@') return 1;      /* jumps: flow check */
+    d = decl_find(ds, n, v->name);
+    if (!resolve_args(d, v, err)) return 0;
+    if (!d || !d->declared) return 1;   /* implicit event — unchecked */
+    for (i = 0; i < v->nargs; i++) {
+        const char *an = v->args[i].n;
+        if (!an) continue;
+        if (!name_in(d->params, d->nparams, an)) {
+            *err = errcat2(xstrdup("unknown parameter '"), an);
+            *err = errcat2(*err, "' — '");
+            *err = errcat2(*err, v->name);
+            *err = errcat2(*err, "' has no parameter named '");
+            *err = errcat2(*err, an);
+            *err = errcat2(*err, "'");
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int check_arms(DeclSeen *ds, int n, ArmD **arms, int narms,
+                      DeclSeen *producer, DeclSeen *own,
+                      const char *pre, DeclSeen *head, char **err) {
+    int i, j;
+    for (i = 0; i < narms; i++) {
+        ArmD *a = arms[i];
+        if (producer && producer->declared &&
+            !a->catchall && a->branch[0] &&
+            !name_in(producer->branches, producer->nbranches, a->branch)) {
+            *err = errcat2(xstrdup("tor '"), producer->n);
+            *err = errcat2(*err, "' has no branch '");
+            *err = errcat2(*err, a->branch);
+            *err = errcat2(*err, "' (available: ");
+            *err = errcat2(*err, producer->nbranches ? "" : "none");
+            for (j = 0; j < producer->nbranches; j++) {
+                if (j) *err = errcat2(*err, ", ");
+                *err = errcat2(*err, producer->branches[j]);
+            }
+            *err = errcat2(*err, ")");
+            return 0;
+        }
+        if (a->nconts && a->kind != 3) {
+            *err = xstrdup("continuations after ->/=>/terminal arms "
+                           "have no result to dispatch — invoke only");
+            return 0;
+        }
+        if (a->kind == 2) {               /* => ctor on own decl */
+            if (!own || !own->declared ||
+                !name_in(own->branches, own->nbranches, a->target)) {
+                *err = errcat2(xstrdup("=> '"), a->target);
+                *err = errcat2(*err, "' but '");
+                *err = errcat2(*err, own ? own->n : "?");
+                *err = errcat2(*err, "' declares no such branch");
+                return 0;
+            }
+        } else if (a->kind == 3) {        /* |> invoke */
+            if (!check_inv_args(ds, n, a->inv, err)) return 0;
+            if (a->nconts &&
+                !check_arms(ds, n, a->conts, a->nconts,
+                            decl_find(ds, n, a->target), own, pre,
+                            head, err))
+                return 0;
+        } else if (a->kind == 4) {        /* |> @label jump */
+            if (!pre || strcmp(a->target, pre)) {
+                *err = errcat2(xstrdup("jump '@"), a->target);
+                *err = errcat2(*err, "' does not name this flow's "
+                                     "#label");
+                return 0;
+            }
+            if (!resolve_args(head, a->inv, err)) return 0;
+            if (head && head->declared) {
+                for (j = 0; j < a->inv->nargs; j++) {
+                    const char *an = a->inv->args[j].n;
+                    if (an &&
+                        !name_in(head->params, head->nparams, an)) {
+                        *err = errcat2(xstrdup("jump arg '"), an);
+                        *err = errcat2(*err, "' — head '");
+                        *err = errcat2(*err, head->n);
+                        *err = errcat2(*err, "' has no parameter '");
+                        *err = errcat2(*err, an);
+                        *err = errcat2(*err, "'");
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    return 1;
+}
+
 /* emit the claim for a program ast + case row */
 static int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
     Jv *items = jarr(ast, "items");
@@ -1613,21 +1870,49 @@ static int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
     bput(&graph, "(graph");
     /* pass 1: impls + tor-decls (decl-only → thunk) */
     {
-        /* collect tor decls and impls by name */
-        typedef struct { char *n; int has_impl; } DeclSeen;
+        /* The `tor`-line contract table — collected in a first pass
+           so impls may precede the decls they invoke. */
         DeclSeen *seen = xmalloc(items->nxs * sizeof(DeclSeen));
         int nseen = 0;
+        memset(seen, 0, items->nxs * sizeof(DeclSeen));
         for (i = 0; i < items->nxs; i++) {
             Jv *it = items->xs[i];
-            if (jget(it, "event_decl")) {
-                Jv *d = jget(it, "event_decl");
-                char *nm = jseg0(jget(d, "path"));
-                int j, dup = 0;
-                if (!nm) { *err = xstrdup("event_decl: no name"); return 0; }
-                for (j = 0; j < nseen; j++)
-                    if (!strcmp(seen[j].n, nm)) dup = 1;
-                if (!dup) { seen[nseen].n = nm; seen[nseen].has_impl = 0; nseen++; }
-            } else if (jget(it, "immediate_impl")) {
+            Jv *d = jget(it, "event_decl");
+            Jv *flds, *brs;
+            char *nm;
+            int j, k;
+            if (!d) continue;
+            nm = jseg0(jget(d, "path"));
+            if (!nm) { *err = xstrdup("event_decl: no name"); return 0; }
+            for (j = 0; j < nseen; j++)
+                if (!strcmp(seen[j].n, nm)) {
+                    *err = xasprintf("duplicate tor '", nm);
+                    *err = xasprintf(*err, "'");
+                    return 0;
+                }
+            seen[nseen].n = nm;
+            flds = jarr(jget(d, "input"), "fields");
+            if (flds) {
+                seen[nseen].nparams = flds->nxs;
+                seen[nseen].params = flds->nxs
+                    ? xmalloc(flds->nxs * sizeof(char *)) : 0;
+                for (k = 0; k < flds->nxs; k++)
+                    seen[nseen].params[k] = jstr(flds->xs[k], "name");
+            }
+            brs = jarr(d, "branches");
+            if (brs) {
+                seen[nseen].nbranches = brs->nxs;
+                seen[nseen].branches = brs->nxs
+                    ? xmalloc(brs->nxs * sizeof(char *)) : 0;
+                for (k = 0; k < brs->nxs; k++)
+                    seen[nseen].branches[k] = jstr(brs->xs[k], "name");
+            }
+            seen[nseen].declared = 1;
+            nseen++;
+        }
+        for (i = 0; i < items->nxs; i++) {
+            Jv *it = items->xs[i];
+            if (jget(it, "immediate_impl")) {
                 Jv *im = jget(it, "immediate_impl");
                 char *nm = jseg0(jget(im, "event_path"));
                 Jv *val = jget(im, "value");
@@ -1635,6 +1920,7 @@ static int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
                 char *bn = jstr(val, "branch_name");
                 KExpr *e;
                 int j, dup = 0;
+                if (!nm) { *err = xstrdup("immediate_impl: no name"); return 0; }
                 for (j = 0; j < nseen; j++)
                     if (!strcmp(seen[j].n, nm)) { dup = 1; seen[j].has_impl = 1; }
                 if (!dup) { seen[nseen].n = nm; seen[nseen].has_impl = 1; nseen++; }
@@ -1674,6 +1960,20 @@ static int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
                     if (!arm_from_ast(conts->xs[j], fd.arms[j], err)) return 0;
                 }
                 {
+                    /* declared-contract checks — koruc's static
+                       walls, checked at the lower boundary where the
+                       decl table is complete */
+                    DeclSeen *ownd = decl_find(seen, nseen,
+                                               impl->xs[0]->s);
+                    DeclSeen *headd;
+                    if (!check_inv_args(seen, nseen, fd.head, err))
+                        return 0;
+                    headd = decl_find(seen, nseen, fd.head->name);
+                    if (!check_arms(seen, nseen, fd.arms, fd.narms,
+                                    headd, ownd, fd.pre, headd, err))
+                        return 0;
+                }
+                {
                     char *nm = impl->xs[0]->s;
                     int dup = 0;
                     for (j = 0; j < nseen; j++)
@@ -1706,6 +2006,98 @@ static int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
         for (i = 0; i < nseen; i++)
             if (!seen[i].has_impl)
                 bputf(&graph, " (def %s thunk)", seen[i].n);
+
+        /* entry args ⊆ the entry tor's declared params — but only
+           when the decl exists: an absent entry is the wire's
+           refusal row (claim lowers, eval refuses). */
+        {
+            DeclSeen *ed = decl_find(seen, nseen, entry);
+            Jv *ea = jget(cspec, "args");
+            if (ed && ed->declared && ea && ea->k == 5) {
+                int k;
+                for (k = 0; k < ea->nfs; k++) {
+                    if (!name_in(ed->params, ed->nparams, ea->fs[k].k)) {
+                        *err = errcat2(xstrdup("entry arg '"),
+                                       ea->fs[k].k);
+                        *err = errcat2(*err, "' — '");
+                        *err = errcat2(*err, entry);
+                        *err = errcat2(*err, "' has no parameter named '");
+                        *err = errcat2(*err, ea->fs[k].k);
+                        *err = errcat2(*err, "'");
+                        return 0;
+                    }
+                }
+            }
+        }
+
+        /* oracle leaves: name declared, args ⊆ params, tag ∈
+           branches — the surface contract applies to leaf data */
+        {
+            Jv *ol = jarr(cspec, "oracle");
+            int k;
+            if (ol) {
+                for (k = 0; k < ol->nxs; k++) {
+                    Jv *leaf = ol->xs[k];
+                    char *ln = jstr(leaf, "name");
+                    Jv *largs = jget(leaf, "args");
+                    Jv *lres = jget(leaf, "result");
+                    DeclSeen *ld = decl_find(seen, nseen,
+                                             ln ? ln : "");
+                    char *lt;
+                    int m;
+                    if (!ld) {
+                        *err = errcat2(xstrdup("oracle leaf '"),
+                                       ln ? ln : "?");
+                        *err = errcat2(*err, "' names no callable");
+                        return 0;
+                    }
+                    if (ld->has_impl) {
+                        *err = errcat2(xstrdup("oracle leaf '"), ln);
+                        *err = errcat2(*err, "' names an impl — leaves "
+                                       "cover thunks only");
+                        return 0;
+                    }
+                    if (largs && largs->k == 5 && ld->declared) {
+                        for (m = 0; m < largs->nfs; m++) {
+                            if (!name_in(ld->params, ld->nparams,
+                                         largs->fs[m].k)) {
+                                *err = errcat2(
+                                    xstrdup("oracle leaf arg '"),
+                                    largs->fs[m].k);
+                                *err = errcat2(*err, "' — '");
+                                *err = errcat2(*err, ln);
+                                *err = errcat2(*err,
+                                    "' has no parameter '");
+                                *err = errcat2(*err, largs->fs[m].k);
+                                *err = errcat2(*err, "'");
+                                return 0;
+                            }
+                        }
+                    }
+                    lt = lres ? jstr(lres, "tag") : 0;
+                    if (ld->declared) {
+                        if (lt) {
+                            if (!name_in(ld->branches, ld->nbranches,
+                                         lt)) {
+                                *err = errcat2(xstrdup(
+                                               "oracle leaf tag '"), lt);
+                                *err = errcat2(*err, "' but '");
+                                *err = errcat2(*err, ln);
+                                *err = errcat2(*err,
+                                           "' declares no such branch");
+                                return 0;
+                            }
+                        } else if (ld->nbranches > 0) {
+                            *err = errcat2(xstrdup("oracle leaf for '"),
+                                           ln);
+                            *err = errcat2(*err, "' is bare/void but the "
+                                           "tor declares branches");
+                            return 0;
+                        }
+                    }
+                }
+            }
+        }
     }
     bput(&graph, ")");
 
