@@ -1,30 +1,30 @@
 {
   "spec": "koru/quotient-maps",
-  "note": "Declared quotient maps for the host2 koru pipeline. Each row is one repr->repr map; the 'by' mechanism interprets the row, never hardcodes it. 'ref' names the authority the row is checked against. Missing map = refuse, never a default.",
+  "note": "Declared quotient maps for the host2 koru pipeline. Each row is one repr->repr map; the 'by' mechanism interprets the row, never hardcodes it. 'ref' names the authority the row is checked against. Missing map = refuse, never a default. Each mechanism path is a translation unit under host2/src/{korufe,krun}/ \u2014 the implementation split by concern \u2014 with a compilable Lean companion (Host2 lib) beside each .c pinning the twin semantics/data.",
   "maps": [
     {
       "id": "koru.surface-to-ast",
       "in": ".k source (koru surface syntax)",
       "out": "program.ast.json (canonical post-parse AST)",
-      "by": "host2/src/korufe.c :: parse",
+      "by": "host2/src/korufe/{lex,parse,astio}.c :: parse",
       "ref": "koruc --ast-json / --ast-canon (w:/src/koru, authority for full language)",
       "subset": true,
-      "notes": "declared subset only: tor decls (params, >=2-branch unions or bare returns), -> impls, decl-less impls (implicit events), = flows, | arms (=>/->/|>/@ steps, bare `when <cond>` guards), literal/cell/arr/cond/unary/binary/field/index/@builtin exprs. Refuses with koruc parity: residual |* arms (koru binds residual records through metatypes — no wire concept; | * spaced is the retired deref), redundant x: x puns, one-variant unions, when( call-shape, name(...) calls inside expressions (KORU104 — builtins spell @name). Also: proc bodies, ~-annotations, ! as, top-level flows, {{}} interp refuse."
+      "notes": "declared subset only: tor decls (params, >=2-branch unions or bare returns), -> impls, decl-less impls (implicit events), = flows, | arms (=>/->/|>/@ steps, bare `when <cond>` guards), literal/cell/arr/cond/unary/binary/field/index/@builtin exprs. Refuses with koruc parity: residual |* arms (koru binds residual records through metatypes \u00e2\u20ac\u201d no wire concept; | * spaced is the retired deref), redundant x: x puns, one-variant unions, when( call-shape, name(...) calls inside expressions (KORU104 \u00e2\u20ac\u201d builtins spell @name). Also: proc bodies, ~-annotations, ! as, top-level flows, {{}} interp refuse."
     },
     {
       "id": "koru.ast-to-flow",
       "in": "program.ast.json + cases.json row",
       "out": "[flow-eval] claim (s-expr wire)",
-      "by": "host2/src/korufe.c :: lower",
+      "by": "host2/src/korufe/lower.c :: lower",
       "ref": "FlowCheck.lean (w:/src/koru/verify/semantics) wire decoders",
       "subset": true,
-      "notes": "immediate_impl -> (bare E), flow impl_of -> (subflow ...), event_decl without impl -> thunk, => b -> (ctor b (lit (cell))) carrying koru's empty-cell payload. Entry args/oracle/expect ride the case row, not the file. Declared-param args resolve by koru's pun/positional rules; declared tors constrain args (PARSE006 parity) and arm branches (KORU021 parity). Rows carrying 'claim' are wire rows — programs (residual-arm catchall dispatch) with no surface spelling; the claim is generated data, not parsed source."
+      "notes": "immediate_impl -> (bare E), flow impl_of -> (subflow ...), event_decl without impl -> thunk, => b -> (ctor b (lit (cell))) carrying koru's empty-cell payload. Entry args/oracle/expect ride the case row, not the file. Declared-param args resolve by koru's pun/positional rules; declared tors constrain args (PARSE006 parity) and arm branches (KORU021 parity). Rows carrying 'claim' are wire rows \u00e2\u20ac\u201d programs (residual-arm catchall dispatch) with no surface spelling; the claim is generated data, not parsed source."
     },
     {
       "id": "flow-to-result",
       "in": "[flow-eval] claim",
       "out": "KResult | refuse (decided, compared)",
-      "by": "host2/src/krun.c :: eval",
+      "by": "host2/src/krun/eval.c :: eval",
       "ref": "runK in src/ISAR/FlowDialect.lean (port of w:/src/koru FlowKernel.lean)",
       "notes": "fuel-stepped call machine; oracle leaves are the trust boundary; forged expectations drift rather than pass. Divergences: exact-rational floats, int64 checked arithmetic (overflow refuses where Int decides)."
     },
@@ -32,7 +32,7 @@
       "id": "kprog-to-quot",
       "in": "KProg (decoded claim graph)",
       "out": "KVal quotation (qnode tag/kids cells)",
-      "by": "host2/src/krun.c :: quote_prog",
+      "by": "host2/src/krun/quote.c :: quote_prog",
       "ref": "quoteProg in src/ISAR/KoruEmit.lean (tags 1-31)",
       "notes": "self-reference substrate: src arrives at emit as a navigable cell value."
     },

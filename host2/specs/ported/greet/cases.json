@@ -1,0 +1,11 @@
+{"cases":{
+ "run":{
+  "file":"input.k","entry":"run","fuel":64,"args":{},
+  "oracle":[
+   {"name":"print-ln","args":{"msg":{"str":"Hello, World!"}},"result":{"bare":{"int":0}}}],
+  "expect":{"bare":{"int":0}},"emit":"refuse"},
+ "greet":{
+  "file":"input.k","entry":"greet","fuel":64,
+  "args":{"name":{"str":"Ada"}},
+  "expect":{"bare":{"str":"Hello, Ada!"}},"emit":"refuse"}
+}}

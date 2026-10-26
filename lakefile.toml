@@ -26,6 +26,12 @@ rev = "v4.31.0"
 name = "ISAR"
 srcDir = "src"
 
+[[lean_lib]]
+name = "Host2"
+srcDir = "host2/src"
+globs = ["korufe.+", "krun.+"]
+needs = ["ISAR"]
+
 [[lean_exe]]
 name = "isar-reduce"
 root = "Main"

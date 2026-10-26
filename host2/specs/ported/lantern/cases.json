@@ -1,0 +1,26 @@
+{"cases":{
+ "describe-dim":{
+  "file":"input.k","entry":"describe","fuel":64,
+  "args":{"room":{"int":0}},
+  "oracle":[
+   {"name":"cond","args":{"expr":{"int":0}},"result":{"tag":"c","payload":{"int":0}}}],
+  "expect":{"bare":{"str":"a dim alcove"}},"emit":"refuse"},
+ "describe-vaulted":{
+  "file":"input.k","entry":"describe","fuel":64,
+  "args":{"room":{"int":5}},
+  "oracle":[
+   {"name":"cond","args":{"expr":{"int":5}},"result":{"tag":"c","payload":{"int":7}}}],
+  "expect":{"bare":{"str":"a vaulted hall"}},"emit":"refuse"},
+ "delve":{
+  "file":"input.k","entry":"delve","fuel":512,
+  "args":{"room":{"int":2}},
+  "oracle":[
+   {"name":"pick","args":{"expr":{"bool":false}},"result":{"tag":"else"}},
+   {"name":"pick","args":{"expr":{"bool":true}},"result":{"tag":"then"}},
+   {"name":"cond","args":{"expr":{"int":2}},"result":{"tag":"c","payload":{"int":0}}},
+   {"name":"cond","args":{"expr":{"int":3}},"result":{"tag":"c","payload":{"int":0}}},
+   {"name":"cond","args":{"expr":{"int":4}},"result":{"tag":"c","payload":{"int":0}}},
+   {"name":"print-ln","args":{"msg":{"str":"a dim alcove"}},"result":{"bare":{"int":0}}},
+   {"name":"print-ln","args":{"msg":{"str":"You climb back into daylight."}},"result":{"bare":{"int":0}}}],
+  "expect":{"bare":{"int":0}},"emit":"refuse"}
+}}

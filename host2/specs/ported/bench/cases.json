@@ -1,0 +1,24 @@
+{"cases":{
+ "sum-range":{
+  "file":"input.k","entry":"sum-range","fuel":256,
+  "args":{"n":{"int":5},"acc":{"int":0}},
+  "oracle":[
+   {"name":"step","args":{"i":{"int":5}},"result":{"tag":"go","payload":{"int":5}}},
+   {"name":"step","args":{"i":{"int":4}},"result":{"tag":"go","payload":{"int":4}}},
+   {"name":"step","args":{"i":{"int":3}},"result":{"tag":"go","payload":{"int":3}}},
+   {"name":"step","args":{"i":{"int":2}},"result":{"tag":"go","payload":{"int":2}}},
+   {"name":"step","args":{"i":{"int":1}},"result":{"tag":"go","payload":{"int":1}}},
+   {"name":"step","args":{"i":{"int":0}},"result":{"tag":"done"}}],
+  "expect":{"bare":{"int":15}},"emit":"refuse"},
+ "fib-walk":{
+  "file":"input.k","entry":"fib-walk","fuel":256,
+  "args":{"n":{"int":5},"a":{"int":0},"b":{"int":1}},
+  "oracle":[
+   {"name":"step","args":{"i":{"int":5}},"result":{"tag":"go","payload":{"int":5}}},
+   {"name":"step","args":{"i":{"int":4}},"result":{"tag":"go","payload":{"int":4}}},
+   {"name":"step","args":{"i":{"int":3}},"result":{"tag":"go","payload":{"int":3}}},
+   {"name":"step","args":{"i":{"int":2}},"result":{"tag":"go","payload":{"int":2}}},
+   {"name":"step","args":{"i":{"int":1}},"result":{"tag":"go","payload":{"int":1}}},
+   {"name":"step","args":{"i":{"int":0}},"result":{"tag":"done"}}],
+  "expect":{"bare":{"int":5}},"emit":"refuse"}
+}}

@@ -3,6 +3,16 @@
   "note": "Realization catalog in the std/realize vocabulary: interface -> row -> arm binding -> mechanism. An arm with mechanism=null is a declared provider gap; the gate refuses paths that need it.",
   "rows": [
     {
+      "id": "koru/authority",
+      "interface": "koru-parse",
+      "stack": ["koru"],
+      "arm": {
+        "mechanism": "W:\\src\\koru\\zig-out\\bin\\koruc",
+        "evidence": "gate leg: every generated + ported .k passes `koruc -c`; missing on a machine = skip, not fail",
+        "delta": "the full-language authority; korufe is the declared subset"
+      }
+    },
+    {
       "id": "host2/koru-parse",
       "interface": "koru-parse",
       "stack": ["host2", "c99"],

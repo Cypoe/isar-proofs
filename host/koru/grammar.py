@@ -52,6 +52,6 @@ def wf_prog(prog) -> bool:
     ISAR.KoruDialect."""
     raise NotRealized(
         "koru grammar: no host-side KProg exists in this mirror "
-        "(.k sources lower to claims in host2/src/korufe.c, not to "
+        "(.k sources lower to claims in host2/src/korufe/, not to "
         "Python objects); the decidable check is wfProg in "
         "ISAR.KoruDialect")

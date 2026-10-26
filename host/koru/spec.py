@@ -40,7 +40,7 @@ KORU_FLOW = {
         "syntax": {
             "status": "realized elsewhere",
             "impl": "no parser in this mirror; the realized .k "
-                    "surface is host2/src/korufe.c (C99, declared "
+                    "surface is host2/src/korufe/ (C99 TUs, declared "
                     "subset: .k -> program.ast.json -> claim); "
                     "koruSurface.parse = fun _ => none in Lean",
             "refuses": "every parse host-side",
