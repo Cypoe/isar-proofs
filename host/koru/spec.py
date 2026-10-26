@@ -43,17 +43,20 @@ KORU_FLOW = {
             "refuses": "every parse",
         },
         "emission": {
-            "status": "declared",
-            "impl": "koruC99 row; emit refuses",
-            "refuses": "every emission",
+            "status": "realized (subset)",
+            "impl": "ISAR.KoruDialect emitC99 + ISAR.KoruEmit kEmit "
+                    "(koru_emit_fixpoint) -- declared subset: single "
+                    "main = bare int literal, CompCert-accepted C",
+            "refuses": "every program outside the declared subset",
         },
     },
     "deferred": {
         "eval_congruence": "FlowEvalCongruent -- a TTerm-resident "
                            "evaluator agreeing with runK on encProg; "
                            "flowEvalDialect is the discharge shape",
-        "self_host": "SelfHostingC99 -- a compiler KProg whose runK "
-                     "evaluation renders what the backend emits",
+        "self_host": "SelfHostingC99 -- full-strength fixpoint "
+                     "stated; koru_emit_fixpoint witnesses it on "
+                     "koruEmitCorpus (1 accept + 7 refuse)",
     },
 }
 

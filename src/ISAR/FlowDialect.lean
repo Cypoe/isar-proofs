@@ -33,6 +33,13 @@ identical:
 Declared divergences from the zig walker (wire-level choices, each a
 refusal or an exactness strengthening — never a silent guess):
 
+  * The builtin table is extended by the emission leg: `"len"`
+    (`arr → int`) and `"intToString"` (`int → str`, decimal). These
+    are stdlib names the kernel subset did not carry; the extension
+    is strictly additive — previously deciding programs decide
+    identically, and only previously-refusing builtin calls now
+    decide. They exist because a compiler program must inspect
+    list lengths and render integers, and the wire has no other way.
   * `KVal.float n d` is an exact rational pair, not IEEE. `asKRat`
     normalizes `d < 0 → (-n, -d)` and REFUSES `d = 0` — the wire
     admits a shape the kernel does not invent a meaning for.
@@ -268,6 +275,17 @@ def evalKBuiltin (env : KEnv) (name : String) (args : List KExpr) : Option KVal 
       | some (.int a), some (.int b) =>
           if b == 0 then none else some (.int (kfmod a b))
       | _, _ => none
+  -- Emission-leg extensions (additive — see header): array length
+  -- and decimal rendering, the two things a compiler program cannot
+  -- otherwise do on the wire.
+  | "len", [e] =>
+      match evalKE env e with
+      | some (.arr items) => some (.int (items.length : Int))
+      | _ => none
+  | "intToString", [e] =>
+      match evalKE env e with
+      | some (.int i) => some (.str (toString i))
+      | _ => none
   | _, _ => none
 end
 
@@ -842,6 +860,22 @@ theorem evalK_rat_add :
 the shape, the kernel does not invent a meaning. -/
 theorem evalK_rat_zero_den :
     evalKE [] (.bin .add (.lit (.float 1 0)) (.lit (.int 2))) == none := by
+  native_decide
+
+/-- The emission-leg builtins: `len` renders array length,
+`intToString` renders decimals — and both refuse on wrong types. -/
+theorem evalK_len :
+    evalKE [] (.builtin "len" [.lit (.arr [.int 1, .int 2, .int 3])])
+      == some (.int 3) := by
+  native_decide
+
+theorem evalK_itoa :
+    evalKE [] (.builtin "intToString" [.lit (.int (-12))])
+      == some (.str "-12") := by
+  native_decide
+
+theorem evalK_len_refuses :
+    evalKE [] (.builtin "len" [.lit (.int 3)]) == none := by
   native_decide
 
 /-! ## The deferred rung — eval congruence

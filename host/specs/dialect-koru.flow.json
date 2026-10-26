@@ -1,12 +1,13 @@
 {"name": "koru.flow",
  "layer": "dialect",
- "in": "KProg (wire-expressible flow grammar: graph × entry × args)",
- "out": "Option KResult (branch × payload, three-case)",
+ "in": "KProg (wire-expressible flow grammar: graph x entry x args)",
+ "out": "Option KResult (branch x payload, three-case)",
  "axis": "dialect",
  "status": "declared",
  "impl": {"lean": ["ISAR.FlowView (codec, proved)",
                    "ISAR.FlowDialect (runK/evalKProg, runK_mono, FlowEvalCongruent)",
-                   "ISAR.KoruDialect (layers, wfProg, SelfHosting)"],
+                   "ISAR.KoruDialect (layers, wfProg, emitC99, SelfHosting)",
+                   "ISAR.KoruEmit (quoteProg, kEmit, koru_emit_fixpoint)"],
           "host": ["host/koru/* (declared mirror + refusals)"]},
- "refuses": ".k surface parse (no surface), C99 emission (declared backend), unasserted thunk leaf, unhandled branch, catchall in bare dispatch, void+arms, bind-on-void-payload, non-bool guard, type error, zero float denominator, fuel exhausted",
- "doc": "The koru dialect's second+third rung: real eval semantics over the FlowView wire grammar (faithful port of w:/src/koru FlowKernel onto the K-grammar, rational-pair floats declared as the wire-level divergence) plus the layer registry — encoding/grammar realized in Lean, syntax/emission declared with refusal paths. Deferred obligations stated, not claimed: FlowEvalCongruent (ISK evaluator rung) and SelfHostingC99 (compiler fixpoint)."}
+ "refuses": ".k surface parse (no surface), C99 emission outside the declared subset (single main = bare int literal), unasserted thunk leaf, unhandled branch, catchall in bare dispatch, void+arms, bind-on-void-payload, non-bool guard, type error, zero float denominator, fuel exhausted",
+ "doc": "The koru dialect, now with the self-host leg's first rung landed. Real eval semantics over the FlowView wire grammar (faithful port of w:/src/koru FlowKernel onto the K-grammar, rational-pair floats declared as the wire-level divergence); layer registry with encoding/grammar/semantics realized and .k declared-refusing. Emission: emitC99 realizes the declared subset (single-entry bare int literal -> 'int main(void) { return i; }', inside the CompCert-accepted C subset so the machine-checked leg to machine code stays available); KoruEmit adds quotation (KProg -> KVal) and kEmit, the same emission written as a KProg, with koru_emit_fixpoint witnessing agreement (accept + refuse directions) on koruEmitCorpus. Deferred obligations stated, not claimed: FlowEvalCongruent (ISK evaluator rung) and SelfHostingC99 at full strength (the forall-src compiler-correctness discharge)."}

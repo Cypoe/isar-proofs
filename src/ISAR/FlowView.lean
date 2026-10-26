@@ -446,54 +446,54 @@ def decNamedValF (f : Nat) (t : TTerm) : Option (String × KVal) :=
   decNamedValP (fun v => decValF f v) t
 
 /-- Term size: a safe fuel bound for every decoder at this tree. -/
-def tsize : TTerm → Nat
+def ktsize : TTerm → Nat
   | .I | .K | .S => 1
-  | .app f a => 1 + tsize f + tsize a
+  | .app f a => 1 + ktsize f + ktsize a
 
 def decProg (t : TTerm) : Option KProg := do
   let (tag, kids) ← decNode t
   match tag, kids with
   | 30, [ds, e, as] =>
-      return { graph := ← decKidsOf decNamedCallableF (tsize t) ds
+      return { graph := ← decKidsOf decNamedCallableF (ktsize t) ds
                entry := ← decStrT e
-               args := ← decKidsOf decNamedValF (tsize t) as }
+               args := ← decKidsOf decNamedValF (ktsize t) as }
   | _, _ => Option.none
 
 /-! ### Round-trip theorems
 
-Fuel discipline: `decXF f (encX x) = some x` whenever `tsize (encX x) ≤ f`
+Fuel discipline: `decXF f (encX x) = some x` whenever `ktsize (encX x) ≤ f`
 — children of a `node` are strict subterms, so each spent level keeps the
-invariant. `decProg` tops up with `tsize t`, which always suffices. -/
+invariant. `decProg` tops up with `ktsize t`, which always suffices. -/
 
-theorem tsize_pos (t : TTerm) : 1 ≤ tsize t := by
+theorem ktsize_pos (t : TTerm) : 1 ≤ ktsize t := by
   cases t with
-  | app f a => simp only [tsize]; omega
-  | _ => simp [tsize]
+  | app f a => simp only [ktsize]; omega
+  | _ => simp [ktsize]
 
-theorem tsize_mem_encList {xs : List TTerm} {x : TTerm}
-    (h : x ∈ xs) : tsize x < tsize (encList xs) := by
+theorem ktsize_mem_encList {xs : List TTerm} {x : TTerm}
+    (h : x ∈ xs) : ktsize x < ktsize (encList xs) := by
   induction xs with
   | nil => simp at h
   | cons a as ih =>
-      simp only [encList, tsize]
+      simp only [encList, ktsize]
       cases h with
       | head => omega
       | tail _ h => have := ih h; omega
 
-theorem tsize_encList_lt_node (tag : Nat) (kids : List TTerm) :
-    tsize (encList kids) < tsize (node tag kids) := by
-  simp [node, tsize]
+theorem ktsize_encList_lt_node (tag : Nat) (kids : List TTerm) :
+    ktsize (encList kids) < ktsize (node tag kids) := by
+  simp [node, ktsize]
 
 /-- Kid of a `node` is a strict subterm — the fuel invariant's workhorse. -/
-theorem tsize_lt_node_of_mem {x : TTerm} {tag : Nat} {kids : List TTerm}
-    (h : x ∈ kids) : tsize x < tsize (node tag kids) :=
-  lt_trans (tsize_mem_encList h) (tsize_encList_lt_node tag kids)
+theorem ktsize_lt_node_of_mem {x : TTerm} {tag : Nat} {kids : List TTerm}
+    (h : x ∈ kids) : ktsize x < ktsize (node tag kids) :=
+  lt_trans (ktsize_mem_encList h) (ktsize_encList_lt_node tag kids)
 
 /-- Elements of `decList`'s output are its immediate kids — encode-side
 form: a member of `kids` decoded from `encList kids`. -/
-theorem tsize_lt_of_mem_encList {xs : List TTerm} {x : TTerm}
-    (h : x ∈ xs) : tsize x < tsize (encList xs) :=
-  tsize_mem_encList h
+theorem ktsize_lt_of_mem_encList {xs : List TTerm} {x : TTerm}
+    (h : x ∈ xs) : ktsize x < ktsize (encList xs) :=
+  ktsize_mem_encList h
 
 theorem decIntT_encIntT (i : Int) : decIntT (encIntT i) = some i := by
   simp [decIntT, encIntT, tagOf_tn, unzigzag_zigzag]
@@ -607,7 +607,7 @@ theorem decOptT_enc {α : Type} {d : Nat → TTerm → Option α}
 
 /-! ### Round trips per grammar level
 
-Fuel invariant: `tsize (encX x) ≤ f → decXF f (encX x) = some x`.
+Fuel invariant: `ktsize (encX x) ≤ f → decXF f (encX x) = some x`.
 Children of `node tag kids` are members of `kids` and strict subterms,
 so spending one fuel level preserves the bound; induction is on the
 fuel so the IH applies to *any* object — which is what list elements
@@ -635,10 +635,10 @@ theorem decNamedValP_enc (n : String) (v : KVal)
   rfl
 
 theorem decValF_encVal : ∀ (v : KVal) (f : Nat),
-    tsize (encVal v) ≤ f → decValF f (encVal v) = some v := by
+    ktsize (encVal v) ≤ f → decValF f (encVal v) = some v := by
   intro v f
   induction f generalizing v with
-  | zero => intro hf; have := tsize_pos (encVal v); omega
+  | zero => intro hf; have := ktsize_pos (encVal v); omega
   | succ f' ih =>
       intro hf
       cases v with
@@ -660,12 +660,12 @@ theorem decValF_encVal : ∀ (v : KVal) (f : Nat),
           simp
       | arr xs =>
           simp only [encVal] at hf ⊢
-          have hmem : ∀ x ∈ xs, tsize (encVal x) ≤ f' := fun x hx => by
+          have hmem : ∀ x ∈ xs, ktsize (encVal x) ≤ f' := fun x hx => by
             have h1 : encVal x ∈ xs.map encVal :=
               List.mem_map.mpr ⟨x, hx, rfl⟩
-            have h2 := tsize_mem_encList h1
+            have h2 := ktsize_mem_encList h1
             rw [← encValList_eq] at h2
-            have h3 := tsize_lt_node_of_mem (tag := 5)
+            have h3 := ktsize_lt_node_of_mem (tag := 5)
               (kids := [encValList xs]) (List.mem_singleton.mpr rfl)
             omega
           simp only [decValF, decNode_node, bind, Option.bind]
@@ -675,16 +675,16 @@ theorem decValF_encVal : ∀ (v : KVal) (f : Nat),
           simp
       | cell fs =>
           simp only [encVal] at hf ⊢
-          have hmem : ∀ p ∈ fs, tsize (encVal p.2) ≤ f' := fun p hp => by
+          have hmem : ∀ p ∈ fs, ktsize (encVal p.2) ≤ f' := fun p hp => by
             have h1 : node 7 [encStrT p.1, encVal p.2] ∈
                 fs.map (fun q => node 7 [encStrT q.1, encVal q.2]) :=
               List.mem_map.mpr ⟨p, hp, rfl⟩
-            have h2 := tsize_mem_encList h1
+            have h2 := ktsize_mem_encList h1
             rw [← encNamedValList_eq] at h2
-            have h3 : tsize (encVal p.2) <
-                tsize (node 7 [encStrT p.1, encVal p.2]) :=
-              tsize_lt_node_of_mem (x := encVal p.2) (by simp)
-            have h4 := tsize_lt_node_of_mem (tag := 6)
+            have h3 : ktsize (encVal p.2) <
+                ktsize (node 7 [encStrT p.1, encVal p.2]) :=
+              ktsize_lt_node_of_mem (x := encVal p.2) (by simp)
+            have h4 := ktsize_lt_node_of_mem (tag := 6)
               (kids := [encNamedValList fs]) (List.mem_singleton.mpr rfl)
             omega
           have hpairs : ∀ p ∈ fs,
@@ -704,17 +704,17 @@ theorem decValF_encVal : ∀ (v : KVal) (f : Nat),
           simp
 
 theorem decExprF_encExpr : ∀ (e : KExpr) (f : Nat),
-    tsize (encExpr e) ≤ f → decExprF f (encExpr e) = some e := by
+    ktsize (encExpr e) ≤ f → decExprF f (encExpr e) = some e := by
   intro e f
   induction f generalizing e with
-  | zero => intro hf; have := tsize_pos (encExpr e); omega
+  | zero => intro hf; have := ktsize_pos (encExpr e); omega
   | succ f' ih =>
       intro hf
       cases e with
       | lit v =>
           simp only [encExpr] at hf ⊢
-          have hb : tsize (encVal v) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encVal v) (tag := 8)
+          have hb : ktsize (encVal v) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encVal v) (tag := 8)
               (kids := [encVal v]) (by simp)
             omega
           simp only [decExprF, decNode_node, bind, Option.bind]
@@ -726,13 +726,13 @@ theorem decExprF_encExpr : ∀ (e : KExpr) (f : Nat),
           simp
       | bin op l r =>
           simp only [encExpr] at hf ⊢
-          have hl : tsize (encExpr l) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr l) (tag := 10)
+          have hl : ktsize (encExpr l) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr l) (tag := 10)
               (kids := [tn (encBinOpN op), encExpr l, encExpr r])
               (by simp)
             omega
-          have hr : tsize (encExpr r) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr r) (tag := 10)
+          have hr : ktsize (encExpr r) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr r) (tag := 10)
               (kids := [tn (encBinOpN op), encExpr l, encExpr r])
               (by simp)
             omega
@@ -745,8 +745,8 @@ theorem decExprF_encExpr : ∀ (e : KExpr) (f : Nat),
           simp
       | un op e =>
           simp only [encExpr] at hf ⊢
-          have he : tsize (encExpr e) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr e) (tag := 11)
+          have he : ktsize (encExpr e) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr e) (tag := 11)
               (kids := [tn (encUnOpN op), encExpr e])
               (by simp)
             omega
@@ -757,16 +757,16 @@ theorem decExprF_encExpr : ∀ (e : KExpr) (f : Nat),
           simp
       | cond c a b =>
           simp only [encExpr] at hf ⊢
-          have hc : tsize (encExpr c) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr c) (tag := 12)
+          have hc : ktsize (encExpr c) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr c) (tag := 12)
               (kids := [encExpr c, encExpr a, encExpr b]) (by simp)
             omega
-          have ha : tsize (encExpr a) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr a) (tag := 12)
+          have ha : ktsize (encExpr a) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr a) (tag := 12)
               (kids := [encExpr c, encExpr a, encExpr b]) (by simp)
             omega
-          have hb : tsize (encExpr b) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr b) (tag := 12)
+          have hb : ktsize (encExpr b) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr b) (tag := 12)
               (kids := [encExpr c, encExpr a, encExpr b]) (by simp)
             omega
           simp only [decExprF, decNode_node, bind, Option.bind]
@@ -778,8 +778,8 @@ theorem decExprF_encExpr : ∀ (e : KExpr) (f : Nat),
           simp
       | field o n =>
           simp only [encExpr] at hf ⊢
-          have ho : tsize (encExpr o) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr o) (tag := 13)
+          have ho : ktsize (encExpr o) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr o) (tag := 13)
               (kids := [encExpr o, encStrT n]) (by simp)
             omega
           simp only [decExprF, decNode_node, bind, Option.bind]
@@ -789,12 +789,12 @@ theorem decExprF_encExpr : ∀ (e : KExpr) (f : Nat),
           simp
       | index o i =>
           simp only [encExpr] at hf ⊢
-          have ho : tsize (encExpr o) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr o) (tag := 14)
+          have ho : ktsize (encExpr o) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr o) (tag := 14)
               (kids := [encExpr o, encExpr i]) (by simp)
             omega
-          have hi : tsize (encExpr i) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr i) (tag := 14)
+          have hi : ktsize (encExpr i) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr i) (tag := 14)
               (kids := [encExpr o, encExpr i]) (by simp)
             omega
           simp only [decExprF, decNode_node, bind, Option.bind]
@@ -804,12 +804,12 @@ theorem decExprF_encExpr : ∀ (e : KExpr) (f : Nat),
           simp
       | builtin n args =>
           simp only [encExpr] at hf ⊢
-          have hmem : ∀ x ∈ args, tsize (encExpr x) ≤ f' := fun x hx => by
+          have hmem : ∀ x ∈ args, ktsize (encExpr x) ≤ f' := fun x hx => by
             have h1 : encExpr x ∈ args.map encExpr :=
               List.mem_map.mpr ⟨x, hx, rfl⟩
-            have h2 := tsize_mem_encList h1
+            have h2 := ktsize_mem_encList h1
             rw [← encExprList_eq] at h2
-            have h3 := tsize_lt_node_of_mem (x := encExprList args)
+            have h3 := ktsize_lt_node_of_mem (x := encExprList args)
               (tag := 15) (kids := [encStrT n, encExprList args]) (by simp)
             omega
           simp only [decExprF, decNode_node, bind, Option.bind]
@@ -836,7 +836,7 @@ theorem decNamedExprF_enc (n : String) (e : KExpr) (f : Nat)
 
 /-- `decNamedExprsF` over an encoded named-expression list. -/
 theorem decNamedExprsF_enc (xs : List (String × KExpr)) (f : Nat)
-    (h : ∀ p ∈ xs, tsize (encExpr p.2) ≤ f) :
+    (h : ∀ p ∈ xs, ktsize (encExpr p.2) ≤ f) :
     decNamedExprsF f (encNamedExprs xs) = some xs := by
   unfold decNamedExprsF
   rw [encNamedExprs_eq]
@@ -853,21 +853,21 @@ theorem decNamedExprsF_enc (xs : List (String × KExpr)) (f : Nat)
 /-- Element bound inside an encoded named-expression list. -/
 theorem expr_bound_of_namedExprs {xs : List (String × KExpr)}
     {p : String × KExpr} (hp : p ∈ xs) :
-    tsize (encExpr p.2) < tsize (encNamedExprs xs) := by
-  have h1 := tsize_lt_node_of_mem (x := encExpr p.2) (tag := 21)
+    ktsize (encExpr p.2) < ktsize (encNamedExprs xs) := by
+  have h1 := ktsize_lt_node_of_mem (x := encExpr p.2) (tag := 21)
     (kids := [encStrT p.1, encExpr p.2]) (by simp)
   have h2 : node 21 [encStrT p.1, encExpr p.2] ∈
       xs.map (fun q => node 21 [encStrT q.1, encExpr q.2]) :=
     List.mem_map.mpr ⟨p, hp, rfl⟩
-  have h3 := tsize_mem_encList h2
+  have h3 := ktsize_mem_encList h2
   rw [← encNamedExprs_eq] at h3
   omega
 
 theorem decArmNodeF_encArmNode : ∀ (a : KArmNode) (f : Nat),
-    tsize (encArmNode a) ≤ f → decArmNodeF f (encArmNode a) = some a := by
+    ktsize (encArmNode a) ≤ f → decArmNodeF f (encArmNode a) = some a := by
   intro a f
   cases f with
-  | zero => intro hf; have := tsize_pos (encArmNode a); omega
+  | zero => intro hf; have := ktsize_pos (encArmNode a); omega
   | succ f' =>
       intro hf
       cases a with
@@ -875,9 +875,9 @@ theorem decArmNodeF_encArmNode : ∀ (a : KArmNode) (f : Nat),
           simp [encArmNode, decArmNodeF, decNode_node]
       | jump n args =>
           simp only [encArmNode] at hf ⊢
-          have hmem : ∀ p ∈ args, tsize (encExpr p.2) ≤ f' :=
+          have hmem : ∀ p ∈ args, ktsize (encExpr p.2) ≤ f' :=
             fun p hp => by
-              have h4 := tsize_lt_node_of_mem (x := encNamedExprs args)
+              have h4 := ktsize_lt_node_of_mem (x := encNamedExprs args)
                 (tag := 17)
                 (kids := [encStrT n, encNamedExprs args]) (by simp)
               have h5 := expr_bound_of_namedExprs hp
@@ -889,9 +889,9 @@ theorem decArmNodeF_encArmNode : ∀ (a : KArmNode) (f : Nat),
           simp
       | invoke n args =>
           simp only [encArmNode] at hf ⊢
-          have hmem : ∀ p ∈ args, tsize (encExpr p.2) ≤ f' :=
+          have hmem : ∀ p ∈ args, ktsize (encExpr p.2) ≤ f' :=
             fun p hp => by
-              have h4 := tsize_lt_node_of_mem (x := encNamedExprs args)
+              have h4 := ktsize_lt_node_of_mem (x := encNamedExprs args)
                 (tag := 18)
                 (kids := [encStrT n, encNamedExprs args]) (by simp)
               have h5 := expr_bound_of_namedExprs hp
@@ -903,8 +903,8 @@ theorem decArmNodeF_encArmNode : ∀ (a : KArmNode) (f : Nat),
           simp
       | produce e =>
           simp only [encArmNode] at hf ⊢
-          have hb : tsize (encExpr e) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr e) (tag := 19)
+          have hb : ktsize (encExpr e) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr e) (tag := 19)
               (kids := [encExpr e]) (List.mem_singleton.mpr rfl)
             omega
           simp only [decArmNodeF, decNode_node, bind, Option.bind]
@@ -912,8 +912,8 @@ theorem decArmNodeF_encArmNode : ∀ (a : KArmNode) (f : Nat),
           simp
       | retCtor c e =>
           simp only [encArmNode] at hf ⊢
-          have hb : tsize (encExpr e) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr e) (tag := 20)
+          have hb : ktsize (encExpr e) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr e) (tag := 20)
               (kids := [encStrT c, encExpr e]) (by simp)
             omega
           simp only [decArmNodeF, decNode_node, bind, Option.bind]
@@ -923,10 +923,10 @@ theorem decArmNodeF_encArmNode : ∀ (a : KArmNode) (f : Nat),
           simp
 
 theorem decArmF_encArm : ∀ (a : KArm) (f : Nat),
-    tsize (encArm a) ≤ f → decArmF f (encArm a) = some a := by
+    ktsize (encArm a) ≤ f → decArmF f (encArm a) = some a := by
   intro a f
   induction f generalizing a with
-  | zero => intro hf; have := tsize_pos (encArm a); omega
+  | zero => intro hf; have := ktsize_pos (encArm a); omega
   | succ f' ih =>
       intro hf
       obtain ⟨br, ca, bi, co, nd, cs⟩ := a
@@ -934,8 +934,8 @@ theorem decArmF_encArm : ∀ (a : KArm) (f : Nat),
       have hbound (t : TTerm) (ht : t ∈
           [encStrT br, encBoolT ca, encOptT (bi.map encStrT),
            encOptT (co.map encExpr), encOptT (nd.map encArmNode),
-           encArmList cs]) : tsize t < f' + 1 := by
-        have := tsize_lt_node_of_mem (tag := 22)
+           encArmList cs]) : ktsize t < f' + 1 := by
+        have := ktsize_lt_node_of_mem (tag := 22)
           (kids := [encStrT br, encBoolT ca, encOptT (bi.map encStrT),
             encOptT (co.map encExpr), encOptT (nd.map encArmNode),
             encArmList cs]) ht
@@ -946,7 +946,7 @@ theorem decArmF_encArm : ∀ (a : KArm) (f : Nat),
         intro x hx
         have hmap : encOptT (co.map encExpr) = node 24 [encExpr x] := by
           rw [hx]; rfl
-        have h1 := tsize_lt_node_of_mem (x := encExpr x) (tag := 24)
+        have h1 := ktsize_lt_node_of_mem (x := encExpr x) (tag := 24)
           (kids := [encExpr x]) (List.mem_singleton.mpr rfl)
         rw [← hmap] at h1
         have h2 := hbound (encOptT (co.map encExpr)) (by simp)
@@ -958,7 +958,7 @@ theorem decArmF_encArm : ∀ (a : KArm) (f : Nat),
         have hmap : encOptT (nd.map encArmNode)
             = node 24 [encArmNode x] := by
           rw [hx]; rfl
-        have h1 := tsize_lt_node_of_mem (x := encArmNode x) (tag := 24)
+        have h1 := ktsize_lt_node_of_mem (x := encArmNode x) (tag := 24)
           (kids := [encArmNode x]) (List.mem_singleton.mpr rfl)
         rw [← hmap] at h1
         have h2 := hbound (encOptT (nd.map encArmNode)) (by simp)
@@ -968,7 +968,7 @@ theorem decArmF_encArm : ∀ (a : KArm) (f : Nat),
         apply ih a'
         have h1 : encArm a' ∈ cs.map encArm :=
           List.mem_map.mpr ⟨a', ha', rfl⟩
-        have h2 := tsize_mem_encList h1
+        have h2 := ktsize_mem_encList h1
         rw [← encArmList_eq] at h2
         have h3 := hbound (encArmList cs) (by simp)
         omega
@@ -989,7 +989,7 @@ theorem decArmF_encArm : ∀ (a : KArm) (f : Nat),
       simp
 
 theorem decHeadF_enc (n : String) (es : List (String × KExpr)) (f : Nat)
-    (hb : ∀ p ∈ es, tsize (encExpr p.2) ≤ f) :
+    (hb : ∀ p ∈ es, ktsize (encExpr p.2) ≤ f) :
     decHeadF f (encHead (n, es)) = some (n, es) := by
   unfold decHeadF encHead
   rw [decNode_node]
@@ -1000,7 +1000,7 @@ theorem decHeadF_enc (n : String) (es : List (String × KExpr)) (f : Nat)
   rfl
 
 theorem decFlowF_encFlow (fl : KFlow) (f : Nat)
-    (hf : tsize (encFlow fl) ≤ f) :
+    (hf : ktsize (encFlow fl) ≤ f) :
     decFlowF f (encFlow fl) = some fl := by
   obtain ⟨pl, hd, arms⟩ := fl
   obtain ⟨hn, hargs⟩ := hd
@@ -1011,11 +1011,11 @@ theorem decFlowF_encFlow (fl : KFlow) (f : Nat)
     apply decHeadF_enc
     intro p hp
     have h3 := expr_bound_of_namedExprs hp
-    have h3b := tsize_lt_node_of_mem (x := encNamedExprs hargs)
+    have h3b := ktsize_lt_node_of_mem (x := encNamedExprs hargs)
       (tag := 26) (kids := [encStrT hn, encNamedExprs hargs])
       (by simp)
     rw [← heq] at h3b
-    have h4 := tsize_lt_node_of_mem (x := encHead (hn, hargs))
+    have h4 := ktsize_lt_node_of_mem (x := encHead (hn, hargs))
       (tag := 25)
       (kids := [encOptT (pl.map encStrT), encHead (hn, hargs),
         encArmList arms]) (by simp)
@@ -1025,9 +1025,9 @@ theorem decFlowF_encFlow (fl : KFlow) (f : Nat)
     apply decArmF_encArm
     have h1 : encArm a' ∈ arms.map encArm :=
       List.mem_map.mpr ⟨a', ha', rfl⟩
-    have h2 := tsize_mem_encList h1
+    have h2 := ktsize_mem_encList h1
     rw [← encArmList_eq] at h2
-    have h3 := tsize_lt_node_of_mem (x := encArmList arms) (tag := 25)
+    have h3 := ktsize_lt_node_of_mem (x := encArmList arms) (tag := 25)
       (kids := [encOptT (pl.map encStrT), encHead (hn, hargs),
         encArmList arms]) (by simp)
     omega
@@ -1044,17 +1044,17 @@ theorem decFlowF_encFlow (fl : KFlow) (f : Nat)
   rfl
 
 theorem decCallableF_encCallable : ∀ (c : KCallable) (f : Nat),
-    tsize (encCallable c) ≤ f → decCallableF f (encCallable c) = some c := by
+    ktsize (encCallable c) ≤ f → decCallableF f (encCallable c) = some c := by
   intro c f
   cases f with
-  | zero => intro hf; have := tsize_pos (encCallable c); omega
+  | zero => intro hf; have := ktsize_pos (encCallable c); omega
   | succ f' =>
       intro hf
       cases c with
       | bare e =>
           simp only [encCallable] at hf ⊢
-          have hb : tsize (encExpr e) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encExpr e) (tag := 27)
+          have hb : ktsize (encExpr e) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encExpr e) (tag := 27)
               (kids := [encExpr e]) (List.mem_singleton.mpr rfl)
             omega
           simp only [decCallableF, decNode_node, bind, Option.bind]
@@ -1064,8 +1064,8 @@ theorem decCallableF_encCallable : ∀ (c : KCallable) (f : Nat),
           simp [encCallable, decCallableF, decNode_node]
       | subflow fl =>
           simp only [encCallable] at hf ⊢
-          have hb : tsize (encFlow fl) ≤ f' := by
-            have := tsize_lt_node_of_mem (x := encFlow fl) (tag := 29)
+          have hb : ktsize (encFlow fl) ≤ f' := by
+            have := ktsize_lt_node_of_mem (x := encFlow fl) (tag := 29)
               (kids := [encFlow fl]) (List.mem_singleton.mpr rfl)
             omega
           simp only [decCallableF, decNode_node, bind, Option.bind]
@@ -1086,54 +1086,54 @@ theorem decNamedCallableF_enc (n : String) (c : KCallable) (f : Nat)
   rfl
 
 /-- The headline codec theorem: a program round-trips through the
-tagged-tree encoding under the `tsize` fuel bound. -/
+tagged-tree encoding under the `ktsize` fuel bound. -/
 theorem decProg_encProg (p : KProg) :
     decProg (encProg p) = some p := by
   obtain ⟨g, en, ag⟩ := p
   have heq : encProg ⟨g, en, ag⟩
       = node 30 [encCallableList g, encStrT en, encNamedValList ag] :=
     rfl
-  have hg : decKidsOf decNamedCallableF (tsize (encProg ⟨g, en, ag⟩))
+  have hg : decKidsOf decNamedCallableF (ktsize (encProg ⟨g, en, ag⟩))
       (encCallableList g) = some g := by
     rw [encCallableList_eq]
     apply decKidsOf_encList
     intro q hq
     obtain ⟨n, c⟩ := q
-    show decNamedCallableF (tsize (encProg ⟨g, en, ag⟩))
+    show decNamedCallableF (ktsize (encProg ⟨g, en, ag⟩))
       (node 31 [encStrT n, encCallable c]) = some (n, c)
     apply decNamedCallableF_enc
     apply decCallableF_encCallable
-    have h1 := tsize_lt_node_of_mem (x := encCallable c) (tag := 31)
+    have h1 := ktsize_lt_node_of_mem (x := encCallable c) (tag := 31)
       (kids := [encStrT n, encCallable c]) (by simp)
     have h2 : node 31 [encStrT n, encCallable c] ∈
         g.map (fun q' => node 31 [encStrT q'.1, encCallable q'.2]) :=
       List.mem_map.mpr ⟨⟨n, c⟩, hq, rfl⟩
-    have h3 := tsize_mem_encList h2
+    have h3 := ktsize_mem_encList h2
     rw [← encCallableList_eq] at h3
-    have h4 := tsize_lt_node_of_mem (x := encCallableList g) (tag := 30)
+    have h4 := ktsize_lt_node_of_mem (x := encCallableList g) (tag := 30)
       (kids := [encCallableList g, encStrT en, encNamedValList ag])
       (by simp)
     rw [← heq] at h4
     omega
-  have ha : decKidsOf decNamedValF (tsize (encProg ⟨g, en, ag⟩))
+  have ha : decKidsOf decNamedValF (ktsize (encProg ⟨g, en, ag⟩))
       (encNamedValList ag) = some ag := by
     rw [encNamedValList_eq]
     apply decKidsOf_encList
     intro q hq
     obtain ⟨n, v⟩ := q
-    show decNamedValF (tsize (encProg ⟨g, en, ag⟩))
+    show decNamedValF (ktsize (encProg ⟨g, en, ag⟩))
       (node 7 [encStrT n, encVal v]) = some (n, v)
     unfold decNamedValF
     apply decNamedValP_enc
     apply decValF_encVal
-    have h1 := tsize_lt_node_of_mem (x := encVal v) (tag := 7)
+    have h1 := ktsize_lt_node_of_mem (x := encVal v) (tag := 7)
       (kids := [encStrT n, encVal v]) (by simp)
     have h2 : node 7 [encStrT n, encVal v] ∈
         ag.map (fun q' => node 7 [encStrT q'.1, encVal q'.2]) :=
       List.mem_map.mpr ⟨⟨n, v⟩, hq, rfl⟩
-    have h3 := tsize_mem_encList h2
+    have h3 := ktsize_mem_encList h2
     rw [← encNamedValList_eq] at h3
-    have h4 := tsize_lt_node_of_mem (x := encNamedValList ag) (tag := 30)
+    have h4 := ktsize_lt_node_of_mem (x := encNamedValList ag) (tag := 30)
       (kids := [encCallableList g, encStrT en, encNamedValList ag])
       (by simp)
     rw [← heq] at h4

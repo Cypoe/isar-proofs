@@ -151,12 +151,23 @@ def koruSurface : KSurface KProg where
   name := ".k"
   parse := fun _ => none
 
+/-- The C99 subset backend's emission — realized for a declared
+subset: a single-entry graph `[("main", .bare (.lit (.int i)))]`,
+entry `main`, empty args, emitted as `int main(void) { return i; }`.
+Everything else refuses. Emitted text stays inside the
+CompCert-accepted C subset (no VLA/`_Complex`/etc.) so the
+machine-checked leg to machine code remains available — that
+constraint is part of the row's contract. -/
+def emitC99 : KProg → Option String
+  | ⟨[("main", .bare (.lit (.int i)))], "main", []⟩ =>
+      some ("int main(void) { return " ++ toString i ++ "; }")
+  | _ => none
+
 /-- The C99 bootstrap backend: the first registered target row —
-declared-not-realized, refuses totally until the emission leg
-lands. -/
+realized for the declared subset (`emitC99`), refusing outside it. -/
 def koruC99 : KBackend KProg where
   name := "c99"
-  emit := fun _ => none
+  emit := emitC99
 
 /-- The current dialect instance: encoding and grammar realized,
 surface and the C99 backend declared with their refusal paths. -/

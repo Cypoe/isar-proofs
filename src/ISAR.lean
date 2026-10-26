@@ -20,6 +20,7 @@ import ISAR.IotaView
 import ISAR.FlowView
 import ISAR.FlowDialect
 import ISAR.KoruDialect
+import ISAR.KoruEmit
 import ISAR.QuantityKernel
 import ISAR.Futamura
 import ISAR.ISARMatrices

@@ -26,7 +26,7 @@
     "koru.flow": {
       "module": "koru.spec",
       "record": "KORU_FLOW",
-      "note": "koru flow/tor dialect leg — semantics is ISAR.FlowDialect+KoruDialect (Lean); encoding+grammar+semantics realized there, .k surface and C99 backend declared with refusal paths"
+      "note": "koru flow/tor dialect leg — semantics is ISAR.FlowDialect+KoruDialect (Lean); encoding+grammar+semantics realized there, C99 backend realized for declared subset (emitC99, fixpoint koru_emit_fixpoint), .k surface declared with refusal path"
     },
     "packed.ir": {
       "module": "spec_term",
