@@ -5,6 +5,13 @@ construct the parser builds must survive astio's canon-shape JSON
 round trip and lower's contract checks; every refusal names the
 axis koruc names (or "out of subset" when it doesn't exist there).
 
+Unary `-`/`!` bind at POSTFIX precedence — koru's parsePrimary
+takes the operand at primary level, so `-(7) / 2` is
+`(negate 7) / 2`, never `negate (7 / 2)`.  An earlier version
+parsed the operand as a full expression and silently produced a
+different program; the 011-013 emit corpus rows caught it.
+Unary results take no postfix (koru refuses `-(a).b` the same way).
+
 ## Item kinds (Item.kind)
 
 | kind | source shape                    | ast.json item     |

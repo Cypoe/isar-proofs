@@ -1,0 +1,1 @@
+{"cases":{"009_accept_mixops":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":46}},"emit":"int main(void) { return ((7 * 8) - (100 % 30)); }","file":"input.k"}}}

@@ -348,8 +348,31 @@ static int op_prec(int op) {
     return 0;
 }
 
+static KExpr *parse_unary(Tks *s, char **err) {
+    KExpr *a;
+    snl(s);
+    if (at(s, "!")) {
+        s->i++;
+        a = parse_unary(s, err);
+        if (!a) return 0;
+        return ke_un(1, a);          /* not */
+    }
+    if (at(s, "-")) {
+        s->i++;
+        a = parse_unary(s, err);
+        if (!a) return 0;
+        /* koru parity: the operand binds at POSTFIX precedence
+           (`-(7) / 2` is `(negate 7) / 2`, never `negate (7 / 2)`;
+           koru's parsePrimary does the same), and `-` always builds
+           the unary node — no literal fold (folding corrupts
+           quotation for the emit leg). */
+        return ke_un(0, a);          /* neg */
+    }
+    return parse_postfix(s, err);
+}
+
 static KExpr *parse_bin(Tks *s, char **err, int minprec) {
-    KExpr *l = parse_postfix(s, err);
+    KExpr *l = parse_unary(s, err);
     if (!l) return 0;
     for (;;) {
         int op, prec;
@@ -373,24 +396,6 @@ static KExpr *parse_bin(Tks *s, char **err, int minprec) {
 
 KExpr *parse_expr(Tks *s, char **err) {
     snl(s);
-    if (at(s, "!")) {
-        KExpr *a;
-        s->i++;
-        a = parse_expr(s, err);
-        if (!a) return 0;
-        return ke_un(1, a);          /* not */
-    }
-    if (at(s, "-")) {
-        KExpr *a;
-        s->i++;
-        a = parse_expr(s, err);
-        if (!a) return 0;
-        /* koru parity: `-` always builds a unary-negate node — real
-           koru has no negative literal spelling (`-3` IS `negate(3)`
-           upstream).  No fold: folding would corrupt quotation for
-           the emit leg. */
-        return ke_un(0, a);          /* neg */
-    }
     return parse_bin(s, err, 1);
 }
 

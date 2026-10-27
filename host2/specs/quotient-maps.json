@@ -40,7 +40,7 @@
       "id": "kprog-to-c99",
       "in": "quoted KProg (subset: main = bare closed-int expr: lit int | bin {+,-,*,/,%} | un neg, nested)",
       "out": "C99 source text | none (refuse)",
-      "by": "specs/tests/200_emit/100_kemit/input.k evaluated as data under krun --emit",
+      "by": "specs/tests/200_emit/900_kemit/input.k evaluated as data under krun --emit",
       "ref": "emitC99/renderCExpr in src/ISAR/KoruDialect.lean + kEmit 9-callable walk (KoruEmit.lean)",
       "notes": "the compiler is a koru program, not host code: emit gate -> recursive render walk -> op-str/join4/paren-neg/wrap assemblers. Refusals are structural (guard miss / arm exhaustion), agreeing with emitC99's Option.none."
     },

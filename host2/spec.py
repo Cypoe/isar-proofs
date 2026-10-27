@@ -59,7 +59,7 @@ HOST2 = {
         },
         "emission": {
             "status": "data",
-            "impl": "specs/tests/200_emit/100_kemit/input.k — the "
+            "impl": "specs/tests/200_emit/900_kemit/input.k — the "
                     "compiler is a 9-callable koru program (emit "
                     "gate + recursive render walk + op-str/join4/"
                     "paren-neg/wrap assemblers) evaluated by the C "
@@ -71,8 +71,12 @@ HOST2 = {
                     "KProg -> freestanding C99 (callables + unrolled "
                     "dispatch mirroring runK + declared runtime "
                     "prelude, NOT an interpreter); specs/gen/kemit.c "
-                    "built by clang AND ccomp; h1 legs compare "
-                    "compiled ≡ interpreted emission per row",
+                    "carries an input.fnv1a64 stamp binding it to "
+                    "900_kemit/input.k; built by clang AND ccomp; "
+                    "h1 legs compare compiled ≡ interpreted emission "
+                    "per row; h2 legs run the ccomp-built compiler's "
+                    "output back through ccomp -> i386 (H1' -> H2' "
+                    "under changed input)",
         },
         "machine_checked_backend": {
             "status": "realized",
@@ -87,8 +91,9 @@ HOST2 = {
             "status": "realized",
             "impl": "check.py — layout convention + koruc authority "
                     "+ parse/lower/claim + FlowCheck witness + "
-                    "emit/cc/ccv/h1/h1v legs + refusal probes over "
-                    "the whole suite (tests+benches+ported)",
+                    "emit/cc/ccv + gen.stamp + h1/h1v/h2 legs + "
+                    "refusal probes over the whole suite "
+                    "(tests+benches+ported)",
         },
     },
     "witness_contract": "data crosses (.k source, ast.json, claims, "
@@ -124,6 +129,12 @@ HOST2 = {
                             "subset; thunk callables, float/bool "
                             "runtime, retCtor, and jump nodes "
                             "refuse at codegen with a named axis",
+        "divzero_axis": "koru's ktdiv/ktmod truncate toward zero "
+                        "like C, but /0 differs: koru refuses "
+                        "(eval -> none) where C traps — two "
+                        "different observations, not a divergence "
+                        "to reconcile; excluded from the corpus "
+                        "deliberately",
     },
 }
 

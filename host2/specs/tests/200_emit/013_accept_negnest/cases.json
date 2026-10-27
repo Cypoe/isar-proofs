@@ -1,0 +1,1 @@
+{"cases":{"013_accept_negnest":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":2}},"emit":"int main(void) { return (-((-9) / 4)); }","file":"input.k"}}}

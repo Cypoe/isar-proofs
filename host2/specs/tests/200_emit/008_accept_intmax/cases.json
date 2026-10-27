@@ -1,0 +1,1 @@
+{"cases":{"008_accept_intmax":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":2147483647}},"emit":"int main(void) { return 2147483647; }","file":"input.k"}}}

@@ -1,3 +1,4 @@
+/* input.fnv1a64:13307051155909439302 */
 #define _CRT_SECURE_NO_WARNINGS
 /* freestanding: <stddef.h> is the only header (CompCert ships it);
    the libc surface used is declared as extern prototypes so the

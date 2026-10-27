@@ -31,4 +31,13 @@ map, refusal names the axis.
 - decl-only names → `(def n thunk)` — the foreign-callable kind;
   their only behavior comes from `cases.json` oracle leaves
 - head args must be named by the time they reach the wire
-  (positional → decl-resolved names) -/
+  (positional → decl-resolved names)
+
+## Wire values
+
+`jval_sx` is the ONE printer for the wire's value grammar
+(`(int N) (float n d) (bool b) (str "s") (arr v*) (cell (n v)*)`)
+— bare expects, tag payloads, oracle results, entry args all go
+through it.  Scalar-only duplication of it was a real wall the
+emit corpus hit (`main -> [1,2]` refused at expect printing, not
+at emit). -/

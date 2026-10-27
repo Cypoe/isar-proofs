@@ -1,0 +1,1 @@
+{"cases":{"011_accept_negdiv":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":-3}},"emit":"int main(void) { return ((-7) / 2); }","file":"input.k"}}}

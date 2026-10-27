@@ -374,6 +374,23 @@ def koruEmitCorpus : List KProg :=
   , ⟨[("main", .bare (.un .neg (.lit (.int 4))))], "main", []⟩
   , ⟨[("main", .bare (.un .neg
         (.bin .add (.lit (.int 1)) (.lit (.int 2)))))], "main", []⟩
+    -- H2 changed input: boundary literal, deeper mixing, and the
+    -- trunc-division witnesses (`ktdiv`/`ktmod` match C `/` `%` on
+    -- negative operands — floor-division would diverge here)
+  , ⟨[("main", .bare (.lit (.int 2147483647)))], "main", []⟩
+  , ⟨[("main", .bare (.bin .sub
+        (.bin .mul (.lit (.int 7)) (.lit (.int 8)))
+        (.bin .mod (.lit (.int 100)) (.lit (.int 30)))))], "main", []⟩
+  , ⟨[("main", .bare (.bin .div
+        (.bin .mul (.bin .sub (.lit (.int 8)) (.lit (.int 3)))
+          (.bin .add (.lit (.int 2)) (.lit (.int 1))))
+        (.bin .sub (.lit (.int 5)) (.lit (.int 2)))))], "main", []⟩
+  , ⟨[("main", .bare (.bin .div
+        (.un .neg (.lit (.int 7))) (.lit (.int 2))))], "main", []⟩
+  , ⟨[("main", .bare (.bin .mod
+        (.un .neg (.lit (.int 7))) (.lit (.int 3))))], "main", []⟩
+  , ⟨[("main", .bare (.un .neg (.bin .div
+        (.un .neg (.lit (.int 9))) (.lit (.int 4)))))], "main", []⟩
     -- refuse: program shape
   , ⟨[("main", .bare (.lit (.int 5)))], "other", []⟩
   , ⟨[("main", .bare (.lit (.int 5)))], "main", [("x", .int 1)]⟩
@@ -390,7 +407,23 @@ def koruEmitCorpus : List KProg :=
      "main", []⟩
   , ⟨[("main", .bare (.lit (.float 1 2)))], "main", []⟩
   , ⟨[("main", .bare (.lit (.str "hi")))], "main", []⟩
-  , ⟨[("main", .thunk)], "main", []⟩ ]
+  , ⟨[("main", .thunk)], "main", []⟩
+    -- refuse: value/expression walls the earlier corpus never
+    -- touched — non-int literal kinds and non-renderable nodes
+  , ⟨[("main", .bare (.lit (.bool true)))], "main", []⟩
+  , ⟨[("main", .bare (.lit (.arr [.int 1, .int 2])))], "main", []⟩
+  , ⟨[("main", .bare (.lit (.cell [("x", .int 1)])))], "main", []⟩
+  , ⟨[("main", .bare (.field
+        (.lit (.cell [("x", .int 1)])) "x"))], "main", []⟩
+  , ⟨[("main", .bare (.index
+        (.lit (.arr [.int 1, .int 2])) (.lit (.int 0))))], "main", []⟩
+    -- `divTrunc` (not `len`): the authority's FlowKernel builtin
+    -- table is {as,intCast,truncate,divTrunc,rem,mod} — `len`/
+    -- `intToString` are OUR extension axis and undecidable there.
+    -- A conformance-unwitnessable claim is worse than a narrower
+    -- wall: `divTrunc` lets FlowCheck re-decide the refusal row too.
+  , ⟨[("main", .bare (.builtin "divTrunc"
+        [.lit (.int 7), .lit (.int 2)]))], "main", []⟩ ]
 
 /-- The witnessed fixpoint: `kEmit` on every corpus member agrees
 with `emitC99` — accepted C text byte-for-byte, refusals `none`.
@@ -403,7 +436,9 @@ theorem koru_emit_fixpoint :
   simp only [koruEmitCorpus, List.mem_cons,
              List.not_mem_nil, or_false] at h
   rcases h with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
-    | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+    | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+    | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+    | rfl | rfl <;>
     native_decide
 
 /-! ## The flow-grammar corpus — the whole declared subset, gated

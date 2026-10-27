@@ -61,7 +61,7 @@
         "host2"
       ],
       "arm": {
-        "mechanism": "specs/tests/200_emit/100_kemit/input.k as data under krun --emit (9-callable program: emit gate + recursive render + op-str/join4/paren-neg/wrap)",
+        "mechanism": "specs/tests/200_emit/900_kemit/input.k as data under krun --emit (9-callable program: emit gate + recursive render + op-str/join4/paren-neg/wrap)",
         "evidence": "gate legs: emit per accept case + cc + ccv + runtime",
         "delta": "single-entry closed-int-expr subset (lit|bin{+,-,*,/,%}|neg, nested); growth = new shape arm in render walk + corpus row"
       }
@@ -100,9 +100,9 @@
         "c99"
       ],
       "arm": {
-        "mechanism": "100_kemit/input.k emitted via krun, compiled by assembly c99 row AND compcert row (ccomp -S -> i386 gcc link+run)",
-        "evidence": "gate emit+cc+ccv+run legs over koruEmitCorpus (19 members: 8 accept + 11 refuse)",
-        "delta": "corpus-level witness; forall-src theorem (SelfHostingC99) is the later rung; machine-checked output verified to i386 asm, link+run is unverified gcc"
+        "mechanism": "900_kemit/input.k emitted via krun, compiled by assembly c99 row AND compcert row (ccomp -S -> i386 gcc link+run)",
+        "evidence": "gate emit+cc+ccv+run legs over koruEmitCorpus (31 members: 14 accept + 17 refuse); h2 legs feed the ccomp-compiled compiler's output back through ccomp -> i386 run",
+        "delta": "corpus-level witness; forall-src theorem (SelfHostingC99) is the later rung; machine-checked output verified to i386 asm, link+run is unverified gcc; div-by-zero is an excluded axis (koru refuses where C traps — different observation, not equivalence)"
       }
     },
     {
@@ -115,7 +115,7 @@
       ],
       "arm": {
         "mechanism": "ISAR.KoruProgEmit.emitProgC : KProg -> Except String String — program-structure codegen (per-callable functions, unrolled dispatchTag/dispatchBare mirroring runK, chains as nested dispatch sites, fuel counter) over the declared runtime prelude (Val union, sexpr decoder, builtins); output = specs/gen/kemit.c, a freestanding C99 source",
-        "evidence": "gate h1 legs: clang AND ccomp each build kemit.c into a reusable compiler binary; `krun --quote claim | kemit_bin` observes the interpreted `krun --emit` output on every corpus row (accepts byte-identical, refuses exit 4); h1.ccv = the CompCert-compiled compiler observing identically on i386",
+        "evidence": "gate h1 legs: clang AND ccomp each build kemit.c into a reusable compiler binary; `krun --quote claim | kemit_bin` observes the interpreted `krun --emit` output on every corpus row (accepts byte-identical, refuses exit 4); h1.ccv = the CompCert-compiled compiler observing identically on i386; h2 legs feed the ccomp-built compiler's emitted C back through ccomp -> i386 run (exit byte == expect's low byte) — changed input -> H1' -> H2' under regeneration; gen.stamp binds kemit.c to 900_kemit/input.k by FNV-1a so a stale artifact fails the gate",
         "delta": "corpus-bounded: the emitted program covers exactly the KExpr/arm subset kEmit uses (vars, int/str lits, field, index, len, intToString, bin {and,eq,concat}, invoke/produce, bind+when+conts); outside forms refuse at codegen with a named axis. The runtime prelude is a declared template, not verified; the C->asm span of the program logic is verified under ccomp, link+run is unverified gcc + libcompcert.a"
       }
     },

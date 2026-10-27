@@ -1,0 +1,1 @@
+{"cases":{"015_refuse_args":{"entry":"main","fuel":64,"args":{"x":{"int":1}},"expect":{"bare":{"int":5}},"emit":"refuse","file":"input.k"}}}

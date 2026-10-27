@@ -1,0 +1,1 @@
+{"cases":{"026_refuse_arrlit":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"arr":[{"int":1},{"int":2}]}},"emit":"refuse","file":"input.k"}}}

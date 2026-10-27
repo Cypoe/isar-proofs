@@ -417,6 +417,46 @@ static int check_arms(DeclSeen *ds, int n, ArmD **arms, int narms,
 }
 
 /* emit the claim for a program ast + case row */
+/* wire-value printer for case-row JSON values — mirrors krun's
+   print_val exactly: (int N) (float n d) (bool b) (str "s")
+   (arr v*) (cell (n v)*).  Bare expects, tag payloads, oracle
+   results and entry args all carry the same grammar. */
+static int jval_sx(Jv *v, Buf *b, char **err) {
+    int i;
+    if (jget(v, "int"))
+        bputf(b, "(int %lld)", (long long)jget(v, "int")->num);
+    else if (jget(v, "float")) {
+        Jv *fl = jget(v, "float");
+        bputf(b, "(float %lld %lld)",
+              (long long)fl->xs[0]->num, (long long)fl->xs[1]->num);
+    }
+    else if (jget(v, "bool"))
+        bputf(b, "(bool %s)", jget(v, "bool")->b ? "true" : "false");
+    else if (jget(v, "str"))
+        bputf(b, "(str \"%s\")", jget(v, "str")->s);
+    else if (jget(v, "arr")) {
+        Jv *xs = jget(v, "arr");
+        bput(b, "(arr");
+        for (i = 0; i < xs->nxs; i++) {
+            bput(b, " ");
+            if (!jval_sx(xs->xs[i], b, err)) return 0;
+        }
+        bput(b, ")");
+    }
+    else if (jget(v, "cell")) {
+        Jv *fs = jget(v, "cell");
+        bput(b, "(cell");
+        for (i = 0; i < fs->nfs; i++) {
+            bputf(b, " (%s ", fs->fs[i].k);
+            if (!jval_sx(fs->fs[i].v, b, err)) return 0;
+            bput(b, ")");
+        }
+        bput(b, ")");
+    }
+    else { *err = xstrdup("wire val shape"); return 0; }
+    return 1;
+}
+
 int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
     Jv *items = jarr(ast, "items");
     Buf graph = {0,0,0}, oracle = {0,0,0};
@@ -681,19 +721,7 @@ int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
                     for (j = 0; j < args->nfs; j++) {
                         bputf(&oracle, "(%s ", args->fs[j].k);
                         /* leaf arg values as sx vals — small writer */
-                        {
-                            Jv *v = args->fs[j].v;
-                            /* only scalars for now: {"int":5} {"str":"s"} */
-                            if (jget(v, "int"))
-                                bputf(&oracle, "(int %lld)",
-                                      (long long)jget(v, "int")->num);
-                            else if (jget(v, "str"))
-                                bputf(&oracle, "(str \"%s\")", jget(v, "str")->s);
-                            else if (jget(v, "bool"))
-                                bputf(&oracle, "(bool %s)",
-                                      jget(v, "bool")->b ? "true" : "false");
-                            else { *err = xstrdup("oracle arg val"); return 0; }
-                        }
+                        if (!jval_sx(args->fs[j].v, &oracle, err)) return 0;
                         bput(&oracle, ") ");
                     }
                 }
@@ -701,22 +729,15 @@ int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
                 /* result: {"bare":v} {"tag":"b","payload":v} {"void":true} */
                 if (jget(res, "void")) bput(&oracle, "(void)");
                 else if (jget(res, "bare")) {
-                    Jv *v = jget(res, "bare");
                     bput(&oracle, "(bare ");
-                    if (jget(v, "int")) bputf(&oracle, "(int %lld)", (long long)jget(v, "int")->num);
-                    else if (jget(v, "str")) bputf(&oracle, "(str \"%s\")", jget(v, "str")->s);
-                    else if (jget(v, "bool")) bputf(&oracle, "(bool %s)", jget(v, "bool")->b ? "true" : "false");
-                    else { *err = xstrdup("oracle bare val"); return 0; }
+                    if (!jval_sx(jget(res, "bare"), &oracle, err)) return 0;
                     bput(&oracle, ")");
                 } else if (jget(res, "tag")) {
                     Jv *v = jget(res, "payload");
                     bputf(&oracle, "(tag %s", jstr(res, "tag"));
                     if (v) {
                         bput(&oracle, " ");
-                        if (jget(v, "int")) bputf(&oracle, "(int %lld)", (long long)jget(v, "int")->num);
-                        else if (jget(v, "str")) bputf(&oracle, "(str \"%s\")", jget(v, "str")->s);
-                        else if (jget(v, "bool")) bputf(&oracle, "(bool %s)", jget(v, "bool")->b ? "true" : "false");
-                        else { *err = xstrdup("oracle payload val"); return 0; }
+                        if (!jval_sx(v, &oracle, err)) return 0;
                     }
                     bput(&oracle, ")");
                 } else { *err = xstrdup("oracle result"); return 0; }
@@ -733,12 +754,8 @@ int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
         bputf(&ea, "(entry %s", entry);
         if (args && args->k == 5) {
             for (i = 0; i < args->nfs; i++) {
-                Jv *v = args->fs[i].v;
                 bputf(&ea, " (%s ", args->fs[i].k);
-                if (jget(v, "int")) bputf(&ea, "(int %lld)", (long long)jget(v, "int")->num);
-                else if (jget(v, "str")) bputf(&ea, "(str \"%s\")", jget(v, "str")->s);
-                else if (jget(v, "bool")) bputf(&ea, "(bool %s)", jget(v, "bool")->b ? "true" : "false");
-                else { *err = xstrdup("entry arg val"); return 0; }
+                if (!jval_sx(args->fs[i].v, &ea, err)) return 0;
                 bput(&ea, ")");
             }
         }
@@ -754,26 +771,15 @@ int lower(Jv *ast, Jv *cspec, Buf *out, char **err) {
         else if (jget(expect, "void"))
             bput(out, "(void)");
         else if (jget(expect, "bare")) {
-            Jv *v = jget(expect, "bare");
             bput(out, "(bare ");
-            if (jget(v, "int")) bputf(out, "(int %lld)", (long long)jget(v, "int")->num);
-            else if (jget(v, "float")) {
-                Jv *fl = jget(v, "float");
-                bputf(out, "(float %lld %lld)",
-                      (long long)fl->xs[0]->num, (long long)fl->xs[1]->num);
-            }
-            else if (jget(v, "str")) bputf(out, "(str \"%s\")", jget(v, "str")->s);
-            else if (jget(v, "bool")) bputf(out, "(bool %s)", jget(v, "bool")->b ? "true" : "false");
-            else { *err = xstrdup("expect bare val"); return 0; }
+            if (!jval_sx(jget(expect, "bare"), out, err)) return 0;
             bput(out, ")");
         } else if (jget(expect, "tag")) {
             Jv *v = jget(expect, "payload");
             bputf(out, "(tag %s", jstr(expect, "tag"));
             if (v) {
                 bput(out, " ");
-                if (jget(v, "int")) bputf(out, "(int %lld)", (long long)v->num);
-                else if (jget(v, "str")) bputf(out, "(str \"%s\")", jget(v, "str")->s);
-                else { *err = xstrdup("expect payload val"); return 0; }
+                if (!jval_sx(v, out, err)) return 0;
             }
             bput(out, ")");
         } else { *err = xstrdup("expect row"); return 0; }

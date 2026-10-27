@@ -540,15 +540,28 @@ def writeLeaf (group leaf row : String) (src : Option String)
   IO.FS.writeFile (dir ++ "/cases.json")
     ("{\"cases\":{\"" ++ leaf ++ "\":" ++ row ++ "}}\n")
 
+/-- FNV-1a-64 over UTF-8 — the generated-artifact freshness stamp.
+Not crypto; a content hash is enough to catch `kemit.c` drifting
+from `input.k` when someone regenerates one side only. -/
+def fnv1a64 (s : String) : UInt64 :=
+  s.toUTF8.foldl (fun h b => (h ^^^ b.toUInt64) * 0x100000001b3)
+    0xcbf29ce484222325
+
 def main : IO Unit := do
   let fuel := 64
   -- 200_emit — the emission-fixpoint corpus: accepts across the
   -- expr subset + every refusal shape kEmit owns, each a named leaf
-  let emitNames := ["accept_int", "accept_neg", "accept_bin",
+  let emitNames := ["accept_int", "emit_neg_lit", "accept_bin",
     "accept_nested", "accept_div", "accept_mod", "accept_uneg",
-    "accept_unested", "refuse_entry", "refuse_args", "refuse_graph",
+    "accept_unested",
+    -- H2 changed input: boundary + trunc-division witnesses
+    "accept_intmax", "accept_mixops", "accept_deep",
+    "accept_negdiv", "accept_negmod", "accept_negnest",
+    "refuse_entry", "refuse_args", "refuse_graph",
     "refuse_var", "refuse_op", "refuse_unop", "refuse_cond",
-    "refuse_child", "refuse_float", "refuse_str", "refuse_thunk"]
+    "refuse_child", "refuse_float", "refuse_str", "refuse_thunk",
+    "refuse_bool", "refuse_arrlit", "refuse_celllit",
+    "refuse_field", "refuse_index", "refuse_builtin"]
   let mut wi := 0
   for (p, i) in ISAR.koruEmitCorpus.zipIdx do
     if i == 1 then
@@ -591,7 +604,7 @@ def main : IO Unit := do
   -- kemit: the compiler as a koru program — emit_prog marks the row
   -- as the emitter, not an emission target.  Fuel sized for the
   -- recursive render walk the --emit leg drives.
-  writeLeaf "200_emit" "100_kemit"
+  writeLeaf "200_emit" "900_kemit"
     ("{\"entry\":\"emit\",\"fuel\":1024"
       ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
       ++ ",\"file\":\"input.k\",\"emit_prog\":true}")
@@ -612,5 +625,10 @@ def main : IO Unit := do
   match ISAR.emitProgC ISAR.kEmit 1024 with
   | .ok c =>
       IO.FS.createDirAll "host2/specs/gen"
-      IO.FS.writeFile "host2/specs/gen/kemit.c" c
+      -- stamp binds the artifact to its input: `input.fnv1a64` of the
+      -- 900_kemit/input.k text this run wrote — check.py's gen.stamp
+      -- leg fails if either side was regenerated without the other
+      IO.FS.writeFile "host2/specs/gen/kemit.c"
+        ("/* input.fnv1a64:" ++ toString (fnv1a64 kemitFile)
+          ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC refused: {ax}")

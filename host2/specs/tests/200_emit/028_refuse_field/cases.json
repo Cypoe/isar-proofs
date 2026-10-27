@@ -1,0 +1,1 @@
+{"cases":{"028_refuse_field":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":1}},"emit":"refuse","file":"input.k"}}}

@@ -49,12 +49,18 @@ The pipeline per case row:
           ccomp -S -> i386 gcc link+run) -> exit byte == expect's low
           byte (host DWORD vs shell exit are two observations of the
           same int; both recorded)
+  gen.stamp : kemit.c's input.fnv1a64 stamp must equal fnv of
+          900_kemit/input.k — a stale generated artifact fails,
+          never silently passes
   h1    : the COMPILED kemit — specs/gen/kemit.c is emitProgC(kEmit)
           generated C; `krun --quote claim | kemit_bin` must emit the
           same C text as `krun --emit` (or refuse, exit 4) on every
           row — compiled ≡ interpreted, the loop's first turn
   h1v   : the same compiled compiler through the CompCert row —
           a machine-checked-compiled compiler observing identically
+  h2    : the compiled compiler's OUTPUT back through the checked
+          backend — ccomp-built kemit's C -> ccomp -> i386 run ->
+          exit byte == expect.  Changed input -> H1' -> H2'
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -111,6 +117,16 @@ def _load(spec):
         return json.load(f)
 
 
+def _fnv1a64(b: bytes) -> int:
+    """FNV-1a-64 — the generated-artifact freshness stamp, twin of
+    the generator's.  Callers normalize CRLF first: the stamp binds
+    content, not checkout line-endings."""
+    h = 0xcbf29ce484222325
+    for x in b:
+        h = ((h ^ x) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
 def _target_row(tid):
     for t in _load("assembly.json")["targets"]:
         if t["id"] == tid:
@@ -142,6 +158,35 @@ def _docker_probe(images):
 
 def _docker_path(p):
     return p.replace("\\", "/")
+
+
+def _ccv_run(ccv_tc, src_name, asm_name, exe_name, lib_name):
+    """Run the declared compcert row end-to-end on a file already in
+    BUILD/: ccomp -S -> i386 gcc link (+libcompcert.a) -> execute.
+    Returns (stage, detail, exit): stage 'ok' carries the run's exit
+    code; 'compile'/'link' carry the refusing step's stderr."""
+    argv_c = [a.format(src=src_name, asm=asm_name, exe=exe_name)
+              for a in ccv_tc["compile"]["argv"]]
+    r1 = subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{_docker_path(BUILD)}:/src",
+         "-w", "/src", ccv_tc["compile"]["image"], *argv_c],
+        capture_output=True, text=True, timeout=180)
+    if r1.returncode != 0:
+        return ("compile", (r1.stderr or r1.stdout).strip()[:160], None)
+    argv_l = [a.format(asm=asm_name, exe=exe_name, lib=lib_name)
+              for a in ccv_tc["link_run"]["argv"]]
+    r2 = subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{_docker_path(BUILD)}:/src",
+         "-w", "/src", ccv_tc["link_run"]["image"], *argv_l],
+        capture_output=True, text=True, timeout=120)
+    if r2.returncode != 0:
+        return ("link", r2.stderr.strip()[:160], None)
+    r3 = subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{_docker_path(BUILD)}:/src",
+         "-w", "/src", ccv_tc["link_run"]["image"],
+         "sh", "-c", f"./{exe_name}"],
+        capture_output=True, timeout=60)
+    return ("ok", "", r3.returncode)
 
 
 def gate():
@@ -290,8 +335,24 @@ def gate():
     for row in _load("realizations.json")["rows"]:
         if row["id"] == "koru/authority":
             mech = row.get("arm", {}).get("mechanism")
-            if mech and os.path.exists(mech):
-                koruc = mech
+            if mech:
+                # the bare name may shadow a platform binary (an ELF
+                # 'koruc' beside 'koruc.exe') — prefer the host's
+                # executable spelling, then probe that it runs
+                cands = [mech + ".exe", mech] if os.name == "nt" \
+                    else [mech]
+                for cand in cands:
+                    if not os.path.exists(cand):
+                        continue
+                    try:
+                        p = subprocess.run([cand, "--version"],
+                                           capture_output=True,
+                                           timeout=20)
+                        if p.returncode in (0, 2):
+                            koruc = cand
+                            break
+                    except (OSError, subprocess.TimeoutExpired):
+                        continue
             break
     for src in sorted({os.path.join(d, "input.k")
                        for _, _, r, _, d in all_rows
@@ -495,45 +556,19 @@ def gate():
                 skip(f"{dkey}.ccv", "compcert provider/images unavailable")
                 continue
             try:
-                argv_c = [a.format(src=f"{bkey}.emit.c",
-                                   asm=f"{bkey}.ccv.s",
-                                   exe=f"{bkey}.ccv")
-                          for a in ccv_tc["compile"]["argv"]]
-                r1 = subprocess.run(
-                    ["docker", "run", "--rm",
-                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
-                     ccv_tc["compile"]["image"], *argv_c],
-                    capture_output=True, text=True, timeout=180)
-                if r1.returncode != 0:
-                    bad(f"{dkey}.ccv",
-                        f"ccomp refused: {(r1.stderr or r1.stdout).strip()[:160]}")
-                    continue
-                sname = f"{bkey}.ccv.s"
-                xname = f"{bkey}.ccv"
-                argv_l = [a.format(asm=sname, exe=xname,
-                                   lib=os.path.basename(ccv_lib))
-                          for a in ccv_tc["link_run"]["argv"]]
-                r2 = subprocess.run(
-                    ["docker", "run", "--rm",
-                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
-                     ccv_tc["link_run"]["image"], *argv_l],
-                    capture_output=True, text=True, timeout=120)
-                if r2.returncode != 0:
-                    bad(f"{dkey}.ccv",
-                        f"i386 link refused: {r2.stderr.strip()[:160]}")
-                    continue
-                r3 = subprocess.run(
-                    ["docker", "run", "--rm",
-                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
-                     ccv_tc["link_run"]["image"],
-                     "sh", "-c", f"./{xname}"],
-                    capture_output=True, timeout=60)
+                stage, detail, got3 = _ccv_run(
+                    ccv_tc, f"{bkey}.emit.c", f"{bkey}.ccv.s",
+                    f"{bkey}.ccv", os.path.basename(ccv_lib))
+                if stage == "compile":
+                    bad(f"{dkey}.ccv", f"ccomp refused: {detail}")
+                elif stage == "link":
+                    bad(f"{dkey}.ccv", f"i386 link refused: {detail}")
                 # linux i386 exit status is 8-bit: compare masked
-                got3 = r3.returncode & 0xFF
-                if got3 == (expect & 0xFF):
-                    ok(f"{dkey}.ccv", f"ccomp i386 exit {got3}")
+                elif (got3 & 0xFF) == (expect & 0xFF):
+                    ok(f"{dkey}.ccv", f"ccomp i386 exit {got3 & 0xFF}")
                 else:
-                    bad(f"{dkey}.ccv", f"exit {got3} != {expect & 0xFF}")
+                    bad(f"{dkey}.ccv",
+                        f"exit {got3 & 0xFF} != {expect & 0xFF}")
             except subprocess.TimeoutExpired:
                 bad(f"{dkey}.ccv", "docker step timed out")
 
@@ -553,6 +588,23 @@ def gate():
     if not os.path.isfile(kemit_c):
         skip("h1.build", "specs/gen/kemit.c not generated")
     else:
+        # gen.stamp: the artifact must be bound to its source — a
+        # stale kemit.c (input.k regenerated without re-running the
+        # generator, or hand-edited) fails here rather than silently
+        # passing on an unfaithful artifact.
+        ik_src = os.path.join(SPECS, "tests", "200_emit",
+                              "900_kemit", "input.k")
+        with open(kemit_c, encoding="utf-8") as f:
+            stamp = re.match(r"/\* input\.fnv1a64:(\d+) \*/",
+                             f.read(200))
+        ik = (open(ik_src, "rb").read().replace(b"\r\n", b"\n")
+              if os.path.isfile(ik_src) else b"")
+        if stamp and int(stamp.group(1)) == _fnv1a64(ik):
+            ok("gen.stamp", "kemit.c bound to 900_kemit/input.k")
+        else:
+            bad("gen.stamp",
+                "kemit.c stamp stale vs 900_kemit/input.k — "
+                "regenerate tools/DumpKoruFixtures")
         c = subprocess.run([tc["cc"], *tc["flags"], kemit_c,
                             "-o", h1_bin],
                            capture_output=True, text=True)
@@ -657,6 +709,40 @@ def gate():
                 bad(f"{dkey}.h1v",
                     f"exit={rv.returncode} "
                     f"got={rv.stdout.strip()[:60]!r}")
+
+            # ---- h2 leg: H1' -> H2' — the COMPILED compiler's own
+            # output rides the checked backend again: the ccomp-built
+            # kemit's emitted C -> ccomp -S -> i386 link+run -> exit
+            # byte == expect's low byte.  Two machine-checked-compiled
+            # stages in sequence: a verified-compiled compiler
+            # producing verified-compiled artifacts on changed input.
+            if want == "refuse" or rv.returncode != 0:
+                continue
+            exp2 = row.get("expect")
+            bare2 = exp2.get("bare") if isinstance(exp2, dict) else None
+            if not (isinstance(bare2, dict) and "int" in bare2):
+                skip(f"{dkey}.h2", "expect is not a bare int")
+                continue
+            h2key = os.path.splitext(os.path.basename(claim))[0]
+            with open(os.path.join(BUILD, f"{h2key}.h2.c"), "w",
+                      encoding="utf-8") as f:
+                f.write(rv.stdout)
+            try:
+                stage, detail, got2 = _ccv_run(
+                    ccv_tc, f"{h2key}.h2.c", f"{h2key}.h2.s",
+                    f"{h2key}.h2", os.path.basename(ccv_lib))
+                if stage == "compile":
+                    bad(f"{dkey}.h2", f"ccomp refused: {detail}")
+                elif stage == "link":
+                    bad(f"{dkey}.h2", f"i386 link refused: {detail}")
+                elif (got2 & 0xFF) == (bare2["int"] & 0xFF):
+                    ok(f"{dkey}.h2",
+                       f"ccomp-kemit->ccomp i386 exit {got2 & 0xFF}")
+                else:
+                    bad(f"{dkey}.h2",
+                        f"exit {got2 & 0xFF} != {bare2['int'] & 0xFF}")
+            except subprocess.TimeoutExpired:
+                bad(f"{dkey}.h2", "docker step timed out")
 
     # ---- refusal probes: the frontend refuses by default, and the
     # same surfaces koruc refuses refuse here (PARSE003/005 parity,

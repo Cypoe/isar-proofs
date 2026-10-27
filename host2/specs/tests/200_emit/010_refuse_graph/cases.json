@@ -1,1 +1,0 @@
-{"cases":{"010_refuse_graph":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":5}},"emit":"refuse","file":"input.k"}}}
