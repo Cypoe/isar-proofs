@@ -169,6 +169,19 @@ mirrors); checker owners named per row. Status: **✓** implemented /
 
 ## 5. What stays outside the theorem — declared vertices, not gaps
 
+**A note on "the compiler through ccomp."** Two different
+"C-compile" tasks are easy to conflate: `c_emitter`'s program
+fragment refuses concurrency because arbitrary koru *programs* use
+pump/rings/threads; a *compiler* is a batch transducer — stdin →
+stdout, sequential, deterministic — the "finite byte transducer"
+class G-CC-1 names as the oracle's first program. The concurrency
+axis doesn't exist for the artifact. Already demonstrated at small
+scale: `h1v`/`h2` legs compile generated `kemit.c` through
+`ccomp -S` and observe corpus-identical results on i386. The real
+bounds for a compiled korufe are emitProgC's program subset
+(arr/cell/str at scale), freestanding headers (solved), and the
+i386 image's <4GB address space — not concurrency.
+
 - `proc` bodies and host lines: the host boundary is a vertex in
   the graph, never a term in the theorem.
 - Zig/JS/CS emitters: upstream's realizations; the theorem covers
