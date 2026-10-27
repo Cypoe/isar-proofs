@@ -44,7 +44,11 @@ The pipeline per case row:
   emit  : krun kemit.claim --emit claim -> row's expected emit text
           ("refuse" for out-of-subset rows)
   cc    : emitted .c compiled by the assembly.json c99 toolchain row,
-          run -> exit DWORD == the literal
+          run -> exit DWORD == claim's expect value
+  ccv   : emitted .c through the machine-checked CompCert row (docker
+          ccomp -S -> i386 gcc link+run) -> exit byte == expect's low
+          byte (host DWORD vs shell exit are two observations of the
+          same int; both recorded)
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -101,11 +105,37 @@ def _load(spec):
         return json.load(f)
 
 
-def _c99_row():
+def _target_row(tid):
     for t in _load("assembly.json")["targets"]:
-        if t["id"] == "c99":
+        if t["id"] == tid:
             return t
     return None
+
+
+def _c99_row():
+    return _target_row("c99")
+
+
+def _docker_probe(images):
+    """None = docker unavailable; set of present images otherwise."""
+    try:
+        r = subprocess.run(["docker", "info"], capture_output=True,
+                           timeout=20)
+        if r.returncode != 0:
+            return None
+        have = set()
+        for img in images:
+            r = subprocess.run(["docker", "image", "inspect", img],
+                               capture_output=True, timeout=30)
+            if r.returncode == 0:
+                have.add(img)
+        return have
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _docker_path(p):
+    return p.replace("\\", "/")
 
 
 def gate():
@@ -138,6 +168,17 @@ def gate():
         bad("specs", "assembly.json has no c99 target row")
         return 1
     tc = target["toolchain"]
+
+    # compcert target row: images are declared data; presence is
+    # probed once and cached — missing provider skips, never fakes.
+    ccv_row = _target_row("compcert")
+    ccv_tc = (ccv_row or {}).get("toolchain") if (
+        ccv_row and ccv_row.get("realized")) else None
+    ccv_have = False
+    if ccv_tc:
+        imgs = [ccv_tc["compile"]["image"], ccv_tc["link_run"]["image"]]
+        have = _docker_probe(imgs)
+        ccv_have = have is not None and all(i in have for i in imgs)
 
     # ---- the suite walk: every leaf folder holding cases.json is a
     # case dir.  tests/ is two levels (<GGG>_<group>/<NNN>_<leaf>/);
@@ -398,11 +439,15 @@ def gate():
                 continue
 
             # ---- cc leg: assembly.json toolchain, run, exit DWORD ----
-            m = re.search(r"return (-?\d+)", want)
-            if not m:
-                skip(f"{dkey}.cc", "no return literal in emit text")
+            # expected exit code is the kernel-decided bare int of the
+            # case's own claim — observational equivalence, not text
+            # scraping of the emitted expr.
+            exp = row.get("expect")
+            bare = exp.get("bare") if isinstance(exp, dict) else None
+            if not (isinstance(bare, dict) and "int" in bare):
+                skip(f"{dkey}.cc", "expect is not a bare int")
                 continue
-            expect = int(m.group(1)) & 0xFFFFFFFF
+            expect = bare["int"] & 0xFFFFFFFF
             csrc = os.path.join(BUILD, f"{bkey}.emit.c")
             cexe = os.path.join(BUILD, f"{bkey}.emit.exe")
             with open(csrc, "w", encoding="utf-8") as f:
@@ -418,6 +463,55 @@ def gate():
                 ok(f"{dkey}.cc", f"exit {got}")
             else:
                 bad(f"{dkey}.cc", f"exit {got} != {expect}")
+
+            # ---- ccv leg: machine-checked CompCert compile ----
+            # ccomp -S emits verified i386 asm; a second docker image
+            # assembles+links+runs it (unverified witness of the
+            # artifact).  Provider/images come from the declared
+            # assembly.json compcert row; absence -> skip, never fake.
+            if not ccv_have:
+                skip(f"{dkey}.ccv", "compcert provider/images unavailable")
+                continue
+            try:
+                argv_c = [a.format(src=f"{bkey}.emit.c",
+                                   asm=f"{bkey}.ccv.s",
+                                   exe=f"{bkey}.ccv")
+                          for a in ccv_tc["compile"]["argv"]]
+                r1 = subprocess.run(
+                    ["docker", "run", "--rm",
+                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                     ccv_tc["compile"]["image"], *argv_c],
+                    capture_output=True, text=True, timeout=180)
+                if r1.returncode != 0:
+                    bad(f"{dkey}.ccv",
+                        f"ccomp refused: {(r1.stderr or r1.stdout).strip()[:160]}")
+                    continue
+                sname = f"{bkey}.ccv.s"
+                xname = f"{bkey}.ccv"
+                argv_l = ["sh", "-c", f"gcc {sname} -o {xname}"]
+                r2 = subprocess.run(
+                    ["docker", "run", "--rm",
+                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                     ccv_tc["link_run"]["image"], *argv_l],
+                    capture_output=True, text=True, timeout=120)
+                if r2.returncode != 0:
+                    bad(f"{dkey}.ccv",
+                        f"i386 link refused: {r2.stderr.strip()[:160]}")
+                    continue
+                r3 = subprocess.run(
+                    ["docker", "run", "--rm",
+                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                     ccv_tc["link_run"]["image"],
+                     "sh", "-c", f"./{xname}"],
+                    capture_output=True, timeout=60)
+                # linux i386 exit status is 8-bit: compare masked
+                got3 = r3.returncode & 0xFF
+                if got3 == (expect & 0xFF):
+                    ok(f"{dkey}.ccv", f"ccomp i386 exit {got3}")
+                else:
+                    bad(f"{dkey}.ccv", f"exit {got3} != {expect & 0xFF}")
+            except subprocess.TimeoutExpired:
+                bad(f"{dkey}.ccv", "docker step timed out")
 
     # ---- refusal probes: the frontend refuses by default, and the
     # same surfaces koruc refuses refuse here (PARSE003/005 parity,

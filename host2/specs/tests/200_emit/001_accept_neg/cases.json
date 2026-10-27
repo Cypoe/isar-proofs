@@ -1,1 +1,0 @@
-{"cases":{"001_accept_neg":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":-3}},"emit":"int main(void) { return -3; }","file":"input.k"}}}

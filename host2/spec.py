@@ -35,7 +35,9 @@ HOST2 = {
         "realizations.json": "interface -> row -> arm -> mechanism "
                              "catalog incl. declared provider gaps",
         "assembly.json": "target rows: c99 toolchain row the cc leg "
-                         "reads, x86_64-pe + compcert deferred rows",
+                         "reads, realized compcert row (docker "
+                         "ccomp -S + i386 gcc link/run), x86_64-pe "
+                         "deferred row",
     },
     "components": {
         "frontend": {
@@ -56,15 +58,25 @@ HOST2 = {
         "emission": {
             "status": "data",
             "impl": "specs/tests/200_emit/100_kemit/input.k — the "
-                    "compiler is a koru program evaluated by the C "
+                    "compiler is a 9-callable koru program (emit "
+                    "gate + recursive render walk + op-str/join4/"
+                    "paren-neg/wrap assemblers) evaluated by the C "
                     "witness, never reimplemented in C",
+        },
+        "machine_checked_backend": {
+            "status": "realized",
+            "impl": "assembly.json compcert row — docker "
+                    "ysli/compcert (CompCert 3.5, i386) ccomp -S "
+                    "emits verified asm; isar/ccrun-i386-gcc:1 "
+                    "links + runs it (unverified leg). amd64 "
+                    "target needs a fuller provider image",
         },
         "gate": {
             "status": "realized",
             "impl": "check.py — layout convention + koruc authority "
                     "+ parse/lower/claim + FlowCheck witness + "
-                    "emit/cc legs + refusal probes over the whole "
-                    "suite (tests+benches+ported)",
+                    "emit/cc/ccv legs + refusal probes over the "
+                    "whole suite (tests+benches+ported)",
         },
     },
     "witness_contract": "data crosses (.k source, ast.json, claims, "
@@ -81,9 +93,9 @@ HOST2 = {
                           "dies when a koru-spelled frontend "
                           "self-parses; until then it is host logic "
                           "beside the krun TUs",
-        "compcert_leg": "assembly.json declares the compcert row; "
-                        "wiring emitted C through machine-checked "
-                        "semantics is the open rung",
+        "compcert_amd64": "the docker compcert image targets i386; "
+                          "an amd64 machine-checked leg needs a "
+                          "provider image with 64-bit CompCert",
         "cref_leg": "FlowCheck --cref compares kernel-rendered "
                     "stdout vs emitted C writes; our emit writes "
                     "exit DWORDs, not stdout — outside its rendered "

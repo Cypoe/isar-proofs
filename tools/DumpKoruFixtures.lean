@@ -189,8 +189,18 @@ def ratDecimal (n d : Int) : Option String :=
 
 mutual
 def kValSrc : ISAR.KVal → String
-  | .int i => toString i
-  | .float n d => (ratDecimal n d).get!
+  | .int i =>
+      -- koru has no negative-literal spelling: `-` is always unary
+      -- `negate`.  An `int (-k)` in EXPR position is unspellable —
+      -- panic (the corpus row must spell `.un .neg` or ride a wire
+      -- leaf) rather than emit `-k` which parses back as `negate k`.
+      if i < 0
+      then panic! "negative int literal has no koru surface — spell .un .neg"
+      else toString i
+  | .float n d =>
+      if n < 0
+      then panic! "negative float literal has no koru surface — spell .un .neg"
+      else (ratDecimal n d).get!
   | .bool b => if b then "true" else "false"
   | .str s => "\"" ++ s ++ "\""
   | .arr xs => "[" ++ String.intercalate ", " (kValsSrc xs) ++ "]"
@@ -232,8 +242,8 @@ def kExprSrc : ISAR.KExpr → String
   | .var n => sxName n
   | .bin op a b =>
       "(" ++ kExprSrc a ++ " " ++ binSym op ++ " " ++ kExprSrc b ++ ")"
-  | .un .neg e => "-" ++ kAtomSrc e
-  | .un .not e => "!" ++ kAtomSrc e
+  | .un .neg e => "-(" ++ kExprSrc e ++ ")"
+  | .un .not e => "!(" ++ kExprSrc e ++ ")"
   | .cond c t e =>
       "if(" ++ kExprSrc c ++ ") " ++ kExprSrc t
         ++ " else " ++ kExprSrc e
@@ -272,6 +282,30 @@ def kGuardSrc : ISAR.KExpr → String
       kExprSrc a ++ " " ++ binSym op ++ " " ++ kExprSrc b
   | e => kExprSrc e
 
+/-- Chain-step printing: `conts` under an invoke arm spell koru's
+`|>` sequence — each cont is a `_chain`-named arm whose `bind` is
+the previous step's retbind (`f(): b` — koru puts the `: b` on the
+invocation, the wire carries it on the next arm). Linear only: a
+branching cont list, a non-invoke step, or a guarded/tagged step
+has no surface — panic, don't guess. -/
+def kContsSrc : List ISAR.KArm → String
+  | [] => ""
+  | [.mk _b ca bind cond node conts] =>
+      let bindf := match bind with
+        | none => ""
+        | some b => " : " ++ sxName b
+      let stepf := match node with
+        | some (.invoke t args) =>
+            " |> " ++ sxName t ++ "(" ++ kNamedExprsSrc args ++ ")"
+        | _ => panic! "koru chain step must invoke a callable"
+      (if ca || cond.isSome then
+        panic! "tagged/guarded chain step has no koru surface"
+       else "") ++ bindf ++ stepf ++ kContsSrc conts
+  | _ => panic! "branching cont list has no koru surface — wire row"
+termination_by l => sizeOf l
+decreasing_by
+  all_goals (simp_wf <;> omega)
+
 /-- One arm line incl. its `|`/`|*` marker — the residual arm is
 glued `|*` in real koru (`| *` is the retired deref spelling). -/
 def kArmSrc (a : ISAR.KArm) : String :=
@@ -287,20 +321,30 @@ def kArmSrc (a : ISAR.KArm) : String :=
     | none => ""
     | some e => " when " ++ kGuardSrc e
   let nodef := match a.node with
-    | none => ""
-    | some .terminal => ""
-    | some (.produce e) => " -> " ++ kExprSrc e
+    | none =>
+        (if a.conts.isEmpty then ""
+         else panic! "conts under a bare arm have no koru surface")
+    | some .terminal =>
+        (if a.conts.isEmpty then ""
+         else panic! "conts under a terminal arm have no koru surface")
+    | some (.produce e) =>
+        (if a.conts.isEmpty then ""
+         else panic! "conts under a produce arm have no koru surface")
+        ++ " -> " ++ kExprSrc e
     | some (.retCtor c e) =>
-        match e with
-        | .lit (.cell []) => " => " ++ sxName c
-        | _ => " => " ++ sxName c ++ " " ++ kExprSrc e
+        (if a.conts.isEmpty then ""
+         else panic! "conts under a ctor arm have no koru surface")
+        ++ match e with
+          | .lit (.cell []) => " => " ++ sxName c
+          | _ => " => " ++ sxName c ++ " " ++ kExprSrc e
     | some (.invoke t args) =>
         " |> " ++ sxName t ++ "(" ++ kNamedExprsSrc args ++ ")"
+          ++ kContsSrc a.conts
     | some (.jump l args) =>
-        " |> @" ++ sxName l ++ "(" ++ kNamedExprsSrc args ++ ")"
-  match a.conts with
-  | _ :: _ => panic! "nested continuation arms have no koru surface in the subset"
-  | [] => (if a.catchall then "|*" else "| ") ++ head ++ bindf ++ whenf ++ nodef
+        (if a.conts.isEmpty then ""
+         else panic! "conts under a jump arm have no koru surface")
+        ++ " |> @" ++ sxName l ++ "(" ++ kNamedExprsSrc args ++ ")"
+  (if a.catchall then "|*" else "| ") ++ head ++ bindf ++ whenf ++ nodef
 
 def kFlowSrc (f : ISAR.KFlow) : String :=
   (match f.preLabel with | none => "" | some l => "#" ++ sxName l ++ " ")
@@ -347,6 +391,13 @@ def kDeclOf (decls : List (String × ISAR.KDecl)) (entry : String)
   | none => if n == entry
       then { params := eargs.map fun (a, v) => (a, kArgTy v) } else {}
 
+/-- The `-> ty` annotation on a `tor` line — the declared return,
+or the literal-inferred one for bare impls when none is declared. -/
+def kRetAnn (d : ISAR.KDecl) (e : ISAR.KExpr) : String :=
+  match d.ret with
+  | some t => " -> " ++ t
+  | none => kRetTy e
+
 /-- A `tor` declaration plus its impl, for one graph entry.  Params
 and branch rows come from the resolved `KDecl` — the contract real
 koru checks at PARSE006/KORU021.  `declared := false` emits no `tor`
@@ -355,17 +406,19 @@ def kCallableSrc (name : String) (d : ISAR.KDecl)
     : ISAR.KCallable → String
   | .bare e =>
       (if d.declared then
-        "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params ++ kRetTy e
-          ++ kBranchesSrc d.branches ++ "\n" else "")
+        "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params
+          ++ kRetAnn d e ++ kBranchesSrc d.branches ++ "\n" else "")
         ++ sxName name ++ " -> " ++ kExprSrc e
   | .thunk =>
       if d.declared then
         "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params
+          ++ (d.ret.map (" -> " ++ ·)).getD ""
           ++ kBranchesSrc d.branches
       else ""
   | .subflow f =>
       (if d.declared then
         "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params
+          ++ (d.ret.map (" -> " ++ ·)).getD ""
           ++ kBranchesSrc d.branches ++ "\n" else "")
         ++ sxName name ++ " = " ++ kFlowSrc f
 
@@ -379,15 +432,19 @@ def kProgSrc (name : String) (p : ISAR.KProg)
         kCallableSrc n (kDeclOf decls p.entry p.args n) c)
     ++ "\n"
 
-/-- `kemit.k`: the compiler program spelled in koru.  `emit` takes a
-quoted program `src` — declared `program`-typed; arg-less invoke
-refuses (`src` unbound), the emit leg supplies it via `--emit`. -/
+/-- `kemit.k`: the compiler program spelled in koru — a real
+multi-callable program (`emit`'s gate → `render`'s recursive walk →
+assembler legs), not a bare-expr stub.  `emit` takes a quoted
+program `src` — declared `program`-typed; arg-less invoke refuses
+(`src` unbound), the emit leg supplies it via `--emit`. -/
 def kemitFile : String :=
   "// kemit.k — the C99 compiler as a koru program (generated)\n"
     ++ "// arg-less invoke refuses: `src` unbound; the emit leg\n"
     ++ "// supplies it via --emit (quote of the source program)\n"
-    ++ "tor emit { src: program } -> string\n"
-    ++ "emit -> " ++ kExprSrc ISAR.kEmitExpr ++ "\n"
+    ++ String.intercalate "\n\n" (ISAR.kEmit.graph.map fun (n, c) =>
+        kCallableSrc n (ISAR.kEmitDecls.find? (·.1 == n)
+          |>.map (·.2) |>.getD {}) c)
+    ++ "\n"
 
 /-! ## cases.json — the spec rows
 
@@ -485,21 +542,34 @@ def writeLeaf (group leaf row : String) (src : Option String)
 
 def main : IO Unit := do
   let fuel := 64
-  -- 200_emit — the emission-fixpoint corpus: accept + every refusal
-  -- shape kEmit owns, each as a named leaf
-  let emitNames := ["accept_int", "accept_neg", "refuse_entry",
-    "refuse_args", "refuse_graph", "refuse_expr", "refuse_float",
-    "refuse_thunk"]
+  -- 200_emit — the emission-fixpoint corpus: accepts across the
+  -- expr subset + every refusal shape kEmit owns, each a named leaf
+  let emitNames := ["accept_int", "accept_neg", "accept_bin",
+    "accept_nested", "accept_div", "accept_mod", "accept_uneg",
+    "accept_unested", "refuse_entry", "refuse_args", "refuse_graph",
+    "refuse_var", "refuse_op", "refuse_unop", "refuse_cond",
+    "refuse_child", "refuse_float", "refuse_str", "refuse_thunk"]
+  let mut wi := 0
   for (p, i) in ISAR.koruEmitCorpus.zipIdx do
-    let leaf := pad3 i ++ "_" ++ emitNames.getD i "unnamed"
-    writeLeaf "200_emit" leaf
-      (caseRow fuel p [] ",\"file\":\"input.k\"")
-      (some (kProgSrc leaf p))
+    if i == 1 then
+      -- `.lit (.int (-3))`: koru has no negative-literal spelling —
+      -- the member stays in the fixpoint corpus but rides a wire
+      -- leaf (claim declared, no surface file).
+      let leaf := pad3 wi ++ "_emit_neg_lit"
+      wi := wi + 1
+      writeLeaf "900_wire" leaf
+        (caseRow fuel p [] (",\"claim\":\"" ++ jsonEsc
+          (claimSxO p fuel (ISAR.evalKProg p [] fuel) []) ++ "\""))
+        none
+    else
+      let leaf := pad3 i ++ "_" ++ emitNames.getD i "unnamed"
+      writeLeaf "200_emit" leaf
+        (caseRow fuel p [] ",\"file\":\"input.k\"")
+        (some (kProgSrc leaf p))
   -- 100_flow — the flow-grammar corpus: every arm/dispatch shape the
   -- subset spells, oracle leaves riding the row.  Wire-only rows
   -- (no surface spelling) land in 900_wire with their own sequence.
   let mut fi := 0
-  let mut wi := 0
   for (key, r) in ISAR.koruFlowCorpus do
     let base := (key.drop 5).toString.map fun c =>
       if c == '-' then '_' else c
@@ -519,9 +589,10 @@ def main : IO Unit := do
         (caseRow fuel r.prog r.oracle ",\"file\":\"input.k\"")
         (some (kProgSrc leaf r.prog r.decls))
   -- kemit: the compiler as a koru program — emit_prog marks the row
-  -- as the emitter, not an emission target
+  -- as the emitter, not an emission target.  Fuel sized for the
+  -- recursive render walk the --emit leg drives.
   writeLeaf "200_emit" "100_kemit"
-    ("{\"entry\":\"emit\",\"fuel\":" ++ toString fuel
+    ("{\"entry\":\"emit\",\"fuel\":1024"
       ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
       ++ ",\"file\":\"input.k\",\"emit_prog\":true}")
     (some kemitFile)

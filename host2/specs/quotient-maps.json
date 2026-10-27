@@ -38,19 +38,19 @@
     },
     {
       "id": "kprog-to-c99",
-      "in": "quoted KProg (subset: main = bare (lit (int i)))",
+      "in": "quoted KProg (subset: main = bare closed-int expr: lit int | bin {+,-,*,/,%} | un neg, nested)",
       "out": "C99 source text | none (refuse)",
       "by": "specs/tests/200_emit/100_kemit/input.k evaluated as data under krun --emit",
-      "ref": "emitC99 in src/ISAR/KoruDialect.lean + kEmit shapeOk conjuncts (KoruEmit.lean)",
-      "notes": "the compiler is a koru program, not host code; refusals are structural (navigation none), agreeing with emitC99's match failure."
+      "ref": "emitC99/renderCExpr in src/ISAR/KoruDialect.lean + kEmit 9-callable walk (KoruEmit.lean)",
+      "notes": "the compiler is a koru program, not host code: emit gate -> recursive render walk -> op-str/join4/paren-neg/wrap assemblers. Refusals are structural (guard miss / arm exhaustion), agreeing with emitC99's Option.none."
     },
     {
       "id": "c99-to-image",
       "in": "emitted .c",
       "out": "executable + observed exit code",
-      "by": "assembly.json :: c99 target toolchain",
+      "by": "assembly.json :: c99 (clang) and compcert (docker ccomp -S -> i386 gcc link+run) target rows",
       "ref": "CompCert-accepted-subset constraint declared on the target row",
-      "notes": "the machine-checked leg; exit DWORD is the observational claim."
+      "notes": "the cc leg is the fast clang witness; the ccv leg is the machine-checked CompCert 3.5 compile (i386 asm) with an unverified gcc link+run witness. Exit status is the observational claim (8-bit on the i386/linux run leg, DWORD on win64)."
     }
   ]
 }

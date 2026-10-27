@@ -1,0 +1,1 @@
+{"cases":{"005_accept_mod":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":1}},"emit":"int main(void) { return (10 % 3); }","file":"input.k"}}}

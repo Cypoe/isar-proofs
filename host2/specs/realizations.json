@@ -61,9 +61,9 @@
         "host2"
       ],
       "arm": {
-        "mechanism": "specs/tests/200_emit/100_kemit/input.k as data under krun --emit",
-        "evidence": "gate legs: emit per accept case + cc + runtime",
-        "delta": "single-entry bare-int-literal subset; growth = match arm + shapeOk conjunct + corpus row"
+        "mechanism": "specs/tests/200_emit/100_kemit/input.k as data under krun --emit (9-callable program: emit gate + recursive render + op-str/join4/paren-neg/wrap)",
+        "evidence": "gate legs: emit per accept case + cc + ccv + runtime",
+        "delta": "single-entry closed-int-expr subset (lit|bin{+,-,*,/,%}|neg, nested); growth = new shape arm in render walk + corpus row"
       }
     },
     {
@@ -100,9 +100,9 @@
         "c99"
       ],
       "arm": {
-        "mechanism": "100_kemit/input.k emitted via krun, compiled by assembly c99 row",
-        "evidence": "gate emit+cc+run legs over koruEmitCorpus",
-        "delta": "corpus-level witness; forall-src theorem (SelfHostingC99) is the later rung"
+        "mechanism": "100_kemit/input.k emitted via krun, compiled by assembly c99 row AND compcert row (ccomp -S -> i386 gcc link+run)",
+        "evidence": "gate emit+cc+ccv+run legs over koruEmitCorpus (19 members: 8 accept + 11 refuse)",
+        "delta": "corpus-level witness; forall-src theorem (SelfHostingC99) is the later rung; machine-checked output verified to i386 asm, link+run is unverified gcc"
       }
     },
     {

@@ -1,0 +1,1 @@
+{"cases":{"003_accept_nested":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":21}},"emit":"int main(void) { return ((1 + 2) * (10 - 3)); }","file":"input.k"}}}

@@ -1,0 +1,1 @@
+{"cases":{"000_emit_neg_lit":{"entry":"main","fuel":64,"args":{},"expect":{"bare":{"int":-3}},"emit":"int main(void) { return -3; }","claim":"[flow-eval] ((entry main) (fuel 64) (result (bare (int -3))) (graph (def main (bare (lit (int -3))))) (oracle))"}}}

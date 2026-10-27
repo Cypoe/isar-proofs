@@ -9,6 +9,6 @@ classify = sign(x)
 sign -> (x < 0)
 
 tor main {}
-main = classify(x: -5)
+main = classify(x: -(5))
 | pos v -> v
 | neg v -> v

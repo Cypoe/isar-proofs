@@ -346,7 +346,13 @@ static int check_arms(DeclSeen *ds, int n, ArmD **arms, int narms,
     int i, j;
     for (i = 0; i < narms; i++) {
         ArmD *a = arms[i];
-        if (producer && producer->declared &&
+        /* KORU021 parity: arm branch names are checked against the
+           producer's declared union — but only when the producer
+           declares branches at all.  A declared-but-branchless tor
+           (`-> program`) returns a bare-typed value; arm names over
+           it are decorative dispatch labels koruc accepts (and
+           FlowKernel ignores under bare dispatch). */
+        if (producer && producer->declared && producer->nbranches > 0 &&
             !a->catchall && a->branch[0] &&
             !name_in(producer->branches, producer->nbranches, a->branch)) {
             *err = errcat2(xstrdup("tor '"), producer->n);

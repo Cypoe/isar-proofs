@@ -385,12 +385,10 @@ KExpr *parse_expr(Tks *s, char **err) {
         s->i++;
         a = parse_expr(s, err);
         if (!a) return 0;
-        /* -<int literal> folds — keeps `-3` surface working */
-        if (a->tag == 0) {
-            if (a->i == INT64_MIN) { fail_at(s, err, "int underflow"); return 0; }
-            a->i = -a->i;
-            return a;
-        }
+        /* koru parity: `-` always builds a unary-negate node — real
+           koru has no negative literal spelling (`-3` IS `negate(3)`
+           upstream).  No fold: folding would corrupt quotation for
+           the emit leg. */
         return ke_un(0, a);          /* neg */
     }
     return parse_bin(s, err, 1);

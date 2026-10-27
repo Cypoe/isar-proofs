@@ -151,16 +151,49 @@ def koruSurface : KSurface KProg where
   name := ".k"
   parse := fun _ => none
 
+/-- Render one closed integer expression into C expression text —
+the declared expression subset of `emitC99`:
+
+  * `.lit (.int i)`      → `i`
+  * `.bin op l r`        → `(l <op> r)` for `op ∈ {add,sub,mul,div,mod}`
+  * `.un .neg e`         → `(-e)`
+  * everything else      → `none` (var, bools, comparison/logical/
+    concat ops, `not`, cond, field, index, builtin, non-int lits)
+
+`div`/`mod` ride on `runK`'s `ktdiv`/`ktmod` — truncating division,
+C's `/`/`%` semantics exactly, so the rendered expression is
+observationally equal to the evaluated one inside `int` range.
+Every emitted node is parenthesized; C precedence never decides
+anything. -/
+def renderCExpr : KExpr → Option String
+  | .lit (.int i) => some (toString i)
+  | .bin op l r =>
+      let sym? : Option String := match op with
+        | .add => some "+" | .sub => some "-" | .mul => some "*"
+        | .div => some "/" | .mod => some "%" | _ => none
+      match sym?, renderCExpr l, renderCExpr r with
+      | some s, some ls, some rs =>
+          some ("(" ++ ls ++ " " ++ s ++ " " ++ rs ++ ")")
+      | _, _, _ => none
+  | .un .neg e =>
+      (renderCExpr e).map fun s => "(-" ++ s ++ ")"
+  | _ => none
+termination_by e => sizeOf e
+decreasing_by
+  all_goals (simp_wf <;> omega)
+
 /-- The C99 subset backend's emission — realized for a declared
-subset: a single-entry graph `[("main", .bare (.lit (.int i)))]`,
-entry `main`, empty args, emitted as `int main(void) { return i; }`.
+subset: a single-entry graph `[("main", .bare e)]`, entry `main`,
+empty args, with `e` in the `renderCExpr` subset (closed integer
+arithmetic). Emitted as `int main(void) { return <e>; }`.
 Everything else refuses. Emitted text stays inside the
 CompCert-accepted C subset (no VLA/`_Complex`/etc.) so the
 machine-checked leg to machine code remains available — that
 constraint is part of the row's contract. -/
 def emitC99 : KProg → Option String
-  | ⟨[("main", .bare (.lit (.int i)))], "main", []⟩ =>
-      some ("int main(void) { return " ++ toString i ++ "; }")
+  | ⟨[("main", .bare e)], "main", []⟩ =>
+      (renderCExpr e).map fun s =>
+        "int main(void) { return " ++ s ++ "; }"
   | _ => none
 
 /-- The C99 bootstrap backend: the first registered target row —

@@ -14,27 +14,33 @@ agreement:
     substrate: `asCall` presents `src` to `comp` as a quoted arg.
 
   * **`emitC99`**: the first realized emission row — for the declared
-    subset `main = bare (lit (int i))` (and nothing else) it emits
-    `int main(void) { return i; }`. Everything else refuses. The
-    emitted fragment is deep inside the CompCert-accepted C subset —
-    no VLA/`_Complex`/etc. — so the machine-checked leg
-    (`KProg → C99 → CompCert → machine code`) stays checkable end to
-    end. Subset growth is mechanical; the refusal contract is the
-    point.
+    subset `main = bare e` with `e` a closed integer expression
+    (`lit int`, `bin {add,sub,mul,div,mod}`, `un neg` — nested) it
+    emits `int main(void) { return <e>; }` through `renderCExpr`.
+    Everything else refuses. The emitted fragment is deep inside
+    the CompCert-accepted C subset — no VLA/`_Complex`/etc. — so the
+    machine-checked leg (`KProg → C99 → CompCert → machine code`)
+    stays checkable end to end. `div`/`mod` render to C's `/`/`%`
+    because `runK`'s `ktdiv`/`ktmod` are already truncating — the
+    same semantics CompCert models.
 
   * **`kEmit`**: the same emission *in the flow language* — a
-    `KProg` whose `emit` callable is a bare expr that shape-checks
-    the quoted source (tag/length/name navigation) and concatenates
-    the C text. Refusals align with `emitC99` because failed
-    navigation produces `none` exactly where the pattern match fails.
+    nine-callable `KProg` compiler: `emit`'s gate subflow hands the
+    quoted expr to `render`'s recursive walk (lit/bin/un dispatch
+    on the expr tag), `op-str` maps op numbers to C symbols, and
+    `join4`/`paren-neg`/`wrap` assemble the text. Refusals align
+    with `emitC99` because a failed gate or a non-matching render
+    arm produces `none` exactly where the pattern match fails —
+    structural, not asserted.
 
   * **The witnessed fixpoint**: `SelfHostingOn` — `SelfHosting`
     restricted to a declared corpus — is discharged by
-    `native_decide` over `koruEmitCorpus` (one accept + seven
-    refuse directions). `SelfHostingC99` stays stated at full
-    strength: the `∀ src` discharge is the compiler-correctness
-    theorem, a later rung — this corpus check is the honest witness,
-    the same discipline as the corpus-facing FlowCheck leg.
+    `native_decide` over `koruEmitCorpus` (accepts across the
+    expression subset + refusal walls in both directions).
+    `SelfHostingC99` stays stated at full strength: the `∀ src`
+    discharge is the compiler-correctness theorem, a later rung —
+    this corpus check is the honest witness, the same discipline
+    as the corpus-facing FlowCheck leg.
 
 What is deliberately absent: no string-payload emission (the wire
 has no char-level ops to C-escape safely — the escape row is a
@@ -143,12 +149,13 @@ def quoteProg (p : KProg) : KVal :=
 
 `emitC99` lives in `KoruDialect` beside the `koruC99` row it
 implements (import direction: this file builds on the registry).
-Declared subset: a single-entry graph
-`[("main", .bare (.lit (.int i)))]`, entry `main`, empty args —
-emitted as `int main(void) { return i; }`. Everything else refuses.
-The emitted fragment is deep inside the CompCert-accepted C subset —
-the machine-checked leg (`KProg → C99 → CompCert → machine code`)
-stays checkable end to end. -/
+Declared subset: a single-entry graph `[("main", .bare e)]`, entry
+`main`, empty args, with `e` in `renderCExpr`'s closed-int subset —
+emitted as `int main(void) { return <e>; }`. Everything else
+refuses. The emitted fragment is deep inside the CompCert-accepted
+C subset — the machine-checked leg
+(`KProg → C99 → CompCert → machine code`) stays checkable end to
+end. -/
 
 /-! ## The calling convention and the renderer -/
 
@@ -197,56 +204,135 @@ def qand (a b : KExpr) : KExpr := .bin .and a b
 def qcat (a b : KExpr) : KExpr := .bin .concat a b
 
 /- The navigation paths into the quoted program — each is an expr
-that evaluates to a piece of `src`'s quotation. -/
+that evaluates to a piece of `src`'s quotation. `emit`'s flow binds
+the echoed program as `s` (via the `ident` head), so paths navigate
+`s`, not `src` — the flow-level spelling. -/
 namespace KEmit
 
-def graphN : KExpr := qi (qf (.var "src") "kids") 0
-def entryN : KExpr := qi (qf (.var "src") "kids") 1
-def argsN : KExpr := qi (qf (.var "src") "kids") 2
+def skids : KExpr := qf (.var "s") "kids"
+def graphN : KExpr := qi skids 0
+def entryN : KExpr := qi skids 1
+def argsN : KExpr := qi skids 2
 def pair0 : KExpr := qi graphN 0
 def callN : KExpr := qf pair0 "v"
 def exprN : KExpr := qi (qf callN "kids") 0
-def valN : KExpr := qi (qf exprN "kids") 0
-def intN : KExpr := qi (qf valN "kids") 0
 
-/-- The shape check: `src` is `qnode 30 [arr[pair "main" (node27
-[node8 [node1 [int]]])], "main", arr[]]`. Any navigation failure
-or tag mismatch refuses — mirroring `emitC99`'s match. -/
+/-- `e.kids[i]` inside `render`'s walk (`e` is render's param). -/
+def ek (i : Int) : KExpr := qi (qf (.var "e") "kids") i
+
+/-- `emit`'s gate: `src` is `qnode 30 [arr[pair "main" (node27 [_])],
+"main", arr[]]` — the *program* shape `emitC99`'s match draws. The
+expression subset is `render`'s wall, not this gate's — the same
+separation `renderCExpr` draws inside `emitC99`. -/
 def shapeOk : KExpr :=
-  qand (qeq (qf (.var "src") "tag") (.lit (.int 30))) (
-  qand (qeq (qlen (qf (.var "src") "kids")) (.lit (.int 3))) (
+  qand (qeq (qf (.var "s") "tag") (.lit (.int 30))) (
+  qand (qeq (qlen skids) (.lit (.int 3))) (
   qand (qeq (qlen graphN) (.lit (.int 1))) (
   qand (qeq (qf pair0 "name") (.lit (.str "main"))) (
   qand (qeq entryN (.lit (.str "main"))) (
   qand (qeq (qlen argsN) (.lit (.int 0))) (
   qand (qeq (qf callN "tag") (.lit (.int 27))) (
-  qand (qeq (qlen (qf callN "kids")) (.lit (.int 1))) (
-  qand (qeq (qf exprN "tag") (.lit (.int 8))) (
-  qand (qeq (qlen (qf exprN "kids")) (.lit (.int 1))) (
-  qand (qeq (qf valN "tag") (.lit (.int 1))) (
-        (qeq (qlen (qf valN "kids")) (.lit (.int 1)))
-  )))))))))))
-
-/-- The produced string — `int main(void) { return <i>; }`. -/
-def produced : KExpr :=
-  qcat (.lit (.str "int main(void) { return ")) (
-       qcat (qitoa intN) (.lit (.str "; }")))
-
-/-- A navigation that cannot succeed — the refusal arm. `src` is a
-quoted program cell; `__missing` is never a field → `none`.  Spelled
-this way (rather than `(0).x`) because real koru refuses
-field-access on a literal in produce position as call-shaped
-(KORU104). -/
-def refused : KExpr := .field (.var "src") "__missing"
+        (qeq (qlen (qf callN "kids")) (.lit (.int 1)))
+  )))))))
 
 end KEmit
 
-/-- `emit`'s body: shape-check → produce | refuse. -/
-def kEmitExpr : KExpr := .cond KEmit.shapeOk KEmit.produced KEmit.refused
+/-- `emit`: gate the program shape on the echoed `src`, then hand
+`main`'s expr node to the recursive `render` walk and wrap the
+result in the `main` skeleton. Refusal is structural: a failed gate
+leaves no `go` arm (refuse); a bad expr kills `render` (refuse) —
+the same `none` `emitC99` produces. -/
+def kEmitEmit : KCallable := .subflow {
+  preLabel := none
+  head := ("ident", [("x", .var "src")])
+  arms := [ .mk "go" false (some "s") (some KEmit.shapeOk)
+      (some (.invoke "render" [("e", KEmit.exprN)]))
+      [ .mk "_chain" false (some "c") none
+          (some (.invoke "wrap" [("c", .var "c")])) [] ] ] }
 
-/-- The compiler program: one bare `emit` callable. -/
+/-- `render`: the recursive walk — dispatch on the expr tag,
+guarded arms own the subset:
+
+  * `lit`: tag 8 and the value is an int (`kids[0].tag == 1`) →
+    `@intToString` of the payload. Float/bool/str/cell/arr values
+    fail the guard → refuse.
+  * `bin`: tag 10 → `op-str` maps the op number (refusing ops
+    outside 0–4), then render each child and `join4` the parens.
+  * `un`: tag 11 and op is `neg` (0) → render the child, wrap
+    `(-…)`. `not` (1) fails the guard → refuse.
+  * every other tag (var 9, cond 12, field 13, index 14, builtin
+    15) fails all guards → refuse.
+
+All walls are structural — a non-matching arm `skip`s and the walk
+runs out of arms, exactly where `renderCExpr` returns `none`. -/
+def kEmitRender : KCallable := .subflow {
+  preLabel := none
+  head := ("tag-num", [("e", .var "e")])
+  arms := [
+    .mk "lit" false (some "t")
+      (some (qand (qeq (.var "t") (.lit (.int 8)))
+                  (qeq (qf (KEmit.ek 0) "tag") (.lit (.int 1)))))
+      (some (.produce (qitoa (qi (qf (KEmit.ek 0) "kids") 0)))) []
+  , .mk "bin" false (some "t")
+      (some (qeq (.var "t") (.lit (.int 10))))
+      (some (.invoke "op-str" [("n", KEmit.ek 0)]))
+      [ .mk "_chain" false (some "op") none
+          (some (.invoke "render" [("e", KEmit.ek 1)]))
+          [ .mk "_chain" false (some "l") none
+              (some (.invoke "render" [("e", KEmit.ek 2)]))
+              [ .mk "_chain" false (some "r") none
+                  (some (.invoke "join4"
+                    [("l", .var "l"), ("op", .var "op"),
+                     ("r", .var "r")]))
+                  [] ] ] ]
+  , .mk "un" false (some "t")
+      (some (qand (qeq (.var "t") (.lit (.int 11)))
+                  (qeq (KEmit.ek 0) (.lit (.int 0)))))
+      (some (.invoke "render" [("e", KEmit.ek 1)]))
+      [ .mk "_chain" false (some "s") none
+          (some (.invoke "paren-neg" [("s", .var "s")])) [] ]
+  ] }
+
+/-- `op-str`: the arithmetic binop table as a walk — `idnum` echoes
+the op number and each arm's `when` selects its C symbol. Ops
+outside `0–4` (comparisons, logicals, concat) match no arm →
+refuse; the same wall `renderCExpr`'s `sym?` draws. -/
+def kEmitOpStr : KCallable := .subflow {
+  preLabel := none
+  head := ("idnum", [("x", .var "n")])
+  arms := [
+    .mk "add" false (some "m") (some (qeq (.var "m") (.lit (.int 0))))
+      (some (.produce (.lit (.str "+")))) []
+  , .mk "sub" false (some "m") (some (qeq (.var "m") (.lit (.int 1))))
+      (some (.produce (.lit (.str "-")))) []
+  , .mk "mul" false (some "m") (some (qeq (.var "m") (.lit (.int 2))))
+      (some (.produce (.lit (.str "*")))) []
+  , .mk "div" false (some "m") (some (qeq (.var "m") (.lit (.int 3))))
+      (some (.produce (.lit (.str "/")))) []
+  , .mk "mod" false (some "m") (some (qeq (.var "m") (.lit (.int 4))))
+      (some (.produce (.lit (.str "%")))) []
+  ] }
+
+/-- The compiler program — a real multi-callable koru program:
+`emit`'s gate → `render`'s recursive walk → the `op-str`/`join4`/
+`paren-neg`/`wrap` assembler legs. Nine callables; refusal is
+structural throughout, matching `emitC99`'s `Option`. -/
 def kEmit : KProg := {
-  graph := [("emit", .bare kEmitExpr)]
+  graph := [
+    ("emit", kEmitEmit),
+    ("render", kEmitRender),
+    ("op-str", kEmitOpStr),
+    ("ident", .bare (.var "x")),
+    ("tag-num", .bare (qf (.var "e") "tag")),
+    ("idnum", .bare (.var "x")),
+    ("join4", .bare (qcat (.lit (.str "("))
+      (qcat (.var "l") (qcat (.lit (.str " "))
+      (qcat (.var "op") (qcat (.lit (.str " "))
+      (qcat (.var "r") (.lit (.str ")"))))))))),
+    ("paren-neg", .bare (qcat (.lit (.str "(-"))
+      (qcat (.var "s") (.lit (.str ")"))))),
+    ("wrap", .bare (qcat (.lit (.str "int main(void) { return "))
+      (qcat (.var "c") (.lit (.str "; }"))))) ]
   entry := "emit"
   args := [] }
 
@@ -267,34 +353,57 @@ def SelfHostingOn (emit : KProg → Option String)
         (.invoke (asCall src).1 (asCall src).2))).bind renderRes
         = emit src
 
-/-- The corpus: accept + every refusal shape the subset owns. -/
+/-- The corpus: accepts across the expression subset + every
+refusal shape it owns — program-shape walls and expression-shape
+walls exercised independently, including nested-refusal
+propagation (`bin` with a non-subset child). -/
 def koruEmitCorpus : List KProg :=
-  [ -- accept: the subset's one shape
+  [ -- accept: closed int arithmetic — lit, all five binops, neg,
+    -- nesting
     ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
   , ⟨[("main", .bare (.lit (.int (-3))))], "main", []⟩
-    -- refuse: wrong entry name
-  , ⟨[("main", .bare (.lit (.int 5)))], "other", []⟩
-    -- refuse: entry args present
-  , ⟨[("main", .bare (.lit (.int 5)))], "main", [("x", .int 1)]⟩
-    -- refuse: graph not singleton
-  , ⟨[("main", .bare (.lit (.int 5))), ("aux", .thunk)], "main", []⟩
-    -- refuse: callable not a bare int literal (bin expr)
   , ⟨[("main", .bare (.bin .add (.lit (.int 1)) (.lit (.int 2))))],
      "main", []⟩
-    -- refuse: the value is not an int (float literal)
+  , ⟨[("main", .bare (.bin .mul
+        (.bin .add (.lit (.int 1)) (.lit (.int 2)))
+        (.bin .sub (.lit (.int 10)) (.lit (.int 3)))))], "main", []⟩
+  , ⟨[("main", .bare (.bin .div (.lit (.int 10)) (.lit (.int 3))))],
+     "main", []⟩
+  , ⟨[("main", .bare (.bin .mod (.lit (.int 10)) (.lit (.int 3))))],
+     "main", []⟩
+  , ⟨[("main", .bare (.un .neg (.lit (.int 4))))], "main", []⟩
+  , ⟨[("main", .bare (.un .neg
+        (.bin .add (.lit (.int 1)) (.lit (.int 2)))))], "main", []⟩
+    -- refuse: program shape
+  , ⟨[("main", .bare (.lit (.int 5)))], "other", []⟩
+  , ⟨[("main", .bare (.lit (.int 5)))], "main", [("x", .int 1)]⟩
+  , ⟨[("main", .bare (.lit (.int 5))), ("aux", .thunk)], "main", []⟩
+    -- refuse: expression subset walls
+  , ⟨[("main", .bare (.var "x"))], "main", []⟩
+  , ⟨[("main", .bare (.bin .eq (.lit (.int 1)) (.lit (.int 1))))],
+     "main", []⟩
+  , ⟨[("main", .bare (.un .not (.lit (.bool true))))], "main", []⟩
+  , ⟨[("main", .bare (.cond (.lit (.bool true)) (.lit (.int 1))
+        (.lit (.int 2))))], "main", []⟩
+    -- refuse: nested child outside the subset propagates
+  , ⟨[("main", .bare (.bin .add (.lit (.int 1)) (.var "x")))],
+     "main", []⟩
   , ⟨[("main", .bare (.lit (.float 1 2)))], "main", []⟩
-    -- refuse: not a callable at all in the right slot (thunk)
+  , ⟨[("main", .bare (.lit (.str "hi")))], "main", []⟩
   , ⟨[("main", .thunk)], "main", []⟩ ]
 
 /-- The witnessed fixpoint: `kEmit` on every corpus member agrees
-with `emitC99` — accepted C text byte-for-byte, refusals `none`. -/
+with `emitC99` — accepted C text byte-for-byte, refusals `none`.
+Fuel is sized for the recursive walk: each `render` recursion level
+rides invoke frames plus the chain steps. -/
 theorem koru_emit_fixpoint :
     SelfHostingOn emitC99 emitCall renderC99 koruEmitCorpus := by
-  refine ⟨kEmit, 64, ?_⟩
+  refine ⟨kEmit, 1024, ?_⟩
   intro src h
   simp only [koruEmitCorpus, List.mem_cons,
              List.not_mem_nil, or_false] at h
-  rcases h with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+  rcases h with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+    | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
     native_decide
 
 /-! ## The flow-grammar corpus — the whole declared subset, gated
@@ -323,6 +432,25 @@ structure KDecl where
   declared : Bool := true
   params : List (String × String) := []
   branches : List (String × Option String) := []
+  /-- Return annotation on the `tor` line (`-> string`); `none`
+  omits it (koru infers). -/
+  ret : Option String := none
+
+/-- `kEmit`'s declared `tor` contracts — every callable's params
+and return annotation spelled as data so the surface file is a
+real, `koruc`-checked koru program. `expr`/`program`/`string`/
+`i64` are koru's own type names. -/
+def kEmitDecls : List (String × KDecl) := [
+    ("emit", { params := [("src", "program")], ret := some "string" })
+  , ("render", { params := [("e", "expr")], ret := some "string" })
+  , ("op-str", { params := [("n", "i64")], ret := some "string" })
+  , ("ident", { params := [("x", "program")], ret := some "program" })
+  , ("tag-num", { params := [("e", "expr")], ret := some "i64" })
+  , ("idnum", { params := [("x", "i64")], ret := some "i64" })
+  , ("join4", { params := [("l", "string"), ("op", "string"),
+                            ("r", "string")], ret := some "string" })
+  , ("paren-neg", { params := [("s", "string")], ret := some "string" })
+  , ("wrap", { params := [("c", "string")], ret := some "string" }) ]
 
 /-- One flow-grammar corpus row: program + asserted oracle leaves +
 the declared `tor` contracts the surface file must carry. -/
@@ -394,7 +522,7 @@ def flowCtor : KFlowRow where
     , ("sign", .bare (.bin .lt (.var "x") (.lit (.int 0))))
     , ("main", .subflow {
           preLabel := none
-          head := ("classify", [("x", .lit (.int (-5)))])
+          head := ("classify", [("x", .un .neg (.lit (.int 5)))])
           arms := [ .mk "pos" false (some "v") none
             (some (.produce (.var "v"))) []
           , .mk "neg" false (some "v") none
