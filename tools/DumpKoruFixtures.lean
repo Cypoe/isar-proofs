@@ -1,4 +1,4 @@
-import ISAR.KoruEmit
+import ISAR.KoruProgEmit
 
 /-!
 # DumpKoruFixtures — the Lean→host2 data crossing
@@ -604,3 +604,13 @@ def main : IO Unit := do
       ++ ",\"expect\":{\"bare\":{\"int\":6}},\"emit\":\"refuse\""
       ++ ",\"file\":\"input.k\",\"forged\":true}")
     (some (kProgSrc "000_wrong_expect" forged))
+  -- specs/gen — the compiler as COMPILED CODE: emitProgC lowers the
+  -- whole kEmit program (callables, dispatch, chains, exprs) to C99
+  -- plus the declared runtime prelude.  The gate compiles it through
+  -- clang AND the CompCert row and runs it on every corpus quote —
+  -- the H1 leg: a koru-spelled compiler executing as an artifact.
+  match ISAR.emitProgC ISAR.kEmit 1024 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/kemit.c" c
+  | .error ax => throw (IO.userError s!"emitProgC refused: {ax}")

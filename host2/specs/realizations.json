@@ -106,6 +106,20 @@
       }
     },
     {
+      "id": "host2/emitprog-c99",
+      "interface": "emitprog-c99",
+      "stack": [
+        "lean",
+        "host2",
+        "c99"
+      ],
+      "arm": {
+        "mechanism": "ISAR.KoruProgEmit.emitProgC : KProg -> Except String String — program-structure codegen (per-callable functions, unrolled dispatchTag/dispatchBare mirroring runK, chains as nested dispatch sites, fuel counter) over the declared runtime prelude (Val union, sexpr decoder, builtins); output = specs/gen/kemit.c, a freestanding C99 source",
+        "evidence": "gate h1 legs: clang AND ccomp each build kemit.c into a reusable compiler binary; `krun --quote claim | kemit_bin` observes the interpreted `krun --emit` output on every corpus row (accepts byte-identical, refuses exit 4); h1.ccv = the CompCert-compiled compiler observing identically on i386",
+        "delta": "corpus-bounded: the emitted program covers exactly the KExpr/arm subset kEmit uses (vars, int/str lits, field, index, len, intToString, bin {and,eq,concat}, invoke/produce, bind+when+conts); outside forms refuse at codegen with a named axis. The runtime prelude is a declared template, not verified; the C->asm span of the program logic is verified under ccomp, link+run is unverified gcc + libcompcert.a"
+      }
+    },
+    {
       "id": "koru/flowcheck",
       "interface": "flow-witness",
       "stack": [

@@ -44,14 +44,16 @@
           "image": "ysli/compcert:latest",
           "argv": ["ccomp", "-S", "{src}", "-o", "{asm}"],
           "entrypoint": "ccomp",
-          "note": "CompCert 3.5, i386 target; -c to .o also works, -o exe fails (image lacks i386 crt)"
+          "note": "CompCert 3.5, i386 target; -c to .o also works, -o exe fails (image lacks i386 crt); verified span = parsed C -> asm. Emitted program sources are FREESTANDING (stddef.h + extern protos) so no hosted-header preprocessing is needed at all"
         },
         "link_run": {
           "image": "isar/ccrun-i386-gcc:1",
-          "argv": ["gcc", "{asm}", "-o", "{exe}"],
+          "argv": ["gcc", "{asm}", "{lib}", "-o", "{exe}"],
+          "lib": "libcompcert.a",
+          "lib_from": "ysli/compcert:latest:/home/coq/.opam/4.05.0/lib/compcert/libcompcert.a",
           "run": "./{exe} -> exit DWORD",
           "rebuild": "docker run --name ccrun-build i386/debian:bookworm-slim sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc libc6-dev' && docker commit ccrun-build isar/ccrun-i386-gcc:1 && docker rm ccrun-build",
-          "note": "unverified link+run leg (binutils ld), kept separate from the verified compile"
+          "note": "unverified link+run leg (binutils ld), kept separate from the verified compile; libcompcert.a is CompCert's own i386 runtime helpers (64-bit div/mod)"
         },
         "host_requirements": ["docker daemon", "linux/i386 exec support (present on x86_64 docker)"],
         "skip_when": "either image absent -> skip, never fake with another compiler"
@@ -60,7 +62,7 @@
         "requires emitted subset to stay inside CompCert-accepted C99",
         "CompCert 3.5 emits i386 asm; link+run leg is unverified gcc/binutils"
       ],
-      "notes": "the machine-checked assembly leg: KProg -> C99 -> ccomp -S -> .s (verified) -> gcc i386 link+run (unverified witness of the artifact)"
+      "notes": "the machine-checked assembly leg: KProg -> C99 (freestanding, no pp needed) -> ccomp -S -> .s (verified) -> gcc i386 link+run with libcompcert.a (unverified witness of the artifact)"
     }
   ]
 }

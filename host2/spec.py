@@ -53,7 +53,9 @@ HOST2 = {
                     "reader, total decoders, runK/evalKE twin, "
                     "quoteProg twin; claim mode re-decides, emit "
                     "mode quotes SRC and invokes the compiler "
-                    "program's entry",
+                    "program's entry, --quote emits the "
+                    "(cell (src <quote>)) wire value the compiled "
+                    "compiler consumes on stdin",
         },
         "emission": {
             "status": "data",
@@ -63,20 +65,30 @@ HOST2 = {
                     "paren-neg/wrap assemblers) evaluated by the C "
                     "witness, never reimplemented in C",
         },
+        "emission_compiled": {
+            "status": "realized",
+            "impl": "src/ISAR/KoruProgEmit.emitProgC — Lean codegen "
+                    "KProg -> freestanding C99 (callables + unrolled "
+                    "dispatch mirroring runK + declared runtime "
+                    "prelude, NOT an interpreter); specs/gen/kemit.c "
+                    "built by clang AND ccomp; h1 legs compare "
+                    "compiled ≡ interpreted emission per row",
+        },
         "machine_checked_backend": {
             "status": "realized",
             "impl": "assembly.json compcert row — docker "
                     "ysli/compcert (CompCert 3.5, i386) ccomp -S "
                     "emits verified asm; isar/ccrun-i386-gcc:1 "
-                    "links + runs it (unverified leg). amd64 "
-                    "target needs a fuller provider image",
+                    "links + runs it (unverified leg, libcompcert.a "
+                    "runtime helpers). amd64 target needs a fuller "
+                    "provider image",
         },
         "gate": {
             "status": "realized",
             "impl": "check.py — layout convention + koruc authority "
                     "+ parse/lower/claim + FlowCheck witness + "
-                    "emit/cc/ccv legs + refusal probes over the "
-                    "whole suite (tests+benches+ported)",
+                    "emit/cc/ccv/h1/h1v legs + refusal probes over "
+                    "the whole suite (tests+benches+ported)",
         },
     },
     "witness_contract": "data crosses (.k source, ast.json, claims, "
@@ -100,6 +112,18 @@ HOST2 = {
                     "stdout vs emitted C writes; our emit writes "
                     "exit DWORDs, not stdout — outside its rendered "
                     "subset today",
+        "runtime_prelude_verified": "emitProgC's runtime prelude "
+                                    "(Val union, sexpr decoder, "
+                                    "builtins) is a declared C "
+                                    "template — observed faithful on "
+                                    "the corpus, not mechanically "
+                                    "verified; only the generated "
+                                    "program logic rides ccomp's "
+                                    "verified span",
+        "emitprog_general": "emitProgC covers exactly the kEmit "
+                            "subset; thunk callables, float/bool "
+                            "runtime, retCtor, and jump nodes "
+                            "refuse at codegen with a named axis",
     },
 }
 

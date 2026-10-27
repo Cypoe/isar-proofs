@@ -49,6 +49,12 @@ The pipeline per case row:
           ccomp -S -> i386 gcc link+run) -> exit byte == expect's low
           byte (host DWORD vs shell exit are two observations of the
           same int; both recorded)
+  h1    : the COMPILED kemit — specs/gen/kemit.c is emitProgC(kEmit)
+          generated C; `krun --quote claim | kemit_bin` must emit the
+          same C text as `krun --emit` (or refuse, exit 4) on every
+          row — compiled ≡ interpreted, the loop's first turn
+  h1v   : the same compiled compiler through the CompCert row —
+          a machine-checked-compiled compiler observing identically
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -175,10 +181,26 @@ def gate():
     ccv_tc = (ccv_row or {}).get("toolchain") if (
         ccv_row and ccv_row.get("realized")) else None
     ccv_have = False
+    ccv_lib = None
     if ccv_tc:
         imgs = [ccv_tc["compile"]["image"], ccv_tc["link_run"]["image"]]
         have = _docker_probe(imgs)
         ccv_have = have is not None and all(i in have for i in imgs)
+    if ccv_have:
+        # CompCert's i386 runtime helpers (64-bit div/mod) — pulled
+        # from the declared image path once, cached in build/.
+        lspec = ccv_tc["link_run"].get("lib_from", "")
+        lname = ccv_tc["link_run"].get("lib", "libcompcert.a")
+        ccv_lib = os.path.join(BUILD, lname)
+        if not os.path.isfile(ccv_lib) and lspec:
+            img, _, lpath = lspec.rpartition(":")
+            subprocess.run(
+                ["docker", "run", "--rm",
+                 "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                 img, "sh", "-c", f"cp {lpath} /src/{lname}"],
+                capture_output=True, timeout=120)
+        if not os.path.isfile(ccv_lib):
+            ccv_lib = None
 
     # ---- the suite walk: every leaf folder holding cases.json is a
     # case dir.  tests/ is two levels (<GGG>_<group>/<NNN>_<leaf>/);
@@ -469,7 +491,7 @@ def gate():
             # assembles+links+runs it (unverified witness of the
             # artifact).  Provider/images come from the declared
             # assembly.json compcert row; absence -> skip, never fake.
-            if not ccv_have:
+            if not ccv_have or not ccv_lib:
                 skip(f"{dkey}.ccv", "compcert provider/images unavailable")
                 continue
             try:
@@ -488,7 +510,9 @@ def gate():
                     continue
                 sname = f"{bkey}.ccv.s"
                 xname = f"{bkey}.ccv"
-                argv_l = ["sh", "-c", f"gcc {sname} -o {xname}"]
+                argv_l = [a.format(asm=sname, exe=xname,
+                                   lib=os.path.basename(ccv_lib))
+                          for a in ccv_tc["link_run"]["argv"]]
                 r2 = subprocess.run(
                     ["docker", "run", "--rm",
                      "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
@@ -512,6 +536,127 @@ def gate():
                     bad(f"{dkey}.ccv", f"exit {got3} != {expect & 0xFF}")
             except subprocess.TimeoutExpired:
                 bad(f"{dkey}.ccv", "docker step timed out")
+
+    # ---- h1 legs: the COMPILED kemit ----
+    # specs/gen/kemit.c is ISAR.KoruProgEmit.emitProgC(kEmit) — the
+    # koru-spelled compiler as generated C99 (callables, unrolled
+    # dispatch, chains — program logic, not an interpreter) plus the
+    # declared runtime prelude.  Feeding each claim's quotation
+    # (`krun --quote`) to the compiled binary must observe the same
+    # emission as `krun kemit.claim --emit` — compiled ≡ interpreted
+    # on the whole corpus.  The compiler binary itself also rides
+    # the CompCert row: a machine-checked-compiled compiler.
+    kemit_c = os.path.join(SPECS, "gen", "kemit.c")
+    h1_bin = os.path.join(BUILD,
+                          "kemit_h1.exe" if os.name == "nt" else "kemit_h1")
+    have_h1 = False
+    if not os.path.isfile(kemit_c):
+        skip("h1.build", "specs/gen/kemit.c not generated")
+    else:
+        c = subprocess.run([tc["cc"], *tc["flags"], kemit_c,
+                            "-o", h1_bin],
+                           capture_output=True, text=True)
+        if c.returncode != 0:
+            bad("h1.build",
+                f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
+        else:
+            ok("h1.build", "emitProgC(kEmit) via c99 toolchain")
+            have_h1 = True
+
+    # the same artifact through the machine-checked backend
+    have_h1v = False
+    h1v_name = "kemit_h1_ccv"
+    if not ccv_have or not ccv_lib:
+        skip("h1.ccv", "compcert provider/images unavailable")
+    else:
+        try:
+            shutil.copy(kemit_c, os.path.join(BUILD, "kemit_h1.c"))
+            argv_c = [a.format(src="kemit_h1.c", asm="kemit_h1_ccv.s",
+                               exe=h1v_name)
+                      for a in ccv_tc["compile"]["argv"]]
+            r1 = subprocess.run(
+                ["docker", "run", "--rm",
+                 "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                 ccv_tc["compile"]["image"], *argv_c],
+                capture_output=True, text=True, timeout=300)
+            if r1.returncode != 0:
+                bad("h1.ccv",
+                    f"ccomp refused: {(r1.stderr or r1.stdout).strip()[:160]}")
+            else:
+                argv_l = [a.format(asm="kemit_h1_ccv.s", exe=h1v_name,
+                                   lib=os.path.basename(ccv_lib))
+                          for a in ccv_tc["link_run"]["argv"]]
+                r2 = subprocess.run(
+                    ["docker", "run", "--rm",
+                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                     ccv_tc["link_run"]["image"], *argv_l],
+                    capture_output=True, text=True, timeout=120)
+                if r2.returncode != 0:
+                    bad("h1.ccv",
+                        f"i386 link refused: {r2.stderr.strip()[:160]}")
+                else:
+                    ok("h1.ccv", "emitProgC(kEmit) via ccomp (verified)")
+                    have_h1v = True
+        except subprocess.TimeoutExpired:
+            bad("h1.ccv", "docker step timed out")
+
+    # observational equivalence per row: compiled ≡ interpreted emit
+    for (dkey, rowname), (claim, row) in sorted(built.items()):
+        if row.get("emit_prog") or row.get("forged"):
+            continue
+        want = row.get("emit")
+        if want is None:
+            continue
+        if not have_h1:
+            skip(f"{dkey}.h1", "kemit binary not built")
+        else:
+            q = subprocess.run([KRUN, "--quote", claim],
+                               capture_output=True, text=True)
+            if q.returncode != 0:
+                bad(f"{dkey}.h1",
+                    f"--quote refused: {q.stderr.strip()[:80]}")
+                continue
+            rb = subprocess.run([h1_bin], input=q.stdout,
+                                capture_output=True, text=True)
+            if want == "refuse":
+                if rb.returncode == 4:
+                    ok(f"{dkey}.h1", "compiled kemit refuses")
+                else:
+                    bad(f"{dkey}.h1",
+                        f"expected refusal, exit={rb.returncode} "
+                        f"{rb.stdout.strip()[:60]!r}")
+            elif rb.returncode == 0 and rb.stdout.strip() == want:
+                ok(f"{dkey}.h1", want[:60])
+            else:
+                bad(f"{dkey}.h1",
+                    f"exit={rb.returncode} "
+                    f"got={rb.stdout.strip()[:60]!r}")
+            if not have_h1v:
+                continue
+            try:
+                rv = subprocess.run(
+                    ["docker", "run", "--rm", "-i",
+                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                     ccv_tc["link_run"]["image"],
+                     "sh", "-c", f"./{h1v_name}"],
+                    input=q.stdout, capture_output=True, text=True,
+                    timeout=60)
+            except subprocess.TimeoutExpired:
+                bad(f"{dkey}.h1v", "docker run timed out")
+                continue
+            if want == "refuse":
+                if rv.returncode == 4:
+                    ok(f"{dkey}.h1v", "ccomp kemit refuses")
+                else:
+                    bad(f"{dkey}.h1v",
+                        f"expected refusal, exit={rv.returncode} "
+                        f"{rv.stdout.strip()[:60]!r}")
+            elif rv.returncode == 0 and rv.stdout.strip() == want:
+                ok(f"{dkey}.h1v", f"ccomp: {want[:50]}")
+            else:
+                bad(f"{dkey}.h1v",
+                    f"exit={rv.returncode} "
+                    f"got={rv.stdout.strip()[:60]!r}")
 
     # ---- refusal probes: the frontend refuses by default, and the
     # same surfaces koruc refuses refuse here (PARSE003/005 parity,

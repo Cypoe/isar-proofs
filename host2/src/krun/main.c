@@ -47,13 +47,16 @@ static void print_result(Result *r, FILE *f) {
 /* ================= claim check + main =================
    krun FILE.k            — parse the [flow-eval] claim, re-decide,
                             compare with asserted result.
-   krun FILE.k --emit SRC.k
+   krun FILE.k --emit CLAIM
                           — take THIS file's program (a compiler such
-                            as kemit.k), quote SRC.k's program, feed
+                            as kemit.k), quote CLAIM's program, feed
                             it as `src` arg, print the str payload
                             (the emitted C). This is the host-side
                             fixpoint leg: the compiler is data, the C
-                            binary only interprets. */
+                            binary only interprets.
+   krun --quote CLAIM    — print CLAIM's program as the wire value
+                            `(cell (src <quote>))` a compiled-program
+                            binary (emitProgC) consumes on stdin. */
 
 int main(int argc, char **argv) {
     char *buf;
@@ -61,13 +64,37 @@ int main(int argc, char **argv) {
     Claim c;
     Result got;
 
-    if (argc != 2 && argc != 4) {
-        fputs("usage: krun FILE.k | krun FILE.k --emit SRC.k\n", stderr);
+    if (argc != 2 && argc != 3 && argc != 4) {
+        fputs("usage: krun FILE.k | krun FILE.k --emit SRC.k"
+              " | krun --quote CLAIM\n", stderr);
         return 2;
     }
     if (argc == 4 && strcmp(argv[2], "--emit") != 0) {
-        fputs("usage: krun FILE.k | krun FILE.k --emit SRC.k\n", stderr);
+        fputs("usage: krun FILE.k | krun FILE.k --emit SRC.k"
+              " | krun --quote CLAIM\n", stderr);
         return 2;
+    }
+    if (argc == 3 && strcmp(argv[1], "--quote") != 0) {
+        fputs("usage: krun FILE.k | krun FILE.k --emit SRC.k"
+              " | krun --quote CLAIM\n", stderr);
+        return 2;
+    }
+
+    /* --quote CLAIM: print the entry args cell `(cell (src <quote>))`
+       a compiled-program binary (ISAR.KoruProgEmit) consumes on
+       stdin — the input wire for the H1 leg. */
+    if (argc == 3) {
+        char *qbuf; Sx *qsx; Claim qc;
+        qbuf = file_read_all(argv[2]);
+        qsx = qbuf ? parse_top(qbuf) : 0;
+        if (!qsx || !sx_claim(qsx, &qc)) {
+            fprintf(stderr, "refuse: %s not a [flow-eval] claim\n", argv[2]);
+            return 2;
+        }
+        fputs("(cell (src ", stdout);
+        print_val(quote_prog(&qc.prog), stdout);
+        fputs("))\n", stdout);
+        return 0;
     }
 
     buf = file_read_all(argv[1]);
