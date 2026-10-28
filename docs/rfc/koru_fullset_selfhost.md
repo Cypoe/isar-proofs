@@ -41,6 +41,17 @@ means fullset-*for-what-is-modeled*), and by the proc boundary (host
 is a declared vertex, not an obligation). What remains — surface
 parse, claim lower, kernel-modeled eval, emission — is ownable.
 
+**Two ladders, same shape — do not conflate.** The witness chain
+`frontend-as-data → emitProgC → ccomp → self-parse` certifies the
+*artifact*: CompCert's theorem covers C→i386, and emitProgC's
+correctness stays corpus-observed — a verified-compiled binary of
+an observed-correct compiler. Option 1 certifies the *map*:
+`∀ src, runK(src) ≡ targetSem(emit(src))` removes the corpus bound
+on the correctness axis entirely. The ccomp chain is the witness
+ladder's ceiling — useful, deployable, and worth walking (it is
+the korufe-as-data path regardless); it is not the rung G, which
+is a different claim proved in a different place.
+
 ## 2. Construct census — semantics → owning file → host2 status
 
 Grammar authority is `ast.zig` (`Item`/`Node`/`ExprNode`/`Continuation`);
