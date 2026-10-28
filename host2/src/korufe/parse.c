@@ -131,12 +131,16 @@ static KExpr *parse_call_args(Tks *s, char **err, KExpr *e /* the call node */) 
 static KExpr *parse_primary(Tks *s, char **err) {
     Tk *t = peek(s);
     if (at(s, "(")) {
-        KExpr *e;
+        /* source parens are DATA — the canon carries grouped nodes
+           and the text projections re-emit them verbatim */
+        KExpr *e, *g;
         s->i++;
         e = parse_expr(s, err);
         if (!e) return 0;
         if (!eat(s, ")")) { fail_at(s, err, "expected ')'"); return 0; }
-        return e;
+        g = ke_new(14);
+        g->a = e;
+        return g;
     }
     if (at(s, "[")) {
         KExpr *e = ke_new(0);   /* lit arr — stored in xs */
@@ -395,8 +399,24 @@ static KExpr *parse_bin(Tks *s, char **err, int minprec) {
 }
 
 KExpr *parse_expr(Tks *s, char **err) {
+    /* every parse_expr root carries its byte span — the authority's
+       value/condition/plain_value fields are raw source slices */
+    long lo;
+    KExpr *e;
     snl(s);
-    return parse_bin(s, err, 1);
+    lo = peek(s)->pos;
+    e = parse_bin(s, err, 1);
+    if (e) {
+        /* hi = end of the last REAL token — parse_bin's trailing
+           snl may have consumed newlines the span must not carry */
+        int j = s->i - 1;
+        Tk *last;
+        while (j >= 0 && s->t[j].kind == 6) j--;
+        last = &s->t[j >= 0 ? j : 0];
+        e->lo = lo;
+        e->hi = last->pos + (long)strlen(last->text);
+    }
+    return e;
 }
 
 /* ================= item parser =================

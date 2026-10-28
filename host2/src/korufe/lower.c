@@ -36,6 +36,8 @@ static void sx_lit(KExpr *e, Buf *b, char **err) {
             bput(b, ")");
         }
         bput(b, ")"); break;
+    case 14:
+        sx_lit(e->a, b, err); break;   /* grouped is surface trivia */
     default:
         *err = xstrdup("non-literal inside literal position");
         break;
@@ -49,6 +51,8 @@ static void sx_expr(KExpr *e, Buf *b, char **err) {
     switch (e->tag) {
     case 0: case 11: case 12: case 13: case 9: case 10:
         bput(b, "(lit "); sx_lit(e, b, err); bput(b, ")"); break;
+    case 14:
+        sx_expr(e->a, b, err); break;  /* grouped is surface trivia */
     case 1: bputf(b, "(var %s)", e->s); break;
     case 2:
         bputf(b, "(bin %s ", ops[e->op]); sx_expr(e->a, b, err);

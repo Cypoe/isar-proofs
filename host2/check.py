@@ -77,8 +77,13 @@ The pipeline per case row:
   kwj   : the JSON race — the same corpus through `korufe
           --ast-json` vs `koruc --ast-json`, deep-equal modulo the
           path-dependent location.file.  The readable view is the
-          authority/interop document; rows are the internal wire —
-          two independent evidence boundaries
+          authority/interop document
+  kwc   : the CANON race — `korufe --ast-canon` vs `koruc
+          --ast-canon`, deep-equal with zero normalization.  The
+          reflective dump is lossless: retbind, jump args, and
+          expression trees (parsed_expression/condition_expr) all
+          compare — the full-shape boundary, and the target the
+          typed-koru reifier should emit
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -1448,6 +1453,46 @@ def gate():
                 r = ast_view_diff(da, db)
                 if r is None:
                     ok(tag, "ast-json agree")
+                else:
+                    bad(tag, f"first diff @{r[0]}: "
+                             f"{r[1]!r} vs {r[2]!r}"[:200])
+
+    # ---- canon race: `korufe --ast-canon` vs `koruc --ast-canon`
+    # on the same corpus — the LOSSLESS document (retbind, jump
+    # args, expression trees; trivia-stripped so locations never
+    # figure).  Deep-equal with NO normalization: this is the full-
+    # shape boundary — the same document the typed-koru lane's
+    # reifier should target, rows→trees being a data transform. ----
+    if not koruc:
+        skip("kwc", "koruc toolchain not on this machine")
+    else:
+        for ik in sorted(glob.glob(
+                os.path.join(SPECS, "tests", "**", "input.k"),
+                recursive=True)):
+            rel = os.path.relpath(ik, os.path.join(SPECS, "tests"))
+            tag = "kwc." + rel.replace("\\", "/").replace(
+                "/", ".").replace("input.k", "").rstrip(".")
+            ra = subprocess.run(
+                [koruc, "--ast-canon", os.path.abspath(ik)],
+                capture_output=True, text=True)
+            rb = subprocess.run([KORUFE, "--ast-canon", ik],
+                                capture_output=True, text=True)
+            auth_bad, fe_bad = ra.returncode != 0, rb.returncode != 0
+            if auth_bad != fe_bad:
+                bad(tag, f"refusal mismatch auth={auth_bad} "
+                         f"fe={fe_bad} {rb.stderr.strip()[:80]}")
+            elif auth_bad:
+                ok(tag, "refusal parity")
+            else:
+                try:
+                    da = json.loads(ra.stdout)
+                    db = json.loads(rb.stdout)
+                except Exception as e:
+                    bad(tag, f"canon not JSON: {e}")
+                    continue
+                r = ast_view_diff(da, db)
+                if r is None:
+                    ok(tag, "ast-canon agree")
                 else:
                     bad(tag, f"first diff @{r[0]}: "
                              f"{r[1]!r} vs {r[2]!r}"[:200])

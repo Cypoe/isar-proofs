@@ -23,17 +23,23 @@ static const char *base_name(const char *p) {
 
 int main(int argc, char **argv) {
     char *err = 0;
-    if (argc == 2 || (argc == 3 && !strcmp(argv[1], "--ast-json"))) {
-        /* parse → ast.json (canon) or --ast-json (the readable
-           projection koruc --ast-json emits — the cross-lane
-           verification document) */
-        int view = argc == 3;
+    if (argc == 2 || (argc == 3 &&
+        (!strcmp(argv[1], "--ast-json") ||
+         !strcmp(argv[1], "--ast-canon")))) {
+        /* parse → ast.json (korufe's own shape, the --lower input)
+           --ast-json  : the readable projection koruc --ast-json
+                         emits — the cross-lane interop document
+           --ast-canon : the reflective tree dump koruc --ast-canon
+                         emits — lossless (retbind, jump args,
+                         expression trees) */
+        int mode = argc == 3 ? (!strcmp(argv[1], "--ast-canon") ? 2 : 1) : 0;
         const char *path = argv[argc - 1];
         char *src = file_read(path);
         Tks *ts;
         Item *items;
         const char *mod;
         if (!src) { fprintf(stderr, "refuse: cannot read %s\n", path); return 2; }
+        korufe_src = src;      /* raw-span text fields slice this */
         ts = lex_k(src, path, &err);
         if (!ts) { fprintf(stderr, "refuse: %s\n", err); return 2; }
         items = parse_program(ts, &err);
@@ -43,7 +49,8 @@ int main(int argc, char **argv) {
             char *dot = strrchr(b, '.');
             mod = dot ? xstrndup(b, (size_t)(dot - b)) : b;
         }
-        if (view) write_ast_json_view(items, mod, stdout);
+        if (mode == 2) write_ast_canon(items, mod, stdout);
+        else if (mode == 1) write_ast_json_view(items, mod, stdout);
         else write_ast_json(items, mod, stdout);
         fputc('\n', stdout);
         return 0;
@@ -75,6 +82,8 @@ int main(int argc, char **argv) {
         return 0;
     }
     fputs("usage: korufe FILE.k\n"
+          "       korufe --ast-json FILE.k\n"
+          "       korufe --ast-canon FILE.k\n"
           "       korufe --lower FILE.ast.json CASES.json KEY\n",
           stderr);
     return 2;

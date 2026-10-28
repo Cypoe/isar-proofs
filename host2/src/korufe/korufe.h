@@ -52,7 +52,8 @@ typedef struct KExpr KExpr;
 typedef struct { char *n; KExpr *e; } NArg;
 struct KExpr {
     int tag;              /* 0 lit 1 var 2 bin 3 un 4 cond 5 field 6 index
-                             7 builtin 8 call(invocation) */
+                             7 builtin 8 call(invocation) 9 arr 10 cell
+                             11 bool 12 float 13 str 14 grouped */
     int64_t i, d;         /* int; float num/den */
     int b;                /* bool */
     char *s;              /* str / var / field name / call-or-builtin name */
@@ -61,7 +62,14 @@ struct KExpr {
     NArg *args; int nargs;                          /* call args */
     KExpr **xs; int nxs;                              /* arr literal */
     struct { char *n; KExpr *e; } *fs; int nfs;       /* cell literal */
+    long lo, hi;          /* byte span — the authority's text fields are
+                             raw source slices, not a printer */
 };
+
+/* the lexed source buffer — set by main.c so the JSON writers can
+   emit raw expression spans (koruc's value/condition/plain_value
+   fields are verbatim source text) */
+extern const char *korufe_src;
 
 /* invocation: qname (mod/path:name dotted-or-slashed → wire keeps last
    segment as callable name; qualifier is recorded, resolution refuses
@@ -124,6 +132,7 @@ KExpr *parse_expr(Tks *s, char **err);
 /* ---- astio.c ---- */
 void write_ast_json(Item *items, const char *file, FILE *f);
 void write_ast_json_view(Item *items, const char *file, FILE *f);
+void write_ast_canon(Item *items, const char *file, FILE *f);
 
 typedef struct Jv Jv;
 struct Jv {
