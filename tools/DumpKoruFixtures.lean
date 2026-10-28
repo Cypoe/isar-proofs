@@ -446,6 +446,23 @@ def kemitFile : String :=
           |>.map (·.2) |>.getD {}) c)
     ++ "\n"
 
+/-- `klex.k`: the sexpr lexer spelled in koru — jump-loop scan over
+`(arr int)` char codes, sexpr tokens as `out` text.  `chars` is
+`[]const i64` — koru's own slice spelling, documentary in the
+untyped subset. -/
+def klexFile : String :=
+  "// klex.k — a koru-spelled sexpr lexer over char codes (generated)\n"
+    ++ "// chars arrives as (arr int) on the wire; the host does\n"
+    ++ "// bytes->codes.  arg-less invoke refuses: `chars` unbound.\n"
+    ++ String.intercalate "\n\n" (ISAR.kLex.graph.map fun (n, c) =>
+        kCallableSrc n (ISAR.kLexDecls.find? (·.1 == n)
+          |>.map (·.2) |>.getD {}) c)
+    ++ "\n"
+
+/-- A test input as the wire value: chars → `(arr int)` codes. -/
+def klexChars (s : String) : ISAR.KVal :=
+  .arr (s.toList.map fun c => .int (Int.ofNat c.toNat))
+
 /-! ## cases.json — the spec rows
 
 One row per corpus file: entry call, fuel, expected result, expected
@@ -540,6 +557,20 @@ def writeLeaf (group leaf row : String) (src : Option String)
   IO.FS.writeFile (dir ++ "/cases.json")
     ("{\"cases\":{\"" ++ leaf ++ "\":" ++ row ++ "}}\n")
 
+/-- A leaf whose cases.json carries several rows — the klex leaf:
+one `emit_prog` program row plus per-input rows over the same
+`input.k`. -/
+def writeLeafRows (group leaf : String) (rows : List (String × String))
+    (src : Option String) : IO Unit := do
+  let dir := "host2/specs/tests/" ++ group ++ "/" ++ leaf
+  IO.FS.createDirAll dir
+  match src with
+  | some s => IO.FS.writeFile (dir ++ "/input.k") s
+  | none => pure ()
+  IO.FS.writeFile (dir ++ "/cases.json")
+    ("{\"cases\":{" ++ String.intercalate ","
+      (rows.map fun (n, r) => "\"" ++ n ++ "\":" ++ r) ++ "}}\n")
+
 /-- FNV-1a-64 over UTF-8 — the generated-artifact freshness stamp.
 Not crypto; a content hash is enough to catch `kemit.c` drifting
 from `input.k` when someone regenerates one side only. -/
@@ -609,6 +640,24 @@ def main : IO Unit := do
       ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
       ++ ",\"file\":\"input.k\",\"emit_prog\":true}")
     (some kemitFile)
+  -- klex: the lexer as a koru program — the emit_prog row marks
+  -- the program for gen/klex.c; sibling rows are the inputs the
+  -- compiled artifact re-decides via `krun --args` cells.  Fuel
+  -- sized for the per-char scan loop over the longest input.
+  writeLeafRows "200_emit" "901_klex"
+    ([("901_klex",
+       "{\"entry\":\"main\",\"fuel\":512"
+       ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
+       ++ ",\"file\":\"input.k\",\"emit_prog\":true,\"emit_args\":true}")]
+     ++ ([("(1 + 22)", "paren"), ("main", "atom"),
+          ("(flow-eval)", "flowkw"), ("x$", "bad"), ("", "empty"),
+          ("42", "num"), ("(1 + 22) main", "mix")].map fun (s, tag) =>
+        ("901_klex_" ++ tag,
+         caseRow 512
+           { ISAR.kLex with
+             args := [("chars", klexChars s)] }
+           [] ",\"file\":\"input.k\"")))
+    (some klexFile)
   -- 800_forged — an asserted-wrong expectation over a deciding
   -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
@@ -632,3 +681,13 @@ def main : IO Unit := do
         ("/* input.fnv1a64:" ++ toString (fnv1a64 kemitFile)
           ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC refused: {ax}")
+  -- klex.c — the lexer as compiled code: emitProgC lowers kLex's
+  -- callables (jump loops, ordered dispatch, invoke tails) to C99.
+  -- Same stamp contract as kemit.c.
+  match ISAR.emitProgC ISAR.kLex 1024 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/klex.c"
+        ("/* input.fnv1a64:" ++ toString (fnv1a64 klexFile)
+          ++ " */\n" ++ c)
+  | .error ax => throw (IO.userError s!"emitProgC(kLex) refused: {ax}")

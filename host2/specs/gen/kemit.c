@@ -486,7 +486,7 @@ static Val *ev99(E *e){
  return elk(e,"c");}
 static Res *aw98(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
  {E*ae=0;
@@ -507,7 +507,7 @@ static Res *ds100(E *e, Res *r){
  return 0;}
 static Res *aw1(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("s",r->v,ee);
  {Val *g=ev84(ee);
@@ -615,7 +615,7 @@ static Val *ev127(E *e){
  return kbi("intToString",av,1);}
 static Res *aw103(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("t",r->v,ee);
  {Val *g=ev117(ee);
@@ -680,7 +680,7 @@ static Val *ev153(E *e){
  return elk(e,"r");}
 static Res *aw150(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("r",r->v,ee);
  {E*ae=0;
@@ -703,7 +703,7 @@ static Res *ds154(E *e, Res *r){
  return 0;}
 static Res *aw144(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("l",r->v,ee);
  {E*ae=0;
@@ -724,7 +724,7 @@ static Res *ds155(E *e, Res *r){
  return 0;}
 static Res *aw138(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("op",r->v,ee);
  {E*ae=0;
@@ -745,7 +745,7 @@ static Res *ds156(E *e, Res *r){
  return 0;}
 static Res *aw128(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("t",r->v,ee);
  {Val *g=ev132(ee);
@@ -812,7 +812,7 @@ static Val *ev177(E *e){
  return elk(e,"s");}
 static Res *aw176(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("s",r->v,ee);
  {E*ae=0;
@@ -833,7 +833,7 @@ static Res *ds178(E *e, Res *r){
  return 0;}
 static Res *aw157(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("t",r->v,ee);
  {Val *g=ev170(ee);
@@ -892,7 +892,7 @@ static Val *ev187(E *e){
  (void)e;return vl186();}
 static Res *aw181(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("m",r->v,ee);
  {Val *g=ev185(ee);
@@ -916,7 +916,7 @@ static Val *ev194(E *e){
  (void)e;return vl193();}
 static Res *aw188(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("m",r->v,ee);
  {Val *g=ev192(ee);
@@ -940,7 +940,7 @@ static Val *ev201(E *e){
  (void)e;return vl200();}
 static Res *aw195(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("m",r->v,ee);
  {Val *g=ev199(ee);
@@ -964,7 +964,7 @@ static Val *ev208(E *e){
  (void)e;return vl207();}
 static Res *aw202(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("m",r->v,ee);
  {Val *g=ev206(ee);
@@ -988,7 +988,7 @@ static Val *ev215(E *e){
  (void)e;return vl214();}
 static Res *aw209(E *e, Res *r){
  KSTEP();
- E*ee=e;
+ E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("m",r->v,ee);
  {Val *g=ev213(ee);
@@ -1147,6 +1147,7 @@ int main(int argc,char**argv){Val*a;E*e;Res*r;int i;
  (void)veq;(void)r_tag;(void)r_done;(void)r_jump;(void)kun;(void)fb;
  (void)asrat;(void)kfmod;(void)ktdiv;(void)ktmod;(void)v_flt;(void)pval;
  (void)v_arr;(void)v_cell;(void)ovf_mul;(void)ovf_add;(void)ovf_sub;
+ (void)k_field;(void)k_index;
  kfuel=1024;if(argc>1)kfuel=atoll(argv[1]);
  xp=xrd();a=xval();
  if(!a||a->tag!=5){fputs("refuse: args not a cell\n",kstderr);return 2;}

@@ -734,9 +734,33 @@ Item *parse_program(Tks *s, char **err) {
                     }
                     it->fields[it->nfields].n = xstrdup(next_tk(s)->text);
                     if (!eat(s, ":")) { fail_at(s, err, "':' after field"); return 0; }
-                    /* type tokens: ident (qualifiers/brackets skipped) */
-                    if (!is_ident_tk(s)) { fail_at(s, err, "field type"); return 0; }
-                    it->fields[it->nfields].t = xstrdup(next_tk(s)->text);
+                    /* type tokens: `[]const T` (koru's slice
+                       spelling) or a bare ident — qualifiers and
+                       trailing [phantom] brackets skipped */
+                    {   int slice = 0;
+                        if (at(s, "[")) {
+                            slice = 1;
+                            s->i++;
+                            if (!eat(s, "]")) {
+                                fail_at(s, err, "']' closing '[]'");
+                                return 0;
+                            }
+                            if (!eat(s, "const")) {
+                                fail_at(s, err, "'const' in '[]const T'");
+                                return 0;
+                            }
+                        }
+                        if (!is_ident_tk(s)) {
+                            fail_at(s, err, "field type");
+                            return 0;
+                        }
+                        it->fields[it->nfields].t =
+                            xstrdup(next_tk(s)->text);
+                        if (slice)
+                            it->fields[it->nfields].t =
+                                xasprintf("[]const ",
+                                          it->fields[it->nfields].t);
+                    }
                     while (at(s, ".") || at(s, "/")) {
                         s->i++;
                         if (is_ident_tk(s))

@@ -1,10 +1,18 @@
 /-! # krun/main.c — the claim-check + emit-host contract, pinned
 
-Two legs, both pure interpretation over wire data:
+Four legs, all pure interpretation over wire data:
 
     krun CLAIM                 parse claim -> re-decide -> compare
     krun EMITTER --emit SRC    SRC's program, quoted, fed to
                                EMITTER's `emit` entry as `src`
+    krun --quote CLAIM         print `(cell (src <quote>))` — the
+                               stdin wire a compiled-program
+                               binary consumes when its entry
+                               takes the program as `src`
+    krun --args CLAIM          print `(cell (name val)…)` — the
+                               claim's own entry args replayed as
+                               the stdin cell (data-arg entries
+                               like klex's `main {chars}`)
 
 ## Exit codes (the gate reads these, keep them stable)
 

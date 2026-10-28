@@ -290,6 +290,7 @@ def driver (entry fuel : String) : String :=
 " (void)veq;(void)r_tag;(void)r_done;(void)r_jump;(void)kun;(void)fb;\n" ++
 " (void)asrat;(void)kfmod;(void)ktdiv;(void)ktmod;(void)v_flt;(void)pval;\n" ++
 " (void)v_arr;(void)v_cell;(void)ovf_mul;(void)ovf_add;(void)ovf_sub;\n" ++
+" (void)k_field;(void)k_index;\n" ++
 " kfuel=" ++ fuel ++ ";if(argc>1)kfuel=atoll(argv[1]);\n" ++
 " xp=xrd();a=xval();\n" ++
 " if(!a||a->tag!=5){fputs(\"refuse: args not a cell\\n\",kstderr);return 2;}\n" ++
@@ -452,7 +453,7 @@ partial def genArm (a : KArm) : EM String := do
             let d ← genDispatch a.conts
             pure s!" return {d}(ee,ir);\n"
         pure s!" \{E*ae=0;\n{argCode} Res*ir=k_{mangle t}(ae);\n if(!ir)return 0;\n if(ir->k!=1&&ir->k!=2)return 0;\n{contStmt}}\n"
-  EM.put s!"static Res *{f}(E *e, Res *r)\{\n KSTEP();\n E*ee=e;\n{bindStmt}{condStmt}{nodeStmt}}\n"
+  EM.put s!"static Res *{f}(E *e, Res *r)\{\n KSTEP();\n E*ee=e;(void)r;(void)ee;\n{bindStmt}{condStmt}{nodeStmt}}\n"
   return f
 
 /-- Named-arg evaluation in source order — mirrors `evalKArgs`. -/

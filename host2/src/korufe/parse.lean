@@ -12,6 +12,11 @@ parsed the operand as a full expression and silently produced a
 different program; the 011-013 emit corpus rows caught it.
 Unary results take no postfix (koru refuses `-(a).b` the same way).
 
+Field types accept `[]const T` — koru's slice spelling — alongside
+bare identifiers; the bracket pair + `const` + element ident is
+consumed and stored as the composite name (types are documentary
+here: the wire is untyped and lower reads only field names).
+
 ## Item kinds (Item.kind)
 
 | kind | source shape                    | ast.json item     |

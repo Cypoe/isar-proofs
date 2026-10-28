@@ -74,15 +74,18 @@ int main(int argc, char **argv) {
               " | krun --quote CLAIM\n", stderr);
         return 2;
     }
-    if (argc == 3 && strcmp(argv[1], "--quote") != 0) {
+    if (argc == 3 && strcmp(argv[1], "--quote") != 0
+                 && strcmp(argv[1], "--args") != 0) {
         fputs("usage: krun FILE.k | krun FILE.k --emit SRC.k"
-              " | krun --quote CLAIM\n", stderr);
+              " | krun --quote CLAIM | krun --args CLAIM\n", stderr);
         return 2;
     }
 
-    /* --quote CLAIM: print the entry args cell `(cell (src <quote>))`
-       a compiled-program binary (ISAR.KoruProgEmit) consumes on
-       stdin — the input wire for the H1 leg. */
+    /* --quote CLAIM / --args CLAIM: print the stdin cell a
+       compiled-program binary (ISAR.KoruProgEmit) consumes —
+       `(cell (src <quote>))` for a program-arg entry (H1 legs),
+       `(cell (name val)…)` replaying the claim's own entry args
+       for a data-arg entry (the klex legs). */
     if (argc == 3) {
         char *qbuf; Sx *qsx; Claim qc;
         qbuf = file_read_all(argv[2]);
@@ -90,6 +93,17 @@ int main(int argc, char **argv) {
         if (!qsx || !sx_claim(qsx, &qc)) {
             fprintf(stderr, "refuse: %s not a [flow-eval] claim\n", argv[2]);
             return 2;
+        }
+        if (strcmp(argv[1], "--args") == 0) {
+            int i;
+            fputs("(cell", stdout);
+            for (i = 0; i < qc.prog.nargs; i++) {
+                fprintf(stdout, " (%s ", qc.prog.args[i].n);
+                print_val(qc.prog.args[i].v, stdout);
+                fputc(')', stdout);
+            }
+            fputs(")\n", stdout);
+            return 0;
         }
         fputs("(cell (src ", stdout);
         print_val(quote_prog(&qc.prog), stdout);

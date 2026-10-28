@@ -423,13 +423,19 @@ def gate():
         return claim
 
     kemit_claim = None
+    args_leaf = None   # leaf of an emit_prog row marked emit_args —
+                       # its sibling rows are the compiled binary's
+                       # inputs via the `krun --args` wire
     built = {}   # (dkey,rowname) -> claim path
     for dkey, rowname, row, cpath, leaf_dir in all_rows:
         claim = run_case(dkey, rowname, row, cpath, leaf_dir)
         if claim:
             built[(dkey, rowname)] = (claim, row)
             if row.get("emit_prog"):
-                kemit_claim = claim
+                if row.get("emit_args"):
+                    args_leaf = leaf_dir
+                else:
+                    kemit_claim = claim
 
     # ---- FlowCheck witness leg: the AUTHORITY's mechanized
     # semantics (w:/src/koru FlowKernel via FlowCheck) re-decides
@@ -468,10 +474,22 @@ def gate():
                     f"FlowKernel.olean: {r.stderr.strip()[:160]}")
         if built_kernel:
             env = {**os.environ, "LEAN_PATH": odir}
-            conf, forg = set(), set()
+            conf, forg, ext = set(), set(), 0
             for claim, row in built.values():
                 line = open(claim, encoding="utf-8").read().strip()
+                # extension builtins (`len`, `intToString`) are OUR
+                # axis — the authority's kernel cannot decide a
+                # claim that mentions them, so they leave the
+                # conformance corpus by name rather than failing it
+                if "(builtin len" in line or \
+                        "(builtin intToString" in line:
+                    ext += 1
+                    continue
                 (forg if row.get("forged") else conf).add(line)
+            if ext:
+                ok("witness.extension",
+                   f"{ext} claims on extension builtins "
+                   f"(len/intToString) — outside FlowKernel's table")
             for tag, lines, extra in (("conformance", conf, []),
                                       ("forged", forg, ["--forged"])):
                 if not lines:
@@ -743,6 +761,150 @@ def gate():
                         f"exit {got2 & 0xFF} != {bare2['int'] & 0xFF}")
             except subprocess.TimeoutExpired:
                 bad(f"{dkey}.h2", "docker step timed out")
+
+    # ---- kl legs: the COMPILED klex ----
+    # specs/gen/klex.c is ISAR.KoruProgEmit.emitProgC(kLex) — the
+    # koru-spelled sexpr lexer as C99 (jump loops, ordered bare
+    # dispatch, invoke tails; cond/index/len/intToString/++ only —
+    # no new builtins).  Each sibling row in the emit_args leaf
+    # feeds its entry args through `krun --args` to the compiled
+    # binary, which must re-decide the same token text the
+    # interpreted claim decided — compiled ≡ interpreted for a
+    # data-arg program, the frontend-shaped one.
+    klex_c = os.path.join(SPECS, "gen", "klex.c")
+    kl_bin = os.path.join(BUILD,
+                          "klex_kl.exe" if os.name == "nt" else "klex_kl")
+    have_kl = False
+    if not os.path.isfile(klex_c):
+        skip("kl.build", "specs/gen/klex.c not generated")
+    else:
+        ik_src = os.path.join(SPECS, "tests", "200_emit",
+                              "901_klex", "input.k")
+        with open(klex_c, encoding="utf-8") as f:
+            stamp = re.match(r"/\* input\.fnv1a64:(\d+) \*/",
+                             f.read(200))
+        ik = (open(ik_src, "rb").read().replace(b"\r\n", b"\n")
+              if os.path.isfile(ik_src) else b"")
+        if stamp and int(stamp.group(1)) == _fnv1a64(ik):
+            ok("gen.stamp.klex", "klex.c bound to 901_klex/input.k")
+        else:
+            bad("gen.stamp.klex",
+                "klex.c stamp stale vs 901_klex/input.k — "
+                "regenerate tools/DumpKoruFixtures")
+        c = subprocess.run([tc["cc"], *tc["flags"], klex_c,
+                            "-o", kl_bin],
+                           capture_output=True, text=True)
+        if c.returncode != 0:
+            bad("kl.build",
+                f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
+        else:
+            ok("kl.build", "emitProgC(kLex) via c99 toolchain")
+            have_kl = True
+
+    have_klv = False
+    klv_name = "klex_kl_ccv"
+    if not ccv_have or not ccv_lib:
+        skip("kl.ccv", "compcert provider/images unavailable")
+    elif not os.path.isfile(klex_c):
+        skip("kl.ccv", "specs/gen/klex.c not generated")
+    else:
+        try:
+            shutil.copy(klex_c, os.path.join(BUILD, "klex_kl.c"))
+            argv_c = [a.format(src="klex_kl.c", asm="klex_kl_ccv.s",
+                               exe=klv_name)
+                      for a in ccv_tc["compile"]["argv"]]
+            r1 = subprocess.run(
+                ["docker", "run", "--rm",
+                 "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                 ccv_tc["compile"]["image"], *argv_c],
+                capture_output=True, text=True, timeout=300)
+            if r1.returncode != 0:
+                bad("kl.ccv",
+                    f"ccomp refused: {(r1.stderr or r1.stdout).strip()[:160]}")
+            else:
+                argv_l = [a.format(asm="klex_kl_ccv.s", exe=klv_name,
+                                   lib=os.path.basename(ccv_lib))
+                          for a in ccv_tc["link_run"]["argv"]]
+                r2 = subprocess.run(
+                    ["docker", "run", "--rm",
+                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                     ccv_tc["link_run"]["image"], *argv_l],
+                    capture_output=True, text=True, timeout=120)
+                if r2.returncode != 0:
+                    bad("kl.ccv",
+                        f"i386 link refused: {r2.stderr.strip()[:160]}")
+                else:
+                    ok("kl.ccv", "emitProgC(kLex) via ccomp (verified)")
+                    have_klv = True
+        except subprocess.TimeoutExpired:
+            bad("kl.ccv", "docker step timed out")
+
+    # per input row: --args cell -> compiled lexer -> token text;
+    # a bare str decides and prints raw, refuse is exit 4 — compare
+    # byte-exact (the trailing-space convention is observed too)
+    if args_leaf is not None:
+        for dkey, rowname, row, cpath, leaf_dir in all_rows:
+            if leaf_dir != args_leaf or row.get("emit_prog"):
+                continue
+            cl = built.get((dkey, rowname))
+            if cl is None:
+                continue
+            claim = cl[0]
+            exp = row.get("expect")
+            bare = exp.get("bare") if isinstance(exp, dict) else None
+            want = bare["str"] if (isinstance(bare, dict)
+                                   and "str" in bare) else "refuse"
+            q = subprocess.run([KRUN, "--args", claim],
+                               capture_output=True, text=True)
+            if q.returncode != 0:
+                bad(f"{dkey}.kl",
+                    f"--args refused: {q.stderr.strip()[:80]}")
+                continue
+            if have_kl:
+                rb = subprocess.run([kl_bin], input=q.stdout,
+                                    capture_output=True, text=True)
+                got = (rb.stdout[:-1]
+                       if rb.stdout.endswith("\n") else rb.stdout)
+                if want == "refuse":
+                    if rb.returncode == 4:
+                        ok(f"{dkey}.kl", "compiled klex refuses")
+                    else:
+                        bad(f"{dkey}.kl",
+                            f"expected refusal, exit={rb.returncode}")
+                elif rb.returncode == 0 and got == want:
+                    ok(f"{dkey}.kl", want[:60])
+                else:
+                    bad(f"{dkey}.kl",
+                        f"exit={rb.returncode} "
+                        f"got={got[:60]!r}")
+            else:
+                skip(f"{dkey}.kl", "klex binary not built")
+            if not have_klv:
+                continue
+            try:
+                rv = subprocess.run(
+                    ["docker", "run", "--rm", "-i",
+                     "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
+                     ccv_tc["link_run"]["image"],
+                     "sh", "-c", f"./{klv_name}"],
+                    input=q.stdout, capture_output=True, text=True,
+                    timeout=60)
+            except subprocess.TimeoutExpired:
+                bad(f"{dkey}.klv", "docker run timed out")
+                continue
+            gotv = (rv.stdout[:-1]
+                    if rv.stdout.endswith("\n") else rv.stdout)
+            if want == "refuse":
+                if rv.returncode == 4:
+                    ok(f"{dkey}.klv", "ccomp klex refuses")
+                else:
+                    bad(f"{dkey}.klv",
+                        f"expected refusal, exit={rv.returncode}")
+            elif rv.returncode == 0 and gotv == want:
+                ok(f"{dkey}.klv", f"ccomp: {want[:50]}")
+            else:
+                bad(f"{dkey}.klv",
+                    f"exit={rv.returncode} got={gotv[:60]!r}")
 
     # ---- refusal probes: the frontend refuses by default, and the
     # same surfaces koruc refuses refuse here (PARSE003/005 parity,

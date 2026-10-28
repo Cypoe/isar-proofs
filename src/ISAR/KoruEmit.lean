@@ -487,6 +487,205 @@ def kEmitDecls : List (String × KDecl) := [
   , ("paren-neg", { params := [("s", "string")], ret := some "string" })
   , ("wrap", { params := [("c", "string")], ret := some "string" }) ]
 
+/-! ## `kLex` — a koru-spelled lexer over char-code arrays
+
+The first frontend-shaped program: `main(chars)` scans an
+`(arr int)` of character codes with a bounds-checked `peek`,
+classifies each code point through ordered guards, and accumulates
+the token stream as `out` sexpr text.  Iteration is tail `invoke`
+with empty `conts` — the invoked result propagates — because the
+`#label`/`@jump` idiom rebinds only the head call's args while the
+flow env stays fixed, and the multi-var scan state (`i`, `out`)
+cannot ride a single payload without runtime cell construction
+(which nothing in the subset can express).  Recursion depth is the
+named boundary: O(input length) nested calls, fuel- and stack-
+bounded — the label idiom returns when a payload-carried state
+shape exists.
+
+Token map:
+
+* `(`/`)` → `(lparen)` `(rparen)`
+* `+` `*` `/` → `(op <code>)`
+* `[0-9]+` → `(num <value>)` — folded on the fly
+* `[A-Za-z0-9_-]+` → `(atom <start> <len>)` — a span, not a slice:
+  no substring builtin exists, so the token is the *location* a
+  downstream parser re-indexes.  That is the honest zero-copy
+  contract anyway — `-`/`9`-led atoms classify downstream.
+* anything else → `(bad <pos> <code>)` in-band and stop — refusal
+  as data.
+
+Every form consumed is already modeled: `cond`, `index`, `len`,
+`intToString`, `++`, ordered bare dispatch, `#label` + `jump`,
+invoke tails.  Nothing new enters the builtin table — this is the
+F3 step measured against need, not breadth. -/
+
+def qint (i : Int) : KExpr := .lit (.int i)
+def qge (a b : KExpr) : KExpr := .bin .ge a b
+def qle (a b : KExpr) : KExpr := .bin .le a b
+def qlt (a b : KExpr) : KExpr := .bin .lt a b
+def qadd (a b : KExpr) : KExpr := .bin .add a b
+def qsub (a b : KExpr) : KExpr := .bin .sub a b
+def qmul (a b : KExpr) : KExpr := .bin .mul a b
+def qor (a b : KExpr) : KExpr := .bin .or a b
+
+/-- `[0-9]` — a digit code point. -/
+def qDigit (c : KExpr) : KExpr :=
+  qand (qge c (qint 48)) (qle c (qint 57))
+
+/-- `[A-Za-z0-9_-]` — an atom code point (koru identifiers carry
+`-`; `+`/`*`/`/` deliberately stay operators). -/
+def qAtom (c : KExpr) : KExpr :=
+  qor (qand (qge c (qint 97)) (qle c (qint 122))) (
+  qor (qand (qge c (qint 65)) (qle c (qint 90))) (
+  qor (qeq c (qint 95)) (
+  qor (qeq c (qint 45)) (qDigit c))))
+
+/-- ` ` `\t` `\n` `\r` — whitespace. -/
+def qWs (c : KExpr) : KExpr :=
+  qor (qeq c (qint 32)) (
+  qor (qeq c (qint 9)) (
+  qor (qeq c (qint 10)) (qeq c (qint 13))))
+
+/-- `+` `*` `/` — the operator code points this lexer knows. -/
+def qOp (c : KExpr) : KExpr :=
+  qor (qeq c (qint 43)) (
+  qor (qeq c (qint 42)) (qeq c (qint 47)))
+
+/-- The scan loop's recurring self-invoke arg record — `lex`'s
+params rebound for the next character. -/
+def kScanArgs (i' out' : KExpr) : List (String × KExpr) :=
+  [("chars", .var "chars"), ("i", i'), ("n", .var "n"), ("out", out')]
+
+/-- `peek`: bounds-checked `chars[i]` — `-1` at end.  `cond`
+evaluates one arm, so the index never runs out of bounds. -/
+def kLexPeek : KCallable := .bare
+  (.cond (qge (.var "i") (.var "n"))
+    (qsub (qint 0) (qint 1))
+    (.index (.var "chars") (.var "i")))
+
+/-- `lex`: the scan loop.  Each arm classifies `peek`'s bare code;
+`ws`/`lp`/`rp`/`op` tail-invoke `lex` one character on, `dg`/`at`
+hand the token to a sub-scanner that re-enters `lex` at the span
+end, `bad` produces the in-band refusal. -/
+def kLexScan : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "fin" false (some "c") (some (qlt (.var "c") (qint 0)))
+      (some (.produce (.var "out"))) []
+  , .mk "ws" false (some "c") (some (qWs (.var "c")))
+      (some (.invoke "lex" (kScanArgs
+        (qadd (.var "i") (qint 1)) (.var "out")))) []
+  , .mk "lp" false (some "c") (some (qeq (.var "c") (qint 40)))
+      (some (.invoke "lex" (kScanArgs
+        (qadd (.var "i") (qint 1))
+        (qcat (.var "out") (.lit (.str "(lparen) ")))))) []
+  , .mk "rp" false (some "c") (some (qeq (.var "c") (qint 41)))
+      (some (.invoke "lex" (kScanArgs
+        (qadd (.var "i") (qint 1))
+        (qcat (.var "out") (.lit (.str "(rparen) ")))))) []
+  , .mk "op" false (some "c") (some (qOp (.var "c")))
+      (some (.invoke "lex" (kScanArgs
+        (qadd (.var "i") (qint 1))
+        (qcat (.var "out") (qcat (.lit (.str "(op "))
+          (qcat (qitoa (.var "c")) (.lit (.str ") ")))))))) []
+  , .mk "dg" false (some "c") (some (qDigit (.var "c")))
+      (some (.invoke "digits"
+        [("chars", .var "chars"), ("j", .var "i"), ("n", .var "n"),
+         ("v", qint 0), ("out", .var "out")])) []
+  , .mk "at" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "atom-end"
+        [("chars", .var "chars"), ("i", .var "i"), ("j", .var "i"),
+         ("n", .var "n"), ("out", .var "out")])) []
+  , .mk "bad" false (some "c") none
+      (some (.produce
+        (qcat (.var "out") (qcat (.lit (.str "(bad "))
+          (qcat (qitoa (.var "i")) (qcat (.lit (.str " "))
+            (qcat (qitoa (.var "c")) (.lit (.str ") "))))))))) []
+  ] }
+
+/-- `digits`: fold `[0-9]+` into `v`, then tail-invoke `lex` at the
+span end appending `(num v)`. -/
+def kLexDigits : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "j"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c") (some (qDigit (.var "c")))
+      (some (.invoke "digits"
+        [("chars", .var "chars"), ("j", qadd (.var "j") (qint 1)),
+         ("n", .var "n"),
+         ("v", qadd (qmul (.var "v") (qint 10))
+                    (qsub (.var "c") (qint 48))),
+         ("out", .var "out")])) []
+  , .mk "stop" false none none
+      (some (.invoke "lex"
+        [("chars", .var "chars"), ("i", .var "j"), ("n", .var "n"),
+         ("out", qcat (.var "out") (qcat (.lit (.str "(num "))
+           (qcat (qitoa (.var "v")) (.lit (.str ") ")))))])) []
+  ] }
+
+/-- `atom-end`: extend `[A-Za-z0-9_-]+` from `j`, then tail-invoke
+`lex` appending the `(atom start len)` span. -/
+def kLexAtomEnd : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "j"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "atom-end"
+        [("chars", .var "chars"), ("i", .var "i"),
+         ("j", qadd (.var "j") (qint 1)),
+         ("n", .var "n"), ("out", .var "out")])) []
+  , .mk "stop" false none none
+      (some (.invoke "lex"
+        [("chars", .var "chars"), ("i", .var "j"), ("n", .var "n"),
+         ("out", qcat (.var "out") (qcat (.lit (.str "(atom "))
+           (qcat (qitoa (.var "i")) (qcat (.lit (.str " "))
+             (qcat (qitoa (qsub (.var "j") (.var "i")))
+               (.lit (.str ") ")))))))])) []
+  ] }
+
+/-- `main`: hand the entry `chars` to the scanner at `(0, len)`. -/
+def kLexMain : KCallable := .subflow {
+  preLabel := none
+  head := ("lex",
+    [("chars", .var "chars"), ("i", qint 0),
+     ("n", .builtin "len" [.var "chars"]), ("out", .lit (.str ""))])
+  arms := [ .mk "done" false (some "s") none
+      (some (.produce (.var "s"))) [] ] }
+
+/-- The lexer program — five callables, jump-loops, invoke tails. -/
+def kLex : KProg := {
+  graph := [
+    ("peek", kLexPeek),
+    ("lex", kLexScan),
+    ("digits", kLexDigits),
+    ("atom-end", kLexAtomEnd),
+    ("main", kLexMain) ]
+  entry := "main"
+  args := [] }
+
+/-- `kLex`'s declared `tor` contracts — `chars` spells koru's own
+`[]const i64` slice type (documentary; the wire is untyped), the
+rest are `i64`/`string`. -/
+def kLexDecls : List (String × KDecl) := [
+    ("peek", { params := [("chars", "[]const i64"), ("i", "i64"),
+                          ("n", "i64")], ret := some "i64" })
+  , ("lex", { params := [("chars", "[]const i64"), ("i", "i64"),
+                         ("n", "i64"), ("out", "string")],
+              ret := some "string" })
+  , ("digits", { params := [("chars", "[]const i64"), ("j", "i64"),
+                            ("n", "i64"), ("v", "i64"),
+                            ("out", "string")], ret := some "string" })
+  , ("atom-end", { params := [("chars", "[]const i64"), ("i", "i64"),
+                              ("j", "i64"), ("n", "i64"),
+                              ("out", "string")],
+                   ret := some "string" })
+  , ("main", { params := [("chars", "[]const i64")],
+               ret := some "string" }) ]
+
 /-- One flow-grammar corpus row: program + asserted oracle leaves +
 the declared `tor` contracts the surface file must carry. -/
 structure KFlowRow where
