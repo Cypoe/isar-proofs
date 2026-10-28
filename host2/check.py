@@ -61,6 +61,11 @@ The pipeline per case row:
   h2    : the compiled compiler's OUTPUT back through the checked
           backend — ccomp-built kemit's C -> ccomp -> i386 run ->
           exit byte == expect.  Changed input -> H1' -> H2'
+  kl/ks : compiled emit_args programs — specs/gen/<g>.c is
+          emitProgC(<prog>) for emit_args leaves (klex, ksexp);
+          `krun --args claim | <g>_bin` must re-decide the claim's
+          text — leg suffix = first two letters of the gen name,
+          <code>v = the ccomp-compiled twin
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -423,9 +428,10 @@ def gate():
         return claim
 
     kemit_claim = None
-    args_leaf = None   # leaf of an emit_prog row marked emit_args —
-                       # its sibling rows are the compiled binary's
-                       # inputs via the `krun --args` wire
+    args_progs = {}   # leaf_dir -> gen name for emit_prog rows
+                      # marked emit_args — their sibling rows are
+                      # the compiled binary's inputs via the
+                      # `krun --args` wire
     built = {}   # (dkey,rowname) -> claim path
     for dkey, rowname, row, cpath, leaf_dir in all_rows:
         claim = run_case(dkey, rowname, row, cpath, leaf_dir)
@@ -433,7 +439,7 @@ def gate():
             built[(dkey, rowname)] = (claim, row)
             if row.get("emit_prog"):
                 if row.get("emit_args"):
-                    args_leaf = leaf_dir
+                    args_progs[leaf_dir] = row.get("gen")
                 else:
                     kemit_claim = claim
 
@@ -762,89 +768,103 @@ def gate():
             except subprocess.TimeoutExpired:
                 bad(f"{dkey}.h2", "docker step timed out")
 
-    # ---- kl legs: the COMPILED klex ----
-    # specs/gen/klex.c is ISAR.KoruProgEmit.emitProgC(kLex) — the
-    # koru-spelled sexpr lexer as C99 (jump loops, ordered bare
-    # dispatch, invoke tails; cond/index/len/intToString/++ only —
-    # no new builtins).  Each sibling row in the emit_args leaf
-    # feeds its entry args through `krun --args` to the compiled
-    # binary, which must re-decide the same token text the
-    # interpreted claim decided — compiled ≡ interpreted for a
-    # data-arg program, the frontend-shaped one.
-    klex_c = os.path.join(SPECS, "gen", "klex.c")
-    kl_bin = os.path.join(BUILD,
-                          "klex_kl.exe" if os.name == "nt" else "klex_kl")
-    have_kl = False
-    if not os.path.isfile(klex_c):
-        skip("kl.build", "specs/gen/klex.c not generated")
-    else:
-        ik_src = os.path.join(SPECS, "tests", "200_emit",
-                              "901_klex", "input.k")
-        with open(klex_c, encoding="utf-8") as f:
-            stamp = re.match(r"/\* input\.fnv1a64:(\d+) \*/",
-                             f.read(200))
-        ik = (open(ik_src, "rb").read().replace(b"\r\n", b"\n")
-              if os.path.isfile(ik_src) else b"")
-        if stamp and int(stamp.group(1)) == _fnv1a64(ik):
-            ok("gen.stamp.klex", "klex.c bound to 901_klex/input.k")
+    # ---- compiled emit_args programs: kl/ks/… legs ----
+    # specs/gen/<g>.c is ISAR.KoruProgEmit.emitProgC(<prog>) — a
+    # koru-spelled frontend component as C99 (ordered bare dispatch,
+    # invoke tails; cond/index/len/intToString/++ only — no new
+    # builtins).  Each sibling row in the program's leaf feeds its
+    # entry args through `krun --args` to the compiled binary, which
+    # must re-decide the same text the interpreted claim decided —
+    # compiled ≡ interpreted for data-arg programs.  `code` is the
+    # leg suffix: first two letters of the gen name (klex→kl,
+    # ksexp→ks).
+    for aleaf, gname in args_progs.items():
+        if not gname:
+            bad("emit_args.gen",
+                f"emit_args row in {os.path.basename(aleaf)} "
+                "lacks a gen name")
+            continue
+        code = gname[:2]
+        gsrc = os.path.join(SPECS, "gen", gname + ".c")
+        gbin = os.path.join(BUILD, f"{gname}_{code}"
+                            + (".exe" if os.name == "nt" else ""))
+        have_g = False
+        if not os.path.isfile(gsrc):
+            skip(f"{code}.build", f"specs/gen/{gname}.c not generated")
         else:
-            bad("gen.stamp.klex",
-                "klex.c stamp stale vs 901_klex/input.k — "
-                "regenerate tools/DumpKoruFixtures")
-        c = subprocess.run([tc["cc"], *tc["flags"], klex_c,
-                            "-o", kl_bin],
-                           capture_output=True, text=True)
-        if c.returncode != 0:
-            bad("kl.build",
-                f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
-        else:
-            ok("kl.build", "emitProgC(kLex) via c99 toolchain")
-            have_kl = True
-
-    have_klv = False
-    klv_name = "klex_kl_ccv"
-    if not ccv_have or not ccv_lib:
-        skip("kl.ccv", "compcert provider/images unavailable")
-    elif not os.path.isfile(klex_c):
-        skip("kl.ccv", "specs/gen/klex.c not generated")
-    else:
-        try:
-            shutil.copy(klex_c, os.path.join(BUILD, "klex_kl.c"))
-            argv_c = [a.format(src="klex_kl.c", asm="klex_kl_ccv.s",
-                               exe=klv_name)
-                      for a in ccv_tc["compile"]["argv"]]
-            r1 = subprocess.run(
-                ["docker", "run", "--rm",
-                 "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
-                 ccv_tc["compile"]["image"], *argv_c],
-                capture_output=True, text=True, timeout=300)
-            if r1.returncode != 0:
-                bad("kl.ccv",
-                    f"ccomp refused: {(r1.stderr or r1.stdout).strip()[:160]}")
+            ik_src = os.path.join(aleaf, "input.k")
+            with open(gsrc, encoding="utf-8") as f:
+                stamp = re.match(r"/\* input\.fnv1a64:(\d+) \*/",
+                                 f.read(200))
+            ik = (open(ik_src, "rb").read().replace(b"\r\n", b"\n")
+                  if os.path.isfile(ik_src) else b"")
+            leafname = os.path.basename(aleaf)
+            if stamp and int(stamp.group(1)) == _fnv1a64(ik):
+                ok(f"gen.stamp.{gname}",
+                   f"{gname}.c bound to {leafname}/input.k")
             else:
-                argv_l = [a.format(asm="klex_kl_ccv.s", exe=klv_name,
-                                   lib=os.path.basename(ccv_lib))
-                          for a in ccv_tc["link_run"]["argv"]]
-                r2 = subprocess.run(
+                bad(f"gen.stamp.{gname}",
+                    f"{gname}.c stamp stale vs {leafname}/input.k — "
+                    "regenerate tools/DumpKoruFixtures")
+            c = subprocess.run([tc["cc"], *tc["flags"], gsrc,
+                                "-o", gbin],
+                               capture_output=True, text=True)
+            if c.returncode != 0:
+                bad(f"{code}.build",
+                    f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
+            else:
+                ok(f"{code}.build",
+                   f"emitProgC({gname}) via c99 toolchain")
+                have_g = True
+
+        have_gv = False
+        gv_name = f"{gname}_{code}_ccv"
+        if not ccv_have or not ccv_lib:
+            skip(f"{code}.ccv", "compcert provider/images unavailable")
+        elif not os.path.isfile(gsrc):
+            skip(f"{code}.ccv", f"specs/gen/{gname}.c not generated")
+        else:
+            try:
+                shutil.copy(gsrc, os.path.join(BUILD,
+                                               f"{gname}_{code}.c"))
+                argv_c = [a.format(src=f"{gname}_{code}.c",
+                                   asm=f"{gv_name}.s", exe=gv_name)
+                          for a in ccv_tc["compile"]["argv"]]
+                r1 = subprocess.run(
                     ["docker", "run", "--rm",
                      "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
-                     ccv_tc["link_run"]["image"], *argv_l],
-                    capture_output=True, text=True, timeout=120)
-                if r2.returncode != 0:
-                    bad("kl.ccv",
-                        f"i386 link refused: {r2.stderr.strip()[:160]}")
+                     ccv_tc["compile"]["image"], *argv_c],
+                    capture_output=True, text=True, timeout=300)
+                if r1.returncode != 0:
+                    bad(f"{code}.ccv",
+                        f"ccomp refused: "
+                        f"{(r1.stderr or r1.stdout).strip()[:160]}")
                 else:
-                    ok("kl.ccv", "emitProgC(kLex) via ccomp (verified)")
-                    have_klv = True
-        except subprocess.TimeoutExpired:
-            bad("kl.ccv", "docker step timed out")
+                    argv_l = [a.format(asm=f"{gv_name}.s", exe=gv_name,
+                                       lib=os.path.basename(ccv_lib))
+                              for a in ccv_tc["link_run"]["argv"]]
+                    r2 = subprocess.run(
+                        ["docker", "run", "--rm",
+                         "-v", f"{_docker_path(BUILD)}:/src",
+                         "-w", "/src", ccv_tc["link_run"]["image"],
+                         *argv_l],
+                        capture_output=True, text=True, timeout=120)
+                    if r2.returncode != 0:
+                        bad(f"{code}.ccv",
+                            f"i386 link refused: "
+                            f"{r2.stderr.strip()[:160]}")
+                    else:
+                        ok(f"{code}.ccv",
+                           f"emitProgC({gname}) via ccomp (verified)")
+                        have_gv = True
+            except subprocess.TimeoutExpired:
+                bad(f"{code}.ccv", "docker step timed out")
 
-    # per input row: --args cell -> compiled lexer -> token text;
-    # a bare str decides and prints raw, refuse is exit 4 — compare
-    # byte-exact (the trailing-space convention is observed too)
-    if args_leaf is not None:
+        # per input row: --args cell -> compiled program -> text;
+        # a bare str decides and prints raw, refuse is exit 4 —
+        # compare byte-exact (trailing space is observed too)
         for dkey, rowname, row, cpath, leaf_dir in all_rows:
-            if leaf_dir != args_leaf or row.get("emit_prog"):
+            if leaf_dir != aleaf or row.get("emit_prog"):
                 continue
             cl = built.get((dkey, rowname))
             if cl is None:
@@ -857,53 +877,54 @@ def gate():
             q = subprocess.run([KRUN, "--args", claim],
                                capture_output=True, text=True)
             if q.returncode != 0:
-                bad(f"{dkey}.kl",
+                bad(f"{dkey}.{code}",
                     f"--args refused: {q.stderr.strip()[:80]}")
                 continue
-            if have_kl:
-                rb = subprocess.run([kl_bin], input=q.stdout,
+            if have_g:
+                rb = subprocess.run([gbin], input=q.stdout,
                                     capture_output=True, text=True)
                 got = (rb.stdout[:-1]
                        if rb.stdout.endswith("\n") else rb.stdout)
                 if want == "refuse":
                     if rb.returncode == 4:
-                        ok(f"{dkey}.kl", "compiled klex refuses")
+                        ok(f"{dkey}.{code}",
+                           f"compiled {gname} refuses")
                     else:
-                        bad(f"{dkey}.kl",
+                        bad(f"{dkey}.{code}",
                             f"expected refusal, exit={rb.returncode}")
                 elif rb.returncode == 0 and got == want:
-                    ok(f"{dkey}.kl", want[:60])
+                    ok(f"{dkey}.{code}", want[:60])
                 else:
-                    bad(f"{dkey}.kl",
+                    bad(f"{dkey}.{code}",
                         f"exit={rb.returncode} "
                         f"got={got[:60]!r}")
             else:
-                skip(f"{dkey}.kl", "klex binary not built")
-            if not have_klv:
+                skip(f"{dkey}.{code}", f"{gname} binary not built")
+            if not have_gv:
                 continue
             try:
                 rv = subprocess.run(
                     ["docker", "run", "--rm", "-i",
                      "-v", f"{_docker_path(BUILD)}:/src", "-w", "/src",
                      ccv_tc["link_run"]["image"],
-                     "sh", "-c", f"./{klv_name}"],
+                     "sh", "-c", f"./{gv_name}"],
                     input=q.stdout, capture_output=True, text=True,
                     timeout=60)
             except subprocess.TimeoutExpired:
-                bad(f"{dkey}.klv", "docker run timed out")
+                bad(f"{dkey}.{code}v", "docker run timed out")
                 continue
             gotv = (rv.stdout[:-1]
                     if rv.stdout.endswith("\n") else rv.stdout)
             if want == "refuse":
                 if rv.returncode == 4:
-                    ok(f"{dkey}.klv", "ccomp klex refuses")
+                    ok(f"{dkey}.{code}v", f"ccomp {gname} refuses")
                 else:
-                    bad(f"{dkey}.klv",
+                    bad(f"{dkey}.{code}v",
                         f"expected refusal, exit={rv.returncode}")
             elif rv.returncode == 0 and gotv == want:
-                ok(f"{dkey}.klv", f"ccomp: {want[:50]}")
+                ok(f"{dkey}.{code}v", f"ccomp: {want[:50]}")
             else:
-                bad(f"{dkey}.klv",
+                bad(f"{dkey}.{code}v",
                     f"exit={rv.returncode} got={gotv[:60]!r}")
 
     # ---- refusal probes: the frontend refuses by default, and the

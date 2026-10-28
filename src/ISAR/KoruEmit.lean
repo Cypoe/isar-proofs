@@ -686,6 +686,208 @@ def kLexDecls : List (String × KDecl) := [
   , ("main", { params := [("chars", "[]const i64")],
                ret := some "string" }) ]
 
+/-! ## `kSexp` — a koru-spelled sexpr parser/normalizer
+
+The second frontend-shaped program and the first *parser*-shaped
+one: `main(chars)` validates and annotates the claim wire's own
+grammar — `(`, `)`, atoms, numbers, op code points, whitespace —
+emitting a span-tagged tree as `out` text:
+
+    (a (b c) d)  →  (seq (atom 1 2) (seq (atom 4 5) (atom 6 7)) (atom 9 10))
+
+Two shape constraints of the subset made the design, both honest:
+
+* **No pair-return** — a recursive-descent `parse-expr` would need
+  `{tree, next-i}` back, and the kernel cannot construct cells
+  dynamically.  But sexpr text is self-delimiting, so the parser is
+  an *explicit-stack* machine: `depth` is the stack register,
+  `(` appends `(seq ` and pushes, `)` appends `)` and pops.  The
+  stack a recursive parser would hide in call frames is declared
+  data — the honest shape for a dispatch-driven calculus.
+* **No `chr`/slice** — nodes print as *spans* `(atom start end)`,
+  like real parse trees carrying source locations; downstream
+  indexing recovers the text.
+
+Structure is enforced, not just balanced: a bare token at depth 0,
+a `)` underflow, a second top-level form (`seen`), and EOF mid-list
+all produce in-band `(bad pos code)` — refusal as data, same idiom
+as `kLex`.  `need` is the sibling-spacing flag: a token gets a
+leading space unless it is a list's first child. -/
+
+/-- `(seq ` / `(num i j)` / `(bad i c)` are appended with a
+leading space only between siblings — `need` tracks it. -/
+def qGap : KExpr :=
+  .cond (qeq (.var "need") (qint 1)) (.lit (.str " ")) (.lit (.str ""))
+
+/-- `out ++ gap ++ text` — the recurring append-with-spacing. -/
+def qEmit (text : KExpr) : KExpr :=
+  qcat (qcat (.var "out") qGap) text
+
+/-- `out ++ gap ++ "(bad i c)"` — in-band structural refusal. -/
+def qBadTok (i c : KExpr) : KExpr :=
+  qEmit (qcat (.lit (.str "(bad "))
+    (qcat (qitoa i) (qcat (.lit (.str " "))
+      (qcat (qitoa c) (.lit (.str ")"))))))
+
+/-- The scan loop's recurring self-invoke arg record — all seven
+state slots explicit, as the subset demands. -/
+def kSxArgs (i' depth' need' seen' out' : KExpr)
+    : List (String × KExpr) :=
+  [("chars", .var "chars"), ("i", i'), ("n", .var "n"),
+   ("depth", depth'), ("need", need'), ("seen", seen'),
+   ("out", out')]
+
+/-- `sx`: the structural scan.  Ordered arms: `fin` accepts only a
+completed single top-level form; `lp`/`rp` each have a `-bad` arm
+ahead of them for the underflow/repeated-topform cases; `tok-bad`
+ahead of `dg`/`at`/`op` enforces tokens-inside-lists; `bad` is the
+code-point catchall. -/
+def kSexpScan : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "fin" false (some "c") (some (qlt (.var "c") (qint 0)))
+      (some (.produce
+        (.cond (qand (qeq (.var "depth") (qint 0))
+                     (qeq (.var "seen") (qint 1)))
+          (.var "out")
+          (qBadTok (.var "n") (qsub (qint 0) (qint 1)))))) []
+  , .mk "ws" false (some "c") (some (qWs (.var "c")))
+      (some (.invoke "sx" (kSxArgs
+        (qadd (.var "i") (qint 1)) (.var "depth") (.var "need")
+        (.var "seen") (.var "out")))) []
+  , .mk "lp-bad" false (some "c")
+      (some (qand (qeq (.var "c") (qint 40))
+        (qand (qeq (.var "depth") (qint 0))
+             (qeq (.var "seen") (qint 1)))))
+      (some (.produce (qBadTok (.var "i") (.var "c")))) []
+  , .mk "lp" false (some "c") (some (qeq (.var "c") (qint 40)))
+      (some (.invoke "sx" (kSxArgs
+        (qadd (.var "i") (qint 1)) (qadd (.var "depth") (qint 1))
+        (qint 0) (qint 1)
+        (qEmit (.lit (.str "(seq ")))))) []
+  , .mk "rp-bad" false (some "c")
+      (some (qand (qeq (.var "c") (qint 41))
+                  (qeq (.var "depth") (qint 0))))
+      (some (.produce (qBadTok (.var "i") (.var "c")))) []
+  , .mk "rp" false (some "c") (some (qeq (.var "c") (qint 41)))
+      (some (.invoke "sx" (kSxArgs
+        (qadd (.var "i") (qint 1)) (qsub (.var "depth") (qint 1))
+        (qint 1) (.var "seen")
+        (qcat (.var "out") (.lit (.str ")")))))) []
+  , .mk "tok-bad" false (some "c")
+      (some (qand (qor (qDigit (.var "c"))
+                       (qor (qAtom (.var "c")) (qOp (.var "c"))))
+                  (qeq (.var "depth") (qint 0))))
+      (some (.produce (qBadTok (.var "i") (.var "c")))) []
+  , .mk "dg" false (some "c") (some (qDigit (.var "c")))
+      (some (.invoke "num"
+        [("chars", .var "chars"), ("i", .var "i"), ("j", .var "i"),
+         ("n", .var "n"), ("depth", .var "depth"),
+         ("need", .var "need"), ("seen", .var "seen"),
+         ("out", .var "out")])) []
+  , .mk "at" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "atom"
+        [("chars", .var "chars"), ("i", .var "i"), ("j", .var "i"),
+         ("n", .var "n"), ("depth", .var "depth"),
+         ("need", .var "need"), ("seen", .var "seen"),
+         ("out", .var "out")])) []
+  , .mk "op" false (some "c") (some (qOp (.var "c")))
+      (some (.invoke "sx" (kSxArgs
+        (qadd (.var "i") (qint 1)) (.var "depth") (qint 1)
+        (.var "seen")
+        (qEmit (qcat (.lit (.str "(op "))
+          (qcat (qitoa (.var "i")) (qcat (.lit (.str " "))
+            (qcat (qitoa (qadd (.var "i") (qint 1)))
+              (.lit (.str ")")))))))))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qBadTok (.var "i") (.var "c")))) []
+  ] }
+
+/-- `num`: extend the digit run from `j`, then re-enter `sx` at the
+span end emitting `(num start end)`. -/
+def kSexpNum : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "j"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c") (some (qDigit (.var "c")))
+      (some (.invoke "num"
+        [("chars", .var "chars"), ("i", .var "i"),
+         ("j", qadd (.var "j") (qint 1)), ("n", .var "n"),
+         ("depth", .var "depth"), ("need", .var "need"),
+         ("seen", .var "seen"), ("out", .var "out")])) []
+  , .mk "stop" false none none
+      (some (.invoke "sx"
+        (kSxArgs (.var "j") (.var "depth") (qint 1) (.var "seen")
+          (qEmit (qcat (.lit (.str "(num "))
+            (qcat (qitoa (.var "i")) (qcat (.lit (.str " "))
+              (qcat (qitoa (.var "j")) (.lit (.str ")")))))))))) []
+  ] }
+
+/-- `atom`: extend the atom run from `j`, then re-enter `sx`
+emitting `(atom start end)`. -/
+def kSexpAtom : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "j"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "atom"
+        [("chars", .var "chars"), ("i", .var "i"),
+         ("j", qadd (.var "j") (qint 1)), ("n", .var "n"),
+         ("depth", .var "depth"), ("need", .var "need"),
+         ("seen", .var "seen"), ("out", .var "out")])) []
+  , .mk "stop" false none none
+      (some (.invoke "sx"
+        (kSxArgs (.var "j") (.var "depth") (qint 1) (.var "seen")
+          (qEmit (qcat (.lit (.str "(atom "))
+            (qcat (qitoa (.var "i")) (qcat (.lit (.str " "))
+              (qcat (qitoa (.var "j")) (.lit (.str ")")))))))))) []
+  ] }
+
+/-- `main`: hand `chars` to the structural scan in its initial
+state — depth 0, no siblings, no top-level form seen. -/
+def kSexpMain : KCallable := .subflow {
+  preLabel := none
+  head := ("sx",
+    [("chars", .var "chars"), ("i", qint 0),
+     ("n", .builtin "len" [.var "chars"]), ("depth", qint 0),
+     ("need", qint 0), ("seen", qint 0), ("out", .lit (.str ""))])
+  arms := [ .mk "done" false (some "s") none
+      (some (.produce (.var "s"))) [] ] }
+
+/-- The sexpr parser program — five callables sharing `peek`. -/
+def kSexp : KProg := {
+  graph := [
+    ("peek", kLexPeek),
+    ("sx", kSexpScan),
+    ("num", kSexpNum),
+    ("atom", kSexpAtom),
+    ("main", kSexpMain) ]
+  entry := "main"
+  args := [] }
+
+/-- `kSexp`'s declared `tor` contracts. -/
+def kSexpDecls : List (String × KDecl) := [
+    ("peek", { params := [("chars", "[]const i64"), ("i", "i64"),
+                          ("n", "i64")], ret := some "i64" })
+  , ("sx", { params := [("chars", "[]const i64"), ("i", "i64"),
+                        ("n", "i64"), ("depth", "i64"),
+                        ("need", "i64"), ("seen", "i64"),
+                        ("out", "string")], ret := some "string" })
+  , ("num", { params := [("chars", "[]const i64"), ("i", "i64"),
+                         ("j", "i64"), ("n", "i64"), ("depth", "i64"),
+                         ("need", "i64"), ("seen", "i64"),
+                         ("out", "string")], ret := some "string" })
+  , ("atom", { params := [("chars", "[]const i64"), ("i", "i64"),
+                          ("j", "i64"), ("n", "i64"), ("depth", "i64"),
+                          ("need", "i64"), ("seen", "i64"),
+                          ("out", "string")], ret := some "string" })
+  , ("main", { params := [("chars", "[]const i64")],
+               ret := some "string" }) ]
+
 /-- One flow-grammar corpus row: program + asserted oracle leaves +
 the declared `tor` contracts the surface file must carry. -/
 structure KFlowRow where

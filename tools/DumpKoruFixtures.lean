@@ -459,6 +459,18 @@ def klexFile : String :=
           |>.map (·.2) |>.getD {}) c)
     ++ "\n"
 
+/-- `ksexp.k`: the sexpr parser spelled in koru — explicit-stack
+scan over `(arr int)` char codes, span-tagged tree as `out` text. -/
+def ksexpFile : String :=
+  "// ksexp.k — a koru-spelled sexpr parser over char codes (generated)\n"
+    ++ "// explicit-stack parse: depth is the stack register;\n"
+    ++ "// nodes print as (kind start end) spans — no chr/slice.\n"
+    ++ "// arg-less invoke refuses: `chars` unbound.\n"
+    ++ String.intercalate "\n\n" (ISAR.kSexp.graph.map fun (n, c) =>
+        kCallableSrc n (ISAR.kSexpDecls.find? (·.1 == n)
+          |>.map (·.2) |>.getD {}) c)
+    ++ "\n"
+
 /-- A test input as the wire value: chars → `(arr int)` codes. -/
 def klexChars (s : String) : ISAR.KVal :=
   .arr (s.toList.map fun c => .int (Int.ofNat c.toNat))
@@ -648,7 +660,8 @@ def main : IO Unit := do
     ([("901_klex",
        "{\"entry\":\"main\",\"fuel\":512"
        ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
-       ++ ",\"file\":\"input.k\",\"emit_prog\":true,\"emit_args\":true}")]
+       ++ ",\"file\":\"input.k\",\"emit_prog\":true"
+       ++ ",\"emit_args\":true,\"gen\":\"klex\"}")]
      ++ ([("(1 + 22)", "paren"), ("main", "atom"),
           ("(flow-eval)", "flowkw"), ("x$", "bad"), ("", "empty"),
           ("42", "num"), ("(1 + 22) main", "mix")].map fun (s, tag) =>
@@ -658,6 +671,25 @@ def main : IO Unit := do
              args := [("chars", klexChars s)] }
            [] ",\"file\":\"input.k\"")))
     (some klexFile)
+  -- ksexp: the sexpr parser as a koru program — same emit_args wire
+  -- as klex, structural rows: nesting, ws-normalization, spans, and
+  -- the four structural refusal shapes.  `gen` names the artifact.
+  writeLeafRows "200_emit" "902_ksexp"
+    ([("902_ksexp",
+       "{\"entry\":\"main\",\"fuel\":1024"
+       ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
+       ++ ",\"file\":\"input.k\",\"emit_prog\":true"
+       ++ ",\"emit_args\":true,\"gen\":\"ksexp\"}")]
+     ++ ([("(a b c)", "list"), ("(a (b c) d)", "nest"),
+          ("  ( 1 + 22 )", "ws"), ("((x))", "deep"),
+          ("(a b", "unclosed"), ("(a) (b)", "twofold"),
+          ("x", "toplevel"), (")", "underflow")].map fun (s, tag) =>
+        ("902_ksexp_" ++ tag,
+         caseRow 1024
+           { ISAR.kSexp with
+             args := [("chars", klexChars s)] }
+           [] ",\"file\":\"input.k\"")))
+    (some ksexpFile)
   -- 800_forged — an asserted-wrong expectation over a deciding
   -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
@@ -691,3 +723,12 @@ def main : IO Unit := do
         ("/* input.fnv1a64:" ++ toString (fnv1a64 klexFile)
           ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC(kLex) refused: {ax}")
+  -- ksexp.c — the parser as compiled code: the explicit-stack scan
+  -- lowered by the same emitProgC path.  Same stamp contract.
+  match ISAR.emitProgC ISAR.kSexp 1024 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/ksexp.c"
+        ("/* input.fnv1a64:" ++ toString (fnv1a64 ksexpFile)
+          ++ " */\n" ++ c)
+  | .error ax => throw (IO.userError s!"emitProgC(kSexp) refused: {ax}")
