@@ -69,6 +69,25 @@ KExpr *parse_expr(Tks *s, char **err);
 static int is_ident_tk(Tks *s);
 static KExpr *parse_postfix(Tks *s, char **err);
 
+/* upstream unescape: \" \\ \n \t \r decode; unknown escapes keep
+   both bytes (e.g. \u0022 stays literal) */
+static char *unesc(const char *s, size_t n) {
+    char *o = xmalloc(n + 1), *w = o;
+    size_t i = 0;
+    while (i < n) {
+        if (s[i] == '\\' && i + 1 < n) {
+            char c = s[i + 1];
+            if (c == '"' || c == '\\') { *w++ = c; i += 2; continue; }
+            if (c == 'n') { *w++ = '\n'; i += 2; continue; }
+            if (c == 't') { *w++ = '\t'; i += 2; continue; }
+            if (c == 'r') { *w++ = '\r'; i += 2; continue; }
+        }
+        *w++ = s[i++];
+    }
+    *w = 0;
+    return o;
+}
+
 /* koru puns: `f(x)` binds param `x` from a bare `x`; the pun name
    is the expr's trailing ident (var or field tail).  Defined with
    the lowering helpers; used at parse for PARSE005 parity. */
@@ -251,7 +270,7 @@ static KExpr *parse_primary(Tks *s, char **err) {
         KExpr *e = ke_new(13);
         size_t n = strlen(t->text);
         s->i++;
-        e->s = xstrndup(t->text + 1, n - 2);
+        e->s = unesc(t->text + 1, n - 2);
         return e;
     }
     if (t->kind == 0) {

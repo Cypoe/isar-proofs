@@ -84,12 +84,26 @@ static int sx_name(Sx *x, char **out) {
 }
 
 static int sx_str(Sx *x, char **out) {
-    /* quoted atom, quotes stripped — no escapes */
-    size_t n;
+    /* quoted atom, quotes stripped, \X unescaped (unknown escapes
+       keep both bytes — upstream unescapeString parity) */
+    size_t n; char *s, *w; size_t i;
     if (!x || x->is_list) return 0;
     n = strlen(x->atom);
     if (n < 2 || x->atom[0] != '"' || x->atom[n - 1] != '"') return 0;
-    *out = xstrndup(x->atom + 1, n - 2);
+    s = xmalloc(n); w = s;
+    for (i = 1; i + 1 < n; i++) {
+        char c = x->atom[i];
+        if (c == '\\' && i + 1 < n - 1) {
+            char d = x->atom[i + 1];
+            if (d == '"' || d == '\\') { *w++ = d; i++; continue; }
+            if (d == 'n') { *w++ = '\n'; i++; continue; }
+            if (d == 't') { *w++ = '\t'; i++; continue; }
+            if (d == 'r') { *w++ = '\r'; i++; continue; }
+        }
+        *w++ = c;
+    }
+    *w = 0;
+    *out = s;
     return 1;
 }
 

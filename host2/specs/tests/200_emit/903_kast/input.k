@@ -38,6 +38,7 @@ tor toargend {chars: []const i64, i: i64, n: i64, d: i64, ins: i64} -> i64
 toargend = peek(chars, i, n)
 | fin c when c < 0 -> i
 | str c when c == 34 |> toargend(chars, i: (i + 1), n, d, ins: if((ins == 1)) 0 else 1)
+| bs c when (ins == 1) && (c == 92) |> toargend(chars, i: (i + 2), n, d, ins)
 | deep c when (ins == 0) && (c == 40) |> toargend(chars, i: (i + 1), n, d: (d + 1), ins)
 | end c when (ins == 0) && ((d == 0) && ((c == 44) || (c == 41))) -> i
 | shal c when (ins == 0) && (c == 41) |> toargend(chars, i: (i + 1), n, d: (d - 1), ins)

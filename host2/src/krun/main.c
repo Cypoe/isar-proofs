@@ -18,7 +18,16 @@ static void print_val(Val *v, FILE *f) {
     case 0: fprintf(f, "(int %lld)", (long long)v->i); break;
     case 1: fprintf(f, "(float %lld %lld)", (long long)v->i, (long long)v->d); break;
     case 2: fprintf(f, "(bool %s)", v->b ? "true" : "false"); break;
-    case 3: fprintf(f, "(str \"%s\")", v->s); break;
+    case 3: {
+        const char *s;
+        fputs("(str \"", f);
+        for (s = v->s; *s; s++) {
+            if (*s == '\\' || *s == '"') fputc('\\', f);
+            fputc(*s, f);
+        }
+        fputs("\")", f);
+        break;
+    }
     case 4:
         fputs("(arr", f);
         for (i = 0; i < v->nx; i++) { fputc(' ', f); print_val(v->xs[i], f); }

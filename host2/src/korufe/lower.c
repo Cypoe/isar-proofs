@@ -14,12 +14,23 @@ static int is_builtin(const char *n) {
     return 0;
 }
 
+/* wire string atom: \ and " must be escaped for the reader */
+static void bput_sxstr(Buf *b, const char *s) {
+    char ch[2] = {0, 0};
+    bput(b, "\"");
+    for (; *s; s++) {
+        if (*s == '\\' || *s == '"') bput(b, "\\");
+        ch[0] = *s; bput(b, ch);
+    }
+    bput(b, "\"");
+}
+
 static void sx_lit(KExpr *e, Buf *b, char **err) {
     int i;
     switch (e->tag) {
     case 0: bputf(b, "(int %lld)", (long long)e->i); break;
     case 12: bputf(b, "(float %lld %lld)", (long long)e->i, (long long)e->d); break;
-    case 13: bput(b, "(str "); bput(b, "\""); bput(b, e->s); bput(b, "\")"); break;
+    case 13: bput(b, "(str "); bput_sxstr(b, e->s); bput(b, ")"); break;
     case 11: bputf(b, "(bool %s)", e->b ? "true" : "false"); break;
     case 9:
         bput(b, "(arr");
@@ -436,8 +447,9 @@ static int jval_sx(Jv *v, Buf *b, char **err) {
     }
     else if (jget(v, "bool"))
         bputf(b, "(bool %s)", jget(v, "bool")->b ? "true" : "false");
-    else if (jget(v, "str"))
-        bputf(b, "(str \"%s\")", jget(v, "str")->s);
+    else if (jget(v, "str")) {
+        bput(b, "(str "); bput_sxstr(b, jget(v, "str")->s); bput(b, ")");
+    }
     else if (jget(v, "arr")) {
         Jv *xs = jget(v, "arr");
         bput(b, "(arr");

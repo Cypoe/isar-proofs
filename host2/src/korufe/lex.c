@@ -73,6 +73,7 @@ Tks *lex_k(const char *src, const char *file, char **err) {
             const char *b = p;
             p++;
             while (*p && *p != '"') {
+                if (*p == '\\' && p[1]) { p += 2; continue; }
                 if (*p == '{' && p[1] == '{') {  /* interpolation */
                     *err = xstrdup("str interpolation {{ }} out of subset");
                     return 0;

@@ -306,6 +306,14 @@ static Outc run_k(Decl *g, int ng, Leaf *o, int no, int64_t fuel, Call c) {
     int i;
     if (fuel <= 0) return outc(0);
     fuel--;
+#ifdef KDBG
+    fprintf(stderr, "K tag=%d name=%s head=%s branch=%s arm=%s tgt=%s\n",
+            c.tag, c.name ? c.name : "-",
+            c.fl && c.fl->hname ? c.fl->hname : "-",
+            c.branch ? c.branch : "-",
+            c.arm && c.arm->branch ? c.arm->branch : "-",
+            c.arm && c.arm->ntarget ? c.arm->ntarget : "-");
+#endif
 
     if (c.tag == 0) {       /* invoke */
         Callable *cb = 0;

@@ -82,18 +82,6 @@ static char *span(long lo, long hi, char **err) {
     return xstrndup(rsrc + lo, (size_t)(hi - lo));
 }
 
-static char *span_trim(long lo, long hi, char **err) {
-    while (hi > lo &&
-           (rsrc[hi - 1] == ' ' || rsrc[hi - 1] == '\t' ||
-            rsrc[hi - 1] == '\r' || rsrc[hi - 1] == '\n'))
-        hi--;
-    while (lo < hi &&
-           (rsrc[lo] == ' ' || rsrc[lo] == '\t' ||
-            rsrc[lo] == '\r' || rsrc[lo] == '\n'))
-        lo++;
-    return span(lo, hi, err);
-}
-
 static int line_of(long off) {
     int l = 1;
     long i;
@@ -162,10 +150,39 @@ static char *span_type(long lo, long hi, char **err) {
     return span(lo, hi, err);
 }
 
+/* expr_from_src re-parses a *slice* — the KExpr spans it produces
+   index into the slice, not the source.  Shift them back to
+   absolute so jese/write_ast_json emit the right bytes. */
+static void span_shift(KExpr *e, long base) {
+    int i;
+    e->lo += base;
+    e->hi += base;
+    if (e->a) span_shift(e->a, base);
+    if (e->bb) span_shift(e->bb, base);
+    if (e->c) span_shift(e->c, base);
+    for (i = 0; i < e->nargs; i++) span_shift(e->args[i].e, base);
+    for (i = 0; i < e->nxs; i++) span_shift(e->xs[i], base);
+    for (i = 0; i < e->nfs; i++) span_shift(e->fs[i].e, base);
+}
+
 static KExpr *span_expr(long lo, long hi, char **err) {
-    char *t = span_trim(lo, expr_tail(lo, hi), err);
+    long alo = lo;
+    KExpr *e;
+    char *t;
+    hi = expr_tail(lo, hi);
+    while (alo < hi &&
+           (rsrc[alo] == ' ' || rsrc[alo] == '\t' ||
+            rsrc[alo] == '\r' || rsrc[alo] == '\n'))
+        alo++;
+    while (hi > alo &&
+           (rsrc[hi - 1] == ' ' || rsrc[hi - 1] == '\t' ||
+            rsrc[hi - 1] == '\r' || rsrc[hi - 1] == '\n'))
+        hi--;
+    t = span(alo, hi, err);
     if (!t || !*t) { *err = xstrdup("empty expression span"); return 0; }
-    return expr_from_src(t, err);
+    e = expr_from_src(t, err);
+    if (e) span_shift(e, alo);
+    return e;
 }
 
 static int pub_before(long j) {

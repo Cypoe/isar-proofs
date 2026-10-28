@@ -43,103 +43,17 @@ static void jese(FILE *f, KExpr *e) {
 /* expr back to source text — the canon AST keeps values as strings.
    Buffer-accumulating; used for plain_value fields. */
 
-/* rational → finite decimal text (koru floats are decimals; only
-   d = 2^a·5^b is surface-expressible — anything else can't be spelled,
-   emits a marker that re-parse will refuse, which is the honest
-   failure for a value koru syntax cannot represent) */
-static void rat_to_dec(int64_t n, int64_t d, Buf *b) {
-    int64_t rem = d, a2 = 0, a5 = 0, k;
-    int64_t scale, pw = 1;
-    int64_t scaled, an, whole, frac;
-    char fr[32], pad[32];
-    int i, fl;
-    while (rem % 2 == 0 && rem) { rem /= 2; a2++; }
-    while (rem % 5 == 0 && rem) { rem /= 5; a5++; }
-    if (rem != 1) {
-        bput(b, "{{unspellable-rational}}");
-        return;
-    }
-    k = a2 > a5 ? a2 : a5;       /* decimal places needed */
-    for (i = 0; i < k; i++) pw *= 10;
-    scale = pw / d;              /* = 2^(k-a2)·5^(k-a5), integer */
-    scaled = n * scale;
-    an = scaled < 0 ? -scaled : scaled;
-    whole = an / pw;
-    frac = an % pw;
-    if (scaled < 0) bput(b, "-");
-    bputf(b, "%lld", (long long)whole);
-    snprintf(fr, sizeof fr, "%lld", (long long)frac);
-    fl = (int)strlen(fr);
-    for (i = 0; i < (int)k - fl; i++) pad[i] = '0';
-    pad[(int)k - fl] = 0;
-    bput(b, "."); bput(b, pad); bput(b, fr);
-}
-
-static void expr_src_b(KExpr *e, Buf *b) {
-    int i;
-    switch (e->tag) {
-    case 0: bputf(b, "%lld", (long long)e->i); break;
-    case 1: bput(b, e->s); break;
-    case 2: {
-        static const char *os[] = {"+","-","*","/","%","==","!=","<",
-                                   "<=",">",">=","&&","||","++"};
-        bput(b, "("); expr_src_b(e->a, b);
-        bputf(b, " %s ", os[e->op]); expr_src_b(e->bb, b); bput(b, ")");
-        break;
-    }
-    case 3: bput(b, e->op == 0 ? "-" : "!"); expr_src_b(e->a, b); break;
-    case 4: bput(b, "if("); expr_src_b(e->a, b); bput(b, ") ");
-        expr_src_b(e->bb, b); bput(b, " else "); expr_src_b(e->c, b); break;
-    case 5: expr_src_b(e->a, b); bputf(b, ".%s", e->s); break;
-    case 6: expr_src_b(e->a, b); bput(b, "["); expr_src_b(e->bb, b); bput(b, "]"); break;
-    case 7:
-        bput(b, "@");   /* builtin_call spells @name(...) */
-        /* fallthrough */
-    case 8:
-        bput(b, e->s); bput(b, "(");
-        for (i = 0; i < e->nargs; i++) {
-            if (i) bput(b, ", ");
-            if (e->args[i].n) bputf(b, "%s: ", e->args[i].n);
-            expr_src_b(e->args[i].e, b);
-        }
-        bput(b, ")"); break;
-    case 9:
-        bput(b, "[");
-        for (i = 0; i < e->nxs; i++) {
-            if (i) bput(b, ", "); expr_src_b(e->xs[i], b);
-        }
-        bput(b, "]"); break;
-    case 10:
-        bput(b, "{");
-        for (i = 0; i < e->nfs; i++) {
-            if (i) bput(b, ", ");
-            bputf(b, "%s: ", e->fs[i].n); expr_src_b(e->fs[i].e, b);
-        }
-        bput(b, "}"); break;
-    case 11: bput(b, e->b ? "true" : "false"); break;
-    case 12:
-        rat_to_dec(e->i, e->d, b);
-        break;
-    case 13:
-        bput(b, "\""); bput(b, e->s); bput(b, "\""); break;
-    case 14:
-        bput(b, "("); expr_src_b(e->a, b); bput(b, ")"); break;
-    }
-}
-
 static void write_inv_json(Inv *v, int jump, FILE *f) {
     int j;
     fputs("{\"event\":[", f);
     if (jump) fprintf(f, "\"@%s\"", v->name); else jesc(f, v->name);
     fputs("],\"args\":[", f);
     for (j = 0; j < v->nargs; j++) {
-        Buf ab = {0, 0, 0};
         if (j) fputc(',', f);
         fputs("{\"name\":", f);
         if (v->args[j].n) jesc(f, v->args[j].n); else jesc(f, "");
         fputs(",\"value\":", f);
-        expr_src_b(v->args[j].e, &ab);
-        jesc(f, ab.p ? ab.p : "");
+        jese(f, v->args[j].e);
         fputc('}', f);
     }
     fputs("],\"variant\":null,\"return_binding\":", f);
@@ -148,27 +62,23 @@ static void write_inv_json(Inv *v, int jump, FILE *f) {
 }
 
 static void write_arm_json(ArmD *a, const char *file, int line, FILE *f) {
-    Buf cb = {0, 0, 0};
     int i;
     fputs("{\"branch\":", f); jesc(f, a->branch);
     fprintf(f, ",\"kind\":\"terminal\",\"is_catchall\":%s,\"binding\":",
             a->catchall ? "true" : "false");
     if (a->bind) jesc(f, a->bind); else fputs("null", f);
     fputs(",\"binding_type\":\"branch_payload\",\"condition\":", f);
-    if (a->cond) { expr_src_b(a->cond, &cb); jesc(f, cb.p ? cb.p : ""); }
-    else fputs("null", f);
+    if (a->cond) jese(f, a->cond); else fputs("null", f);
     fputs(",\"step\":", f);
     if (a->kind == 1) {           /* produce */
-        Buf pb = {0, 0, 0};
-        expr_src_b(a->produce, &pb);
         fputs("{\"type\":\"produce\",\"plain_value\":", f);
-        jesc(f, pb.p ? pb.p : "");
+        jese(f, a->produce);
         fputs("}", f);
     } else if (a->kind == 2) {    /* ctor */
         fputs("{\"type\":\"branch_constructor\",\"branch_constructor\":{\"branch_name\":", f);
         jesc(f, a->target);
         fputs(",\"fields\":[],\"plain_value\":", f);
-        if (a->produce) { Buf pb = {0,0,0}; expr_src_b(a->produce, &pb); jesc(f, pb.p?pb.p:""); }
+        if (a->produce) jese(f, a->produce);
         else fputs("null", f);
         fputs(",\"has_expressions\":", f);
         fputs(a->produce ? "true" : "false", f);
@@ -227,16 +137,13 @@ void write_ast_json(Item *items, const char *file, FILE *f) {
                     it->is_pub ? "true" : "false", file);
             break;
         }
-        case 2: {
-            Buf b = {0, 0, 0};
-            expr_src_b(it->bare, &b);
+        case 2:
             fputs("{\"immediate_impl\":{\"event_path\":{\"module_qualifier\":null,\"segments\":[", f);
             jesc(f, it->name);
             fputs("]},\"value\":{\"branch_name\":\"\",\"fields\":[],\"plain_value\":", f);
-            jesc(f, b.p ? b.p : "");
+            jese(f, it->bare);
             fprintf(f, ",\"has_expressions\":true,\"is_bare_return\":true},\"annotations\":[],\"module\":\"%s\",\"is_impl\":false}}", file);
             break;
-        }
         case 3:
             /* subflow impl → flow with impl_of */
             fputs("{\"flow\":{\"invocation\":", f);
@@ -283,6 +190,38 @@ void write_ast_json(Item *items, const char *file, FILE *f) {
    `parsed_expression` exists only where koru's own ExprNode can
    hold the shape — array/cell literals are outside that grammar
    and serialize as null with the raw span in `value`. */
+
+/* rational → finite decimal text (koru floats are decimals; only
+   d = 2^a·5^b is surface-expressible — anything else can't be spelled,
+   emits a marker that re-parse will refuse, which is the honest
+   failure for a value koru syntax cannot represent) */
+static void rat_to_dec(int64_t n, int64_t d, Buf *b) {
+    int64_t rem = d, a2 = 0, a5 = 0, k;
+    int64_t scale, pw = 1;
+    int64_t scaled, an, whole, frac;
+    char fr[32], pad[32];
+    int i, fl;
+    while (rem % 2 == 0 && rem) { rem /= 2; a2++; }
+    while (rem % 5 == 0 && rem) { rem /= 5; a5++; }
+    if (rem != 1) {
+        bput(b, "{{unspellable-rational}}");
+        return;
+    }
+    k = a2 > a5 ? a2 : a5;       /* decimal places needed */
+    for (i = 0; i < k; i++) pw *= 10;
+    scale = pw / d;              /* = 2^(k-a2)·5^(k-a5), integer */
+    scaled = n * scale;
+    an = scaled < 0 ? -scaled : scaled;
+    whole = an / pw;
+    frac = an % pw;
+    if (scaled < 0) bput(b, "-");
+    bputf(b, "%lld", (long long)whole);
+    snprintf(fr, sizeof fr, "%lld", (long long)frac);
+    fl = (int)strlen(fr);
+    for (i = 0; i < (int)k - fl; i++) pad[i] = '0';
+    pad[(int)k - fl] = 0;
+    bput(b, "."); bput(b, pad); bput(b, fr);
+}
 
 static int kexpr_parseable(KExpr *e) {
     int i;

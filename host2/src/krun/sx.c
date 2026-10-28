@@ -72,7 +72,10 @@ static int tokenize(const char *src, char ***toks_out, int *ntoks) {
             t = xstrndup(p, 1); p++;
         } else if (*p == '"') {
             q = p + 1;
-            while (*q && *q != '"') q++;
+            while (*q && *q != '"') {
+                if (*q == '\\' && q[1]) { q += 2; continue; }
+                q++;
+            }
             if (!*q) return 0;      /* unterminated quote refuses */
             q++;
             t = xstrndup(p, (size_t)(q - p)); p = q;

@@ -79,6 +79,7 @@ int main(int argc, char **argv) {
             rows = file_read(argv[2]);
         }
         if (!rows) { fputs("refuse: cannot read rows\n", stderr); return 2; }
+        korufe_src = src;   /* jese slices absolute spans */
         items = reify_rows(rows, src, &err);
         if (!items) { fprintf(stderr, "refuse: %s\n", err); return 2; }
         b = base_name(argv[3]);

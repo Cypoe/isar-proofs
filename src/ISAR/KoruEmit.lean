@@ -1021,7 +1021,8 @@ def kAstToArrow : KCallable := .subflow {
 
 /-- `toargend`: scan an arg *value* to its `,` or `)` at paren
 depth 0 — `d` is the explicit stack, `ins` the in-string flag
-(`"` toggles it; `\"` escapes are a named axis). -/
+(`"` toggles it; `bs` skips the byte after `\` so `\"` stays
+inside the string — upstream lexer parity). -/
 def kAstToArgEnd : KCallable := .subflow {
   preLabel := none
   head := ("peek",
@@ -1036,6 +1037,13 @@ def kAstToArgEnd : KCallable := .subflow {
          ("d", .var "d"),
          ("ins", .cond (qeq (.var "ins") (qint 1))
                        (qint 0) (qint 1))])) []
+  , .mk "bs" false (some "c")
+      (some (qand (qeq (.var "ins") (qint 1))
+                  (qeq (.var "c") (qint 92))))
+      (some (.invoke "toargend"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 2)), ("n", .var "n"),
+         ("d", .var "d"), ("ins", .var "ins")])) []
   , .mk "deep" false (some "c")
       (some (qand (qeq (.var "ins") (qint 0))
                   (qeq (.var "c") (qint 40))))
