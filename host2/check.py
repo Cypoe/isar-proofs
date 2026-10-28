@@ -70,6 +70,10 @@ The pipeline per case row:
           --ast-json` normalized to the same flat `(kind span…)`
           row text must equal what the program decided —
           authority AST ≡ koru-spelled parser output
+  kw    : the WIDE race — every specs/tests input.k through the
+          compiled kast (enlarged-stack build, invoke-recursion
+          axis) vs `koruc --ast-json` normalized; row-identical
+          plus refusal parity both directions
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -86,6 +90,7 @@ authority declared in realizations.json.
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
@@ -144,32 +149,36 @@ def _fnv1a64(b: bytes) -> int:
 # import_decl) the location's own text is what keeps it honest —
 # a location that doesn't point at an `import` token drops out.
 
-_AST_ATOM = set(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+_AST_ATOM = (
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
 
 def ast_norm_rows(src, ast):
     """`koruc --ast-json` output → list of `(kind i j …)` row text,
-    the same flat wire kAst's `out` carries."""
+    the same flat wire kAst's `out` carries.  All offsets are BYTE
+    positions: the wire carries the source as an int array of bytes
+    and the authority's zig lexer counts []const u8 columns, so
+    every scan below works on src.encode() — never on codepoints."""
+    src = src.encode("utf-8")
     rows = []
     lstart = [0]
-    for ln in src.split("\n")[:-1]:
+    for ln in src.split(b"\n")[:-1]:
         lstart.append(lstart[-1] + len(ln) + 1)
 
     def loff(loc):
         return lstart[loc["line"] - 1] + loc["col"]
 
     def line_end(pos):
-        e = src.find("\n", pos)
+        e = src.find(b"\n", pos)
         return len(src) if e < 0 else e
 
     def ws_fwd(pos):
-        while pos < len(src) and src[pos] in " \t\n\r":
+        while pos < len(src) and src[pos] in b" \t\n\r":
             pos += 1
         return pos
 
     def hws_fwd(pos):
-        while pos < len(src) and src[pos] in " \t":
+        while pos < len(src) and src[pos] in b" \t":
             pos += 1
         return pos
 
@@ -182,6 +191,7 @@ def ast_norm_rows(src, ast):
     def find_word(pat, lo, hi):
         """First occurrence of `pat` in src[lo:hi] with non-atom
         boundaries, like the parser's `word` scanner."""
+        pat = pat.encode("utf-8")
         n = len(pat)
         i = lo
         while True:
@@ -196,20 +206,24 @@ def ast_norm_rows(src, ast):
     def parens_args(pos):
         """`name(args)` at pos → list of (named?, nj, ne, vj, ve)
         arg spans, and the offset just past `)`."""
-        o = src.find("(", pos)
+        o = src.find(b"(", pos)
         if o < 0:
             return None
-        depth, i, segs, s0 = 0, o, [], o + 1
+        depth, i, segs, s0, ins = 0, o, [], o + 1, 0
         while i < len(src):
-            c = src[i]
-            if c == "(":
+            c = src[i:i + 1]
+            if c == b'"':
+                ins = 1 - ins
+            elif ins:
+                pass
+            elif c == b"(":
                 depth += 1
-            elif c == ")":
+            elif c == b")":
                 depth -= 1
                 if depth == 0:
                     segs.append((s0, i))
                     break
-            elif c == "," and depth == 1:
+            elif c == b"," and depth == 1:
                 segs.append((s0, i))
                 s0 = i + 1
             i += 1
@@ -220,13 +234,17 @@ def ast_norm_rows(src, ast):
                 continue
             # named arg iff a depth-0 ':' before any '('
             colon = None
-            d = 0
+            d = ins = 0
             for k in range(a, b):
-                if src[k] == "(":
+                if src[k:k + 1] == b'"':
+                    ins = 1 - ins
+                elif ins:
+                    pass
+                elif src[k:k + 1] == b"(":
                     d += 1
-                elif src[k] == ")":
+                elif src[k:k + 1] == b")":
                     d -= 1
-                elif src[k] == ":" and d == 0:
+                elif src[k:k + 1] == b":" and d == 0:
                     colon = k
                     break
             if colon is not None:
@@ -246,38 +264,145 @@ def ast_norm_rows(src, ast):
         """The cont's `|` line → (line_start, line_end)."""
         return loff(loc), line_end(loff(loc))
 
+    def emit_step_rows(st, v0, cle, via_pipe):
+        """Step rows for the step whose value text starts at v0 and
+        whose line ends at cle.  `via_pipe` is True when the step
+        rides `|>` (invocation-shaped), False for `->` produce.
+        Returns the offset just past the step's closing `)` for
+        invocation/jump steps (the retbind `:` decision point),
+        else None."""
+        sty = st.get("type")
+        if sty == "expression":
+            rows.append(f"(step expr {v0} {cle})")
+            return None
+        if sty == "invocation":
+            # `-> if(c) a else b` is an `["if"]` invocation in
+            # the authority's schema — the else tail is not in
+            # args.  kAst spans the whole expression; project to
+            # the same `(step expr v0 cle)` row.  `|> if(g)` keeps
+            # its invoke shape — the nested `| then`/`| else` arms
+            # arrive as continuation rows on both sides.
+            if st["invocation"]["event"] == ["if"] and not via_pipe:
+                rows.append(f"(step expr {v0} {cle})")
+                return None
+            sj = v0
+            se = word_end(sj)
+            rows.append(f"(step invoke {sj} {se})")
+            pa = parens_args(se)
+            for named, nj2, ne2, vj, ve in (pa[0] if pa else []):
+                rows.append(f"(arg {nj2} {ne2} {vj} {ve})")
+            return pa[1] if pa else None
+        if sty == "label_jump":
+            sj = v0 + 1 if src[v0:v0 + 1] == b"@" else v0
+            se = word_end(sj)
+            rows.append(f"(step jump {sj} {se})")
+            pa = parens_args(se)
+            for named, nj2, ne2, vj, ve in (pa[0] if pa else []):
+                rows.append(f"(arg {nj2} {ne2} {vj} {ve})")
+            return pa[1] if pa else None
+        if sty == "branch_constructor":
+            sj = v0
+            se = word_end(sj)
+            rows.append(
+                f"(ctor {sj} {se} {hws_fwd(se)} {cle})")
+            return None
+        return None
+
+    def emit_cont(c, v0_hint=None):
+        """Rows for one continuation plus its nested continuations.
+        Named conts re-derive their `| branch` span from location;
+        anonymous `|>`-chain conts (retbind / chained step) have
+        branch "" — they emit no (cont) row and take their step
+        position from the caller's `|>` scan."""
+        if c["branch"]:
+            cl0, cle = arm_line(c["location"])
+            bj = hws_fwd(cl0 + 1)
+            be = word_end(bj)
+            rows.append(f"(cont {bj} {be})")
+            t = hws_fwd(be)
+            # bind / when / tail in source order
+            if c.get("binding"):
+                bb = c["binding"].encode("utf-8")
+                rows.append(f"(bind {t} {t + len(bb)})")
+                t = hws_fwd(t + len(bb))
+            tt = t
+            if c.get("condition") and src[t:t + 4] == b"when":
+                c0 = hws_fwd(t + 4)
+                tt = min(
+                    (k for tok in (b"->", b"|>", b"=>")
+                     for k in [src.find(tok, c0, cle)] if k >= 0),
+                    default=cle)
+                rows.append(f"(cond {c0} {tt})")
+            st = c.get("step")
+            if not st:
+                return
+            v0 = hws_fwd(tt + 2)
+            via_pipe = src[tt:tt + 2] == b"|>"
+        else:
+            if v0_hint is None:
+                rows.append("(bad 0 -2)")
+                return
+            v0 = v0_hint
+            cle = line_end(v0)
+            st = c.get("step")
+            via_pipe = True
+        ae = emit_step_rows(st, v0, cle, via_pipe) if st else None
+        nested = c.get("continuations", [])
+        if ae is None:
+            for nc in nested:
+                emit_cont(nc)
+            return
+        # after the step's `)`: `: name |>` retbind, `|>` chain, or
+        # `| name` nested-dispatch arms (those re-derive by location)
+        p2 = hws_fwd(ae)
+        hint = None
+        if src[p2:p2 + 1] == b":":
+            w0 = hws_fwd(p2 + 1)
+            w1 = word_end(w0)
+            rows.append(f"(rbind {w0} {w1})")
+            p3 = hws_fwd(w1)
+            if src[p3:p3 + 2] == b"|>":
+                hint = hws_fwd(p3 + 2)
+        elif src[p2:p2 + 2] == b"|>":
+            hint = hws_fwd(p2 + 2)
+        for nc in nested:
+            emit_cont(nc, hint)
+            hint = None
+
     for it in ast.get("items", []):
         ty = it.get("type")
         loc = it.get("location") or {}
         if ty == "import_decl":
             p = ws_fwd(loff(loc))
-            if src[p:p + 6] != "import":
+            if src[p:p + 6] != b"import":
                 continue  # injected prelude — no row
             s = hws_fwd(p + 6)
             rows.append(f"(imp {s} {line_end(s)})")
         elif ty == "event_decl":
             p = ws_fwd(loff(loc))
-            j = src.find(it["name"], p)
+            nameb = it["name"].encode("utf-8")
+            j = src.find(nameb, p)
             if j < 0:
                 rows.append("(bad 0 -1)")
                 continue
-            rows.append(f"(ev {j} {j + len(it['name'])})")
+            rows.append(f"(ev {j} {j + len(nameb)})")
             le = line_end(j)
             for f in it["input"]["fields"]:
+                fnb = f["name"].encode("utf-8")
                 nj = find_word(f["name"], j, le)
                 if nj < 0:
                     rows.append("(bad 0 -1)")
                     continue
-                c = src.find(":", nj + len(f["name"]), le)
-                tj = hws_fwd(c + 1) if c >= 0 else nj + len(f["name"])
-                te = min((x for x in (src.find(",", tj, le),
-                                     src.find("}", tj, le))
+                c = src.find(b":", nj + len(fnb), le)
+                tj = hws_fwd(c + 1) if c >= 0 else nj + len(fnb)
+                te = min((x for x in (src.find(b",", tj, le),
+                                     src.find(b"}", tj, le))
                           if x >= 0), default=le)
-                rows.append(f"(fld {nj} {nj + len(f['name'])} "
+                rows.append(f"(fld {nj} {nj + len(fnb)} "
                             f"{tj} {te})")
             # the authority drops `-> T` entirely; on a tor line
             # a post-fields `->` can only be the return annotation
-            ar = src.find("->", j, le)
+            ar = src.find(b"->", j, le)
             if ar >= 0:
                 rows.append(
                     f"(ret {hws_fwd(ar + 2)} {line_end(ar + 2)})")
@@ -287,13 +412,13 @@ def ast_norm_rows(src, ast):
             seen = 0
             while seen < n_br and q < len(src):
                 q = ws_fwd(q)
-                if src[q:q + 1] != "|" or src[q + 1:q + 2] == ">":
+                if src[q:q + 1] != b"|" or src[q + 1:q + 2] == b">":
                     break
                 nj = hws_fwd(q + 1)
                 ne = word_end(nj)
                 t0 = hws_fwd(ne)
                 qe = line_end(t0)
-                if t0 < qe and src[t0] not in "\n":
+                if t0 < qe and src[t0] != 0x0A:
                     rows.append(f"(brd {nj} {ne} {t0} {qe})")
                 else:
                     rows.append(f"(brd {nj} {ne} 0 0)")
@@ -303,66 +428,29 @@ def ast_norm_rows(src, ast):
             p = ws_fwd(loff(loc))
             nj = word_end(p)
             le = line_end(p)
-            ar = src.find("->", nj, le)
+            ar = src.find(b"->", nj, le)
             v0 = ws_fwd(ar + 2) if ar >= 0 else le
             rows.append(f"(impl {p} {nj} {v0} {le})")
         elif ty == "flow":
             p = ws_fwd(loff(loc))
             le = line_end(p)
             if it.get("pre_label"):
-                lj = src.find("#" + it["pre_label"], p, le)
+                lj = src.find(b"#" + it["pre_label"].encode("utf-8"),
+                              p, le)
                 if lj >= 0:
-                    rows.append(f"(lbl {lj + 1} "
-                                f"{lj + 1 + len(it['pre_label'])})")
+                    rows.append(
+                        f"(lbl {lj + 1} "
+                        f"{lj + 1 + len(it['pre_label'].encode('utf-8'))})")
             nj = word_end(p)
             rows.append(f"(flw {p} {nj})")
             ev = it["invocation"]["event"]
-            ename = ev[-1] if ev else ""
-            ej = src.find(ename, nj, le)
+            ename = (ev[-1] if ev else "").encode("utf-8")
+            ej = src.find(ename, nj, le) if ename else -1
             if ej >= 0:
                 rows.append(f"(call {ej} {ej + len(ename)})")
                 emit_args(ej + len(ename))
             for c in it["continuations"]:
-                cl0, cle = arm_line(c["location"])
-                bj = cl0 + 1
-                bj = hws_fwd(bj)
-                be = word_end(bj)
-                rows.append(f"(cont {bj} {be})")
-                t = hws_fwd(be)
-                # bind / when / tail in source order
-                if c.get("binding"):
-                    rows.append(f"(bind {t} {t + len(c['binding'])})")
-                    t = hws_fwd(t + len(c["binding"]))
-                tt = t
-                if c.get("condition") and src[t:t + 4] == "when":
-                    c0 = hws_fwd(t + 4)
-                    tt = min(
-                        (k for tok in ("->", "|>", "=>")
-                         for k in [src.find(tok, c0, cle)] if k >= 0),
-                        default=cle)
-                    rows.append(f"(cond {c0} {tt})")
-                st = c.get("step")
-                if not st:
-                    continue
-                v0 = hws_fwd(tt + 2)
-                sty = st.get("type")
-                if sty == "expression":
-                    rows.append(f"(step expr {v0} {cle})")
-                elif sty == "invocation":
-                    sj = v0
-                    se = word_end(sj)
-                    rows.append(f"(step invoke {sj} {se})")
-                    emit_args(se)
-                elif sty == "label_jump":
-                    sj = v0 + 1 if src[v0:v0 + 1] == "@" else v0
-                    se = word_end(sj)
-                    rows.append(f"(step jump {sj} {se})")
-                    emit_args(se)
-                elif sty == "branch_constructor":
-                    sj = v0
-                    se = word_end(sj)
-                    rows.append(
-                        f"(ctor {sj} {se} {hws_fwd(se)} {cle})")
+                emit_cont(c)
     return rows
 
 
@@ -1214,6 +1302,69 @@ def gate():
             else:
                 bad(f"{dkey}.{code}v",
                     f"exit={rv.returncode} got={gotv[:60]!r}")
+
+    # ---- wide AST race: every input.k in the corpus goes through
+    # the compiled kast binary and `koruc --ast-json`, both
+    # normalized to the flat row wire, refusal parity included.
+    # The race binary gets an enlarged stack — emitProgC compiles
+    # each invoke to a C call (no tail-call flattening), so |> chains
+    # and per-arm dispatch are mutual recursion: the 14KB kast
+    # source overflows the 1MB default.  Host-resource axis, not a
+    # parse limit; the fuel argument stays well above decidedness. ----
+    kw_leaf = next((a for a, g in args_progs.items() if g == "kast"),
+                   None)
+    if not koruc:
+        skip("kw.build", "koruc toolchain not on this machine")
+    elif kw_leaf is None:
+        skip("kw.build", "no kast emit_args row")
+    else:
+        kw_src = os.path.join(SPECS, "gen", "kast.c")
+        kw_bin = os.path.join(BUILD, "kast_kw"
+                              + (".exe" if os.name == "nt" else ""))
+        kw_flags = list(tc["flags"])
+        if os.name == "nt":
+            kw_flags.append("-Wl,/STACK:67108864")
+        c = subprocess.run([tc["cc"], *kw_flags, kw_src, "-o", kw_bin],
+                           capture_output=True, text=True)
+        if c.returncode != 0:
+            bad("kw.build",
+                f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
+        else:
+            ok("kw.build", "emitProgC(kast) wide-stack build")
+            for ik in sorted(glob.glob(
+                    os.path.join(SPECS, "tests", "**", "input.k"),
+                    recursive=True)):
+                rel = os.path.relpath(
+                    ik, os.path.join(SPECS, "tests"))
+                tag = "kw." + rel.replace("\\", "/").replace(
+                    "/", ".").replace("input.k", "").rstrip(".")
+                raw = open(ik, "rb").read()
+                src_text = raw.decode("utf-8")
+                ra = subprocess.run(
+                    [koruc, "--ast-json", os.path.abspath(ik)],
+                    capture_output=True, text=True)
+                auth_bad = ra.returncode != 0
+                theirs = ([] if auth_bad else ast_norm_rows(
+                    src_text, json.loads(ra.stdout)))
+                cell = ("(cell (chars (arr "
+                        + " ".join(f"(int {b})" for b in raw) + ")))")
+                rm = subprocess.run([kw_bin, "4000000"], input=cell,
+                                    capture_output=True, text=True,
+                                    timeout=300)
+                mine = parse_row_text(rm.stdout)
+                mine_bad = any(r.startswith("(bad") for r in mine)
+                if auth_bad != mine_bad:
+                    bad(tag, f"refusal mismatch auth_bad={auth_bad}")
+                elif mine != theirs:
+                    i = next((k for k, (a, b)
+                              in enumerate(zip(mine, theirs)) if a != b),
+                             min(len(mine), len(theirs)))
+                    bad(tag, f"first diff @{i}: "
+                             f"{mine[i:i + 1]} vs {theirs[i:i + 1]}")
+                elif auth_bad:
+                    ok(tag, "refusal parity")
+                else:
+                    ok(tag, f"{len(mine)} rows agree")
 
     # ---- refusal probes: the frontend refuses by default, and the
     # same surfaces koruc refuses refuse here (PARSE003/005 parity,

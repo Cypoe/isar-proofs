@@ -1455,7 +1455,8 @@ def kAstArgVal : KCallable := .subflow {
           [("out", qRow4 "arg" (qint 0) (qint 0)
                             (.var "i") (.var "v1"))]))) [] ] }
 
-/-- `argnext`: after a value — `,` loops, `)` closes to `armloop`. -/
+/-- `argnext`: after a value — `,` loops, `)` closes to `postcall`
+(the retbind decision point). -/
 def kAstArgNext : KCallable :=
   qSeq (qWsAt (.var "i")) "d" "argnext-at" (qNext (.var "d") [])
 
@@ -1467,7 +1468,65 @@ def kAstArgNextAt : KCallable := .subflow {
     .mk "more" false (some "c") (some (qeq (.var "c") (qint 44)))
       (some (.invoke "args" (qNext (qadd (.var "i") (qint 1)) []))) []
   , .mk "close" false (some "c") (some (qeq (.var "c") (qint 41)))
-      (some (.invoke "armloop" (qNext (qadd (.var "i") (qint 1)) []))) []
+      (some (.invoke "postcall" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `postcall`: horizontal ws after a call's `)` — a `:` opens a
+retbind; anything else ends the arm/call into `armloop`. -/
+def kAstPostCall : KCallable :=
+  qSeq ("hws",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+    "p" "postcall-at" (qNext (.var "p") [])
+
+/-- `postcall-at`. -/
+def kAstPostCallAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "rb" false (some "c") (some (qeq (.var "c") (qint 58)))
+      (some (.invoke "rb-word" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "done" false (some "c") none
+      (some (.invoke "armloop" (qNext (.var "i") []))) [] ] }
+
+/-- `rb-word`: ws to the result name of `: name`. -/
+def kAstRbWord : KCallable :=
+  qSeq (qWsAt (.var "i")) "w" "rb-word-at" (qNext (.var "w") [])
+
+/-- `rb-word-at`: the name word — `(rbind w we)`; the tail then
+requires `|>` (`->`/`=>` after a retbind is a named axis). -/
+def kAstRbWordAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "we" false (some "we") none
+          (some (.invoke "rb-tail"
+            (qNext (.var "we")
+              [("out", qRow2 "rbind" (.var "i") (.var "we"))]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `rb-tail`: horizontal ws after the name — `|>` recurses into
+the step chain (its `)` lands back at `postcall`, so `: a |> : b`
+chains work). -/
+def kAstRbTail : KCallable :=
+  qSeq ("hws",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+    "t" "rb-tail-at" (qNext (.var "t") [])
+
+/-- `rb-tail-at`. -/
+def kAstRbTailAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "step" false (some "c")
+      (some (qand (qeq (.var "c") (qint 124))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.invoke "arm-step"
+        (qNext (qadd (.var "i") (qint 2)) []))) []
   , .mk "bad" false (some "c") none
       (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
 
@@ -1951,6 +2010,12 @@ def kAst : KProg := {
     ("argval", kAstArgVal),
     ("argnext", kAstArgNext),
     ("argnext-at", kAstArgNextAt),
+    ("postcall", kAstPostCall),
+    ("postcall-at", kAstPostCallAt),
+    ("rb-word", kAstRbWord),
+    ("rb-word-at", kAstRbWordAt),
+    ("rb-tail", kAstRbTail),
+    ("rb-tail-at", kAstRbTailAt),
     ("armloop", kAstArmLoop),
     ("armloop-at", kAstArmLoopAt),
     ("arm", kAstArm),
@@ -2047,6 +2112,12 @@ def kAstDecls : List (String × KDecl) :=
   , ("argval", flow ["i", "n"])
   , ("argnext", flow ["i", "n"])
   , ("argnext-at", flow ["i", "n"])
+  , ("postcall", flow ["i", "n"])
+  , ("postcall-at", flow ["i", "n"])
+  , ("rb-word", flow ["i", "n"])
+  , ("rb-word-at", flow ["i", "n"])
+  , ("rb-tail", flow ["i", "n"])
+  , ("rb-tail-at", flow ["i", "n"])
   , ("armloop", flow ["i", "n"])
   , ("armloop-at", flow ["i", "n"])
   , ("arm", flow ["i", "n"])

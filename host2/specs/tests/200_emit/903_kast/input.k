@@ -171,7 +171,34 @@ argnext = ws(chars, i, n)
 tor argnext-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 argnext-at = peek(chars, i, n)
 | more c when c == 44 |> args(chars, i: (i + 1), n, out)
-| close c when c == 41 |> armloop(chars, i: (i + 1), n, out)
+| close c when c == 41 |> postcall(chars, i: (i + 1), n, out)
+| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+
+tor postcall {chars: []const i64, i: i64, n: i64, out: string} -> string
+postcall = hws(chars, i, n)
+| go p |> postcall-at(chars, i: p, n, out)
+
+tor postcall-at {chars: []const i64, i: i64, n: i64, out: string} -> string
+postcall-at = peek(chars, i, n)
+| rb c when c == 58 |> rb-word(chars, i: (i + 1), n, out)
+| done _ |> armloop(chars, i, n, out)
+
+tor rb-word {chars: []const i64, i: i64, n: i64, out: string} -> string
+rb-word = ws(chars, i, n)
+| go w |> rb-word-at(chars, i: w, n, out)
+
+tor rb-word-at {chars: []const i64, i: i64, n: i64, out: string} -> string
+rb-word-at = peek(chars, i, n)
+| id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : we |> rb-tail(chars, i: we, n, out: (out ++ ("(rbind " ++ (@intToString(i) ++ (" " ++ (@intToString(we) ++ ") "))))))
+| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+
+tor rb-tail {chars: []const i64, i: i64, n: i64, out: string} -> string
+rb-tail = hws(chars, i, n)
+| go t |> rb-tail-at(chars, i: t, n, out)
+
+tor rb-tail-at {chars: []const i64, i: i64, n: i64, out: string} -> string
+rb-tail-at = peek(chars, i, n)
+| step c when (c == 124) && (chars[(i + 1)] == 62) |> arm-step(chars, i: (i + 2), n, out)
 | bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
 
 tor armloop {chars: []const i64, i: i64, n: i64, out: string} -> string
