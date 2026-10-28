@@ -55,6 +55,39 @@ int main(int argc, char **argv) {
         fputc('\n', stdout);
         return 0;
     }
+    if (argc == 4 && !strcmp(argv[1], "--reify")) {
+        /* flat row wire + the source it indexes → the same
+           ast.json `korufe FILE.k` emits — the koru-typed lane's
+           lowerer half: input.k --kast--> rows --reify--> ast.json
+           --lower--> claim.  `-` reads rows from stdin. */
+        char *src = file_read(argv[3]);
+        char *rows;
+        Item *items;
+        const char *b;
+        char *dot;
+        if (!src) { fprintf(stderr, "refuse: cannot read %s\n", argv[3]); return 2; }
+        if (!strcmp(argv[2], "-")) {
+            Buf rb = {0, 0, 0};
+            char tmp[4096];
+            size_t got;
+            while ((got = fread(tmp, 1, sizeof tmp - 1, stdin)) > 0) {
+                tmp[got] = 0;
+                bput(&rb, tmp);
+            }
+            rows = rb.p ? rb.p : xstrdup("");
+        } else {
+            rows = file_read(argv[2]);
+        }
+        if (!rows) { fputs("refuse: cannot read rows\n", stderr); return 2; }
+        items = reify_rows(rows, src, &err);
+        if (!items) { fprintf(stderr, "refuse: %s\n", err); return 2; }
+        b = base_name(argv[3]);
+        dot = strrchr(b, '.');
+        write_ast_json(items, dot ? xstrndup(b, (size_t)(dot - b)) : b,
+                       stdout);
+        fputc('\n', stdout);
+        return 0;
+    }
     if (argc == 5 && !strcmp(argv[1], "--lower")) {
         /* ast.json + cases.json KEY → claim */
         char *asrc = file_read(argv[2]);
@@ -84,6 +117,7 @@ int main(int argc, char **argv) {
     fputs("usage: korufe FILE.k\n"
           "       korufe --ast-json FILE.k\n"
           "       korufe --ast-canon FILE.k\n"
+          "       korufe --reify ROWS.txt FILE.k  ('-' = rows on stdin)\n"
           "       korufe --lower FILE.ast.json CASES.json KEY\n",
           stderr);
     return 2;

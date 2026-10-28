@@ -74,6 +74,11 @@ The pipeline per case row:
           compiled kast (enlarged-stack build, invoke-recursion
           axis) vs `koruc --ast-json` normalized; row-identical
           plus refusal parity both directions
+  kr    : the REIFY race — `korufe --reify` turns kast's row wire
+          back into korufe's internal ast.json; it must be byte-
+          identical to `korufe FILE.k` — the koru-spelled parse
+          reified ≡ the C parse, document-level (the rows are the
+          interchange document; JSON stays the interface)
   kwj   : the JSON race — the same corpus through `korufe
           --ast-json` vs `koruc --ast-json`, deep-equal modulo the
           path-dependent location.file.  The readable view is the
@@ -115,7 +120,7 @@ SRC_KRUN = [os.path.join(_HOST2, "src", "krun", f)
             for f in ("sx.c", "wire.c", "eval.c", "quote.c", "main.c")]
 SRC_KORUFE = [os.path.join(_HOST2, "src", "korufe", f)
               for f in ("util.c", "lex.c", "parse.c", "astio.c",
-                        "lower.c", "main.c")]
+                        "lower.c", "reify.c", "main.c")]
 KRUN = os.path.join(_HOST2, "build", "krun.exe" if os.name == "nt" else "krun")
 KORUFE = os.path.join(_HOST2, "build", "korufe.exe" if os.name == "nt" else "korufe")
 SPECS = os.path.join(_HOST2, "specs")
@@ -1416,6 +1421,33 @@ def gate():
                     ok(tag, "refusal parity")
                 else:
                     ok(tag, f"{len(mine)} rows agree")
+                # ---- kr: the lowerer half — reify the row wire
+                # back into korufe's internal document.  `korufe
+                # --reify - FILE.k` must emit the *same* ast.json the
+                # C parser emits for FILE.k — document-level identity
+                # between the koru-spelled parse and the C parse, and
+                # the bridge that makes kast output runnable. ----
+                ktag = "kr" + tag[2:]
+                rd = subprocess.run([KORUFE, ik],
+                                    capture_output=True, text=True)
+                rr = subprocess.run([KORUFE, "--reify", "-", ik],
+                                    input=rm.stdout,
+                                    capture_output=True, text=True)
+                d_bad, r_bad = rd.returncode != 0, rr.returncode != 0
+                if d_bad != r_bad:
+                    bad(ktag, f"refusal mismatch korufe={d_bad} "
+                              f"reify={r_bad} {rr.stderr.strip()[:80]}")
+                elif d_bad:
+                    ok(ktag, "refusal parity")
+                elif rd.stdout != rr.stdout:
+                    a, b = rd.stdout, rr.stdout
+                    i = next((k for k, (x, y)
+                              in enumerate(zip(a, b)) if x != y),
+                             min(len(a), len(b)))
+                    bad(ktag, f"first diff @{i}: "
+                              f"{a[i:i + 40]!r} vs {b[i:i + 40]!r}")
+                else:
+                    ok(ktag, "reified ast.json identical")
 
     # ---- wide JSON race: the SAME corpus through `korufe
     # --ast-json` vs `koruc --ast-json` — the readable view is the

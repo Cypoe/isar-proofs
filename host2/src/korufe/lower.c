@@ -155,7 +155,7 @@ static void sx_arm(ArmD *a, Buf *b, char **err) {
 
 /* --- the JSON-AST → same ArmD tree (lower reads canon items) --- */
 
-static KExpr *expr_from_src(const char *src, char **err) {
+KExpr *expr_from_src(const char *src, char **err) {
     Tks *ts;
     KExpr *e;
     if (!src || !*src) { *err = xstrdup("empty expression"); return 0; }

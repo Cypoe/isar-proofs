@@ -153,6 +153,10 @@ char *jseg0(Jv *path);
 
 /* ---- lower.c ---- */
 char *pun_name(KExpr *e);
+KExpr *expr_from_src(const char *src, char **err);
 int lower(Jv *ast, Jv *cspec, Buf *out, char **err);
+
+/* ---- reify.c ---- */
+Item *reify_rows(const char *rowtext, const char *source, char **err);
 
 #endif
