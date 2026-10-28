@@ -306,6 +306,33 @@ termination_by l => sizeOf l
 decreasing_by
   all_goals (simp_wf <;> omega)
 
+mutual
+/-- Free-var check for the `_` discard the authority demands on
+unreferenced arm bindings (KORU100).  Cont arms get a fresh env —
+only the guard and node can see the bind. -/
+def kExprUsesVar (x : String) : ISAR.KExpr → Bool
+  | .lit _ => false
+  | .var n => n == x
+  | .bin _ a b => kExprUsesVar x a || kExprUsesVar x b
+  | .un _ e => kExprUsesVar x e
+  | .cond c t e => kExprUsesVar x c || kExprUsesVar x t
+                   || kExprUsesVar x e
+  | .field o _ => kExprUsesVar x o
+  | .index o i => kExprUsesVar x o || kExprUsesVar x i
+  | .builtin _ args => kExprArgsUseVar x args
+
+def kExprArgsUseVar (x : String) : List ISAR.KExpr → Bool
+  | [] => false
+  | e :: es => kExprUsesVar x e || kExprArgsUseVar x es
+end
+
+def kArmNodeUsesVar (x : String) : ISAR.KArmNode → Bool
+  | .terminal => false
+  | .jump _ args => args.any (fun (_, e) => kExprUsesVar x e)
+  | .invoke _ args => args.any (fun (_, e) => kExprUsesVar x e)
+  | .produce e => kExprUsesVar x e
+  | .retCtor _ e => kExprUsesVar x e
+
 /-- One arm line incl. its `|`/`|*` marker — the residual arm is
 glued `|*` in real koru (`| *` is the retired deref spelling). -/
 def kArmSrc (a : ISAR.KArm) : String :=
@@ -316,7 +343,11 @@ def kArmSrc (a : ISAR.KArm) : String :=
     else sxName a.branch
   let bindf := match a.bind with
     | none => ""
-    | some b => " " ++ sxName b
+    | some b =>
+        let used :=
+          (a.cond.map (kExprUsesVar b)).getD false
+          || (a.node.map (kArmNodeUsesVar b)).getD false
+        " " ++ (if used then sxName b else "_")
   let whenf := match a.cond with
     | none => ""
     | some e => " when " ++ kGuardSrc e
@@ -468,6 +499,21 @@ def ksexpFile : String :=
     ++ "// arg-less invoke refuses: `chars` unbound.\n"
     ++ String.intercalate "\n\n" (ISAR.kSexp.graph.map fun (n, c) =>
         kCallableSrc n (ISAR.kSexpDecls.find? (·.1 == n)
+          |>.map (·.2) |>.getD {}) c)
+    ++ "\n"
+
+/-- `kast.k`: the koru surface parser spelled in koru — explicit
+rule-chain state machine over `(arr int)` char codes; flat
+`(kind span…)` rows as `out` text, raced against `koruc
+--ast-json` in the gate. -/
+def kastFile : String :=
+  "// kast.k — a koru-spelled surface parser → flat AST rows (generated)\n"
+    ++ "// item-level grammar: import/tor/impl/flow + arm bars;\n"
+    ++ "// names, types, exprs ride source spans — the authority's\n"
+    ++ "// own ast keeps them as text too.  arg-less invoke\n"
+    ++ "// refuses: `chars` unbound.\n"
+    ++ String.intercalate "\n\n" (ISAR.kAst.graph.map fun (n, c) =>
+        kCallableSrc n (ISAR.kAstDecls.find? (·.1 == n)
           |>.map (·.2) |>.getD {}) c)
     ++ "\n"
 
@@ -690,6 +736,34 @@ def main : IO Unit := do
              args := [("chars", klexChars s)] }
            [] ",\"file\":\"input.k\"")))
     (some ksexpFile)
+  -- kast: the surface parser as a koru program — real koru
+  -- sources in as `(arr int)` args, flat `(kind span…)` rows out.
+  -- `src` carries the same text the chars encode so the gate can
+  -- hand it to `koruc --ast-json` and race the normalized
+  -- authority AST against the decided row text.
+  writeLeafRows "200_emit" "903_kast"
+    ([("903_kast",
+       "{\"entry\":\"main\",\"fuel\":8192"
+       ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
+       ++ ",\"file\":\"input.k\",\"emit_prog\":true"
+       ++ ",\"emit_args\":true,\"gen\":\"kast\"}")]
+     ++ ([("tor sign {x: i64} -> bool\nsign -> (x < 0)\n", "decl"),
+          ("tor tick {i: i64}\n| next i64\n| stop\n\ntor count {i: i64}\ncount = #loop tick(i)\n| next i when 0 < i |> @loop(i: (i - 1))\n| next i -> i\n",
+           "flow"),
+          ("tor classify {x: i64}\n| pos i64\n| neg i64\nclassify = sign(x)\n| ok p when p => pos x\n| ok _ => neg x\n",
+           "ctor"),
+          ("import std/compiler\ntor main {}\nmain -> 1\n", "imp"),
+          ("tor main {}\nmain = tick()\n| go\n\ntor tick {}\n| go i64\n| stop\n",
+           "term"),
+          ("", "empty"),
+          ("tor broken {\n", "bad")].map fun (s, tag) =>
+        ("903_kast_" ++ tag,
+         caseRow 8192
+           { ISAR.kAst with
+             args := [("chars", klexChars s)] }
+           [] (",\"file\":\"input.k\",\"src\":\""
+             ++ jsonEsc s ++ "\",\"race\":true"))))
+    (some kastFile)
   -- 800_forged — an asserted-wrong expectation over a deciding
   -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
@@ -732,3 +806,14 @@ def main : IO Unit := do
         ("/* input.fnv1a64:" ++ toString (fnv1a64 ksexpFile)
           ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC(kSexp) refused: {ax}")
+  -- kast.c — the surface parser as compiled code: the largest
+  -- koru program lowered so far (76 callables: int scanners,
+  -- rule chains, row emission).  Same stamp contract; fuel sized
+  -- for the longest corpus source.
+  match ISAR.emitProgC ISAR.kAst 8192 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/kast.c"
+        ("/* input.fnv1a64:" ++ toString (fnv1a64 kastFile)
+          ++ " */\n" ++ c)
+  | .error ax => throw (IO.userError s!"emitProgC(kAst) refused: {ax}")

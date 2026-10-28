@@ -888,6 +888,1209 @@ def kSexpDecls : List (String × KDecl) := [
   , ("main", { params := [("chars", "[]const i64")],
                ret := some "string" }) ]
 
+/-! ## `kAst` — a koru-spelled surface parser → flat AST rows
+
+The third frontend TU and the first to consume *koru surface*:
+`main(chars)` parses the item-level grammar our generated corpus
+exercises — `tor` declarations, `->` immediate impls, `=` flow
+impls with head invocations and `|` arm bars — and emits flat node
+rows over source *spans*:
+
+    tor main {x: i64} -> i64
+    main -> if((x > 0)) x else (0 - x)
+
+      →  (ev 4 8) (fld 11 12 14 17) (ret 22 25) (impl 27 31 35 52)
+
+Every name/type/expression is a `(start end)` span — the shape the
+authority's own `ast_json` uses too (its `condition`, `arg.value`,
+`plain_value` fields are verbatim source text; spans are the
+zero-copy equivalent).  The race leg in `check.py` normalizes
+`koruc --ast-json` to this row format and diffs — same structure,
+same spans, independent derivations.
+
+### Architecture under the subset's walls
+
+* **Int-returning flows** (`ws`, `word`, `toeol`, `toarrow`,
+  `toargend`, `typend`, `kwtor`) produce a *position* — a single
+  `i64`, the only carryable payload.  Rules that need a token's
+  span hold its start in env while a helper scans its end:
+  `| e |> rule(chars, j, e, ...)` — the pair rides two legs.
+* **`depth`/`ins` registers** in `toargend` are the explicit-stack
+  trick again — paren nesting and in-string state as data.
+* Ordering in arms implements lookahead-free dispatch; `-bad`
+  variants first, catchall `bad` last — refusal as data. -/
+
+/-- `ws`: whitespace and `//` line comments → next significant
+index.  The comment tail is a sub-flow re-entering `ws` — a comment
+only suspends skipping, it doesn't end it. -/
+def kAstWs : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "ws" false (some "c") (some (qWs (.var "c")))
+      (some (.invoke "ws"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")])) []
+  , .mk "cm" false (some "c")
+      (some (qand (qeq (.var "c") (qint 47))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 47))))
+      (some (.invoke "comment"
+        [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])) []
+  , .mk "stop" false (some "c") none
+      (some (.produce (.var "i"))) [] ] }
+
+/-- `comment`: inside `//` — consume to newline, then re-enter `ws`
+at the newline (it re-classifies as whitespace). -/
+def kAstComment : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c")
+      (some (qand (qge (.var "c") (qint 0))
+                  (.un .not (qeq (.var "c") (qint 10)))))
+      (some (.invoke "comment"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")])) []
+  , .mk "eol" false (some "c") none
+      (some (.invoke "ws"
+        [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])) []
+  ] }
+
+/-- `word`: an atom run's end — `[A-Za-z0-9_-]+` starting at `i`. -/
+def kAstWord : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")])) []
+  , .mk "stop" false (some "c") none
+      (some (.produce (.var "i"))) [] ] }
+
+/-- `toeol`: scan to newline or EOF — the impl/variant tail span's
+end.  Single-line expressions only (multi-line expr bodies are a
+named axis, not silently consumed). -/
+def kAstToEol : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c")
+      (some (qand (qge (.var "c") (qint 0))
+                  (.un .not (qeq (.var "c") (qint 10)))))
+      (some (.invoke "toeol"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")])) []
+  , .mk "stop" false (some "c") none
+      (some (.produce (.var "i"))) [] ] }
+
+/-- `toarrow`: scan to the tail token — `->`, `|>`, or `=>`, since
+produce-, step-, and ctor-arms all carry `when` guards.  The
+returned position is the condition's end; the token itself is
+re-classified by `arm-tok`.  (Nested tokens inside condition
+parens/strings is a named axis — no depth tracking.) -/
+def kAstToArrow : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "arr" false (some "c")
+      (some (qand (qeq (.var "c") (qint 45))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.produce (.var "i"))) []
+  , .mk "stp" false (some "c")
+      (some (qand (qeq (.var "c") (qint 124))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.produce (.var "i"))) []
+  , .mk "ctr" false (some "c")
+      (some (qand (qeq (.var "c") (qint 61))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.produce (.var "i"))) []
+  , .mk "more" false (some "c") none
+      (some (.invoke "toarrow"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")])) [] ] }
+
+/-- `toargend`: scan an arg *value* to its `,` or `)` at paren
+depth 0 — `d` is the explicit stack, `ins` the in-string flag
+(`"` toggles it; `\"` escapes are a named axis). -/
+def kAstToArgEnd : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "fin" false (some "c") (some (qlt (.var "c") (qint 0)))
+      (some (.produce (.var "i"))) []
+  , .mk "str" false (some "c") (some (qeq (.var "c") (qint 34)))
+      (some (.invoke "toargend"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n"),
+         ("d", .var "d"),
+         ("ins", .cond (qeq (.var "ins") (qint 1))
+                       (qint 0) (qint 1))])) []
+  , .mk "deep" false (some "c")
+      (some (qand (qeq (.var "ins") (qint 0))
+                  (qeq (.var "c") (qint 40))))
+      (some (.invoke "toargend"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n"),
+         ("d", qadd (.var "d") (qint 1)), ("ins", .var "ins")])) []
+  , .mk "end" false (some "c")
+      (some (qand (qeq (.var "ins") (qint 0))
+        (qand (qeq (.var "d") (qint 0))
+          (qor (qeq (.var "c") (qint 44)) (qeq (.var "c") (qint 41))))))
+      (some (.produce (.var "i"))) []
+  , .mk "shal" false (some "c")
+      (some (qand (qeq (.var "ins") (qint 0))
+                  (qeq (.var "c") (qint 41))))
+      (some (.invoke "toargend"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n"),
+         ("d", qsub (.var "d") (qint 1)), ("ins", .var "ins")])) []
+  , .mk "more" false (some "c") none
+      (some (.invoke "toargend"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n"),
+         ("d", .var "d"), ("ins", .var "ins")])) [] ] }
+
+/-- `typend`: a type annotation's end — scan to `,` or `}` (`[]const`
+brackets pass through; param types carry no parens in the subset). -/
+def kAstTypEnd : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "stop" false (some "c")
+      (some (qor (qeq (.var "c") (qint 44))
+                (qeq (.var "c") (qint 125))))
+      (some (.produce (.var "i"))) []
+  , .mk "fin" false (some "c") (some (qlt (.var "c") (qint 0)))
+      (some (.produce (.var "i"))) []
+  , .mk "more" false (some "c") none
+      (some (.invoke "typend"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")])) [] ] }
+
+/-- `kwtor`: is `(j,e)` the `tor` keyword — a `.bare` int predicate
+since the whole check is expr-level. -/
+def kAstKwTor : KCallable := .bare
+  (.cond
+    (qand (qeq (.var "e") (qadd (.var "j") (qint 3)))
+      (qand (qeq (.index (.var "chars") (.var "j")) (qint 116))
+        (qand (qeq (.index (.var "chars") (qadd (.var "j") (qint 1)))
+                   (qint 111))
+             (qeq (.index (.var "chars") (qadd (.var "j") (qint 2)))
+                   (qint 114)))))
+    (qint 1) (qint 0))
+
+/-- `kwwhen`: is `(j,e)` the `when` keyword — arm-guard dispatch. -/
+def kAstKwWhen : KCallable := .bare
+  (.cond
+    (qand (qeq (.var "e") (qadd (.var "j") (qint 4)))
+      (qand (qeq (.index (.var "chars") (.var "j")) (qint 119))
+        (qand (qeq (.index (.var "chars") (qadd (.var "j") (qint 1)))
+                   (qint 104))
+          (qand (qeq (.index (.var "chars") (qadd (.var "j") (qint 2)))
+                     (qint 101))
+               (qeq (.index (.var "chars") (qadd (.var "j") (qint 3)))
+                     (qint 110))))))
+    (qint 1) (qint 0))
+
+/-- `kwimport`: is `(j,e)` the `import` keyword — the second
+top-level dispatch after `tor`. -/
+def kAstKwImport : KCallable := .bare
+  (.cond
+    (qand (qeq (.var "e") (qadd (.var "j") (qint 6)))
+      (qand (qeq (.index (.var "chars") (.var "j")) (qint 105))
+        (qand (qeq (.index (.var "chars") (qadd (.var "j") (qint 1)))
+                   (qint 109))
+          (qand (qeq (.index (.var "chars") (qadd (.var "j") (qint 2)))
+                     (qint 112))
+            (qand (qeq (.index (.var "chars")
+                            (qadd (.var "j") (qint 3))) (qint 111))
+              (qand (qeq (.index (.var "chars")
+                              (qadd (.var "j") (qint 4))) (qint 114))
+                (qeq (.index (.var "chars")
+                          (qadd (.var "j") (qint 5))) (qint 116))))))))
+    (qint 1) (qint 0))
+
+/-- `hws`: *horizontal* whitespace only — space/tab.  Branch
+declarations decide "type follows" by whether the next non-space
+char is still on the same line. -/
+def kAstHws : KCallable := .subflow {
+  preLabel := none
+  head := ("peek",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [
+    .mk "more" false (some "c")
+      (some (qor (qeq (.var "c") (qint 32)) (qeq (.var "c") (qint 9))))
+      (some (.invoke "hws"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")])) []
+  , .mk "stop" false (some "c") none
+      (some (.produce (.var "i"))) [] ] }
+
+/-! ### kAst row emission — `(kind i j …) ` appended to `out`,
+trailing-space convention as kLex/kSexp. -/
+
+/-- `(KIND a) ` row. -/
+def qRow1 (k : String) (a : KExpr) : KExpr :=
+  qcat (.var "out") (qcat (.lit (.str ("(" ++ k ++ " ")))
+    (qcat (qitoa a) (.lit (.str ") "))))
+
+/-- `(KIND a b) ` row. -/
+def qRow2 (k : String) (a b : KExpr) : KExpr :=
+  qcat (.var "out") (qcat (.lit (.str ("(" ++ k ++ " ")))
+    (qcat (qitoa a) (qcat (.lit (.str " "))
+      (qcat (qitoa b) (.lit (.str ") "))))))
+
+/-- `(KIND a b c d) ` row. -/
+def qRow4 (k : String) (a b c d : KExpr) : KExpr :=
+  qcat (.var "out") (qcat (.lit (.str ("(" ++ k ++ " ")))
+    (qcat (qitoa a) (qcat (.lit (.str " ")) (qcat (qitoa b)
+      (qcat (.lit (.str " ")) (qcat (qitoa c)
+        (qcat (.lit (.str " ")) (qcat (qitoa d)
+          (.lit (.str ") "))))))))))
+
+/-- `(bad i c) ` — structural refusal row. -/
+def qAstBad (i c : KExpr) : KExpr := qRow2 "bad" i c
+
+/-- `(KIND TAG a b) ` row — `TAG` a literal atom (step kinds). -/
+def qRowS (k t : String) (a b : KExpr) : KExpr :=
+  qcat (.var "out") (qcat (.lit (.str ("(" ++ k ++ " " ++ t ++ " ")))
+    (qcat (qitoa a) (qcat (.lit (.str " "))
+      (qcat (qitoa b) (.lit (.str ") "))))))
+
+/-- `(KIND a b) ` row TEXT — no `out` prefix; for composing a
+second row onto an already-extended `out`. -/
+def qRowTxt (k : String) (a b : KExpr) : KExpr :=
+  qcat (.lit (.str ("(" ++ k ++ " ")))
+    (qcat (qitoa a) (qcat (.lit (.str " "))
+      (qcat (qitoa b) (.lit (.str ") ")))))
+
+/-- `next` invoked with the standard state — `chars`, position
+under `i`, `n`, `out` — plus extra spans the rule needs.  An
+`("out", _)` in `extra` REPLACES the default (row emission), so a
+single name never appears twice.  Convention: the position param
+of every flow is `i`; other names are real extra spans. -/
+def qNext (i' : KExpr) (extra : List (String × KExpr))
+    : List (String × KExpr) :=
+  [("chars", .var "chars"), ("i", i'), ("n", .var "n")]
+    ++ (if extra.any (·.1 == "out") then [] else [("out", .var "out")])
+    ++ extra
+
+/-- `H(args) | bind |> NEXT(nextArgs)` — the one-dispatch chain a
+sequence rule collapses to (`ws`/`word`/`typend` results feed the
+next rule's position). -/
+def qSeq (h : String × List (String × KExpr)) (bind : String)
+    (next : String) (nextArgs : List (String × KExpr)) : KCallable :=
+  .subflow {
+    preLabel := none
+    head := h
+    arms := [.mk "go" false (some bind) none
+      (some (.invoke next nextArgs)) []] }
+
+/-- `ws` invoked at `i` — chain head for "skip trivia then …". -/
+def qWsAt (i' : KExpr) : String × List (String × KExpr) :=
+  ("ws", [("chars", .var "chars"), ("i", i'), ("n", .var "n")])
+
+/-- `word` invoked at `i`. -/
+def qWordAt (i' : KExpr) : List (String × KExpr) :=
+  [("chars", .var "chars"), ("i", i'), ("n", .var "n")]
+
+/-- `peek` invoked at `i`. -/
+def qPeekAt (i' : KExpr) : List (String × KExpr) :=
+  [("chars", .var "chars"), ("i", i'), ("n", .var "n")]
+
+/-- `top`: the item dispatcher's ws leg. -/
+def kAstTop : KCallable :=
+  qSeq (qWsAt (.var "i")) "j" "top-at" (qNext (.var "j") [])
+
+/-- `top-at`: classify the token — EOF ends, an atom-char starts a
+word (whose end `e` re-enters at `kwd`), anything else is a
+structural refusal. -/
+def kAstTopAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "fin" false (some "c") (some (qlt (.var "c") (qint 0)))
+      (some (.produce (.var "out"))) []
+  , .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "e" false (some "e") none
+          (some (.invoke "kwd"
+            (qNext (.var "i") [("e", .var "e")]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `kwd`: `tor` opens a declaration; other words chain to `kwd2`
+for the `import`/item-name split.  `i` is the word's start, `e`
+its end. -/
+def kAstKwd : KCallable := .subflow {
+  preLabel := none
+  head := ("kwtor",
+    [("chars", .var "chars"), ("j", .var "i"), ("e", .var "e"),
+     ("n", .var "n")])
+  arms := [
+    .mk "decl" false (some "k") (some (qeq (.var "k") (qint 1)))
+      (some (.invoke "decl" (qNext (.var "e") []))) []
+  , .mk "item" false (some "k") none
+      (some (.invoke "kwd2" (qNext (.var "i") [("e", .var "e")]))) [] ] }
+
+/-- `kwd2`: `import` opens a path row; any other word is an item
+name → impl-or-flow. -/
+def kAstKwd2 : KCallable := .subflow {
+  preLabel := none
+  head := ("kwimport",
+    [("chars", .var "chars"), ("j", .var "i"), ("e", .var "e"),
+     ("n", .var "n")])
+  arms := [
+    .mk "imp" false (some "k") (some (qeq (.var "k") (qint 1)))
+      (some (.invoke "imp-path" (qNext (.var "e") []))) []
+  , .mk "item" false (some "k") none
+      (some (.invoke "morf" (qNext (.var "e")
+        [("j", .var "i"), ("ne", .var "e")]))) [] ] }
+
+/-- `imp-path`: ws, then the import path runs to end-of-line —
+`(imp …)` row and back to `top`. -/
+def kAstImpPath : KCallable :=
+  qSeq (qWsAt (.var "i")) "p" "imp-path2" (qNext (.var "p") [])
+
+/-- `imp-path2`. -/
+def kAstImpPath2 : KCallable := .subflow {
+  preLabel := none
+  head := ("toeol",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "p1") none
+      (some (.invoke "top"
+        (qNext (.var "p1")
+          [("out", qRow2 "imp" (.var "i") (.var "p1"))]))) [] ] }
+
+/-- `morf`: `name ->` immediate impl or `name =` flow — ws between
+name and the `->`/`=` marker.  `j`/`ne` carry the name span. -/
+def kAstMorf : KCallable :=
+  qSeq (qWsAt (.var "i")) "s" "morf-at"
+    (qNext (.var "s") [("j", .var "j"), ("ne", .var "ne")])
+
+/-- `morf-at`: `-`+`>` is `->` impl; `=` not followed by `>` is a
+flow head.  (`=>` refused: ctor impls are outside the subset.) -/
+def kAstMorfAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "impl" false (some "c")
+      (some (qand (qeq (.var "c") (qint 45))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.invoke "impl-body" (qNext (qadd (.var "i") (qint 2))
+        [("j", .var "j"), ("ne", .var "ne")]))) []
+  , .mk "flow" false (some "c")
+      (some (qand (qeq (.var "c") (qint 61))
+        (.un .not (qeq (.index (.var "chars")
+                            (qadd (.var "i") (qint 1))) (qint 62)))))
+      (some (.invoke "flow-pre" (qNext (qadd (.var "i") (qint 1))
+        [("j", .var "j"), ("ne", .var "ne")]))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `impl-body`: ws then the value runs to end-of-line. -/
+def kAstImplBody : KCallable :=
+  qSeq (qWsAt (.var "i")) "v0" "impl-val"
+    (qNext (.var "v0") [("j", .var "j"), ("ne", .var "ne")])
+
+/-- `impl-val`: `toeol` bounds the value span; emit `(impl …)` and
+re-enter `top` at the value's end. -/
+def kAstImplVal : KCallable := .subflow {
+  preLabel := none
+  head := ("toeol",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "v1") none
+      (some (.invoke "top"
+        (qNext (.var "v1")
+          [("out", qRow4 "impl" (.var "j") (.var "ne")
+                            (.var "i") (.var "v1"))]))) [] ] }
+
+/-- `flow-pre`: after `=` — ws, then `#label` or the head
+callable. -/
+def kAstFlowPre : KCallable :=
+  qSeq (qWsAt (.var "i")) "p" "flow-pre0"
+    (qNext (.var "p") [("j", .var "j"), ("ne", .var "ne")])
+
+/-- `flow-pre0`: the post-`=` token — `#` opens a label, an atom
+char the head callable.  `j`/`ne` carry the flow's name span. -/
+def kAstFlowPre0 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "lbl" false (some "c") (some (qeq (.var "c") (qint 35)))
+      (some (.invoke "word" (qWordAt (qadd (.var "i") (qint 1)))))
+      [ .mk "le" false (some "le") none
+          (some (.invoke "flow-lbl"
+            (qNext (.var "le")
+              [("j", .var "j"), ("ne", .var "ne"),
+               ("out", qRow2 "lbl"
+                 (qadd (.var "i") (qint 1)) (.var "le"))]))) [] ]
+  , .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "he" false (some "he") none
+          (some (.invoke "call-open"
+            (qNext (.var "he")
+              [("out", qcat
+                 (qRow2 "flw" (.var "j") (.var "ne"))
+                 (qRowTxt "call" (.var "i") (.var "he")))]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `flow-lbl`: `#label` consumed — ws, then the head callable. -/
+def kAstFlowLbl : KCallable :=
+  qSeq (qWsAt (.var "i")) "h" "flow-pre2"
+    (qNext (.var "h") [("j", .var "j"), ("ne", .var "ne")])
+
+/-- `flow-pre2`: the head callable word after a `#label`. -/
+def kAstFlowPre2 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "he" false (some "he") none
+          (some (.invoke "call-open"
+            (qNext (.var "he")
+              [("out", qcat
+                 (qRow2 "flw" (.var "j") (.var "ne"))
+                 (qRowTxt "call" (.var "i") (.var "he")))]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `call-open`: `(flw …)(call …)`/`(step …)` rows are appended;
+skip ws and require `(`, else structural refusal. -/
+def kAstCallOpen : KCallable :=
+  qSeq (qWsAt (.var "i")) "a" "call-at" (qNext (.var "a") [])
+
+/-- `call-at`: `(` opens the arg list, else bad. -/
+def kAstCallAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "open" false (some "c") (some (qeq (.var "c") (qint 40)))
+      (some (.invoke "args" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `args`: the invocation arg loop — ws, then `)` closes into
+`armloop` or an arg (named `x:` or positional). -/
+def kAstArgs : KCallable :=
+  qSeq (qWsAt (.var "i")) "a" "args-at" (qNext (.var "a") [])
+
+/-- `args-at`. -/
+def kAstArgsAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "close" false (some "c") (some (qeq (.var "c") (qint 41)))
+      (some (.invoke "armloop" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "we" false (some "we") none
+          (some (.invoke "argname"
+            (qNext (.var "i") [("we", .var "we")]))) [] ]
+  , .mk "pos" false (some "c") none
+      (some (.invoke "argval" (qNext (.var "i") []))) [] ] }
+
+/-- `argname`: word scanned — ws to the `:` decision point.  `i`
+is the word's start, `we` its end. -/
+def kAstArgName : KCallable :=
+  qSeq (qWsAt (.var "we")) "d" "argname-at"
+    (qNext (.var "d") [("aj", .var "i"), ("ae", .var "we")])
+
+/-- `argname-at`: `:` makes the word a name; anything else means
+the word was the value's head — rescan the value from its start. -/
+def kAstArgNameAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "named" false (some "c") (some (qeq (.var "c") (qint 58)))
+      (some (.invoke "ws"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")]))
+      [ .mk "v0" false (some "v0") none
+          (some (.invoke "argvaln"
+            (qNext (.var "v0")
+              [("aj", .var "aj"), ("ae", .var "ae")]))) [] ]
+  , .mk "pos" false (some "c") none
+      (some (.invoke "argval" (qNext (.var "aj") []))) [] ] }
+
+/-- `argvaln`: a named arg — `toargend` bounds the value; emit
+`(arg nj ne v0 v1)`. -/
+def kAstArgValN : KCallable := .subflow {
+  preLabel := none
+  head := ("toargend",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n"),
+     ("d", qint 0), ("ins", qint 0)])
+  arms := [ .mk "done" false (some "v1") none
+      (some (.invoke "argnext"
+        (qNext (.var "v1")
+          [("out", qRow4 "arg" (.var "aj") (.var "ae")
+                            (.var "i") (.var "v1"))]))) [] ] }
+
+/-- `argval`: a positional arg — `(arg 0 0 v0 v1)` marks the
+unnamed name-span; the normalizer re-lexes `chars[v0:v1]` to
+recognize authority puns. -/
+def kAstArgVal : KCallable := .subflow {
+  preLabel := none
+  head := ("toargend",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n"),
+     ("d", qint 0), ("ins", qint 0)])
+  arms := [ .mk "done" false (some "v1") none
+      (some (.invoke "argnext"
+        (qNext (.var "v1")
+          [("out", qRow4 "arg" (qint 0) (qint 0)
+                            (.var "i") (.var "v1"))]))) [] ] }
+
+/-- `argnext`: after a value — `,` loops, `)` closes to `armloop`. -/
+def kAstArgNext : KCallable :=
+  qSeq (qWsAt (.var "i")) "d" "argnext-at" (qNext (.var "d") [])
+
+/-- `argnext-at`. -/
+def kAstArgNextAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "more" false (some "c") (some (qeq (.var "c") (qint 44)))
+      (some (.invoke "args" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "close" false (some "c") (some (qeq (.var "c") (qint 41)))
+      (some (.invoke "armloop" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `armloop`: between arm bars and the next item — `|` (not `|>`)
+opens an arm; anything else is the next item for `top`. -/
+def kAstArmLoop : KCallable :=
+  qSeq (qWsAt (.var "i")) "a" "armloop-at" (qNext (.var "a") [])
+
+/-- `armloop-at`. -/
+def kAstArmLoopAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "bar" false (some "c")
+      (some (qand (qeq (.var "c") (qint 124))
+        (.un .not (qeq (.index (.var "chars")
+                            (qadd (.var "i") (qint 1))) (qint 62)))))
+      (some (.invoke "arm" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "item" false (some "c") none
+      (some (.invoke "top-at" (qNext (.var "i") []))) [] ] }
+
+/-- `arm`: the branch word opens a continuation row. -/
+def kAstArm : KCallable :=
+  qSeq (qWsAt (.var "i")) "b" "arm1" (qNext (.var "b") [])
+
+/-- `arm1`: branch word, then the tail decides. -/
+def kAstArm1 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "be" false (some "be") none
+          (some (.invoke "arm-tail"
+            (qNext (.var "be")
+              [("out", qRow2 "cont" (.var "i") (.var "be"))]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `arm-tail`: after the branch — `when`, a bind word, `->`
+produce, `|>` step, `=>` ctor, or end-of-line (bare terminal arm).
+Horizontal ws only — a newline ends the arm; the next `|` or item
+is `armloop`'s job.  Shared tail for post-branch/post-bind. -/
+def kAstArmTail : KCallable :=
+  qSeq ("hws",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+    "t" "arm-tok" (qNext (.var "t") [])
+
+/-- `arm-tok`: classify the tail token.  `->`/`|`>`/`=>` precede
+the word arm — `-` is itself an atom char, so order does the
+lookahead.  A bare line-end is a terminal arm → `armloop`. -/
+def kAstArmTok : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "prod" false (some "c")
+      (some (qand (qeq (.var "c") (qint 45))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.invoke "arm-prod"
+        (qNext (qadd (.var "i") (qint 2)) []))) []
+  , .mk "step" false (some "c")
+      (some (qand (qeq (.var "c") (qint 124))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.invoke "arm-step"
+        (qNext (qadd (.var "i") (qint 2)) []))) []
+  , .mk "ctor" false (some "c")
+      (some (qand (qeq (.var "c") (qint 61))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.invoke "arm-ctor"
+        (qNext (qadd (.var "i") (qint 2)) []))) []
+  , .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "we" false (some "we") none
+          (some (.invoke "arm-kw"
+            (qNext (.var "i") [("we", .var "we")]))) [] ]
+  , .mk "eol" false (some "c")
+      (some (qor (qeq (.var "c") (qint 10)) (qlt (.var "c") (qint 0))))
+      (some (.invoke "armloop" (qNext (.var "i") []))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `arm-ctor`: `=>` — the branch-constructor step: ws, the ctor
+name word, then the payload expr runs to EOL.  Row `(ctor nj ne
+v0 v1)`; ends the arm → `armloop`. -/
+def kAstArmCtor : KCallable :=
+  qSeq (qWsAt (.var "i")) "w" "arm-ctor1" (qNext (.var "w") [])
+
+/-- `arm-ctor1`: the ctor name word. -/
+def kAstArmCtor1 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "ce" false (some "ce") none
+          (some (.invoke "arm-ctor2"
+            (qNext (.var "ce")
+              [("cj", .var "i"), ("ce", .var "ce")]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `arm-ctor2`: ws then the payload span to EOL.  `cj`/`ce` carry
+the ctor-name span. -/
+def kAstArmCtor2 : KCallable :=
+  qSeq (qWsAt (.var "i")) "p" "arm-ctor3"
+    (qNext (.var "p") [("cj", .var "cj"), ("ce", .var "ce")])
+
+/-- `arm-ctor3`. -/
+def kAstArmCtor3 : KCallable := .subflow {
+  preLabel := none
+  head := ("toeol",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "t1") none
+      (some (.invoke "armloop"
+        (qNext (.var "t1")
+          [("out", qRow4 "ctor" (.var "cj") (.var "ce")
+                            (.var "i") (.var "t1"))]))) [] ] }
+
+/-- `arm-kw`: a word in tail position is `when` (guard) or a bind
+name.  `i` is the word start, `we` its end. -/
+def kAstArmKw : KCallable := .subflow {
+  preLabel := none
+  head := ("kwwhen",
+    [("chars", .var "chars"), ("j", .var "i"), ("e", .var "we"),
+     ("n", .var "n")])
+  arms := [
+    .mk "cond" false (some "k") (some (qeq (.var "k") (qint 1)))
+      (some (.invoke "arm-cond" (qNext (.var "we") []))) []
+  , .mk "bind" false (some "k") none
+      (some (.invoke "arm-tail"
+        (qNext (.var "we")
+          [("out", qRow2 "bind" (.var "i") (.var "we"))]))) [] ] }
+
+/-- `arm-cond`: ws, then the condition runs to the `->`. -/
+def kAstArmCond : KCallable :=
+  qSeq (qWsAt (.var "i")) "c0" "arm-cond2" (qNext (.var "c0") [])
+
+/-- `arm-cond2`: `toarrow` bounds the condition; after it the
+produce/step split is the same `arm-tok` at the arrow. -/
+def kAstArmCond2 : KCallable := .subflow {
+  preLabel := none
+  head := ("toarrow",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "c1") none
+      (some (.invoke "arm-tok"
+        (qNext (.var "c1")
+          [("out", qRow2 "cond" (.var "i") (.var "c1"))]))) [] ] }
+
+/-- `arm-prod`: ws, then the produce value runs to end-of-line —
+`(step expr …)` and back to `armloop` at the value's end. -/
+def kAstArmProd : KCallable :=
+  qSeq (qWsAt (.var "i")) "v0" "arm-prod2" (qNext (.var "v0") [])
+
+/-- `arm-prod2`. -/
+def kAstArmProd2 : KCallable := .subflow {
+  preLabel := none
+  head := ("toeol",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "v1") none
+      (some (.invoke "armloop"
+        (qNext (.var "v1")
+          [("out", qRowS "step" "expr" (.var "i") (.var "v1"))]))) [] ] }
+
+/-- `arm-step`: after `|>` — `@label` jump or `name(` invoke. -/
+def kAstArmStep : KCallable :=
+  qSeq (qWsAt (.var "i")) "s" "arm-step2" (qNext (.var "s") [])
+
+/-- `arm-step2`. -/
+def kAstArmStep2 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "jump" false (some "c") (some (qeq (.var "c") (qint 64)))
+      (some (.invoke "word" (qWordAt (qadd (.var "i") (qint 1)))))
+      [ .mk "le" false (some "le") none
+          (some (.invoke "call-open"
+            (qNext (.var "le")
+              [("out", qRowS "step" "jump"
+                 (qadd (.var "i") (qint 1)) (.var "le"))]))) [] ]
+  , .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "se" false (some "se") none
+          (some (.invoke "call-open"
+            (qNext (.var "se")
+              [("out", qRowS "step" "invoke"
+                 (.var "i") (.var "se"))]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `decl`: after `tor` — ws, the declared name, `(ev …)` row. -/
+def kAstDecl : KCallable :=
+  qSeq (qWsAt (.var "i")) "d" "decl1" (qNext (.var "d") [])
+
+/-- `decl1`. -/
+def kAstDecl1 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "de" false (some "de") none
+          (some (.invoke "decl-brace"
+            (qNext (.var "de")
+              [("out", qRow2 "ev" (.var "i") (.var "de"))]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `decl-brace`: ws then `{` opens the param list. -/
+def kAstDeclBrace : KCallable :=
+  qSeq (qWsAt (.var "i")) "b" "decl-brace2" (qNext (.var "b") [])
+
+/-- `decl-brace2`. -/
+def kAstDeclBrace2 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "open" false (some "c") (some (qeq (.var "c") (qint 123)))
+      (some (.invoke "fields" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `fields`: the param/variant loop inside `{…}`. -/
+def kAstFields : KCallable :=
+  qSeq (qWsAt (.var "i")) "f" "fields-at" (qNext (.var "f") [])
+
+/-- `fields-at`: `}` closes to the optional `-> ret`; `|` opens a
+union variant; a word opens `name: type`. -/
+def kAstFieldsAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "close" false (some "c") (some (qeq (.var "c") (qint 125)))
+      (some (.invoke "decl-ret" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "var" false (some "c") (some (qeq (.var "c") (qint 124)))
+      (some (.invoke "variant" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "fe" false (some "fe") none
+          (some (.invoke "fld"
+            (qNext (.var "i") [("fe", .var "fe")]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `field`: `name :` then a type span to `,`/`}`.  `i` is the
+name start, `fe` its end. -/
+def kAstFld : KCallable :=
+  qSeq (qWsAt (.var "fe")) "c" "fld2"
+    (qNext (.var "c") [("fj", .var "i"), ("fe", .var "fe")])
+
+/-- `field2`: `:` confirmed — the type scans to `,`/`}`. -/
+def kAstFld2 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "ty" false (some "k") (some (qeq (.var "k") (qint 58)))
+      (some (.invoke "ws"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 1)), ("n", .var "n")]))
+      [ .mk "t0" false (some "t0") none
+          (some (.invoke "fld3"
+            (qNext (.var "t0")
+              [("fj", .var "fj"), ("fe", .var "fe")]))) [] ]
+  , .mk "bad" false (some "k") none
+      (some (.produce (qAstBad (.var "i") (.var "k")))) [] ] }
+
+/-- `field3`: `typend` bounds the type — `(fld …)` row, then the
+`,`/`}` decision.  `i` is the type start. -/
+def kAstFld3 : KCallable := .subflow {
+  preLabel := none
+  head := ("typend",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "t1") none
+      (some (.invoke "fields2"
+        (qNext (.var "t1")
+          [("out", qRow4 "fld" (.var "fj") (.var "fe")
+                            (.var "i") (.var "t1"))]))) [] ] }
+
+/-- `fields2`: `,` loops to the next field; `}` closes. -/
+def kAstFields2 : KCallable :=
+  qSeq (qWsAt (.var "i")) "d" "fields2-at" (qNext (.var "d") [])
+
+/-- `fields2-at`. -/
+def kAstFields2At : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "more" false (some "c") (some (qeq (.var "c") (qint 44)))
+      (some (.invoke "fields" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "close" false (some "c") (some (qeq (.var "c") (qint 125)))
+      (some (.invoke "decl-ret" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `variant`: `| go i64` inside braces — a `(var name type)` row,
+then back to the field loop's decision. -/
+def kAstVariant : KCallable :=
+  qSeq (qWsAt (.var "i")) "v" "variant1" (qNext (.var "v") [])
+
+/-- `variant1`. -/
+def kAstVariant1 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "ve" false (some "ve") none
+          (some (.invoke "variant2"
+            (qNext (.var "i") [("ve", .var "ve")]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `variant2`: ws then the payload type to EOL — `(var …)`, then
+the field loop resumes at the next line.  `i` is the variant-name
+start, `ve` its end. -/
+def kAstVariant2 : KCallable :=
+  qSeq (qWsAt (.var "ve")) "t0" "variant3"
+    (qNext (.var "t0") [("vj", .var "i"), ("ve", .var "ve")])
+
+/-- `variant3`. -/
+def kAstVariant3 : KCallable := .subflow {
+  preLabel := none
+  head := ("toeol",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "t1") none
+      (some (.invoke "fields"
+        (qNext (.var "t1")
+          [("out", qRow4 "brd" (.var "vj") (.var "ve")
+                            (.var "i") (.var "t1"))]))) [] ] }
+
+/-- `decl-ret`: after `}` — `-> ret` runs to EOL, else the next
+item starts (a bare `}` decl). -/
+def kAstDeclRet : KCallable :=
+  qSeq (qWsAt (.var "i")) "r" "decl-ret-at" (qNext (.var "r") [])
+
+/-- `decl-ret-at`. -/
+def kAstDeclRetAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "ret" false (some "c")
+      (some (qand (qeq (.var "c") (qint 45))
+        (qeq (.index (.var "chars") (qadd (.var "i") (qint 1)))
+             (qint 62))))
+      (some (.invoke "ws"
+        [("chars", .var "chars"),
+         ("i", qadd (.var "i") (qint 2)), ("n", .var "n")]))
+      [ .mk "t0" false (some "t0") none
+          (some (.invoke "decl-ret2"
+            (qNext (.var "t0") []))) [] ]
+  , .mk "next" false (some "c") none
+      (some (.invoke "branches" (qNext (.var "i") []))) [] ] }
+
+/-- `decl-ret2`: the return type runs to EOL — `(ret …)`, then the
+branch-declaration lines.  `i` is the type start. -/
+def kAstDeclRet2 : KCallable := .subflow {
+  preLabel := none
+  head := ("toeol",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "done" false (some "t1") none
+      (some (.invoke "branches"
+        (qNext (.var "t1")
+          [("out", qRow2 "ret" (.var "i") (.var "t1"))]))) [] ] }
+
+/-- `branches`: post-decl `| name type` lines — `|` (not `|>`)
+opens a `(brd …)` row; anything else ends the decl and re-enters
+`top-at` for the next item. -/
+def kAstBranches : KCallable :=
+  qSeq (qWsAt (.var "i")) "b" "branches-at" (qNext (.var "b") [])
+
+/-- `branches-at`. -/
+def kAstBranchesAt : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "br" false (some "c")
+      (some (qand (qeq (.var "c") (qint 124))
+        (.un .not (qeq (.index (.var "chars")
+                            (qadd (.var "i") (qint 1))) (qint 62)))))
+      (some (.invoke "branch" (qNext (qadd (.var "i") (qint 1)) []))) []
+  , .mk "next" false (some "c") none
+      (some (.invoke "top-at" (qNext (.var "i") []))) [] ] }
+
+/-- `branch`: ws then the branch name word. -/
+def kAstBranch : KCallable :=
+  qSeq (qWsAt (.var "i")) "w" "branch1" (qNext (.var "w") [])
+
+/-- `branch1`: the branch name, then horizontal-ws decides whether
+a payload type follows on the same line.  `i` is the name start. -/
+def kAstBranch1 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "id" false (some "c") (some (qAtom (.var "c")))
+      (some (.invoke "word" (qWordAt (.var "i"))))
+      [ .mk "be" false (some "be") none
+          (some (.invoke "branch-ty"
+            (qNext (.var "be")
+              [("bj", .var "i"), ("be", .var "be")]))) [] ]
+  , .mk "bad" false (some "c") none
+      (some (.produce (qAstBad (.var "i") (.var "c")))) [] ] }
+
+/-- `branch-ty`: horizontal ws — a type on the same line binds the
+branch payload; a newline/EOF means `| stop`-shape (no payload). -/
+def kAstBranchTy : KCallable := .subflow {
+  preLabel := none
+  head := ("hws",
+    [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")])
+  arms := [ .mk "h" false (some "h") none
+      (some (.invoke "branch-ty2"
+        (qNext (.var "h") [("bj", .var "bj"), ("be", .var "be")]))) [] ] }
+
+/-- `branch-ty2`. -/
+def kAstBranchTy2 : KCallable := .subflow {
+  preLabel := none
+  head := ("peek", qPeekAt (.var "i"))
+  arms := [
+    .mk "eol" false (some "c")
+      (some (qor (qeq (.var "c") (qint 10)) (qlt (.var "c") (qint 0))))
+      (some (.invoke "branches"
+        (qNext (.var "i")
+          [("out", qRow4 "brd" (.var "bj") (.var "be")
+                            (qint 0) (qint 0))]))) []
+  , .mk "ty" false (some "c") none
+      (some (.invoke "toeol"
+        [("chars", .var "chars"), ("i", .var "i"), ("n", .var "n")]))
+      [ .mk "t1" false (some "t1") none
+          (some (.invoke "branches"
+            (qNext (.var "t1")
+              [("out", qRow4 "brd" (.var "bj") (.var "be")
+                                (.var "i") (.var "t1"))]))) [] ] ] }
+
+/-- `main`: hand `chars` to `top` — the item loop carries
+`(0, len, "")`. -/
+def kAstMain : KCallable := .subflow {
+  preLabel := none
+  head := ("top",
+    [("chars", .var "chars"), ("i", qint 0),
+     ("n", .builtin "len" [.var "chars"]), ("out", .lit (.str ""))])
+  arms := [ .mk "done" false (some "s") none
+      (some (.produce (.var "s"))) [] ] }
+
+/-- The surface parser — scanners, the grammar machine, `main`. -/
+def kAst : KProg := {
+  graph := [
+    ("peek", kLexPeek),
+    ("ws", kAstWs),
+    ("comment", kAstComment),
+    ("word", kAstWord),
+    ("toeol", kAstToEol),
+    ("toarrow", kAstToArrow),
+    ("toargend", kAstToArgEnd),
+    ("typend", kAstTypEnd),
+    ("kwtor", kAstKwTor),
+    ("kwwhen", kAstKwWhen),
+    ("kwimport", kAstKwImport),
+    ("hws", kAstHws),
+    ("top", kAstTop),
+    ("top-at", kAstTopAt),
+    ("kwd", kAstKwd),
+    ("kwd2", kAstKwd2),
+    ("imp-path", kAstImpPath),
+    ("imp-path2", kAstImpPath2),
+    ("morf", kAstMorf),
+    ("morf-at", kAstMorfAt),
+    ("impl-body", kAstImplBody),
+    ("impl-val", kAstImplVal),
+    ("flow-pre", kAstFlowPre),
+    ("flow-pre0", kAstFlowPre0),
+    ("flow-lbl", kAstFlowLbl),
+    ("flow-pre2", kAstFlowPre2),
+    ("call-open", kAstCallOpen),
+    ("call-at", kAstCallAt),
+    ("args", kAstArgs),
+    ("args-at", kAstArgsAt),
+    ("argname", kAstArgName),
+    ("argname-at", kAstArgNameAt),
+    ("argvaln", kAstArgValN),
+    ("argval", kAstArgVal),
+    ("argnext", kAstArgNext),
+    ("argnext-at", kAstArgNextAt),
+    ("armloop", kAstArmLoop),
+    ("armloop-at", kAstArmLoopAt),
+    ("arm", kAstArm),
+    ("arm1", kAstArm1),
+    ("arm-tail", kAstArmTail),
+    ("arm-tok", kAstArmTok),
+    ("arm-kw", kAstArmKw),
+    ("arm-cond", kAstArmCond),
+    ("arm-cond2", kAstArmCond2),
+    ("arm-prod", kAstArmProd),
+    ("arm-prod2", kAstArmProd2),
+    ("arm-step", kAstArmStep),
+    ("arm-step2", kAstArmStep2),
+    ("arm-ctor", kAstArmCtor),
+    ("arm-ctor1", kAstArmCtor1),
+    ("arm-ctor2", kAstArmCtor2),
+    ("arm-ctor3", kAstArmCtor3),
+    ("decl", kAstDecl),
+    ("decl1", kAstDecl1),
+    ("decl-brace", kAstDeclBrace),
+    ("decl-brace2", kAstDeclBrace2),
+    ("fields", kAstFields),
+    ("fields-at", kAstFieldsAt),
+    ("fld", kAstFld),
+    ("fld2", kAstFld2),
+    ("fld3", kAstFld3),
+    ("fields2", kAstFields2),
+    ("fields2-at", kAstFields2At),
+    ("variant", kAstVariant),
+    ("variant1", kAstVariant1),
+    ("variant2", kAstVariant2),
+    ("variant3", kAstVariant3),
+    ("decl-ret", kAstDeclRet),
+    ("decl-ret-at", kAstDeclRetAt),
+    ("decl-ret2", kAstDeclRet2),
+    ("branches", kAstBranches),
+    ("branches-at", kAstBranchesAt),
+    ("branch", kAstBranch),
+    ("branch1", kAstBranch1),
+    ("branch-ty", kAstBranchTy),
+    ("branch-ty2", kAstBranchTy2),
+    ("main", kAstMain) ]
+  entry := "main"
+  args := [] }
+
+/-- `kAst`'s declared `tor` contracts — every structural flow is
+`[]const i64 × i64 × i64 × string → string`; the int-returning
+scanners return `i64`; `peek`/`kwtor`/`kwwhen` are small enough to
+spell by hand.  Position params are all named `i`. -/
+def kAstDecls : List (String × KDecl) :=
+  let flow (ps : List String) : KDecl :=
+    { params := ("chars", "[]const i64") :: ps.map (·, "i64")
+        ++ [("out", "string")], ret := some "string" }
+  let scan (extra : List String) : KDecl :=
+    { params := ("chars", "[]const i64")
+        :: (["i", "n"] ++ extra).map (·, "i64"),
+      ret := some "i64" }
+  [ ("peek", { params := [("chars", "[]const i64"), ("i", "i64"),
+                          ("n", "i64")], ret := some "i64" })
+  , ("ws", scan []), ("comment", scan []), ("word", scan [])
+  , ("toeol", scan []), ("toarrow", scan [])
+  , ("toargend", scan ["d", "ins"]), ("typend", scan [])
+  , ("kwtor", { params := [("chars", "[]const i64"), ("j", "i64"),
+                           ("e", "i64"), ("n", "i64")],
+                ret := some "i64" })
+  , ("kwwhen", { params := [("chars", "[]const i64"), ("j", "i64"),
+                            ("e", "i64"), ("n", "i64")],
+                 ret := some "i64" })
+  , ("kwimport", { params := [("chars", "[]const i64"), ("j", "i64"),
+                              ("e", "i64"), ("n", "i64")],
+                   ret := some "i64" })
+  , ("hws", scan [])
+  , ("top", flow ["i", "n"])
+  , ("top-at", flow ["i", "n"])
+  , ("kwd", flow ["i", "e", "n"])
+  , ("kwd2", flow ["i", "e", "n"])
+  , ("imp-path", flow ["i", "n"])
+  , ("imp-path2", flow ["i", "n"])
+  , ("morf", flow ["i", "n", "j", "ne"])
+  , ("morf-at", flow ["i", "n", "j", "ne"])
+  , ("impl-body", flow ["i", "n", "j", "ne"])
+  , ("impl-val", flow ["i", "n", "j", "ne"])
+  , ("flow-pre", flow ["i", "n", "j", "ne"])
+  , ("flow-pre0", flow ["i", "n", "j", "ne"])
+  , ("flow-lbl", flow ["i", "n", "j", "ne"])
+  , ("flow-pre2", flow ["i", "n", "j", "ne"])
+  , ("call-open", flow ["i", "n"])
+  , ("call-at", flow ["i", "n"])
+  , ("args", flow ["i", "n"])
+  , ("args-at", flow ["i", "n"])
+  , ("argname", flow ["i", "we", "n"])
+  , ("argname-at", flow ["i", "n", "aj", "ae"])
+  , ("argvaln", flow ["i", "n", "aj", "ae"])
+  , ("argval", flow ["i", "n"])
+  , ("argnext", flow ["i", "n"])
+  , ("argnext-at", flow ["i", "n"])
+  , ("armloop", flow ["i", "n"])
+  , ("armloop-at", flow ["i", "n"])
+  , ("arm", flow ["i", "n"])
+  , ("arm1", flow ["i", "n"])
+  , ("arm-tail", flow ["i", "n"])
+  , ("arm-tok", flow ["i", "n"])
+  , ("arm-kw", flow ["i", "we", "n"])
+  , ("arm-cond", flow ["i", "n"])
+  , ("arm-cond2", flow ["i", "n"])
+  , ("arm-prod", flow ["i", "n"])
+  , ("arm-prod2", flow ["i", "n"])
+  , ("arm-step", flow ["i", "n"])
+  , ("arm-step2", flow ["i", "n"])
+  , ("arm-ctor", flow ["i", "n"])
+  , ("arm-ctor1", flow ["i", "n"])
+  , ("arm-ctor2", flow ["i", "n", "cj", "ce"])
+  , ("arm-ctor3", flow ["i", "n", "cj", "ce"])
+  , ("decl", flow ["i", "n"])
+  , ("decl1", flow ["i", "n"])
+  , ("decl-brace", flow ["i", "n"])
+  , ("decl-brace2", flow ["i", "n"])
+  , ("fields", flow ["i", "n"])
+  , ("fields-at", flow ["i", "n"])
+  , ("fld", flow ["i", "fe", "n"])
+  , ("fld2", flow ["i", "n", "fj", "fe"])
+  , ("fld3", flow ["i", "n", "fj", "fe"])
+  , ("fields2", flow ["i", "n"])
+  , ("fields2-at", flow ["i", "n"])
+  , ("variant", flow ["i", "n"])
+  , ("variant1", flow ["i", "n"])
+  , ("variant2", flow ["i", "ve", "n"])
+  , ("variant3", flow ["i", "n", "vj", "ve"])
+  , ("decl-ret", flow ["i", "n"])
+  , ("decl-ret-at", flow ["i", "n"])
+  , ("decl-ret2", flow ["i", "n"])
+  , ("branches", flow ["i", "n"])
+  , ("branches-at", flow ["i", "n"])
+  , ("branch", flow ["i", "n"])
+  , ("branch1", flow ["i", "n"])
+  , ("branch-ty", flow ["i", "n", "bj", "be"])
+  , ("branch-ty2", flow ["i", "n", "bj", "be"])
+  , ("main", { params := [("chars", "[]const i64")],
+               ret := some "string" }) ]
+
 /-- One flow-grammar corpus row: program + asserted oracle leaves +
 the declared `tor` contracts the surface file must carry. -/
 structure KFlowRow where

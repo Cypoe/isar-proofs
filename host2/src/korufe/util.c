@@ -25,9 +25,19 @@ void bput(Buf *b, const char *s) {
 }
 void bputf(Buf *b, const char *fmt, ...) {
     char tmp[128];
-    va_list ap;
+    va_list ap, ap2;
+    int n;
     va_start(ap, fmt);
-    vsnprintf(tmp, sizeof tmp, fmt, ap);
+    va_copy(ap2, ap);
+    n = vsnprintf(tmp, sizeof tmp, fmt, ap);
     va_end(ap);
-    bput(b, tmp);
+    if (n < 0) { va_end(ap2); return; }
+    if (n < (int)sizeof tmp) { bput(b, tmp); va_end(ap2); return; }
+    {
+        char *p = xmalloc((size_t)n + 1);
+        vsnprintf(p, (size_t)n + 1, fmt, ap2);
+        va_end(ap2);
+        bput(b, p);
+        free(p);
+    }
 }

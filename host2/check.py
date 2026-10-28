@@ -66,6 +66,10 @@ The pipeline per case row:
           `krun --args claim | <g>_bin` must re-decide the claim's
           text — leg suffix = first two letters of the gen name,
           <code>v = the ccomp-compiled twin
+  <code>r : the AST race — for `race` rows (kast): `koruc
+          --ast-json` normalized to the same flat `(kind span…)`
+          row text must equal what the program decided —
+          authority AST ≡ koru-spelled parser output
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -130,6 +134,242 @@ def _fnv1a64(b: bytes) -> int:
     for x in b:
         h = ((h ^ x) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
     return h
+
+
+# ---- the kast race: koruc --ast-json → the flat (kind span…) row
+# text the koru-spelled parser emits, so both sides can be diffed.
+# The authority's schema maps onto ours row-for-row; where it
+# normalizes text (arg values, conditions) the comparison boundary
+# is the source SPAN, and where it injects structure (the implicit
+# import_decl) the location's own text is what keeps it honest —
+# a location that doesn't point at an `import` token drops out.
+
+_AST_ATOM = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+
+
+def ast_norm_rows(src, ast):
+    """`koruc --ast-json` output → list of `(kind i j …)` row text,
+    the same flat wire kAst's `out` carries."""
+    rows = []
+    lstart = [0]
+    for ln in src.split("\n")[:-1]:
+        lstart.append(lstart[-1] + len(ln) + 1)
+
+    def loff(loc):
+        return lstart[loc["line"] - 1] + loc["col"]
+
+    def line_end(pos):
+        e = src.find("\n", pos)
+        return len(src) if e < 0 else e
+
+    def ws_fwd(pos):
+        while pos < len(src) and src[pos] in " \t\n\r":
+            pos += 1
+        return pos
+
+    def hws_fwd(pos):
+        while pos < len(src) and src[pos] in " \t":
+            pos += 1
+        return pos
+
+    def word_end(pos):
+        e = pos
+        while e < len(src) and src[e] in _AST_ATOM:
+            e += 1
+        return e
+
+    def find_word(pat, lo, hi):
+        """First occurrence of `pat` in src[lo:hi] with non-atom
+        boundaries, like the parser's `word` scanner."""
+        n = len(pat)
+        i = lo
+        while True:
+            i = src.find(pat, i, hi)
+            if i < 0:
+                return -1
+            if (i == 0 or src[i - 1] not in _AST_ATOM) and \
+               (i + n >= len(src) or src[i + n] not in _AST_ATOM):
+                return i
+            i += 1
+
+    def parens_args(pos):
+        """`name(args)` at pos → list of (named?, nj, ne, vj, ve)
+        arg spans, and the offset just past `)`."""
+        o = src.find("(", pos)
+        if o < 0:
+            return None
+        depth, i, segs, s0 = 0, o, [], o + 1
+        while i < len(src):
+            c = src[i]
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    segs.append((s0, i))
+                    break
+            elif c == "," and depth == 1:
+                segs.append((s0, i))
+                s0 = i + 1
+            i += 1
+        args = []
+        for a, b in segs:
+            a = ws_fwd(a)
+            if a >= b:
+                continue
+            # named arg iff a depth-0 ':' before any '('
+            colon = None
+            d = 0
+            for k in range(a, b):
+                if src[k] == "(":
+                    d += 1
+                elif src[k] == ")":
+                    d -= 1
+                elif src[k] == ":" and d == 0:
+                    colon = k
+                    break
+            if colon is not None:
+                nj = a
+                ne = word_end(nj)
+                vj = hws_fwd(colon + 1)
+                args.append((True, nj, ne, vj, b))
+            else:
+                args.append((False, 0, 0, a, b))
+        return args, i + 1
+
+    def emit_args(pos):
+        for named, nj, ne, vj, ve in parens_args(pos)[0] or []:
+            rows.append(f"(arg {nj} {ne} {vj} {ve})")
+
+    def arm_line(loc):
+        """The cont's `|` line → (line_start, line_end)."""
+        return loff(loc), line_end(loff(loc))
+
+    for it in ast.get("items", []):
+        ty = it.get("type")
+        loc = it.get("location") or {}
+        if ty == "import_decl":
+            p = ws_fwd(loff(loc))
+            if src[p:p + 6] != "import":
+                continue  # injected prelude — no row
+            s = hws_fwd(p + 6)
+            rows.append(f"(imp {s} {line_end(s)})")
+        elif ty == "event_decl":
+            p = ws_fwd(loff(loc))
+            j = src.find(it["name"], p)
+            if j < 0:
+                rows.append("(bad 0 -1)")
+                continue
+            rows.append(f"(ev {j} {j + len(it['name'])})")
+            le = line_end(j)
+            for f in it["input"]["fields"]:
+                nj = find_word(f["name"], j, le)
+                if nj < 0:
+                    rows.append("(bad 0 -1)")
+                    continue
+                c = src.find(":", nj + len(f["name"]), le)
+                tj = hws_fwd(c + 1) if c >= 0 else nj + len(f["name"])
+                te = min((x for x in (src.find(",", tj, le),
+                                     src.find("}", tj, le))
+                          if x >= 0), default=le)
+                rows.append(f"(fld {nj} {nj + len(f['name'])} "
+                            f"{tj} {te})")
+            # the authority drops `-> T` entirely; on a tor line
+            # a post-fields `->` can only be the return annotation
+            ar = src.find("->", j, le)
+            if ar >= 0:
+                rows.append(
+                    f"(ret {hws_fwd(ar + 2)} {line_end(ar + 2)})")
+            # `| name [type]` lines after the decl
+            q = le + 1
+            n_br = len(it["branches"])
+            seen = 0
+            while seen < n_br and q < len(src):
+                q = ws_fwd(q)
+                if src[q:q + 1] != "|" or src[q + 1:q + 2] == ">":
+                    break
+                nj = hws_fwd(q + 1)
+                ne = word_end(nj)
+                t0 = hws_fwd(ne)
+                qe = line_end(t0)
+                if t0 < qe and src[t0] not in "\n":
+                    rows.append(f"(brd {nj} {ne} {t0} {qe})")
+                else:
+                    rows.append(f"(brd {nj} {ne} 0 0)")
+                seen += 1
+                q = qe + 1
+        elif ty == "immediate_impl":
+            p = ws_fwd(loff(loc))
+            nj = word_end(p)
+            le = line_end(p)
+            ar = src.find("->", nj, le)
+            v0 = ws_fwd(ar + 2) if ar >= 0 else le
+            rows.append(f"(impl {p} {nj} {v0} {le})")
+        elif ty == "flow":
+            p = ws_fwd(loff(loc))
+            le = line_end(p)
+            if it.get("pre_label"):
+                lj = src.find("#" + it["pre_label"], p, le)
+                if lj >= 0:
+                    rows.append(f"(lbl {lj + 1} "
+                                f"{lj + 1 + len(it['pre_label'])})")
+            nj = word_end(p)
+            rows.append(f"(flw {p} {nj})")
+            ev = it["invocation"]["event"]
+            ename = ev[-1] if ev else ""
+            ej = src.find(ename, nj, le)
+            if ej >= 0:
+                rows.append(f"(call {ej} {ej + len(ename)})")
+                emit_args(ej + len(ename))
+            for c in it["continuations"]:
+                cl0, cle = arm_line(c["location"])
+                bj = cl0 + 1
+                bj = hws_fwd(bj)
+                be = word_end(bj)
+                rows.append(f"(cont {bj} {be})")
+                t = hws_fwd(be)
+                # bind / when / tail in source order
+                if c.get("binding"):
+                    rows.append(f"(bind {t} {t + len(c['binding'])})")
+                    t = hws_fwd(t + len(c["binding"]))
+                tt = t
+                if c.get("condition") and src[t:t + 4] == "when":
+                    c0 = hws_fwd(t + 4)
+                    tt = min(
+                        (k for tok in ("->", "|>", "=>")
+                         for k in [src.find(tok, c0, cle)] if k >= 0),
+                        default=cle)
+                    rows.append(f"(cond {c0} {tt})")
+                st = c.get("step")
+                if not st:
+                    continue
+                v0 = hws_fwd(tt + 2)
+                sty = st.get("type")
+                if sty == "expression":
+                    rows.append(f"(step expr {v0} {cle})")
+                elif sty == "invocation":
+                    sj = v0
+                    se = word_end(sj)
+                    rows.append(f"(step invoke {sj} {se})")
+                    emit_args(se)
+                elif sty == "label_jump":
+                    sj = v0 + 1 if src[v0:v0 + 1] == "@" else v0
+                    se = word_end(sj)
+                    rows.append(f"(step jump {sj} {se})")
+                    emit_args(se)
+                elif sty == "branch_constructor":
+                    sj = v0
+                    se = word_end(sj)
+                    rows.append(
+                        f"(ctor {sj} {se} {hws_fwd(se)} {cle})")
+    return rows
+
+
+def parse_row_text(txt):
+    """kAst's `out` → the same `(kind i j …)` row list."""
+    return [f"({m.group(1)}{m.group(2)})"
+            for m in re.finditer(r"\(([a-z]+)((?: [-\w]+)*)\)", txt)]
 
 
 def _target_row(tid):
@@ -900,6 +1140,54 @@ def gate():
                         f"got={got[:60]!r}")
             else:
                 skip(f"{dkey}.{code}", f"{gname} binary not built")
+
+            # ---- the AST race: `koruc --ast-json` normalized to the
+            # same flat row text must equal what the koru-spelled
+            # parser decided (and the compiled legs re-decided).
+            # Refusal parity: a source the authority refuses must
+            # carry a `(bad i c)` row on our side.
+            if row.get("race"):
+                rt = f"{dkey}.{code}r"
+                if not koruc:
+                    skip(rt, "koruc toolchain not on this machine")
+                else:
+                    with open(os.path.join(BUILD, "race_in.k"), "w",
+                              encoding="utf-8") as f:
+                        f.write(row.get("src", ""))
+                    ra = subprocess.run(
+                        [koruc, "--ast-json",
+                         os.path.join(BUILD, "race_in.k")],
+                        capture_output=True, text=True)
+                    if ra.returncode != 0:
+                        if "(bad " in want:
+                            ok(rt, "authority refuses; (bad) parity")
+                        else:
+                            bad(rt, "koruc refused but rows lack "
+                                f"(bad): {ra.stderr.strip()[:100]}")
+                    else:
+                        try:
+                            ast = json.loads(ra.stdout)
+                        except json.JSONDecodeError as e:
+                            bad(rt, f"ast-json unreadable: {e}")
+                        else:
+                            mine = parse_row_text(want)
+                            theirs = ast_norm_rows(
+                                row.get("src", ""), ast)
+                            if mine == theirs:
+                                ok(rt, f"ast race: {len(mine)} "
+                                       "rows agree")
+                            else:
+                                diff = next(
+                                    (i for i, (a, b) in
+                                     enumerate(zip(mine, theirs))
+                                     if a != b),
+                                    min(len(mine), len(theirs)))
+                                bad(rt,
+                                    f"row {diff}: mine="
+                                    f"{mine[diff] if diff < len(mine) else '∅'} "
+                                    f"theirs="
+                                    f"{theirs[diff] if diff < len(theirs) else '∅'}")
+
             if not have_gv:
                 continue
             try:
