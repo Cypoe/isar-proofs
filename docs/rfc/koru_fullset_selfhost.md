@@ -204,7 +204,43 @@ i386 image's <4GB address space — not concurrency.
   and becomes part of the formalized target — same obligation,
   better accounting.
 
-## 6. Open questions
+## 6. The proved seed path (rung G, concretely)
+
+The machine side is not hypothetical: `SpecVocabulary.lean` already
+carries a proved two-pass assembler (`p1`/`p2` fold semantics,
+`p1ProgSem_wf`, `asm_eval` — axiom-audited) and COFF/PE emission as
+data — the `native.x86_64.pe` seed path. The full proved chain:
+
+```
+prog.k
+  │  (1) korufe-as-data — parse+lower as a total function on text,
+  │      provable against a formalized grammar spec
+  ▼
+[flow-eval] claim C      — pure data, the wire
+  │  (2) emit : C → machine program — declared quotient map
+  │      theorem: ∀ C ∈ modeled set, runK(C) ≡ MachSem(emit(C))
+  ▼
+x86_64 machine program
+  │  (3) MachSem — SpecVocabulary p1/p2 folds + program_eval
+  ▼
+native.x86_64.pe         — the bytes ARE the target
+  ▼
+trusted binary           — proved map AND no unproved compiler leg
+```
+
+Self-application closes the loop: the frontend is a koru program,
+so `emit(korufe_as_data)` through the same map gives a compiler
+binary that is *proved*, not verified-compiled:
+`∀ src, binary(emit(korufe))(src) ≡ runK(parse(src))`.
+
+Residual TCB, named: (a) grammar formalization — surface→claim
+correctness needs the spec as a term; (b) the modeled-subset bound
+(runK's domain); (c) MachSem fidelity — our x86 model vs silicon,
+the same assumption CompCert makes about its model; (d) loader/OS
+and `proc` effects — the declared host vertex; (e) fuel — runK
+decides under a bound; `run_mono` is what makes that honest.
+
+## 7. Open questions
 
 - **Foreach/cond/switch nodes:** surface-level desugar into the
   arm/invoke grammar, or first-class wire nodes? Upstream lowers
