@@ -248,6 +248,245 @@ void write_ast_json(Item *items, const char *file, FILE *f) {
     fprintf(f, "],\"main_module_name\":\"%s\",\"parts\":[]}", file);
 }
 
+/* ================= --ast-json view (the readable projection)
+   The authority's --ast-json is the flat {type,name,location}
+   schema — lossier than canon (no return_type, no return_binding,
+   jump args dropped, `-> if(c) a else b` surfaces as an `["if"]`
+   invocation whose only arg is the condition) — but it is the
+   document every lane can emit, so it is the cross-verification
+   wire.  The printer below matches koruc's expression rendering:
+   binary ops are wrapped `(a op b)` except the outermost in a
+   `condition` field; unary operands always wrap (`-(5)`,
+   `!(x)`); field/index bases wrap unless a bare variable. ===== */
+
+static void zexpr(KExpr *e, Buf *b, int top) {
+    int i;
+    switch (e->tag) {
+    case 0: bputf(b, "%lld", (long long)e->i); break;
+    case 1: bput(b, e->s); break;
+    case 2: {
+        static const char *os[] = {"+","-","*","/","%","==","!=","<",
+                                   "<=",">",">=","&&","||","++"};
+        if (!top) bput(b, "(");
+        zexpr(e->a, b, 0);
+        bputf(b, " %s ", os[e->op]);
+        zexpr(e->bb, b, 0);
+        if (!top) bput(b, ")");
+        break;
+    }
+    case 3:
+        bput(b, e->op == 0 ? "-(" : "!(");
+        zexpr(e->a, b, 0);
+        bput(b, ")");
+        break;
+    case 4:
+        bput(b, "if("); zexpr(e->a, b, 0); bput(b, ") ");
+        zexpr(e->bb, b, 0); bput(b, " else "); zexpr(e->c, b, 0);
+        break;
+    case 5: case 6: {
+        /* postfix-able bases print bare (s.kids[0].v); literal and
+           operator bases wrap — ({x: 3}).x, ([10, 20])[1] */
+        int wrap = (e->a->tag == 0 || e->a->tag == 2 ||
+                    e->a->tag == 3 || e->a->tag == 4 ||
+                    e->a->tag == 9 || e->a->tag == 10);
+        if (wrap) bput(b, "(");
+        zexpr(e->a, b, 0);
+        if (wrap) bput(b, ")");
+        if (e->tag == 5) bputf(b, ".%s", e->s);
+        else { bput(b, "["); zexpr(e->bb, b, 0); bput(b, "]"); }
+        break;
+    }
+    case 7:
+        bput(b, "@");   /* builtin_call spells @name(...) */
+        /* fallthrough */
+    case 8:
+        bput(b, e->s); bput(b, "(");
+        for (i = 0; i < e->nargs; i++) {
+            if (i) bput(b, ", ");
+            if (e->args[i].n) bputf(b, "%s: ", e->args[i].n);
+            zexpr(e->args[i].e, b, 0);
+        }
+        bput(b, ")"); break;
+    case 9:
+        bput(b, "[");
+        for (i = 0; i < e->nxs; i++) {
+            if (i) bput(b, ", "); zexpr(e->xs[i], b, 0);
+        }
+        bput(b, "]"); break;
+    case 10:
+        bput(b, "{");
+        for (i = 0; i < e->nfs; i++) {
+            if (i) bput(b, ", ");
+            bputf(b, "%s: ", e->fs[i].n); zexpr(e->fs[i].e, b, 0);
+        }
+        bput(b, "}"); break;
+    case 11: bput(b, e->b ? "true" : "false"); break;
+    case 12: rat_to_dec(e->i, e->d, b); break;
+    case 13: bput(b, "\""); bput(b, e->s); bput(b, "\""); break;
+    }
+}
+
+/* invocation args — the authority writes a positional arg's name
+   as the value text itself (probe: f(g()) → name "g()"), so named
+   args keep their name and positionals echo their value. */
+static void zinv(Inv *v, FILE *f) {
+    int j;
+    fputs("{\"event\":[", f);
+    jesc(f, v->name);
+    fputs("],\"args\":[", f);
+    for (j = 0; j < v->nargs; j++) {
+        Buf vb = {0, 0, 0};
+        zexpr(v->args[j].e, &vb, 0);
+        if (j) fputc(',', f);
+        fputs("{\"name\":", f);
+        jesc(f, v->args[j].n ? v->args[j].n : (vb.p ? vb.p : ""));
+        fputs(",\"value\":", f);
+        jesc(f, vb.p ? vb.p : "");
+        fputc('}', f);
+    }
+    fputs("],\"variant\":null}", f);
+}
+
+static void zstep(ArmD *a, FILE *f) {
+    if (a->kind == 1) {         /* produce */
+        if (a->produce && a->produce->tag == 4) {
+            /* `-> if(c) t else e` — readable schema: an `["if"]`
+               invocation, the else tail is not in args */
+            Buf cb = {0, 0, 0};
+            zexpr(a->produce->a, &cb, 0);
+            fputs("{\"type\":\"invocation\",\"invocation\":{\"event\":[\"if\"],\"args\":[{\"name\":", f);
+            jesc(f, cb.p ? cb.p : "");
+            fputs(",\"value\":", f);
+            jesc(f, cb.p ? cb.p : "");
+            fputs("}],\"variant\":null}}", f);
+        } else {
+            Buf pb = {0, 0, 0};
+            if (a->produce) zexpr(a->produce, &pb, 0);
+            fputs("{\"type\":\"expression\",\"expression\":", f);
+            jesc(f, pb.p ? pb.p : "");
+            fputc('}', f);
+        }
+    } else if (a->kind == 2) {  /* ctor */
+        Buf pb = {0, 0, 0};
+        if (a->produce) zexpr(a->produce, &pb, 0);
+        fputs("{\"type\":\"branch_constructor\",\"branch_constructor\":{\"branch_name\":", f);
+        jesc(f, a->target);
+        fputs(",\"fields\":[],\"plain_value\":", f);
+        if (a->produce) jesc(f, pb.p ? pb.p : ""); else fputs("null", f);
+        fputs(",\"has_expressions\":", f);
+        fputs(a->produce ? "true" : "false", f);
+        fputs("}}", f);
+    } else if (a->kind == 3) {  /* invoke */
+        fputs("{\"type\":\"invocation\",\"invocation\":", f);
+        zinv(a->inv, f);
+        fputc('}', f);
+    } else if (a->kind == 4) {  /* @jump — args dropped in the view */
+        fputs("{\"type\":\"label_jump\",\"label\":", f);
+        jesc(f, a->inv->name);
+        fputc('}', f);
+    }
+}
+
+static void zcont(ArmD *a, const char *file, FILE *f) {
+    int i;
+    fputs("{\"branch\":", f); jesc(f, a->branch);
+    fprintf(f, ",\"kind\":\"terminal\",\"is_catchall\":%s,\"binding\":",
+            a->catchall ? "true" : "false");
+    /* the view drops the retbind name on anonymous chain conts —
+       the canon keeps it in Inv.retbind */
+    if (a->bind && a->branch[0]) jesc(f, a->bind); else fputs("null", f);
+    fputs(",\"binding_type\":\"branch_payload\",\"condition\":", f);
+    if (a->cond) {
+        Buf cb = {0, 0, 0};
+        zexpr(a->cond, &cb, 1);
+        jesc(f, cb.p ? cb.p : "");
+    } else fputs("null", f);
+    fprintf(f, ",\"location\":{\"file\":\"%s\",\"line\":%d,\"col\":0},\"step\":",
+            file, a->line);
+    if (a->kind <= 0) fputs("null", f); else zstep(a, f);
+    fputs(",\"continuations\":[", f);
+    for (i = 0; i < a->nconts; i++) {
+        if (i) fputc(',', f);
+        zcont(a->conts[i], file, f);
+    }
+    fputs("]}", f);
+}
+
+void write_ast_json_view(Item *items, const char *file, FILE *f) {
+    fputs("{\"module_annotations\":[],\"items\":[", f);
+    /* the real frontend injects `import std/compiler` first */
+    fprintf(f, "{\"type\":\"import_decl\",\"path\":\"std/compiler\",\"location\":{\"file\":\"%s\",\"line\":1,\"col\":0}}",
+            file);
+    for (Item *it = items; it; it = it->next) {
+        int i;
+        fputc(',', f);
+        switch (it->kind) {
+        case 0:
+            fputs("{\"type\":\"import_decl\",\"path\":", f);
+            jesc(f, it->import_path);
+            fprintf(f, ",\"location\":{\"file\":\"%s\",\"line\":%d,\"col\":0}}",
+                    file, it->line);
+            break;
+        case 1:
+            fputs("{\"type\":\"event_decl\",\"name\":", f);
+            jesc(f, it->name);
+            fputs(",\"path\":[", f); jesc(f, it->name);
+            fprintf(f, "],\"module\":\"%s\",\"input\":{\"fields\":[", file);
+            for (i = 0; i < it->nfields; i++) {
+                if (i) fputc(',', f);
+                fputs("{\"name\":", f); jesc(f, it->fields[i].n);
+                fputs(",\"type\":", f); jesc(f, it->fields[i].t);
+                fputs(",\"is_source\":false,\"is_file\":false,\"is_embed_file\":false,\"is_expression\":false,\"is_invocation_meta\":false,\"phantom\":null}", f);
+            }
+            fputs("]},\"branches\":[", f);
+            for (i = 0; i < it->nbranches; i++) {
+                if (i) fputc(',', f);
+                fputs("{\"name\":", f); jesc(f, it->branches[i]);
+                fputs(",\"kind\":\"terminal\",\"resume\":null,\"resume_phantom\":null,\"is_optional\":false,\"is_panic\":false,\"payload\":{\"fields\":[", f);
+                if (it->btypes && it->btypes[i]) {
+                    fputs("{\"name\":\"__type_ref\",\"type\":", f);
+                    jesc(f, it->btypes[i]);
+                    fputs(",\"is_source\":false,\"is_file\":false,\"is_embed_file\":false,\"is_expression\":false,\"is_invocation_meta\":false,\"phantom\":null}", f);
+                }
+                fputs("]}}", f);
+            }
+            fprintf(f, "],\"location\":{\"file\":\"%s\",\"line\":%d,\"col\":0}}",
+                    file, it->line);
+            break;
+        case 2: {
+            Buf b = {0, 0, 0};
+            zexpr(it->bare, &b, 0);
+            fputs("{\"type\":\"immediate_impl\",\"event_path\":[", f);
+            jesc(f, it->name);
+            fputs("],\"value\":{\"branch_name\":\"\",\"fields\":[],\"plain_value\":", f);
+            jesc(f, b.p ? b.p : "");
+            fprintf(f, ",\"has_expressions\":true},\"annotations\":[],\"location\":{\"file\":\"%s\",\"line\":%d,\"col\":0},\"is_impl\":false}",
+                    file, it->line);
+            break;
+        }
+        case 3: case 4: {
+            fputs("{\"type\":\"flow\",\"invocation\":", f);
+            zinv(it->flow->head, f);
+            fputs(",\"continuations\":[", f);
+            for (i = 0; i < it->flow->narms; i++) {
+                if (i) fputc(',', f);
+                zcont(it->flow->arms[i], file, f);
+            }
+            fputs("],\"pre_label\":", f);
+            if (it->flow->pre) jesc(f, it->flow->pre); else fputs("null", f);
+            fputs(",\"impl_of\":", f);
+            if (it->kind == 3) {
+                fputc('[', f); jesc(f, it->name); fputc(']', f);
+            } else fputs("null", f);
+            fprintf(f, ",\"location\":{\"file\":\"%s\",\"line\":%d,\"col\":0}}",
+                    file, it->line);
+            break;
+        }
+        }
+    }
+    fputs("]}", f);
+}
+
 /* ================= JSON reader (for --lower) ================= */
 
 

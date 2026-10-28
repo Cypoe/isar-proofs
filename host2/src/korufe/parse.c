@@ -508,9 +508,11 @@ static void arm_push(ArmD ***xs, int *n, int *cap, ArmD *a) {
    cont arms that ride a bare result.  A `|>` step after a tagged
    producer is not expressible on the wire and refuses at eval. */
 static ArmD *parse_cont_step(Tks *s, char **err, char *bind) {
+    /* consumed `|>` already — s->t[s->i-1] is it */
     ArmD *a = xmalloc(sizeof(ArmD));
     memset(a, 0, sizeof *a);
     a->kind = -1;
+    a->line = s->t[s->i - 1].line;
     a->branch = "";
     a->bind = bind;
     a->inv = parse_inv(s, err, 1);
@@ -526,6 +528,7 @@ static ArmD *parse_arm(Tks *s, char **err) {
     ArmD *a = xmalloc(sizeof(ArmD));
     memset(a, 0, sizeof *a);
     a->kind = -1;
+    a->line = s->t[s->i - 1].line;
     a->branch = "";
     snl(s);
     if (at(s, "*")) {
@@ -781,11 +784,13 @@ Item *parse_program(Tks *s, char **err) {
                 }
                 if (!eat(s, "}")) { fail_at(s, err, "'}' after fields"); return 0; }
             }
-            /* branch decls: | name [payload] — payload groups skipped
-               (declared, not interpreted by the wire) */
+            /* branch decls: | name [payload] — the payload type text is
+               kept (btypes) for the __type_ref projection; the type is
+               declared, not interpreted by the wire */
             {
                 int cap = 4;
                 it->branches = xmalloc(cap * sizeof(char *));
+                it->btypes = xmalloc(cap * sizeof(char *));
                 it->nbranches = 0;
                 for (;;) {
                     snl(s);
@@ -799,17 +804,24 @@ Item *parse_program(Tks *s, char **err) {
                         cap *= 2;
                         { char **nb = xmalloc(cap * sizeof(char *));
                           memcpy(nb, it->branches, it->nbranches * sizeof(char *));
-                          it->branches = nb; }
+                          it->branches = nb;
+                          nb = xmalloc(cap * sizeof(char *));
+                          memcpy(nb, it->btypes, it->nbranches * sizeof(char *));
+                          it->btypes = nb; }
                     }
                     it->branches[it->nbranches++] = xstrdup(next_tk(s)->text);
+                    it->btypes[it->nbranches - 1] = 0;
                     {   /* identity payload `| go i64` — same-line type */
                         int bl = s->t[s->i - 1].line;
                         if (s->i < s->n && s->t[s->i].kind == 0 &&
                             s->t[s->i].line == bl) {
-                            s->i++;
+                            char *bt = xstrdup(next_tk(s)->text);
                             while (at(s, ".") || at(s, "/")) {
                                 s->i++;
-                                if (is_ident_tk(s)) s->i++;
+                                if (is_ident_tk(s))
+                                    bt = xasprintf(
+                                        bt, xasprintf(
+                                            "/", next_tk(s)->text));
                             }
                             if (at(s, "[")) {           /* type params */
                                 int depth = 0;
@@ -819,6 +831,7 @@ Item *parse_program(Tks *s, char **err) {
                                     s->i++;
                                 } while (depth > 0 && !at_kind(s, 5));
                             }
+                            it->btypes[it->nbranches - 1] = bt;
                         }
                     }
                     if (at(s, "(") || at(s, "{")) {   /* payload decl — skip */

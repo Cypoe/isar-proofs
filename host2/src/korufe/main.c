@@ -23,23 +23,28 @@ static const char *base_name(const char *p) {
 
 int main(int argc, char **argv) {
     char *err = 0;
-    if (argc == 2) {
-        /* parse → ast.json */
-        char *src = file_read(argv[1]);
+    if (argc == 2 || (argc == 3 && !strcmp(argv[1], "--ast-json"))) {
+        /* parse → ast.json (canon) or --ast-json (the readable
+           projection koruc --ast-json emits — the cross-lane
+           verification document) */
+        int view = argc == 3;
+        const char *path = argv[argc - 1];
+        char *src = file_read(path);
         Tks *ts;
         Item *items;
         const char *mod;
-        if (!src) { fprintf(stderr, "refuse: cannot read %s\n", argv[1]); return 2; }
-        ts = lex_k(src, argv[1], &err);
+        if (!src) { fprintf(stderr, "refuse: cannot read %s\n", path); return 2; }
+        ts = lex_k(src, path, &err);
         if (!ts) { fprintf(stderr, "refuse: %s\n", err); return 2; }
         items = parse_program(ts, &err);
         if (!items) { fprintf(stderr, "refuse: %s\n", err); return 2; }
         {
-            const char *b = base_name(argv[1]);
+            const char *b = base_name(path);
             char *dot = strrchr(b, '.');
             mod = dot ? xstrndup(b, (size_t)(dot - b)) : b;
         }
-        write_ast_json(items, mod, stdout);
+        if (view) write_ast_json_view(items, mod, stdout);
+        else write_ast_json(items, mod, stdout);
         fputc('\n', stdout);
         return 0;
     }

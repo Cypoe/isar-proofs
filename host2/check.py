@@ -74,6 +74,11 @@ The pipeline per case row:
           compiled kast (enlarged-stack build, invoke-recursion
           axis) vs `koruc --ast-json` normalized; row-identical
           plus refusal parity both directions
+  kwj   : the JSON race — the same corpus through `korufe
+          --ast-json` vs `koruc --ast-json`, deep-equal modulo the
+          path-dependent location.file.  The readable view is the
+          authority/interop document; rows are the internal wire —
+          two independent evidence boundaries
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -151,6 +156,47 @@ def _fnv1a64(b: bytes) -> int:
 
 _AST_ATOM = (
     b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+
+
+def ast_view_norm(o):
+    """Normalize a readable `--ast-json` document for cross-frontend
+    equality: `location.file` is path-dependent (koruc echoes the
+    argv path, korufe sees the relative one), so it collapses to the
+    basename without extension.  Everything else compares exact —
+    the readable view is the shared interop document, and the whole
+    point of the mirror is that no printer dialect remains."""
+    if isinstance(o, dict):
+        return {k: (os.path.basename(v).rsplit(".", 1)[0]
+                    if k == "file" and isinstance(v, str)
+                    else ast_view_norm(v))
+                for k, v in o.items()}
+    if isinstance(o, list):
+        return [ast_view_norm(v) for v in o]
+    return o
+
+
+def ast_view_diff(a, b, path="$"):
+    """First structural difference between two normalized view
+    docs — returns (path, theirs, ours) or None."""
+    if type(a) is not type(b):
+        return path, a, b
+    if isinstance(a, dict):
+        if set(a) != set(b):
+            return path, "keys " + repr(sorted(set(a) ^ set(b))), ""
+        for k in a:
+            r = ast_view_diff(a[k], b[k], path + "." + k)
+            if r:
+                return r
+        return None
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return path, f"len {len(a)}", f"len {len(b)}"
+        for i, (x, y) in enumerate(zip(a, b)):
+            r = ast_view_diff(x, y, f"{path}[{i}]")
+            if r:
+                return r
+        return None
+    return (path, a, b) if a != b else None
 
 
 def ast_norm_rows(src, ast):
@@ -1365,6 +1411,46 @@ def gate():
                     ok(tag, "refusal parity")
                 else:
                     ok(tag, f"{len(mine)} rows agree")
+
+    # ---- wide JSON race: the SAME corpus through `korufe
+    # --ast-json` vs `koruc --ast-json` — the readable view is the
+    # authority/interop document, so the C lane must mirror it
+    # exactly (modulo the path-dependent location.file).  This is a
+    # second, independent evidence boundary to the row race: rows
+    # prove the koru-spelled parser, JSON proves the C frontend. ----
+    if not koruc:
+        skip("kwj", "koruc toolchain not on this machine")
+    else:
+        for ik in sorted(glob.glob(
+                os.path.join(SPECS, "tests", "**", "input.k"),
+                recursive=True)):
+            rel = os.path.relpath(ik, os.path.join(SPECS, "tests"))
+            tag = "kwj." + rel.replace("\\", "/").replace(
+                "/", ".").replace("input.k", "").rstrip(".")
+            ra = subprocess.run(
+                [koruc, "--ast-json", os.path.abspath(ik)],
+                capture_output=True, text=True)
+            rb = subprocess.run([KORUFE, "--ast-json", ik],
+                                capture_output=True, text=True)
+            auth_bad, fe_bad = ra.returncode != 0, rb.returncode != 0
+            if auth_bad != fe_bad:
+                bad(tag, f"refusal mismatch auth={auth_bad} "
+                         f"fe={fe_bad} {rb.stderr.strip()[:80]}")
+            elif auth_bad:
+                ok(tag, "refusal parity")
+            else:
+                try:
+                    da = ast_view_norm(json.loads(ra.stdout))
+                    db = ast_view_norm(json.loads(rb.stdout))
+                except Exception as e:
+                    bad(tag, f"view not JSON: {e}")
+                    continue
+                r = ast_view_diff(da, db)
+                if r is None:
+                    ok(tag, "ast-json agree")
+                else:
+                    bad(tag, f"first diff @{r[0]}: "
+                             f"{r[1]!r} vs {r[2]!r}"[:200])
 
     # ---- refusal probes: the frontend refuses by default, and the
     # same surfaces koruc refuses refuse here (PARSE003/005 parity,

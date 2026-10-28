@@ -86,6 +86,8 @@ struct ArmD {
     Inv *inv;              /* invoke/jump args */
     KExpr *produce;        /* produce/ctor payload */
     ArmD **conts; int nconts;
+    int line;              /* the `|`/`|>` token's source line —
+                              ast-json locations are per-cont */
 };
 
 typedef struct {
@@ -102,6 +104,9 @@ struct Item {
     char *import_path;
     struct { char *n; char *t; } *fields; int nfields;   /* tor inputs */
     char **branches; int nbranches;
+    char **btypes;               /* `| name T` payload type text, may
+                                    be NULL per branch — only kept for
+                                    the __type_ref ast-json projection */
     char *ret_type;
     int is_pub;
     KExpr *bare;           /* impl_bare */
@@ -118,6 +123,7 @@ KExpr *parse_expr(Tks *s, char **err);
 
 /* ---- astio.c ---- */
 void write_ast_json(Item *items, const char *file, FILE *f);
+void write_ast_json_view(Item *items, const char *file, FILE *f);
 
 typedef struct Jv Jv;
 struct Jv {
