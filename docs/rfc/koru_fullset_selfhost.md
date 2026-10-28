@@ -238,7 +238,31 @@ correctness needs the spec as a term; (b) the modeled-subset bound
 (runK's domain); (c) MachSem fidelity — our x86 model vs silicon,
 the same assumption CompCert makes about its model; (d) loader/OS
 and `proc` effects — the declared host vertex; (e) fuel — runK
-decides under a bound; `run_mono` is what makes that honest.
+decides under a bound; **`run_mono` is what makes that honest** —
+decided results never flip with more fuel, so the theorem
+quantifies over decided evaluations rather than arbitrary
+truncations. Fuel is a resource cap proved transparent, not a
+semantics change.
+
+**The claim, phrased for outsiders:** a koru program compiled
+through the proven map is *proven meaning-preserving* —
+`MachSem(emit(P)) ≡ runK(P)`. Same shape as the
+koru-verification-path's trust pyramid (CompCert certifies C→asm
+for every C program) but moved one level up: the *koru map itself*
+is the theorem, not trusted machinery below it. "Proven when
+typed" — each compilation instantiates the universal theorem at
+P₀; the binary is a proof certificate of semantic preservation.
+Two honest bounds on the phrasing: proven *faithful to
+semantics*, not correct against intent (the spec/obligation axis
+is a different layer — HoldsCheck territory); and the `∀` ranges
+over the modeled subset, not all of surface koru.
+
+**The method is already proven machinery:** F1→F2→F3→G are not
+leaps — each rung is the H2 protocol replayed (widen the subset →
+regenerate → re-witness → stamp-bound freshness), until the last
+re-witness is replaced by a proof. The discipline that made H2
+is the same discipline that makes G; only the verdict kind
+changes (observed → proved).
 
 ## 7. Open questions
 
