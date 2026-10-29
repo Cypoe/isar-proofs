@@ -25,12 +25,32 @@ static void bput_sxstr(Buf *b, const char *s) {
     bput(b, "\"");
 }
 
+/* koru literal-text → runtime value: the AST keeps the raw token
+   between quotes; the decode happens when the literal becomes a
+   value (upstream pins `print.ln("a\\\"b")` → `a\"b`).  Set: \" \\
+   \n \t \r decode; unknown escapes keep both bytes. */
+static char *str_val(const char *s) {
+    char *o = xmalloc(strlen(s) + 1), *w = o;
+    while (*s) {
+        if (*s == '\\' && s[1]) {
+            char c = s[1];
+            if (c == '"' || c == '\\') { *w++ = c; s += 2; continue; }
+            if (c == 'n') { *w++ = '\n'; s += 2; continue; }
+            if (c == 't') { *w++ = '\t'; s += 2; continue; }
+            if (c == 'r') { *w++ = '\r'; s += 2; continue; }
+        }
+        *w++ = *s++;
+    }
+    *w = 0;
+    return o;
+}
+
 static void sx_lit(KExpr *e, Buf *b, char **err) {
     int i;
     switch (e->tag) {
     case 0: bputf(b, "(int %lld)", (long long)e->i); break;
     case 12: bputf(b, "(float %lld %lld)", (long long)e->i, (long long)e->d); break;
-    case 13: bput(b, "(str "); bput_sxstr(b, e->s); bput(b, ")"); break;
+    case 13: bput(b, "(str "); bput_sxstr(b, str_val(e->s)); bput(b, ")"); break;
     case 11: bputf(b, "(bool %s)", e->b ? "true" : "false"); break;
     case 9:
         bput(b, "(arr");

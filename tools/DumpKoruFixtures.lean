@@ -30,7 +30,24 @@ decides 5 — `krun` must DRIFT it, proving claims are re-decided.
 
 def sxName (s : String) : String := s
 
-def sxStrLit (s : String) : String := "\"" ++ s ++ "\""
+/-- Koru string literal escaping — the inverse of the upstream
+decode set (the AST keeps the raw token, the VALUE decodes `\"`→`"`,
+`\\`→`\`, `\n`/`\t`/`\r`→controls, unknown keeps both bytes): every
+value byte gets its decoding spelling.  The same set serves wire
+`(str …)` atoms — krun's `sx` reader decodes the identical escapes. -/
+def koruStrEsc (s : String) : String :=
+  String.join (s.toList.map fun c =>
+    if c == '"' then "\\\""
+    else if c == '\\' then "\\\\"
+    else if c == '\n' then "\\n"
+    else if c == '\t' then "\\t"
+    else if c == '\r' then "\\r"
+    else if c.toNat < 0x20 then "\\u00" ++
+      (let h := String.ofList (Nat.toDigits 16 c.toNat)
+       "".pushn '0' (2 - h.length) ++ h)
+    else c.toString)
+
+def sxStrLit (s : String) : String := "\"" ++ koruStrEsc s ++ "\""
 
 def binopName : ISAR.KBinOp → String
   | .add => "add" | .sub => "sub" | .mul => "mul" | .div => "div" | .mod => "mod"
@@ -202,7 +219,7 @@ def kValSrc : ISAR.KVal → String
       then panic! "negative float literal has no koru surface — spell .un .neg"
       else (ratDecimal n d).get!
   | .bool b => if b then "true" else "false"
-  | .str s => "\"" ++ s ++ "\""
+  | .str s => "\"" ++ koruStrEsc s ++ "\""
   | .arr xs => "[" ++ String.intercalate ", " (kValsSrc xs) ++ "]"
   | .cell fs => "{" ++ String.intercalate ", " (kNamedValsSrc fs) ++ "}"
 
@@ -241,11 +258,21 @@ def kExprSrc : ISAR.KExpr → String
   | .lit v => kValSrc v
   | .var n => sxName n
   | .bin op a b =>
-      "(" ++ kExprSrc a ++ " " ++ binSym op ++ " " ++ kExprSrc b ++ ")"
+      -- `if … else` is greedier than any binary op (`else x`
+      -- swallows a trailing `a ++ b`), so a `.cond` operand must
+      -- carry its own parens.
+      let wrap (x : ISAR.KExpr) (s : String) : String :=
+        match x with | .cond _ _ _ => "(" ++ s ++ ")" | _ => s
+      "(" ++ wrap a (kExprSrc a) ++ " " ++ binSym op
+        ++ " " ++ wrap b (kExprSrc b) ++ ")"
   | .un .neg e => "-(" ++ kExprSrc e ++ ")"
   | .un .not e => "!(" ++ kExprSrc e ++ ")"
   | .cond c t e =>
-      "if(" ++ kExprSrc c ++ ") " ++ kExprSrc t
+      -- the then-branch gets the same guard: `if c if … else …`
+      -- has no surface reading
+      let wrap (x : ISAR.KExpr) (s : String) : String :=
+        match x with | .cond _ _ _ => "(" ++ s ++ ")" | _ => s
+      "if(" ++ kExprSrc c ++ ") " ++ wrap t (kExprSrc t)
         ++ " else " ++ kExprSrc e
   | .field o n => kPostSrc o ++ "." ++ sxName n
   | .index o i => kPostSrc o ++ "[" ++ kExprSrc i ++ "]"
@@ -517,6 +544,21 @@ def kastFile : String :=
           |>.map (·.2) |>.getD {}) c)
     ++ "\n"
 
+/-- `klow.k`: the koru-spelled reifier — flat six-int rows + the
+source byte array → the `program.ast.json` document as a string.
+Mirrors `reify.c`'s state machine and `write_ast_json`'s shape;
+the gate races parsed-JSON equality against `korufe --reify`.
+arg-less invoke refuses: `src`/`rows`/`mod` unbound. -/
+def klowFile : String :=
+  "// klow.k — a koru-spelled reifier → program.ast.json (generated)\n"
+    ++ "// flat six-int rows + source bytes in; escaped JSON text\n"
+    ++ "// out (span bytes as \\u00xx).  arg-less invoke refuses:\n"
+    ++ "// `src`/`rows`/`mod` unbound.\n"
+    ++ String.intercalate "\n\n" (ISAR.kLow.graph.map fun (n, c) =>
+        kCallableSrc n (ISAR.kLowDecls.find? (·.1 == n)
+          |>.map (·.2) |>.getD {}) c)
+    ++ "\n"
+
 /-- A test input as the wire value: chars → `(arr int)` codes. -/
 def klexChars (s : String) : ISAR.KVal :=
   .arr (s.toList.map fun c => .int (Int.ofNat c.toNat))
@@ -764,6 +806,17 @@ def main : IO Unit := do
            [] (",\"file\":\"input.k\",\"src\":\""
              ++ jsonEsc s ++ "\",\"race\":true"))))
     (some kastFile)
+  -- 904_klow — the koru-spelled reifier: flat six-int rows + the
+  -- source bytes -> the ast.json document as an escaped string.
+  -- The leaf carries only the emit_prog row: per-input rows+src are
+  -- derived at check time from the kast binary's own wire (the kl
+  -- leg), so no second hand-encoded row set can drift from it.
+  writeLeaf "200_emit" "904_klow"
+    ("{\"entry\":\"main\",\"fuel\":4000000"
+      ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
+      ++ ",\"file\":\"input.k\",\"emit_prog\":true"
+      ++ ",\"emit_args\":true,\"gen\":\"klow\"}")
+    (some klowFile)
   -- 800_forged — an asserted-wrong expectation over a deciding
   -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
@@ -817,3 +870,14 @@ def main : IO Unit := do
         ("/* input.fnv1a64:" ++ toString (fnv1a64 kastFile)
           ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC(kAst) refused: {ax}")
+  -- klow.c — the reifier as compiled code: emitProgC lowers kLow's
+  -- 84 callables (byte scanners, escapers, the row state machine) to
+  -- C99.  Same stamp contract; the kl leg races it against `korufe
+  -- --reify` and the interpreted krun lane.
+  match ISAR.emitProgC ISAR.kLow 8192 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/klow.c"
+        ("/* input.fnv1a64:" ++ toString (fnv1a64 klowFile)
+          ++ " */\n" ++ c)
+  | .error ax => throw (IO.userError s!"emitProgC(kLow) refused: {ax}")

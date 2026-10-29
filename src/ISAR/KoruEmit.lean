@@ -2170,6 +2170,946 @@ def kAstDecls : List (String × KDecl) :=
   , ("main", { params := [("chars", "[]const i64")],
                ret := some "string" }) ]
 
+/-! ## `kLow` — a koru-spelled reifier: flat rows + src → ast.json
+
+`klow` is the lowering leg of the koru lane — it consumes the
+*flat* row wire kast produces (six ints per row: kind, sub, v0..v3)
+plus the source byte array, and emits the `program.ast.json`
+document as a string (span bytes as `\u00xx` escapes, structural
+quotes as `\"` — the koru literal `"\""`).  It mirrors
+`host2/src/korufe/reify.c`'s state machine arm-for-arm and
+`astio.c`'s `write_ast_json` shape; the race is parsed-JSON
+deep-equal, not byte equality (`\u0069` ≡ `i` after decode).
+
+The row→flat-int projection is declared data in the check
+harness; refusal parity on `(bad …)`/dangling-`rbind` rows.
+
+Self-parse files (900–903) overflow the interpreter's native
+stack — the named trampolined-invokes axis (frag 0047). -/
+
+def kLowPkb : KCallable := .bare (.cond (.bin .or (.bin .lt (.var "i") (qint 0)) (.bin .ge (.var "i") (.var "n"))) (.bin .sub (qint 0) (qint 1)) (.index (.var "t") (.var "i")))
+
+def kLowLxt : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [
+    .mk "fin" false (some "c") (some (.bin .lt (.var "c") (qint 0)))
+      (some (.produce (.var "hi"))) []
+  ,     .mk "ql" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (qint 1)) (.bin .eq (.var "c") (qint 34))))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (qint 0))])) []
+  ,     .mk "bs" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (qint 1)) (.bin .eq (.var "c") (qint 92))))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 2))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])) []
+  ,     .mk "iq" false (some "c") (some (.bin .eq (.var "ins") (qint 1)))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])) []
+  ,     .mk "qo" false (some "c") (some (.bin .eq (.var "c") (qint 34)))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (qint 1))])) []
+  ,     .mk "dop" false (some "c") (some (.bin .or (.bin .eq (.var "c") (qint 40)) (.bin .or (.bin .eq (.var "c") (qint 91)) (.bin .eq (.var "c") (qint 123)))))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("d", (.bin .add (.var "d") (qint 1))), ("ins", (.var "ins"))])) []
+  ,     .mk "dcl" false (some "c") (some (.bin .or (.bin .eq (.var "c") (qint 41)) (.bin .or (.bin .eq (.var "c") (qint 93)) (.bin .eq (.var "c") (qint 125)))))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("d", (.bin .sub (.var "d") (qint 1))), ("ins", (.var "ins"))])) []
+  ,     .mk "oo" false (some "c") (some (.bin .and (.bin .eq (.var "d") (qint 0)) (.bin .and (.bin .eq (.var "c") (qint 124)) (.bin .and (.bin .lt (.bin .add (.var "i") (qint 1)) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 1))) (qint 124))))))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 2))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])) []
+  ,     .mk "ob" false (some "c") (some (.bin .and (.bin .eq (.var "d") (qint 0)) (.bin .and (.bin .eq (.var "c") (qint 124)) (.bin .and (.bin .gt (.var "i") (qint 0)) (.bin .eq (.index (.var "src") (.bin .sub (.var "i") (qint 1))) (qint 124))))))
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])) []
+  ,     .mk "pp" false (some "c") (some (.bin .and (.bin .eq (.var "d") (qint 0)) (.bin .eq (.var "c") (qint 124))))
+      (some (.produce (.var "i"))) []
+  ,     .mk "aw" false (some "c") (some (.bin .and (.bin .eq (.var "d") (qint 0)) (.bin .and (.bin .or (.bin .eq (.var "c") (qint 61)) (.bin .eq (.var "c") (qint 45))) (.bin .and (.bin .lt (.bin .add (.var "i") (qint 1)) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 1))) (qint 62))))))
+      (some (.produce (.var "i"))) []
+  ,     .mk "cm" false (some "c") (some (.bin .and (.bin .eq (.var "d") (qint 0)) (.bin .and (.bin .eq (.var "c") (qint 47)) (.bin .and (.bin .lt (.bin .add (.var "i") (qint 1)) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 1))) (qint 47))))))
+      (some (.produce (.var "i"))) []
+  ,     .mk "mo" false (some "c") none
+      (some (.invoke "lxt" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])) [] ] }
+
+
+def kLowLtma : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [
+    .mk "ws" false (some "c") (some (.bin .or (.bin .eq (.var "c") (qint 32)) (.bin .or (.bin .eq (.var "c") (qint 9)) (.bin .or (.bin .eq (.var "c") (qint 10)) (.bin .eq (.var "c") (qint 13))))))
+      (some (.invoke "ltma" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi"))])) []
+  ,     .mk "dn" false (some "c") none
+      (some (.produce (.var "i"))) [] ] }
+
+
+def kLowLtmb : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "j")), ("n", (.var "n"))])
+  arms := [
+    .mk "ws" false (some "c") (some (.bin .and (.bin .ge (.var "j") (.var "lo")) (.bin .or (.bin .eq (.var "c") (qint 32)) (.bin .or (.bin .eq (.var "c") (qint 9)) (.bin .or (.bin .eq (.var "c") (qint 10)) (.bin .eq (.var "c") (qint 13)))))))
+      (some (.invoke "ltmb" [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "j") (qint 1))), ("n", (.var "n"))])) []
+  ,     .mk "dn" false (some "c") none
+      (some (.produce (.bin .add (.var "j") (qint 1)))) [] ] }
+
+
+def kLowLtk1 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [
+    .mk "fin" false (some "c") (some (.bin .lt (.var "c") (qint 0)))
+      (some (.produce (.var "hi"))) []
+  ,     .mk "ct" false (some "c") (some (.bin .and (.bin .eq (.var "c") (qint 47)) (.bin .and (.bin .lt (.bin .add (.var "i") (qint 1)) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 1))) (qint 47)))))
+      (some (.produce (.var "i"))) []
+  ,     .mk "ws" false (some "c") (some (.bin .or (.bin .eq (.var "c") (qint 32)) (.bin .or (.bin .eq (.var "c") (qint 9)) (.bin .or (.bin .eq (.var "c") (qint 10)) (.bin .eq (.var "c") (qint 13))))))
+      (some (.produce (.var "i"))) []
+  ,     .mk "mo" false (some "c") none
+      (some (.invoke "ltk1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi"))])) [] ] }
+
+
+def kLowLty1 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [
+    .mk "fin" false (some "c") (some (.bin .lt (.var "c") (qint 0)))
+      (some (.produce (.var "hi"))) []
+  ,     .mk "ct" false (some "c") (some (.bin .and (.bin .eq (.var "c") (qint 47)) (.bin .and (.bin .lt (.bin .add (.var "i") (qint 1)) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 1))) (qint 47)))))
+      (some (.produce (.var "i"))) []
+  ,     .mk "mo" false (some "c") none
+      (some (.invoke "lty1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi"))])) [] ] }
+
+
+def kLowLtm2 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "j")), ("n", (.var "n"))])
+  arms := [
+    .mk "ws" false (some "c") (some (.bin .and (.bin .ge (.var "j") (.var "lo")) (.bin .or (.bin .eq (.var "c") (qint 32)) (.bin .eq (.var "c") (qint 9)))))
+      (some (.invoke "ltm2" [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "j") (qint 1))), ("n", (.var "n"))])) []
+  ,     .mk "dn" false (some "c") none
+      (some (.produce (.bin .add (.var "j") (qint 1)))) [] ] }
+
+
+def kLowLln : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "n"))])
+  arms := [
+    .mk "fin" false (some "c") (some (.bin .or (.bin .ge (.var "i") (.var "off")) (.bin .lt (.var "c") (qint 0))))
+      (some (.produce (.var "l"))) []
+  ,     .mk "nl" false (some "c") (some (.bin .eq (.var "c") (qint 10)))
+      (some (.invoke "lln" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("off", (.var "off")), ("n", (.var "n")), ("l", (.bin .add (.var "l") (qint 1)))])) []
+  ,     .mk "ch" false (some "c") none
+      (some (.invoke "lln" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("off", (.var "off")), ("n", (.var "n")), ("l", (.var "l"))])) [] ] }
+
+
+def kLowLbs : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.bin .sub (.var "i") (qint 1))), ("n", (.var "n"))])
+  arms := [
+    .mk "nl" false (some "c") (some (.bin .or (.bin .le (.var "i") (qint 0)) (.bin .eq (.var "c") (qint 10))))
+      (some (.produce (.var "i"))) []
+  ,     .mk "ch" false (some "c") none
+      (some (.invoke "lbs" [("src", (.var "src")), ("i", (.bin .sub (.var "i") (qint 1))), ("n", (.var "n"))])) [] ] }
+
+
+def kLowLpb : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "n"))])
+  arms := [
+    .mk "pb" false (some "c") (some (.bin .and (.bin .le (.bin .add (.var "i") (qint 4)) (.var "j")) (.bin .and (.bin .eq (.var "c") (qint 112)) (.bin .and (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 1))) (qint 117)) (.bin .and (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 2))) (qint 98)) (.bin .and (.bin .or (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 3))) (qint 32)) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (qint 3))) (qint 9))) (.bin .or (.bin .eq (.var "i") (.var "ls")) (.bin .or (.bin .eq (.index (.var "src") (.bin .sub (.var "i") (qint 1))) (qint 32)) (.bin .eq (.index (.var "src") (.bin .sub (.var "i") (qint 1))) (qint 9))))))))))
+      (some (.produce (qint 1))) []
+  ,     .mk "nx" false (some "c") (some (.bin .lt (.var "i") (.var "j")))
+      (some (.invoke "lpb" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("ls", (.var "ls")), ("j", (.var "j")), ("n", (.var "n"))])) []
+  ,     .mk "no" false (some "c") none
+      (some (.produce (qint 0))) [] ] }
+
+
+def kLowLpub : KCallable := .subflow {
+  preLabel := none
+  head := ("lbs",
+    [("src", (.var "src")), ("i", (.var "j")), ("n", (.var "n"))])
+  arms := [
+    .mk "s" false (some "ls") none
+      (some (.invoke "lpb" [("src", (.var "src")), ("i", (.var "ls")), ("ls", (.var "ls")), ("j", (.var "j")), ("n", (.var "n"))])) [] ] }
+
+
+def kLowLhx : KCallable := .bare (.cond (.bin .lt (.var "d") (qint 10)) (.builtin "intToString" [(.var "d")]) (.cond (.bin .eq (.var "d") (qint 10)) (.lit (.str "a")) (.cond (.bin .eq (.var "d") (qint 11)) (.lit (.str "b")) (.cond (.bin .eq (.var "d") (qint 12)) (.lit (.str "c")) (.cond (.bin .eq (.var "d") (qint 13)) (.lit (.str "d")) (.cond (.bin .eq (.var "d") (qint 14)) (.lit (.str "e")) (.lit (.str "f"))))))))
+
+def kLowEscl : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [
+    .mk "fin" false (some "c") (some (.bin .lt (.var "c") (qint 0)))
+      (some (.produce (.var "out"))) []
+  ,     .mk "ch" false (some "c") (some (.bin .le (.var "c") (qint 127)))
+      (some (.invoke "esca" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("out", (.var "out")), ("c", (.var "c"))])) [] ] }
+
+
+def kLowEsca : KCallable := .subflow {
+  preLabel := none
+  head := ("lhx",
+    [("d", (.bin .div (.var "c") (qint 16)))])
+  arms := [
+    .mk "hd" false (some "a") none
+      (some (.invoke "escb" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("out", (.var "out")), ("c", (.var "c")), ("a", (.var "a"))])) [] ] }
+
+
+def kLowEscb : KCallable := .subflow {
+  preLabel := none
+  head := ("lhx",
+    [("d", (.bin .mod (.var "c") (qint 16)))])
+  arms := [
+    .mk "hd" false (some "b") none
+      (some (.invoke "escl" [("src", (.var "src")), ("i", (.bin .add (.var "i") (qint 1))), ("hi", (.var "hi")), ("out", (.bin .concat (.var "out") (.bin .concat (.lit (.str "\\u00")) (.bin .concat (.var "a") (.var "b")))))])) [] ] }
+
+
+def kLowEscx : KCallable := .subflow {
+  preLabel := none
+  head := ("lxt",
+    [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "hi")), ("d", (qint 0)), ("ins", (qint 0))])
+  arms := [
+    .mk "cut" false (some "c") none
+      (some (.invoke "escx1" [("src", (.var "src")), ("lo", (.var "lo")), ("xt", (.var "c")), ("n", (.var "n")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowEscx1 : KCallable := .subflow {
+  preLabel := none
+  head := ("ltma",
+    [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "xt"))])
+  arms := [
+    .mk "at" false (some "a") none
+      (some (.invoke "escx2" [("src", (.var "src")), ("a", (.var "a")), ("xt", (.var "xt")), ("n", (.var "n")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowEscx2 : KCallable := .subflow {
+  preLabel := none
+  head := ("ltmb",
+    [("src", (.var "src")), ("lo", (.var "a")), ("j", (.bin .sub (.var "xt") (qint 1))), ("n", (.var "n"))])
+  arms := [
+    .mk "bt" false (some "b") none
+      (some (.invoke "escl" [("src", (.var "src")), ("i", (.var "a")), ("hi", (.var "b")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowEsct : KCallable := .subflow {
+  preLabel := none
+  head := ("ltmb",
+    [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "hi") (qint 1))), ("n", (.var "n"))])
+  arms := [
+    .mk "tb" false (some "b") none
+      (some (.invoke "esct1" [("src", (.var "src")), ("lo", (.var "lo")), ("b", (.var "b")), ("n", (.var "n")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowEsct1 : KCallable := .subflow {
+  preLabel := none
+  head := ("ltk1",
+    [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "b"))])
+  arms := [
+    .mk "ct" false (some "c") none
+      (some (.invoke "escl" [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "c")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowEscty : KCallable := .subflow {
+  preLabel := none
+  head := ("ltmb",
+    [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "hi") (qint 1))), ("n", (.var "n"))])
+  arms := [
+    .mk "tb" false (some "b") none
+      (some (.invoke "escty1" [("src", (.var "src")), ("lo", (.var "lo")), ("b", (.var "b")), ("n", (.var "n")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowEscty1 : KCallable := .subflow {
+  preLabel := none
+  head := ("lty1",
+    [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "b"))])
+  arms := [
+    .mk "ct" false (some "c") none
+      (some (.invoke "escty2" [("src", (.var "src")), ("lo", (.var "lo")), ("c", (.var "c")), ("n", (.var "n")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowEscty2 : KCallable := .subflow {
+  preLabel := none
+  head := ("ltm2",
+    [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "c") (qint 1))), ("n", (.var "n"))])
+  arms := [
+    .mk "db" false (some "d") none
+      (some (.invoke "escl" [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "d")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowLcls : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "mod")), ("i", (qint 0)), ("n", (.var "nmod"))])
+  arms := [
+    .mk "done" false (some "c") (some (.bin .eq (.var "dp") (qint 0)))
+      (some (.produce (.var "out"))) []
+  ,     .mk "more" false (some "c") none
+      (some (.invoke "lclsm" [("dp", (.var "dp")), ("mod", (.var "mod")), ("fln", (.var "fln")), ("nmod", (.var "nmod")), ("out", (.var "out"))])) [] ] }
+
+
+def kLowLclsm : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "mod")), ("i", (qint 0)), ("hi", (.var "nmod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"location\":{\"file\":\""))))])
+  arms := [
+    .mk "md" false (some "e") none
+      (some (.invoke "lclsn" [("dp", (.var "dp")), ("mod", (.var "mod")), ("fln", (.var "fln")), ("nmod", (.var "nmod")), ("out", (.var "e"))])) [] ] }
+
+
+def kLowLclsn : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "mod")), ("i", (qint 0)), ("n", (.var "nmod"))])
+  arms := [
+    .mk "go" false (some "c") none
+      (some (.invoke "lcls" [("dp", (.bin .sub (.var "dp") (qint 1))), ("mod", (.var "mod")), ("fln", (.var "fln")), ("nmod", (.var "nmod")), ("out", (.bin .concat (.var "out") (.bin .concat (.lit (.str "\",\"line\":")) (.bin .concat (.builtin "intToString" [(.var "fln")]) (.lit (.str ",\"col\":0}}"))))))])) [] ] }
+
+
+def kLowLtail : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "mod")), ("i", (qint 0)), ("hi", (.var "nmod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"main_module_name\":\""))))])
+  arms := [
+    .mk "done" false (some "e") none
+      (some (.produce (.bin .concat (.var "e") (.lit (.str "\",\"parts\":[]}"))))) [] ] }
+
+
+def kLowLimp : KCallable := .subflow {
+  preLabel := none
+  head := ("esct",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.bin .concat (.var "out") (.lit (.str ",{\"import_decl\":{\"path\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "limp2" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "e")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLimp2 : KCallable := .subflow {
+  preLabel := none
+  head := ("esct",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.bin .concat (.var "out") (.lit (.str "\",\"local_name\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "limpm" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "e")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLimpm : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "mod")), ("i", (qint 0)), ("hi", (.builtin "len" [(.var "mod")])), ("out", (.bin .concat (.var "out") (.lit (.str "\",\"module\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "ltop" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"}}")))), ("p0", (.var "p0")), ("p1", (.var "p1")), ("q0", (.bin .sub (qint 0) (qint 1)))])) [] ] }
+
+
+def kLowLimpl : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str ",{\"immediate_impl\":{\"event_path\":{\"module_qualifier\":null,\"segments\":[\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "limpl2" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "e")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLimpl2 : KCallable := .subflow {
+  preLabel := none
+  head := ("escx",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.bin .concat (.var "out") (.lit (.str "\"]},\"value\":{\"branch_name\":\"\",\"fields\":[],\"plain_value\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "limplm" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "e")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLimplm : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "mod")), ("i", (qint 0)), ("hi", (.builtin "len" [(.var "mod")])), ("out", (.bin .concat (.var "out") (.lit (.str "\",\"has_expressions\":true,\"is_bare_return\":true},\"annotations\":[],\"module\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "ltop" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\",\"is_impl\":false}}")))), ("p0", (.var "p0")), ("p1", (.var "p1")), ("q0", (.bin .sub (qint 0) (qint 1)))])) [] ] }
+
+
+def kLowLevo : KCallable := .subflow {
+  preLabel := none
+  head := ("lpub",
+    [("src", (.var "src")), ("j", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "pb" false (some "evp") none
+      (some (.invoke "levoe" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLevoe : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str ",{\"event_decl\":{\"path\":{\"module_qualifier\":null,\"segments\":[\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "levf" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"]},\"input\":{\"fields\":[")))), ("ff", (qint 0)), ("bf", (qint 0)), ("r0", (.bin .sub (qint 0) (qint 1))), ("r1", (.bin .sub (qint 0) (qint 1))), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLevf : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "fld" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 2)) (.bin .and (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")])))))
+      (some (.invoke "lfld" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("ff", (.var "ff")), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "ret" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 3)) (.bin .and (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")])))))
+      (some (.invoke "levf" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("ff", (.var "ff")), ("bf", (.var "bf")), ("r0", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("r1", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "brf" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 4)) (.bin .and (.bin .eq (.var "bf") (qint 0)) (.bin .and (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lbrdf" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "brn" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 4)) (.bin .and (.bin .eq (.var "bf") (qint 1)) (.bin .and (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lbrdn" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "clo" false (some "c") (some (.bin .eq (.var "bf") (qint 0)))
+      (some (.invoke "levcc" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "clb" false (some "c") (some (.bin .eq (.var "bf") (qint 1)))
+      (some (.invoke "levcc2" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLfld : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.bin .concat (.cond (.bin .eq (.var "ff") (qint 1)) (.lit (.str ",")) (.lit (.str ""))) (.lit (.str "{\"name\":\"")))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "lfldn" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "e")), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLfldn : KCallable := .subflow {
+  preLabel := none
+  head := ("escty",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.bin .concat (.var "out") (.lit (.str "\",\"type\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "levf" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\",\"module_path\":null,\"phantom\":null,\"is_source\":false,\"is_file\":false,\"is_embed_file\":false,\"is_expression\":false,\"is_invocation_meta\":false,\"expression\":null,\"expression_str\":null,\"owns_expression\":false,\"default\":null}")))), ("ff", (qint 1)), ("bf", (qint 0)), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLbrdf : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str "],\"is_wildcard\":false},\"branches\":[{\"name\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "levf" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\",\"kind\":\"terminal\",\"resume\":null,\"resume_phantom\":null,\"is_optional\":false,\"is_panic\":false,\"payload\":{\"fields\":[]}}")))), ("ff", (qint 1)), ("bf", (qint 1)), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLbrdn : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str ",{\"name\":\""))))])
+  arms := [
+    .mk "p" false (some "e") none
+      (some (.invoke "levf" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\",\"kind\":\"terminal\",\"resume\":null,\"resume_phantom\":null,\"is_optional\":false,\"is_panic\":false,\"payload\":{\"fields\":[]}}")))), ("ff", (qint 1)), ("bf", (qint 1)), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLevcc : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "r0")), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "hasr" false (some "c") (some (.bin .ge (.var "r0") (qint 0)))
+      (some (.invoke "levc1" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"is_wildcard\":false},\"branches\":[],\"return_type\":\"")))), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "nor" false (some "c") none
+      (some (.invoke "levcm" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"is_wildcard\":false},\"branches\":[],\"return_type\":null")))), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLevcc2 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "r0")), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "hasr" false (some "c") (some (.bin .ge (.var "r0") (qint 0)))
+      (some (.invoke "levc1" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"return_type\":\"")))), ("r0", (.var "r0")), ("r1", (.var "r1")), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "nor" false (some "c") none
+      (some (.invoke "levcm" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"return_type\":null")))), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLevc1 : KCallable := .subflow {
+  preLabel := none
+  head := ("esct",
+    [("src", (.var "src")), ("lo", (.var "r0")), ("hi", (.var "r1")), ("n", (.builtin "len" [(.var "src")])), ("out", (.var "out"))])
+  arms := [
+    .mk "t" false (some "e") none
+      (some (.invoke "levcm" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"")))), ("evp", (.var "evp")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowLevcm : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "mod")), ("i", (qint 0)), ("hi", (.builtin "len" [(.var "mod")])), ("out", (.bin .concat (.var "out") (.bin .concat (.lit (.str ",\"return_phantom\":null,\"is_public\":")) (.bin .concat (.cond (.bin .eq (.var "evp") (qint 1)) (.lit (.str "true")) (.lit (.str "false"))) (.lit (.str ",\"is_implicit_flow\":false,\"annotations\":[],\"prose\":\"\",\"is_pure\":false,\"is_transitively_pure\":false,\"module\":\""))))))])
+  arms := [
+    .mk "m" false (some "e") none
+      (some (.invoke "ltop" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"}}")))), ("p0", (.var "p0")), ("p1", (.var "p1")), ("q0", (.bin .sub (qint 0) (qint 1)))])) [] ] }
+
+
+def kLowLflw : KCallable := .subflow {
+  preLabel := none
+  head := ("lln",
+    [("src", (.var "src")), ("i", (qint 0)), ("off", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("n", (.builtin "len" [(.var "src")])), ("l", (qint 1))])
+  arms := [
+    .mk "ln" false (some "l") none
+      (some (.invoke "lhead" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str ",{\"flow\":{\"invocation\":")))), ("f0", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("f1", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("fln", (.var "l")), ("k4", (qint 0)), ("pr0", (.var "p0")), ("pr1", (.var "p1")), ("q0", (.bin .sub (qint 0) (qint 1))), ("q1", (.bin .sub (qint 0) (qint 1))), ("dp", (qint 0)), ("af", (qint 0)), ("cs", (qint 0)), ("hn", (qint 0))])) [] ] }
+
+
+def kLowLhead : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "call" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 8)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lcall" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLcall : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str "{\"event\":[\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "linv" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\"],\"args\":[")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.cond (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (.var "f0")) (qint 1) (qint 0))), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (qint 0)), ("as", (qint 0))])) [] ] }
+
+
+def kLowLinv : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "arg" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 9)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5))) (.builtin "len" [(.var "src")])))))))
+      (some (.invoke "larg" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (.var "wh")), ("as", (.var "as"))])) []
+  ,     .mk "rb" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 10)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lrb" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (.var "wh"))])) []
+  ,     .mk "oth" false (some "c") none
+      (some (.invoke "lconts" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.bin .concat (.lit (.str "],\"variant\":null,\"return_binding\":null")) (.bin .concat (.cond (.bin .eq (.var "wh") (qint 1)) (.lit (.str "}}")) (.lit (.str "}"))) (.lit (.str ",\"continuations\":[")))))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.bin .add (.var "dp") (qint 1))), ("af", (qint 0)), ("cs", (.cond (.bin .eq (.var "wh") (qint 1)) (qint 1) (qint 0))), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLarg : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "nm" false (some "c") (some (.bin .gt (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)))
+      (some (.invoke "largn" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (.var "wh")), ("as", (.var "as"))])) []
+  ,     .mk "ps" false (some "c") none
+      (some (.invoke "largp" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (.var "wh")), ("as", (.var "as"))])) [] ] }
+
+
+def kLowLargn : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.bin .concat (.cond (.bin .eq (.var "as") (qint 1)) (.lit (.str ",")) (.lit (.str ""))) (.lit (.str "{\"name\":\"")))))])
+  arms := [
+    .mk "nm" false (some "e") none
+      (some (.invoke "largm" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\",\"value\":\"")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (.var "wh"))])) [] ] }
+
+
+def kLowLargp : KCallable := .subflow {
+  preLabel := none
+  head := ("escx",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.bin .concat (.var "out") (.bin .concat (.cond (.bin .eq (.var "as") (qint 1)) (.lit (.str ",")) (.lit (.str ""))) (.lit (.str "{\"name\":\"\",\"value\":\"")))))])
+  arms := [
+    .mk "v" false (some "e") none
+      (some (.invoke "linv" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"}")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (.var "wh")), ("as", (qint 1))])) [] ] }
+
+
+def kLowLargm : KCallable := .subflow {
+  preLabel := none
+  head := ("escx",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.var "out"))])
+  arms := [
+    .mk "v" false (some "e") none
+      (some (.invoke "linv" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"}")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (.var "wh")), ("as", (qint 1))])) [] ] }
+
+
+def kLowLrb : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str "],\"variant\":null,\"return_binding\":\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "lconts" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.bin .concat (.lit (.str "\"")) (.bin .concat (.cond (.bin .eq (.var "wh") (qint 1)) (.lit (.str "}}")) (.lit (.str "}"))) (.lit (.str ",\"continuations\":[")))))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("q1", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("dp", (.bin .add (.var "dp") (qint 1))), ("af", (qint 0)), ("cs", (.cond (.bin .eq (.var "wh") (qint 1)) (qint 1) (qint 0))), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLbind : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "bd" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 12)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lbd" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "oth" false (some "c") none
+      (some (.invoke "lcond" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "null,\"binding_type\":\"branch_payload\",\"condition\":")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLbd : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str "\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "lcond" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\",\"binding_type\":\"branch_payload\",\"condition\":")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLcond : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "cd" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 13)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lcd" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "oth" false (some "c") none
+      (some (.invoke "lstep" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "null,\"step\":")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLcd : KCallable := .subflow {
+  preLabel := none
+  head := ("escx",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.bin .concat (.var "out") (.lit (.str "\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "lstep" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\",\"step\":")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLstep : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "se" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 14)) (.bin .and (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 1))) (qint 1)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")])))))))
+      (some (.invoke "lsxp" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "si" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 14)) (.bin .and (.bin .or (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 1))) (qint 2)) (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 1))) (qint 3))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")])))))))
+      (some (.invoke "lsiv" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "ct" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 15)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lctor" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "oth" false (some "c") none
+      (some (.invoke "lconts" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "{\"type\":\"terminal\"},\"continuations\":[")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.bin .add (.var "dp") (qint 1))), ("af", (qint 0)), ("cs", (qint 0)), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLsxp : KCallable := .subflow {
+  preLabel := none
+  head := ("escx",
+    [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("n", (.builtin "len" [(.var "src")])), ("out", (.bin .concat (.var "out") (.lit (.str "{\"type\":\"produce\",\"plain_value\":\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "lconts" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\"},\"continuations\":[")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.bin .add (.var "dp") (qint 1))), ("af", (qint 0)), ("cs", (qint 0)), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLsiv : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.bin .concat (.lit (.str "{\"type\":\"invocation\",\"invocation\":{\"event\":[")) (.cond (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 1))) (qint 3)) (.lit (.str "\"@")) (.lit (.str "\""))))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "linv" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\"],\"args\":[")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("wh", (qint 1)), ("as", (qint 0))])) [] ] }
+
+
+def kLowLctor : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str "{\"type\":\"branch_constructor\",\"branch_constructor\":{\"branch_name\":\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "lctor1" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\",\"fields\":[],\"plain_value\":")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLctor1 : KCallable := .subflow {
+  preLabel := none
+  head := ("lxt",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5)))), ("d", (qint 0)), ("ins", (qint 0))])
+  arms := [
+    .mk "x" false (some "xt") none
+      (some (.invoke "lctor2" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("xt", (.var "xt"))])) [] ] }
+
+
+def kLowLctor2 : KCallable := .subflow {
+  preLabel := none
+  head := ("ltma",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))), ("hi", (.var "xt"))])
+  arms := [
+    .mk "a" false (some "a") none
+      (some (.invoke "lctor3" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("xt", (.var "xt")), ("a", (.var "a"))])) [] ] }
+
+
+def kLowLctor3 : KCallable := .subflow {
+  preLabel := none
+  head := ("ltmb",
+    [("src", (.var "src")), ("lo", (.var "a")), ("j", (.bin .sub (.var "xt") (qint 1))), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "b" false (some "b") none
+      (some (.invoke "lctor4" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("xt", (.var "xt")), ("a", (.var "a")), ("b", (.var "b"))])) [] ] }
+
+
+def kLowLctor4 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "a")), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "has" false (some "c") (some (.bin .lt (.var "a") (.var "b")))
+      (some (.invoke "lctor5" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn")), ("a", (.var "a")), ("b", (.var "b"))])) []
+  ,     .mk "non" false (some "c") (some (.bin .and (.bin .ge (.var "a") (.var "b")) (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4))) (.var "xt"))))
+      (some (.invoke "lconts" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "null,\"has_expressions\":false,\"is_bare_return\":false}},\"continuations\":[")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.bin .add (.var "dp") (qint 1))), ("af", (qint 0)), ("cs", (qint 0)), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLctor5 : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.var "a")), ("hi", (.var "b")), ("out", (.bin .concat (.var "out") (.lit (.str "\""))))])
+  arms := [
+    .mk "v" false (some "e") none
+      (some (.invoke "lconts" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\",\"has_expressions\":true,\"is_bare_return\":false}},\"continuations\":[")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.bin .add (.var "dp") (qint 1))), ("af", (qint 0)), ("cs", (qint 0)), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLconts : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "cn" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 11)) (.bin .and (.bin .and (.bin .lt (.var "q0") (qint 0)) (.bin .eq (.var "hn") (qint 0))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")])))))))
+      (some (.invoke "larmc" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "st" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 14)) (.bin .and (.bin .or (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 1))) (qint 2)) (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 1))) (qint 3))) (.bin .or (.bin .eq (.var "cs") (qint 1)) (.bin .and (.bin .and (.bin .eq (.var "dp") (qint 1)) (.bin .eq (.var "af") (qint 0))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")])))))))))
+      (some (.invoke "llink" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "oth" false (some "c") none
+      (some (.invoke "litemc" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLarmc : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "deep" false (some "c") (some (.bin .gt (.var "dp") (qint 1)))
+      (some (.invoke "larmd" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "shal" false (some "c") (some (.bin .eq (.var "dp") (qint 1)))
+      (some (.invoke "lcarmp" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.cond (.bin .eq (.var "af") (qint 1)) (.lit (.str ",")) (.lit (.str ""))))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLarmd : KCallable := .subflow {
+  preLabel := none
+  head := ("lcls",
+    [("dp", (.bin .sub (.var "dp") (qint 1))), ("mod", (.var "mod")), ("fln", (.var "fln")), ("nmod", (.builtin "len" [(.var "mod")])), ("out", (.var "out"))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "lcarmp" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str ",")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (qint 1)), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLcarmp : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.bin .concat (.var "out") (.lit (.str "{\"branch\":\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "lbind" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\",\"kind\":\"terminal\",\"is_catchall\":false,\"binding\":")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.bin .sub (qint 0) (qint 1))), ("q1", (.bin .sub (qint 0) (qint 1))), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (qint 0)), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLlink : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "q0")), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "pb" false (some "c") (some (.bin .ge (.var "q0") (qint 0)))
+      (some (.invoke "llinkb" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.bin .concat (.cond (.bin .eq (.var "af") (qint 1)) (.lit (.str ",")) (.lit (.str ""))) (.lit (.str "{\"branch\":\"\",\"kind\":\"terminal\",\"is_catchall\":false,\"binding\":\""))))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "nb" false (some "c") (some (.bin .lt (.var "q0") (qint 0)))
+      (some (.invoke "llinkn" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.bin .concat (.cond (.bin .eq (.var "af") (qint 1)) (.lit (.str ",")) (.lit (.str ""))) (.lit (.str "{\"branch\":\"\",\"kind\":\"terminal\",\"is_catchall\":false,\"binding\":null"))))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLlinkb : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.var "q0")), ("hi", (.var "q1")), ("out", (.var "out"))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "llinkn" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\"")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLlinkn : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "go" false (some "c") none
+      (some (.invoke "llinke" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.bin .concat (.lit (.str ",\"binding_type\":\"branch_payload\",\"condition\":null,\"step\":{\"type\":\"invocation\",\"invocation\":{\"event\":[")) (.cond (.bin .eq (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 1))) (qint 3)) (.lit (.str "\"@")) (.lit (.str "\"")))))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLlinke : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("hi", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("out", (.var "out"))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "linv" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\"],\"args\":[")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.bin .sub (qint 0) (qint 1))), ("q1", (.bin .sub (qint 0) (qint 1))), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.cond (.bin .and (.bin .eq (.var "dp") (qint 1)) (.bin .eq (.var "af") (qint 0))) (qint 1) (.var "hn"))), ("wh", (qint 1)), ("as", (qint 0))])) [] ] }
+
+
+def kLowLitemc : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "deep" false (some "c") (some (.bin .gt (.var "dp") (qint 1)))
+      (some (.invoke "litemd" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "shal" false (some "c") (some (.bin .eq (.var "dp") (qint 1)))
+      (some (.invoke "litemp" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLitemd : KCallable := .subflow {
+  preLabel := none
+  head := ("lcls",
+    [("dp", (.bin .sub (.var "dp") (qint 1))), ("mod", (.var "mod")), ("fln", (.var "fln")), ("nmod", (.builtin "len" [(.var "mod")])), ("out", (.var "out"))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "litemp" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "v")), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (qint 1)), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLitemp : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "src")), ("i", (.var "pr0")), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [
+    .mk "f4" false (some "c") (some (.bin .eq (.var "k4") (qint 1)))
+      (some (.invoke "liteml" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"pre_label\":null,\"impl_of\":null")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "hp" false (some "c") (some (.bin .and (.bin .eq (.var "k4") (qint 0)) (.bin .ge (.var "pr0") (qint 0))))
+      (some (.invoke "litem3p" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"pre_label\":\"")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) []
+  ,     .mk "np" false (some "c") (some (.bin .and (.bin .eq (.var "k4") (qint 0)) (.bin .lt (.var "pr0") (qint 0))))
+      (some (.invoke "litem3i" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "out") (.lit (.str "],\"pre_label\":null,\"impl_of\":[\"")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLitem3p : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.var "pr0")), ("hi", (.var "pr1")), ("out", (.var "out"))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "litem3i" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\",\"impl_of\":[\"")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLitem3i : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "src")), ("i", (.var "f0")), ("hi", (.var "f1")), ("out", (.var "out"))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "liteml" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.lit (.str "\"]")))), ("f0", (.var "f0")), ("f1", (.var "f1")), ("fln", (.var "fln")), ("k4", (.var "k4")), ("pr0", (.var "pr0")), ("pr1", (.var "pr1")), ("q0", (.var "q0")), ("q1", (.var "q1")), ("dp", (.var "dp")), ("af", (.var "af")), ("cs", (.var "cs")), ("hn", (.var "hn"))])) [] ] }
+
+
+def kLowLiteml : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "mod")), ("i", (qint 0)), ("hi", (.builtin "len" [(.var "mod")])), ("out", (.bin .concat (.var "out") (.lit (.str ",\"location\":{\"file\":\""))))])
+  arms := [
+    .mk "e" false (some "v") none
+      (some (.invoke "ltop" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "v") (.bin .concat (.lit (.str "\",\"line\":")) (.bin .concat (.builtin "intToString" [(.var "fln")]) (.lit (.str ",\"col\":0}}}")))))), ("p0", (.bin .sub (qint 0) (qint 1))), ("p1", (.bin .sub (qint 0) (qint 1))), ("q0", (.var "q0"))])) [] ] }
+
+
+def kLowLtop : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb",
+    [("t", (.var "rows")), ("i", (.bin .mul (.var "i") (qint 6))), ("n", (.var "n"))])
+  arms := [
+    .mk "fin" false (some "c") (some (.bin .and (.bin .ge (.bin .mul (.var "i") (qint 6)) (.var "n")) (.bin .lt (.var "q0") (qint 0))))
+      (some (.invoke "ltail" [("mod", (.var "mod")), ("nmod", (.builtin "len" [(.var "mod")])), ("out", (.var "out"))])) []
+  ,     .mk "ev" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "k") (qint 1)) (.bin .lt (.var "q0") (qint 0))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "levo" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "im" false (some "k") (some (.bin .and (.bin .and (.bin .and (.bin .eq (.var "k") (qint 5)) (.bin .lt (.var "q0") (qint 0))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 4)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 5))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "limpl" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "lb" false (some "k") (some (.bin .and (.bin .eq (.var "k") (qint 6)) (.bin .and (.bin .and (.bin .lt (.var "q0") (qint 0)) (.bin .lt (.var "p0") (qint 0))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")])))))))
+      (some (.invoke "ltop" [("rows", (.var "rows")), ("i", (.bin .add (.var "i") (qint 1))), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("p0", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))), ("p1", (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3)))), ("q0", (.var "q0"))])) []
+  ,     .mk "fw" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "k") (qint 7)) (.bin .lt (.var "q0") (qint 0))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "lflw" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) []
+  ,     .mk "ip" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "k") (qint 16)) (.bin .lt (.var "q0") (qint 0))) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2))) (qint 0)) (.bin .and (.bin .ge (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 2)))) (.bin .le (.index (.var "rows") (.bin .add (.bin .mul (.var "i") (qint 6)) (qint 3))) (.builtin "len" [(.var "src")]))))))
+      (some (.invoke "limp" [("rows", (.var "rows")), ("i", (.var "i")), ("n", (.var "n")), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.var "out")), ("p0", (.var "p0")), ("p1", (.var "p1"))])) [] ] }
+
+
+def kLowMain : KCallable := .subflow {
+  preLabel := none
+  head := ("escl",
+    [("src", (.var "mod")), ("i", (qint 0)), ("hi", (.builtin "len" [(.var "mod")])), ("out", (.lit (.str "{\"module_annotations\":[],\"items\":[{\"import_decl\":{\"path\":\"std/compiler\",\"local_name\":\"std.compiler\",\"module\":\"")))])
+  arms := [
+    .mk "m" false (some "e") none
+      (some (.invoke "ltop" [("rows", (.var "rows")), ("i", (qint 0)), ("n", (.builtin "len" [(.var "rows")])), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"}}")))), ("p0", (.bin .sub (qint 0) (qint 1))), ("p1", (.bin .sub (qint 0) (qint 1))), ("q0", (.bin .sub (qint 0) (qint 1)))])) [] ] }
+
+
+def kLow : KProg := {
+  graph := [("pkb", kLowPkb), ("lxt", kLowLxt), ("ltma", kLowLtma), ("ltmb", kLowLtmb), ("ltk1", kLowLtk1), ("lty1", kLowLty1), ("ltm2", kLowLtm2), ("lln", kLowLln), ("lbs", kLowLbs), ("lpb", kLowLpb), ("lpub", kLowLpub), ("lhx", kLowLhx), ("escl", kLowEscl), ("esca", kLowEsca), ("escb", kLowEscb), ("escx", kLowEscx), ("escx1", kLowEscx1), ("escx2", kLowEscx2), ("esct", kLowEsct), ("esct1", kLowEsct1), ("escty", kLowEscty), ("escty1", kLowEscty1), ("escty2", kLowEscty2), ("lcls", kLowLcls), ("lclsm", kLowLclsm), ("lclsn", kLowLclsn), ("ltail", kLowLtail), ("limp", kLowLimp), ("limp2", kLowLimp2), ("limpm", kLowLimpm), ("limpl", kLowLimpl), ("limpl2", kLowLimpl2), ("limplm", kLowLimplm), ("levo", kLowLevo), ("levoe", kLowLevoe), ("levf", kLowLevf), ("lfld", kLowLfld), ("lfldn", kLowLfldn), ("lbrdf", kLowLbrdf), ("lbrdn", kLowLbrdn), ("levcc", kLowLevcc), ("levcc2", kLowLevcc2), ("levc1", kLowLevc1), ("levcm", kLowLevcm), ("lflw", kLowLflw), ("lhead", kLowLhead), ("lcall", kLowLcall), ("linv", kLowLinv), ("larg", kLowLarg), ("largn", kLowLargn), ("largp", kLowLargp), ("largm", kLowLargm), ("lrb", kLowLrb), ("lbind", kLowLbind), ("lbd", kLowLbd), ("lcond", kLowLcond), ("lcd", kLowLcd), ("lstep", kLowLstep), ("lsxp", kLowLsxp), ("lsiv", kLowLsiv), ("lctor", kLowLctor), ("lctor1", kLowLctor1), ("lctor2", kLowLctor2), ("lctor3", kLowLctor3), ("lctor4", kLowLctor4), ("lctor5", kLowLctor5), ("lconts", kLowLconts), ("larmc", kLowLarmc), ("larmd", kLowLarmd), ("lcarmp", kLowLcarmp), ("llink", kLowLlink), ("llinkb", kLowLlinkb), ("llinkn", kLowLlinkn), ("llinke", kLowLlinke), ("litemc", kLowLitemc), ("litemd", kLowLitemd), ("litemp", kLowLitemp), ("litem3p", kLowLitem3p), ("litem3i", kLowLitem3i), ("liteml", kLowLiteml), ("ltop", kLowLtop), ("main", kLowMain)]
+  entry := "main"
+  args := [] }
+
+def kLowDecls : List (String × KDecl) :=
+  [ ("pkb", { params := [("t", "[]const i64"), ("i", "i64"), ("n", "i64")], ret := some "i64" }),
+  ("lxt", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64"), ("ins", "i64")], ret := some "i64" }),
+  ("ltma", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" }),
+  ("ltmb", { params := [("src", "[]const i64"), ("lo", "i64"), ("j", "i64"), ("n", "i64")], ret := some "i64" }),
+  ("ltk1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" }),
+  ("lty1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" }),
+  ("ltm2", { params := [("src", "[]const i64"), ("lo", "i64"), ("j", "i64"), ("n", "i64")], ret := some "i64" }),
+  ("lln", { params := [("src", "[]const i64"), ("i", "i64"), ("off", "i64"), ("n", "i64"), ("l", "i64")], ret := some "i64" }),
+  ("lbs", { params := [("src", "[]const i64"), ("i", "i64"), ("n", "i64")], ret := some "i64" }),
+  ("lpb", { params := [("src", "[]const i64"), ("i", "i64"), ("ls", "i64"), ("j", "i64"), ("n", "i64")], ret := some "i64" }),
+  ("lpub", { params := [("src", "[]const i64"), ("j", "i64"), ("n", "i64")], ret := some "i64" }),
+  ("lhx", { params := [("d", "i64")], ret := some "string" }),
+  ("escl", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string")], ret := some "string" }),
+  ("esca", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string"), ("c", "i64")], ret := some "string" }),
+  ("escb", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string"), ("c", "i64"), ("a", "string")], ret := some "string" }),
+  ("escx", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("escx1", { params := [("src", "[]const i64"), ("lo", "i64"), ("xt", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("escx2", { params := [("src", "[]const i64"), ("a", "i64"), ("xt", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("esct", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("esct1", { params := [("src", "[]const i64"), ("lo", "i64"), ("b", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("escty", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("escty1", { params := [("src", "[]const i64"), ("lo", "i64"), ("b", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("escty2", { params := [("src", "[]const i64"), ("lo", "i64"), ("c", "i64"), ("n", "i64"), ("out", "string")], ret := some "string" }),
+  ("lcls", { params := [("dp", "i64"), ("mod", "[]const i64"), ("fln", "i64"), ("nmod", "i64"), ("out", "string")], ret := some "string" }),
+  ("lclsm", { params := [("dp", "i64"), ("mod", "[]const i64"), ("fln", "i64"), ("nmod", "i64"), ("out", "string")], ret := some "string" }),
+  ("lclsn", { params := [("dp", "i64"), ("mod", "[]const i64"), ("fln", "i64"), ("nmod", "i64"), ("out", "string")], ret := some "string" }),
+  ("ltail", { params := [("mod", "[]const i64"), ("nmod", "i64"), ("out", "string")], ret := some "string" }),
+  ("limp", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("limp2", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("limpm", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("limpl", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("limpl2", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("limplm", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("levo", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("levoe", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("levf", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("ff", "i64"), ("bf", "i64"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("lfld", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("ff", "i64"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("lfldn", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("lbrdf", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("lbrdn", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("levcc", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("levcc2", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("levc1", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("r0", "i64"), ("r1", "i64"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("levcm", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("evp", "i64"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("lflw", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64")], ret := some "string" }),
+  ("lhead", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lcall", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("linv", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("wh", "i64"), ("as", "i64")], ret := some "string" }),
+  ("larg", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("wh", "i64"), ("as", "i64")], ret := some "string" }),
+  ("largn", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("wh", "i64"), ("as", "i64")], ret := some "string" }),
+  ("largp", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("wh", "i64"), ("as", "i64")], ret := some "string" }),
+  ("largm", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("wh", "i64")], ret := some "string" }),
+  ("lrb", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("wh", "i64")], ret := some "string" }),
+  ("lbind", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lbd", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lcond", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lcd", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lstep", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lsxp", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lsiv", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lctor", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lctor1", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lctor2", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("xt", "i64")], ret := some "string" }),
+  ("lctor3", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("xt", "i64"), ("a", "i64")], ret := some "string" }),
+  ("lctor4", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("xt", "i64"), ("a", "i64"), ("b", "i64")], ret := some "string" }),
+  ("lctor5", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64"), ("a", "i64"), ("b", "i64")], ret := some "string" }),
+  ("lconts", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("larmc", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("larmd", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("lcarmp", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("llink", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("llinkb", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("llinkn", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("llinke", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("litemc", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("litemd", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("litemp", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("litem3p", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("litem3i", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("liteml", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("f0", "i64"), ("f1", "i64"), ("fln", "i64"), ("k4", "i64"), ("pr0", "i64"), ("pr1", "i64"), ("q0", "i64"), ("q1", "i64"), ("dp", "i64"), ("af", "i64"), ("cs", "i64"), ("hn", "i64")], ret := some "string" }),
+  ("ltop", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64"), ("q0", "i64")], ret := some "string" }),
+  ("main", { params := [("src", "[]const i64"), ("rows", "[]const i64"), ("mod", "[]const i64")], ret := some "string" }) ]
+
 /-- One flow-grammar corpus row: program + asserted oracle leaves +
 the declared `tor` contracts the surface file must carry. -/
 structure KFlowRow where

@@ -89,6 +89,16 @@ The pipeline per case row:
           expression trees (parsed_expression/condition_expr) all
           compare — the full-shape boundary, and the target the
           typed-koru reifier should emit
+  kl    : the REIFIER race — klow.k is the row→ast.json reifier
+          spelled in koru itself (ISAR.kLow → specs/gen/klow.c).
+          Fed the declared flat-row projection klow_flat(rows) +
+          source bytes, the emitProgC-compiled program must emit a
+          document parsed-JSON-deep-equal to `korufe --reify`'s —
+          and refuse exactly where --reify refuses
+  kli   : the same reifier through the interpreted lane
+          (korufe --lower → claim → krun).  Interpreter recursion
+          per scanned byte is the named trampolining axis
+          (frag 0047): stack-overflow signature → skip
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -268,6 +278,9 @@ def ast_norm_rows(src, ast):
         depth, i, segs, s0, ins = 0, o, [], o + 1, 0
         while i < len(src):
             c = src[i:i + 1]
+            if ins and c == b"\\":
+                i += 2          # `\"` is data, not a close
+                continue
             if c == b'"':
                 ins = 1 - ins
             elif ins:
@@ -291,7 +304,11 @@ def ast_norm_rows(src, ast):
             # named arg iff a depth-0 ':' before any '('
             colon = None
             d = ins = 0
-            for k in range(a, b):
+            k = a
+            while k < b:
+                if ins and src[k:k + 1] == b"\\":
+                    k += 2
+                    continue
                 if src[k:k + 1] == b'"':
                     ins = 1 - ins
                 elif ins:
@@ -303,6 +320,7 @@ def ast_norm_rows(src, ast):
                 elif src[k:k + 1] == b":" and d == 0:
                     colon = k
                     break
+                k += 1
             if colon is not None:
                 nj = a
                 ne = word_end(nj)
@@ -514,6 +532,63 @@ def parse_row_text(txt):
     """kAst's `out` → the same `(kind i j …)` row list."""
     return [f"({m.group(1)}{m.group(2)})"
             for m in re.finditer(r"\(([a-z]+)((?: [-\w]+)*)\)", txt)]
+
+
+# Row-wire → flat-int projection consumed by ISAR.kLow: each
+# `(kind sub? v0 v1 v2 v3)` row becomes six ints [kind, sub,
+# v0..v3], -1 for absent fields, sub names encoded below.  The
+# table is the same one klow.k's dispatch arms spell literally.
+KLOW_KIND = {"ev": 1, "fld": 2, "ret": 3, "brd": 4, "impl": 5,
+             "lbl": 6, "flw": 7, "call": 8, "arg": 9, "rbind": 10,
+             "cont": 11, "bind": 12, "cond": 13, "step": 14,
+             "ctor": 15, "imp": 16, "bad": 17}
+KLOW_SUB = {"expr": 1, "invoke": 2, "jump": 3}
+
+
+def klow_flat(rows_txt):
+    flat = []
+    for row in re.findall(r"\(([^)]*)\)", rows_txt):
+        toks = row.split()
+        vals = []
+        sub = 0
+        for tk in toks[1:]:
+            if tk.lstrip("-").isdigit():
+                vals.append(int(tk))
+            else:
+                sub = KLOW_SUB.get(tk, -1)
+        while len(vals) < 4:
+            vals.append(-1)
+        flat += [KLOW_KIND.get(toks[0], -1), sub] + vals[:4]
+    return flat
+
+
+def sx_arr_ints(vals):
+    """wire `(arr (int n) …)` literal for a flat int list/bytes."""
+    return "(arr " + " ".join(f"(int {v})" for v in vals) + ")"
+
+
+def sx_str_decode(txt):
+    """first `(str "…")` atom in a krun result → its bytes-level
+    value (the wire's escape set: \\" \\ \\n \\t \\r, unknown
+    escapes keep both bytes).  None if absent."""
+    i = txt.find('(str "')
+    if i < 0:
+        return None
+    i += 6
+    out = []
+    while i < len(txt):
+        c = txt[i]
+        if c == '"':
+            return "".join(out)
+        if c == "\\" and i + 1 < len(txt):
+            n = txt[i + 1]
+            out.append({"n": "\n", "t": "\t", "r": "\r"}.get(n, "\\" + n)
+                       if n not in '"\\' else n)
+            i += 2
+        else:
+            out.append(c)
+            i += 1
+    return None
 
 
 def _target_row(tid):
@@ -1387,6 +1462,44 @@ def gate():
                 f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
         else:
             ok("kw.build", "emitProgC(kast) wide-stack build")
+            # ---- kl: the koru-spelled reifier — the lowerer half
+            # of the koru witness lane spelled inside the language
+            # it lowers.  Two lanes per corpus file: `kl` runs the
+            # emitProgC-compiled program and `kli` the interpreted
+            # krun lane (korufe --lower → claim → krun); both race
+            # `korufe --reify` document-for-document.  Input is the
+            # declared flat-row projection `klow_flat` above plus
+            # the source bytes. ----
+            kl_leaf = next((a for a, g in args_progs.items()
+                            if g == "klow"), None)
+            kl_bin = os.path.join(BUILD, "klow_kl"
+                                  + (".exe" if os.name == "nt" else ""))
+            kl_ast = os.path.join(BUILD, "klow.ast.json")
+            klow_ok = False
+            if kl_leaf is None or not os.path.isfile(
+                    os.path.join(SPECS, "gen", "klow.c")):
+                skip("kl.build", "no klow emit_args row")
+            else:
+                c = subprocess.run(
+                    [tc["cc"], *kw_flags,
+                     os.path.join(SPECS, "gen", "klow.c"),
+                     "-o", kl_bin],
+                    capture_output=True, text=True)
+                if c.returncode != 0:
+                    bad("kl.build",
+                        f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
+                else:
+                    ok("kl.build", "emitProgC(klow) wide-stack build")
+                    p = subprocess.run(
+                        [KORUFE, os.path.join(kl_leaf, "input.k")],
+                        capture_output=True, text=True)
+                    if p.returncode != 0:
+                        bad("kl.build", "korufe refused klow surface: "
+                            f"{p.stderr.strip()[:120]}")
+                    else:
+                        with open(kl_ast, "w") as f:
+                            f.write(p.stdout)
+                        klow_ok = True
             for ik in sorted(glob.glob(
                     os.path.join(SPECS, "tests", "**", "input.k"),
                     recursive=True)):
@@ -1448,6 +1561,113 @@ def gate():
                               f"{a[i:i + 40]!r} vs {b[i:i + 40]!r}")
                 else:
                     ok(ktag, "reified ast.json identical")
+                # ---- kl / kli: the koru-spelled reifier on the
+                # same row wire.  `kl` is the emitProgC-compiled
+                # program (raw JSON document on stdout); `kli` the
+                # same program through krun (`(str "…")` result,
+                # wire-decoded).  Both compare parsed-JSON-deep-
+                # equal against the direct `korufe` document — and
+                # must refuse exactly when --reify refused.
+                # Interpreter recursion per scanned byte is the
+                # named trampolining axis (frag 0047): a stack-
+                # overflow signature is skip, not fail. ----
+                ltag = "kl" + tag[2:]
+                itag = "kli" + tag[2:]
+                if not klow_ok:
+                    skip(ltag, "emitProgC(klow) not built")
+                    skip(itag, "emitProgC(klow) not built")
+                else:
+                    flat = klow_flat(rm.stdout)
+                    cellin = ("(cell (src " + sx_arr_ints(raw)
+                              + ") (rows " + sx_arr_ints(flat)
+                              + ") (mod " + sx_arr_ints(b"input")
+                              + "))")
+                    rb = subprocess.run([kl_bin, "2000000000"],
+                                        input=cellin,
+                                        capture_output=True,
+                                        text=True, timeout=600)
+                    refdoc = None if r_bad else json.loads(rd.stdout)
+                    if rb.returncode == 0:
+                        try:
+                            got = json.loads(rb.stdout)
+                        except json.JSONDecodeError as e:
+                            bad(ltag, f"unparseable document: {e}")
+                        else:
+                            if refdoc is None:
+                                bad(ltag, "klow produced a document "
+                                          "where --reify refused")
+                            elif got == refdoc:
+                                ok(ltag, "ast.json deep-equal")
+                            else:
+                                bad(ltag, "document mismatch vs "
+                                          "--reify")
+                    elif rb.returncode in (2, 4):
+                        if r_bad:
+                            ok(ltag, "refusal parity")
+                        else:
+                            bad(ltag, "klow refused a wire --reify "
+                                      f"accepted: {rb.stderr[:80]}")
+                    elif rb.returncode in (-11, 0xC00000FD,
+                                           -1073741571):
+                        skip(ltag, "stack axis (frag 0047)")
+                    else:
+                        bad(ltag, f"exit={rb.returncode} "
+                                  f"{rb.stderr[:80]}")
+                    cjp = os.path.join(BUILD, "kl_case.json")
+                    with open(cjp, "w") as f:
+                        json.dump({"cases": {"c": {
+                            "entry": "main", "fuel": 400000000,
+                            "args": {
+                                "src": {"arr": [{"int": b}
+                                                for b in raw]},
+                                "rows": {"arr": [{"int": v}
+                                                 for v in flat]},
+                                "mod": {"arr": [{"int": b}
+                                                for b in b"input"]}},
+                            "expect": {"bare": {"int": 0}}}}}, f)
+                    lw = subprocess.run(
+                        [KORUFE, "--lower", kl_ast, cjp, "c"],
+                        capture_output=True, text=True)
+                    if lw.returncode != 0:
+                        bad(itag, "--lower refused: "
+                                  f"{lw.stderr.strip()[:80]}")
+                    else:
+                        clp = os.path.join(BUILD, "kl_case.claim")
+                        with open(clp, "w") as f:
+                            f.write(lw.stdout)
+                        rv = subprocess.run([KRUN, clp],
+                                            capture_output=True,
+                                            text=True, timeout=600)
+                        out = rv.stdout + rv.stderr
+                        sval = sx_str_decode(out)
+                        if sval is not None:
+                            try:
+                                got = json.loads(sval)
+                            except json.JSONDecodeError as e:
+                                bad(itag, f"unparseable document: {e}")
+                            else:
+                                if refdoc is None:
+                                    bad(itag, "klow produced a "
+                                              "document where "
+                                              "--reify refused")
+                                elif got == refdoc:
+                                    ok(itag, "ast.json deep-equal")
+                                else:
+                                    bad(itag, "document mismatch "
+                                              "vs --reify")
+                        elif rv.returncode in (-11, 0xC00000FD,
+                                               -1073741571):
+                            skip(itag, "interpreter stack axis "
+                                       "(frag 0047)")
+                        elif "refuse" in out:
+                            if r_bad:
+                                ok(itag, "refusal parity")
+                            else:
+                                bad(itag, "klow refused a wire "
+                                          "--reify accepted")
+                        else:
+                            bad(itag, f"exit={rv.returncode} "
+                                      f"{out[:80]!r}")
 
     # ---- wide JSON race: the SAME corpus through `korufe
     # --ast-json` vs `koruc --ast-json` — the readable view is the
