@@ -503,9 +503,43 @@ partial def genCallable (name : String) (c : KCallable) : EM Unit := do
         else do
           let d ← genDispatch fl.arms
           pure s!"   \{Res*t={d}(ce,h);\n   if(!t)return 0;\n   if(t->k==3)return r_bare(0);\n{jumpStmt}   return t;}\n"
-      EM.put s!"static Res *{kn}(E *ce)\{\n KSTEP();\n E*he=0;\n{headArgs} for(;;)\{\n  KSTEP();\n  Res*h=k_{mangle fl.head.1}(he);\n  if(!h||(h->k!=1&&h->k!=2))return 0;\n{body} }\n}\n"
+      -- arm-less + arg-less flows (kChain's unrealized-leg stubs)
+      -- never touch `ce` — silence -Wunused-parameter honestly.
+      let unusedCe :=
+        if fl.arms.isEmpty && fl.head.2.isEmpty then " (void)ce;\n"
+        else ""
+      EM.put s!"static Res *{kn}(E *ce)\{\n KSTEP();\n{unusedCe} E*he=0;\n{headArgs} for(;;)\{\n  KSTEP();\n  Res*h=k_{mangle fl.head.1}(he);\n  if(!h||(h->k!=1&&h->k!=2))return 0;\n{body} }\n}\n"
 
 end
+
+/-- Callee names inside one arm — `.invoke` targets only
+(`.jump` is `#label`-local). Nested `conts` arms recurse. -/
+partial def armRefs (a : KArm) : List String :=
+  (match a.node with
+   | some (.invoke t _) => [t]
+   | _ => []) ++ a.conts.flatMap armRefs
+
+/-- Graph edges out of one callable: the subflow head plus every
+`.invoke` target reachable through its arms. -/
+def callableRefs : KCallable → List String
+  | .bare _ | .thunk => []
+  | .subflow fl => fl.head.1 :: fl.arms.flatMap armRefs
+
+/-- Names reachable from `entry` in `g.length` closure steps — enough:
+each pass either reaches a fixpoint or adds at least one name.  The
+generated program is the reachable subgraph; declared-but-unwired
+legs (kChain's stub boundaries) stay in the declaration but don't
+materialize as dead C functions (`-Wunused-function`). -/
+def reachables (g : List (String × KCallable)) (entry : String) : List String :=
+  (List.range g.length).foldl
+    (fun seen _ =>
+      g.foldl (fun s q =>
+        if s.contains q.1 then
+          (callableRefs q.2).foldl
+            (fun s' n => if s'.contains n then s' else s' ++ [n]) s
+        else s)
+        seen)
+    [entry]
 
 /-- Emit `p` as a self-contained C99 program: runtime prelude,
 forward decls, generated callables, driver `main`. Refuses with a
@@ -514,9 +548,11 @@ def emitProgC (p : KProg) (fuel : Nat) : Except String String :=
   if p.graph.isEmpty then .error "axis: empty graph"
   else if !p.graph.any (·.1 == p.entry) then .error "axis: entry missing"
   else
+    let live := reachables p.graph p.entry
+    let g := p.graph.filter (live.contains ·.1)
     let fwd := String.intercalate ""
-      (p.graph.map fun q => s!"static Res *k_{mangle q.1}(E *e);\n")
-    match (p.graph.mapM fun q => genCallable q.1 q.2).run {} with
+      (g.map fun q => s!"static Res *k_{mangle q.1}(E *e);\n")
+    match (g.mapM fun q => genCallable q.1 q.2).run {} with
     | .error e _ => .error e
     | .ok _ st => .ok (prelude ++ fwd ++ st.out ++ driver p.entry (toString fuel))
 

@@ -3110,6 +3110,101 @@ def kLowDecls : List (String × KDecl) :=
   ("ltop", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64"), ("q0", "i64")], ret := some "string" }),
   ("main", { params := [("src", "[]const i64"), ("rows", "[]const i64"), ("mod", "[]const i64")], ret := some "string" }) ]
 
+/-! ## `kChain` — the composed lane as a declared shape
+
+Composition is graph union, but every boundary in the subset is
+TEXT — composite values can't be constructed inside eval — so the
+chain passes documents, not cells:
+
+    src ──a-*──▶ row-text ──l-*──▶ ast.json   (authority mirror)
+                       └──wir──▶ claim-sexp ──emt──▶ C text
+
+Each phase's tors carry a one-letter prefix (`main`/`peek` collide
+across rungs); `jump` stays label-local and needs no rename.
+
+Three legs are still unwritten and stand in the graph as
+*arm-less subflows*: the head invoke resolves (to `unrealized`),
+dispatch finds no arm, and the refusal names the leg by position
+in the chain — refuse by default, axis named.  As each leg lands,
+its stub is replaced by the real tor under the contracted name:
+
+  * `low-txt` — klow's row-TEXT variant (the kl leg's flat-int
+    projection `klow_flat` spelled in-language; text-mediated so
+    `a-main`'s output feeds it directly)
+  * `wir` — the lowerer: rows+src → `[flow-eval]` claim sexp text
+    (the `lower.c` mirror; ast.json is NOT on the emit path)
+  * `emt-txt` — emit on claim TEXT via span-index navigation
+    (today `kEmit.emit` gates on program CELLS — a composite-value
+    input the subset can't produce in-language; bucket-3 axis)
+
+`chain`'s arm spine spells the intended data flow: `doc` is bound
+but not consumed downstream — ast.json is the authority race's
+side output, not the compile interface. -/
+
+/-- Rename invoke/head targets (NOT `jump` — label-local). -/
+def renameNode (f : String → String) : KArmNode → KArmNode
+  | .terminal => .terminal
+  | .jump t a => .jump t a
+  | .invoke t a => .invoke (f t) a
+  | .produce e => .produce e
+  | .retCtor c e => .retCtor c e
+
+def renameArm (f : String → String) : KArm → KArm
+  | .mk br anon bind g node kids =>
+      .mk br anon bind g (node.map (renameNode f))
+        (kids.map (renameArm f))
+
+def renameCallable (f : String → String) : KCallable → KCallable
+  | .bare e => .bare e
+  | .thunk => .thunk
+  | .subflow fl =>
+      .subflow { fl with head := (f fl.head.1, fl.head.2)
+                         arms := fl.arms.map (renameArm f) }
+
+def prefixGraph (pre : String) (g : List (String × KCallable)) :
+    List (String × KCallable) :=
+  g.map fun (n, c) => (pre ++ n, renameCallable (pre ++ ·) c)
+
+/-- The unrealized-leg shape: head resolves, no arm matches —
+dispatch refuses and the tor NAME is the axis. -/
+def kChainStub : KCallable :=
+  .subflow ⟨none, ("unrealized", []), []⟩
+
+/-- The wiring spine: `a-main` rows → the three document legs.
+Each stub invocation is where its leg's contract will sit. -/
+def kChainMain : KCallable := .subflow {
+  preLabel := none
+  head := ("a-main", [("chars", .var "src")])
+  arms := [ .mk "rows" false (some "rows") none
+      (some (.invoke "low-txt"
+        [("rows", .var "rows"), ("src", .var "src")]))
+      [ .mk "doc" false (some "_") none
+          (some (.invoke "wir"
+            [("rows", .var "rows"), ("src", .var "src")]))
+          [ .mk "claim" false (some "claim") none
+              (some (.invoke "emt-txt" [("claim", .var "claim")]))
+              [] ] ] ] }
+
+def kChain : KProg := {
+  graph :=
+    [("unrealized", .bare (.lit (.str "unrealized")))
+    ,("low-txt", kChainStub)
+    ,("wir", kChainStub)
+    ,("emt-txt", kChainStub)
+    ,("chain", kChainMain)]
+    ++ prefixGraph "a-" kAst.graph
+    ++ prefixGraph "l-" kLow.graph
+  entry := "chain"
+  args := [] }
+
+def kChainDecls : List (String × KDecl) :=
+  [ ("chain", { params := [("src", "[]const i64")], ret := some "string" }),
+    ("low-txt", { params := [("rows", "[]const i64"), ("src", "[]const i64")], ret := some "string" }),
+    ("wir", { params := [("rows", "[]const i64"), ("src", "[]const i64")], ret := some "string" }),
+    ("emt-txt", { params := [("claim", "[]const i64")], ret := some "string" }) ]
+  ++ (kAstDecls.map fun (n, d) => ("a-" ++ n, d))
+  ++ (kLowDecls.map fun (n, d) => ("l-" ++ n, d))
+
 /-- One flow-grammar corpus row: program + asserted oracle leaves +
 the declared `tor` contracts the surface file must carry. -/
 structure KFlowRow where

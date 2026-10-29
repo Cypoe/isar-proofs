@@ -557,6 +557,18 @@ def klowFile : String :=
     ++ String.intercalate "\n\n" (ISAR.kLow.graph.map fun (n, c) =>
         kCallableSrc n (ISAR.kLowDecls.find? (·.1 == n)
           |>.map (·.2) |>.getD {}) c)
+
+/-- `kchain.k`: the composed lane as surface text — the prefixed
+graph union plus `chain` wiring and the three arm-less stub legs.
+Generated from ISAR.kChain so the shape Lars/the corpus sees is
+exactly what emitProgC lowers. -/
+def kchainFile : String :=
+  "// kchain.k — the composed lane as declared shape (generated)\n"
+    ++ "// a-*=kast  l-*=klow  chain=wiring;  low-txt / wir /\n"
+    ++ "// emt-txt are arm-less stubs — refusal names the leg.\n"
+    ++ String.intercalate "\n\n" (ISAR.kChain.graph.map fun (n, c) =>
+        kCallableSrc n (ISAR.kChainDecls.find? (·.1 == n)
+          |>.map (·.2) |>.getD {}) c)
     ++ "\n"
 
 /-- A test input as the wire value: chars → `(arr int)` codes. -/
@@ -817,6 +829,19 @@ def main : IO Unit := do
       ++ ",\"file\":\"input.k\",\"emit_prog\":true"
       ++ ",\"emit_args\":true,\"gen\":\"klow\"}")
     (some klowFile)
+  -- 905_kchain — the composed lane as a DECLARED SHAPE: prefixed
+  -- graph union of kAst + kLow plus the `chain` wiring entry and
+  -- arm-less stubs for the three unwritten legs (low-txt, wir,
+  -- emt-txt).  `chain` with args walks a-main for real, then
+  -- refuses inside `low-txt` — the refusal names the leg.  arg-less
+  -- refuses on unbound `src`.  The surface file carries the whole
+  -- union, so kw/kwj/kwc race composition itself against koruc.
+  writeLeaf "200_emit" "905_kchain"
+    ("{\"entry\":\"chain\",\"fuel\":4000000"
+      ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
+      ++ ",\"file\":\"input.k\",\"emit_prog\":true"
+      ++ ",\"emit_args\":true,\"gen\":\"kchain\"}")
+    (some kchainFile)
   -- 800_forged — an asserted-wrong expectation over a deciding
   -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
@@ -881,3 +906,12 @@ def main : IO Unit := do
         ("/* input.fnv1a64:" ++ toString (fnv1a64 klowFile)
           ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC(kLow) refused: {ax}")
+  -- kchain.c — the declared composition shape as compiled code:
+  -- graph union + wiring + stubs through the same emitProgC path.
+  match ISAR.emitProgC ISAR.kChain 8192 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/kchain.c"
+        ("/* input.fnv1a64:" ++ toString (fnv1a64 kchainFile)
+          ++ " */\n" ++ c)
+  | .error ax => throw (IO.userError s!"emitProgC(kChain) refused: {ax}")
