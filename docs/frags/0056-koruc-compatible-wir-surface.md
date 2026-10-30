@@ -58,6 +58,47 @@ sexpr reader spelled in koru, or args embedded via the program's
 own entry mechanism. That adapter is the next real boundary
 artifact if the three-way race is wanted.
 
+## Addendum — the adapter exists and is verified; the blocker moved upstream
+
+`_scratch/kdrv/` now holds the race adapter: `drv.k` (read-stdin →
+six typed parse tors → `app/wir:main` → `print.ln`) + `drv.kz`
+(zig `~proc` bodies parsing the KVal cell sexpr — same boundary
+role as kwir.c's `main()` reader). `wir.k` copied with `main`
+marked `pub` (visibility only — module import requires it).
+koruc --deep-check **passes** the whole bundle; the zig parse
+procs verified in isolation produce the six slices
+**byte-identical** to the Python decode of `_906.cell`
+(hash 85b6b328209b4d05, rows=39576 src=60327 names=11566
+nsp=118157 strs=252 ssp=504).
+
+But `koruc build` of the emitted program **fails** — 62 defects
+in the emitted zig, all inside wir.k's own tors, none in the
+adapter:
+
+1. **`| _ c` on bare returns does not lower.** `-> i64` tors emit
+   `Output = i64`; continuations emit `switch (result) { ._ => }`
+   — unswitchable on a scalar ("expected type i64, found
+   @Type(.enum_literal)"), and arm payload binds are dropped
+   (14 `use of undeclared identifier` for c/k/h/nm/q). Deep-check
+   accepts what emission cannot realize — a real upstream hole.
+   koruc-native equivalents are tagged-union outcomes or `: bind`
+   pipelines — either is a *structural* rewrite of all 372
+   continuation sites, i.e. a different program surface.
+2. **Builtin vocabulary diverges.** `@len` (14 sites) and
+   `@intToString` (2) pass verbatim into zig where they are
+   invalid builtins — koruc spells `.len` and `std/string:from-int`
+   instead. Neither spelling parses in the other dialect.
+3. **Emitter strictness.** 28 `unused capture` + 4 `unused local
+   constant` — emitted-code hygiene, upstream polish.
+
+Net: the koru-spelled lowerer is *check-clean* under production
+koruc but not yet *buildable* — the three-way binary race wants a
+koruc-native witness variant (third realization, raced
+observationally on the same wire) or the upstream emitter fixes.
+That koruc accepts the program semantically while producing
+uncompilable emission is itself the pairing datum: the dialect
+gap is in the *lowering*, not the *language*.
+
 **The dialect gap, named:** korufe's `dispatchBare` is ordered
 arms on bare results with cosmetic labels; koruc requires
 declared outcomes for tag matching and pipeline binds for bare
