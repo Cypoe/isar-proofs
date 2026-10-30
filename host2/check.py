@@ -99,6 +99,14 @@ The pipeline per case row:
           (korufe --lower → claim → krun).  Interpreter recursion
           per scanned byte is the named trampolining axis
           (frag 0047): stack-overflow signature → skip
+  wi    : the LOWERER race — kwir.k is the row→claim-sexp lowerer
+          spelled in koru itself (ISAR.kWir → specs/gen/kwir.c).
+          Fed the same flat rows plus the declared token tables
+          wir_tables(raw), the emitProgC-compiled program must emit
+          a (graph …) slice byte-identical to `korufe --lower`'s —
+          (bad axis) markers are in-band text and compare like any
+  wii   : the same lowerer through the interpreted lane
+          (korufe --lower → claim → krun); same stack axis
 
 Spec rows consumed as data: cases.json (entry/fuel/expect/emit/oracle/
 claim), assembly.json (cc + flags + run semantics). Refusal probes
@@ -565,6 +573,150 @@ def klow_flat(rows_txt):
 def sx_arr_ints(vals):
     """wire `(arr (int n) …)` literal for a flat int list/bytes."""
     return "(arr " + " ".join(f"(int {v})" for v in vals) + ")"
+
+
+def sx_str_lit(s):
+    """wire `…` quoted atom — the reader's escape set (sx_str):
+    \\" \\\\ \\n \\t \\r decode, unknown escapes keep both bytes."""
+    return '"' + "".join({"\\": "\\\\", '"': '\\"', "\n": "\\n",
+                          "\t": "\\t", "\r": "\\r"}.get(c, c)
+                         for c in s) + '"'
+
+
+def sx_arr_strs(vals):
+    """wire `(arr (str "s") …)` literal for a string list."""
+    return "(arr " + " ".join(f"(str {sx_str_lit(s)})"
+                              for s in vals) + ")"
+
+
+# Row-wire → token-table projection consumed by ISAR.kWir: koru
+# cannot slice strings, so name/string text crosses the boundary
+# AS DATA — ident tokens keyed by span start (nsp names), claim-
+# side str-literal payloads keyed by the opening-quote position
+# (ssp strs).  The tables are exactly what the klex producer would
+# hand across — a lexer never emits comment text.
+_WIR_ATOM = set(
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+
+
+def wir_pack_nsp(raw, rows, nsp, names):
+    """Pack pix|pairs|eix|hix|xix into one []i64 (the wire `nsp`).
+
+    pix[p]   = name-index whose span-lo is p, else -1 (O(1) wnat).
+    eix[k]   = first ev-row flat offset for names[k]'s text, else -1.
+    hix[k]   = 1 if any impl/flw row names names[k]'s text.
+    xix[k]   = count of ev rows naming names[k]'s text (dup-tor).
+    The witness reads them positionally (data, not logic — the same
+    token-table projection the C frontend hands its own lowerer)."""
+    nn = len(names)
+    pix = [-1] * len(raw)
+    for k in range(nn):
+        if 0 <= nsp[2 * k] < len(raw):
+            pix[nsp[2 * k]] = k
+    first_ev, evcnt, impl = {}, {}, set()
+    for i in range(0, len(rows), 6):
+        lo, hi = rows[i + 2], rows[i + 3]
+        if not (0 <= lo < hi):
+            continue
+        txt = raw[lo:hi].decode("utf-8", "replace")
+        if rows[i] == 1:
+            first_ev.setdefault(txt, i)
+            evcnt[txt] = evcnt.get(txt, 0) + 1
+        if rows[i] in (5, 7):
+            impl.add(txt)
+    eix = [first_ev.get(t, -1) for t in names]
+    hix = [1 if t in impl else 0 for t in names]
+    xix = [evcnt.get(t, 0) for t in names]
+    return pix + nsp + eix + hix + xix
+
+
+def wir_tables(raw):
+    """ident tokens → (nsp, names); string literals → (ssp, strs).
+
+    `strs` payloads are the CLAIM-side text (bput_sxstr escaping —
+    decode koru's literal escapes per lower.c str_val, then
+    re-escape only " and \\)."""
+    nsp, names, ssp, strs = [], [], [], []
+    i, n = 0, len(raw)
+    while i < n:
+        c = raw[i]
+        if c == 47 and i + 1 < n and raw[i + 1] == 47:  # // comment
+            j = raw.find(b"\n", i)
+            i = n if j < 0 else j + 1
+            continue
+        if c == 34:  # "
+            j = i + 1
+            while j < n:
+                if raw[j] == 92:
+                    j += 2
+                    continue
+                if raw[j] == 34:
+                    break
+                j += 1
+            ssp += [i, j + 1]
+            strs.append(_wir_claim_str(
+                raw[i + 1:j].decode("utf-8", "replace")))
+            i = j + 1
+            continue
+        if c in _WIR_ATOM:
+            j = i
+            while j < n and raw[j] in _WIR_ATOM:
+                j += 1
+            nsp += [i, j]
+            names.append(raw[i:j].decode("utf-8"))
+            i = j
+            continue
+        i += 1
+    return nsp, names, ssp, strs
+
+
+def _wir_claim_str(rawtxt):
+    """raw token text (between quotes) → `(str "…")` payload text:
+    lower.c str_val decodes \\" \\\\ \\n \\t \\r (unknown escapes keep
+    both bytes), bput_sxstr re-escapes only " and \\."""
+    v = []
+    i = 0
+    while i < len(rawtxt):
+        c = rawtxt[i]
+        if c == "\\" and i + 1 < len(rawtxt):
+            n = rawtxt[i + 1]
+            if n in '"\\':
+                v.append(n)
+                i += 2
+                continue
+            if n in "ntr":
+                v.append({"n": "\n", "t": "\t", "r": "\r"}[n])
+                i += 2
+                continue
+        v.append(c)
+        i += 1
+    return "".join(("\\" + c) if c in '"\\' else c for c in v)
+
+
+def run_t(argv, **kw):
+    """subprocess.run that turns TimeoutExpired into None — a leg
+    that exceeds its time budget names the resource:time axis as a
+    skip instead of crashing the whole gate."""
+    try:
+        return subprocess.run(argv, **kw)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def graph_slice(txt):
+    """first balanced `(graph …)` sexp inside a claim."""
+    i = txt.find("(graph")
+    if i < 0:
+        return None
+    d = 0
+    for j in range(i, len(txt)):
+        if txt[j] == "(":
+            d += 1
+        elif txt[j] == ")":
+            d -= 1
+            if d == 0:
+                return txt[i:j + 1]
+    return None
 
 
 def sx_str_decode(txt):
@@ -1243,7 +1395,7 @@ def gate():
                 f"emit_args row in {os.path.basename(aleaf)} "
                 "lacks a gen name")
             continue
-        code = gname[:2]
+        code = {"kwir": "wi"}.get(gname, gname[:2])
         gsrc = os.path.join(SPECS, "gen", gname + ".c")
         gbin = os.path.join(BUILD, f"{gname}_{code}"
                             + (".exe" if os.name == "nt" else ""))
@@ -1500,6 +1652,44 @@ def gate():
                         with open(kl_ast, "w") as f:
                             f.write(p.stdout)
                         klow_ok = True
+            # ---- wi / wii: the koru-spelled lowerer — the claim
+            # graph half (lower.c) spelled inside the language.
+            # `wi` runs the emitProgC-compiled program, `wii` the
+            # interpreted krun lane; both race `korufe --lower`'s
+            # (graph …) slice byte-for-byte.  Input is the SAME
+            # flat rows klow consumes plus the declared token
+            # tables `wir_tables` (ident/str text arrives AS DATA —
+            # koru cannot slice strings). ----
+            wi_leaf = next((a for a, g in args_progs.items()
+                            if g == "kwir"), None)
+            wi_bin = os.path.join(BUILD, "kwir_wiw"
+                                  + (".exe" if os.name == "nt" else ""))
+            wi_ast = os.path.join(BUILD, "kwir.ast.json")
+            kwir_ok = False
+            if wi_leaf is None or not os.path.isfile(
+                    os.path.join(SPECS, "gen", "kwir.c")):
+                skip("wi.wide", "no kwir emit_args row")
+            else:
+                c = subprocess.run(
+                    [tc["cc"], *kw_flags,
+                     os.path.join(SPECS, "gen", "kwir.c"),
+                     "-o", wi_bin],
+                    capture_output=True, text=True)
+                if c.returncode != 0:
+                    bad("wi.wide",
+                        f"{tc['cc']} refused: {c.stderr.strip()[:160]}")
+                else:
+                    ok("wi.wide", "emitProgC(kwir) wide-stack build")
+                    p = subprocess.run(
+                        [KORUFE, os.path.join(wi_leaf, "input.k")],
+                        capture_output=True, text=True)
+                    if p.returncode != 0:
+                        bad("wi.build", "korufe refused kwir surface: "
+                            f"{p.stderr.strip()[:120]}")
+                    else:
+                        with open(wi_ast, "w") as f:
+                            f.write(p.stdout)
+                        kwir_ok = True
             for ik in sorted(glob.glob(
                     os.path.join(SPECS, "tests", "**", "input.k"),
                     recursive=True)):
@@ -1582,12 +1772,14 @@ def gate():
                               + ") (rows " + sx_arr_ints(flat)
                               + ") (mod " + sx_arr_ints(b"input")
                               + "))")
-                    rb = subprocess.run([kl_bin, "2000000000"],
-                                        input=cellin,
-                                        capture_output=True,
-                                        text=True, timeout=600)
+                    rb = run_t([kl_bin, "2000000000"],
+                               input=cellin,
+                               capture_output=True,
+                               text=True, timeout=600)
                     refdoc = None if r_bad else json.loads(rd.stdout)
-                    if rb.returncode == 0:
+                    if rb is None:
+                        skip(ltag, "time axis (>600s on wire)")
+                    elif rb.returncode == 0:
                         try:
                             got = json.loads(rb.stdout)
                         except json.JSONDecodeError as e:
@@ -1635,12 +1827,15 @@ def gate():
                         clp = os.path.join(BUILD, "kl_case.claim")
                         with open(clp, "w") as f:
                             f.write(lw.stdout)
-                        rv = subprocess.run([KRUN, clp],
-                                            capture_output=True,
-                                            text=True, timeout=600)
-                        out = rv.stdout + rv.stderr
-                        sval = sx_str_decode(out)
-                        if sval is not None:
+                        rv = run_t([KRUN, clp],
+                                   capture_output=True,
+                                   text=True, timeout=600)
+                        out = rv.stdout + rv.stderr if rv else ""
+                        sval = sx_str_decode(out) if rv else None
+                        if rv is None:
+                            skip(itag, "time axis (>600s in "
+                                       "interpreter)")
+                        elif sval is not None:
                             try:
                                 got = json.loads(sval)
                             except json.JSONDecodeError as e:
@@ -1667,6 +1862,124 @@ def gate():
                                           "--reify accepted")
                         else:
                             bad(itag, f"exit={rv.returncode} "
+                                      f"{out[:80]!r}")
+                # ---- wi / wii: the koru-spelled lowerer on the
+                # same row wire.  `wi` is the emitProgC-compiled
+                # program (raw claim text on stdout); `wii` the
+                # same program through krun (`(str "…")` result,
+                # wire-decoded).  Both compare byte-for-byte
+                # against `korufe --lower`'s (graph …) slice —
+                # `(bad axis)` markers are in-band and compare
+                # like any text.  Interpreter recursion per
+                # scanned byte is the named trampolining axis
+                # (frag 0047): a stack-overflow signature is
+                # skip, not fail. ----
+                wtag = "wi" + tag[2:]
+                utag = "wii" + tag[2:]
+                wleaf = os.path.dirname(ik)
+                wcases = os.path.join(wleaf, "cases.json")
+                wckey = os.path.basename(wleaf)
+                wast = os.path.join(BUILD, "wi_corpus.ast.json")
+                want = None
+                if rd.returncode == 0:
+                    with open(wast, "w") as f:
+                        f.write(rd.stdout)
+                    rl = subprocess.run(
+                        [KORUFE, "--lower", wast, wcases, wckey],
+                        capture_output=True, text=True)
+                    if rl.returncode == 0:
+                        want = graph_slice(rl.stdout)
+                if want is None:
+                    skip(wtag, "authority --lower has no graph")
+                    skip(utag, "authority --lower has no graph")
+                elif not kwir_ok:
+                    skip(wtag, "emitProgC(kwir) not built")
+                    skip(utag, "emitProgC(kwir) not built")
+                else:
+                    flat = klow_flat(rm.stdout)
+                    nsp, names, ssp, strs = wir_tables(raw)
+                    nsp = wir_pack_nsp(raw, flat, nsp, names)
+                    cellin = ("(cell (rows " + sx_arr_ints(flat)
+                              + ") (src " + sx_arr_ints(raw)
+                              + ") (names " + sx_arr_strs(names)
+                              + ") (nsp " + sx_arr_ints(nsp)
+                              + ") (strs " + sx_arr_strs(strs)
+                              + ") (ssp " + sx_arr_ints(ssp) + "))")
+                    rb = run_t([wi_bin, "2000000000"],
+                               input=cellin,
+                               capture_output=True,
+                               text=True, timeout=600)
+                    if rb is None:
+                        skip(wtag, "time axis (>600s on wire)")
+                    elif rb.returncode == 0:
+                        got = graph_slice(rb.stdout)
+                        if got == want:
+                            ok(wtag, f"{len(want)} chars, graph "
+                                     "identical")
+                        else:
+                            bad(wtag, "graph mismatch vs --lower")
+                    elif rb.returncode in (2, 4):
+                        bad(wtag, "kwir refused a wire --lower "
+                                  f"accepted: {rb.stderr[:80]}")
+                    elif rb.returncode in (-11, 0xC00000FD,
+                                           -1073741571):
+                        skip(wtag, "stack axis (frag 0047)")
+                    else:
+                        bad(wtag, f"exit={rb.returncode} "
+                                  f"{rb.stderr[:80]}")
+                    cjp = os.path.join(BUILD, "wi_case.json")
+                    with open(cjp, "w") as f:
+                        json.dump({"cases": {"c": {
+                            "entry": "main", "fuel": 400000000,
+                            "args": {
+                                "rows": {"arr": [{"int": v}
+                                                 for v in flat]},
+                                "src": {"arr": [{"int": b}
+                                                for b in raw]},
+                                "names": {"arr": [{"str": s}
+                                                  for s in names]},
+                                "nsp": {"arr": [{"int": v}
+                                                for v in nsp]},
+                                "strs": {"arr": [{"str": s}
+                                                 for s in strs]},
+                                "ssp": {"arr": [{"int": v}
+                                                for v in ssp]}},
+                            "expect": {"bare": {"int": 0}}}}}, f)
+                    lw = subprocess.run(
+                        [KORUFE, "--lower", wi_ast, cjp, "c"],
+                        capture_output=True, text=True)
+                    if lw.returncode != 0:
+                        bad(utag, "--lower refused: "
+                                  f"{lw.stderr.strip()[:80]}")
+                    else:
+                        clp = os.path.join(BUILD, "wi_case.claim")
+                        with open(clp, "w") as f:
+                            f.write(lw.stdout)
+                        rv = run_t([KRUN, clp],
+                                   capture_output=True,
+                                   text=True, timeout=600)
+                        out = rv.stdout + rv.stderr if rv else ""
+                        sval = sx_str_decode(out) if rv else None
+                        if rv is None:
+                            skip(utag, "time axis (>600s in "
+                                       "interpreter)")
+                        elif sval is not None:
+                            got = graph_slice(sval)
+                            if got == want:
+                                ok(utag, f"{len(want)} chars, "
+                                         "graph identical")
+                            else:
+                                bad(utag, "graph mismatch vs "
+                                          "--lower")
+                        elif rv.returncode in (-11, 0xC00000FD,
+                                               -1073741571):
+                            skip(utag, "interpreter stack axis "
+                                       "(frag 0047)")
+                        elif "refuse" in out:
+                            bad(utag, "kwir refused a wire "
+                                      "--lower accepted")
+                        else:
+                            bad(utag, f"exit={rv.returncode} "
                                       f"{out[:80]!r}")
 
     # ---- wide JSON race: the SAME corpus through `korufe

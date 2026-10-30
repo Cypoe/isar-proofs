@@ -309,6 +309,22 @@ def kGuardSrc : ISAR.KExpr → String
       kExprSrc a ++ " " ++ binSym op ++ " " ++ kExprSrc b
   | e => kExprSrc e
 
+/-- Produce-position wrapping: after `->`, the authority reads
+`IDENT` + `[`/`(`/`{` as an invocation head (`-> a[i]` parses as
+invoke `a[`, `-> if(…)` as invoke `if`) while korufe/kast read the
+index/cond expr — a genuine frontend divergence.  Any produce expr
+that isn't a bare atom gets parens so both frontends take the expr
+path. -/
+def kProduceSrc : ISAR.KExpr → String
+  | .lit v => kValSrc v
+  | .var n => sxName n
+  | .un .neg e => "-(" ++ kExprSrc e ++ ")"
+  | .un .not e => "!(" ++ kExprSrc e ++ ")"
+  | .builtin n args =>
+      "@" ++ sxName n ++ "("
+        ++ String.intercalate ", " (kExprsSrc args) ++ ")"
+  | e => "(" ++ kExprSrc e ++ ")"
+
 /-- Chain-step printing: `conts` under an invoke arm spell koru's
 `|>` sequence — each cont is a `_chain`-named arm whose `bind` is
 the previous step's retbind (`f(): b` — koru puts the `: b` on the
@@ -335,8 +351,9 @@ decreasing_by
 
 mutual
 /-- Free-var check for the `_` discard the authority demands on
-unreferenced arm bindings (KORU100).  Cont arms get a fresh env —
-only the guard and node can see the bind. -/
+unreferenced arm bindings (KORU100).  The arm env — bind included —
+carries into every cont (`armWalk` runs `|>` links under `env2`), so
+`used` must fold the whole cont tree, not only guard and node. -/
 def kExprUsesVar (x : String) : ISAR.KExpr → Bool
   | .lit _ => false
   | .var n => n == x
@@ -351,7 +368,16 @@ def kExprUsesVar (x : String) : ISAR.KExpr → Bool
 def kExprArgsUseVar (x : String) : List ISAR.KExpr → Bool
   | [] => false
   | e :: es => kExprUsesVar x e || kExprArgsUseVar x es
-end
+
+def kArmUsesVar (x : String) : ISAR.KArm → Bool
+  | .mk _ _ _ cd nd cs =>
+      (cd.map (kExprUsesVar x)).getD false
+        || (nd.map (kArmNodeUsesVar x)).getD false
+        || kArmListUsesVar x cs
+
+def kArmListUsesVar (x : String) : List ISAR.KArm → Bool
+  | [] => false
+  | a :: as => kArmUsesVar x a || kArmListUsesVar x as
 
 def kArmNodeUsesVar (x : String) : ISAR.KArmNode → Bool
   | .terminal => false
@@ -359,6 +385,7 @@ def kArmNodeUsesVar (x : String) : ISAR.KArmNode → Bool
   | .invoke _ args => args.any (fun (_, e) => kExprUsesVar x e)
   | .produce e => kExprUsesVar x e
   | .retCtor _ e => kExprUsesVar x e
+end
 
 /-- One arm line incl. its `|`/`|*` marker — the residual arm is
 glued `|*` in real koru (`| *` is the retired deref spelling). -/
@@ -371,10 +398,7 @@ def kArmSrc (a : ISAR.KArm) : String :=
   let bindf := match a.bind with
     | none => ""
     | some b =>
-        let used :=
-          (a.cond.map (kExprUsesVar b)).getD false
-          || (a.node.map (kArmNodeUsesVar b)).getD false
-        " " ++ (if used then sxName b else "_")
+        " " ++ (if kArmUsesVar b a then sxName b else "_")
   let whenf := match a.cond with
     | none => ""
     | some e => " when " ++ kGuardSrc e
@@ -388,7 +412,7 @@ def kArmSrc (a : ISAR.KArm) : String :=
     | some (.produce e) =>
         (if a.conts.isEmpty then ""
          else panic! "conts under a produce arm have no koru surface")
-        ++ " -> " ++ kExprSrc e
+        ++ " -> " ++ kProduceSrc e
     | some (.retCtor c e) =>
         (if a.conts.isEmpty then ""
          else panic! "conts under a ctor arm have no koru surface")
@@ -466,7 +490,7 @@ def kCallableSrc (name : String) (d : ISAR.KDecl)
       (if d.declared then
         "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params
           ++ kRetAnn d e ++ kBranchesSrc d.branches ++ "\n" else "")
-        ++ sxName name ++ " -> " ++ kExprSrc e
+        ++ sxName name ++ " -> " ++ kProduceSrc e
   | .thunk =>
       if d.declared then
         "tor " ++ sxName name ++ " " ++ kDeclFieldsT d.params
@@ -558,13 +582,30 @@ def klowFile : String :=
         kCallableSrc n (ISAR.kLowDecls.find? (·.1 == n)
           |>.map (·.2) |>.getD {}) c)
 
+/-- `kwir.k`: the koru-spelled lowerer — flat six-int rows + source
+bytes + the token tables (ident text by span start, str-literal
+claim payloads by quote position) → the `(graph …)` claim document
+`lower.c` writes.  Mirrors `lower.c`'s checks (dup-tor, decl-param,
+decl-branch, ctor-branch, jump-label); refused axes ride in-band as
+`(bad …)` markers.  The wi/wii races compare the graph slice
+against `korufe --lower` byte-for-byte.  arg-less invoke refuses:
+`rows`/`src`/`names`/`nsp`/`strs`/`ssp` unbound. -/
+def kwirFile : String :=
+  "// kwir.k — a koru-spelled lowerer → (graph …) claim text (generated)\n"
+    ++ "// flat six-int rows + source bytes + names/nsp/strs/ssp\n"
+    ++ "// tables in; claim S-expression text out.  arg-less invoke\n"
+    ++ "// refuses: `rows`/`src`/`names`/`nsp`/`strs`/`ssp` unbound.\n"
+    ++ String.intercalate "\n\n" (ISAR.kWir.graph.map fun (n, c) =>
+        kCallableSrc n (ISAR.kWirDecls.find? (·.1 == n)
+          |>.map (·.2) |>.getD {}) c)
+
 /-- `kchain.k`: the composed lane as surface text — the prefixed
 graph union plus `chain` wiring and the three arm-less stub legs.
 Generated from ISAR.kChain so the shape Lars/the corpus sees is
 exactly what emitProgC lowers. -/
 def kchainFile : String :=
   "// kchain.k — the composed lane as declared shape (generated)\n"
-    ++ "// a-*=kast  l-*=klow  chain=wiring;  low-txt / wir /\n"
+    ++ "// a-*=kast  l-*=klow  w-*=kwir  chain=wiring;  low-txt and\n"
     ++ "// emt-txt are arm-less stubs — refusal names the leg.\n"
     ++ String.intercalate "\n\n" (ISAR.kChain.graph.map fun (n, c) =>
         kCallableSrc n (ISAR.kChainDecls.find? (·.1 == n)
@@ -842,6 +883,16 @@ def main : IO Unit := do
       ++ ",\"file\":\"input.k\",\"emit_prog\":true"
       ++ ",\"emit_args\":true,\"gen\":\"kchain\"}")
     (some kchainFile)
+  -- 906_kwir — the koru-spelled lowerer: flat rows + src + the
+  -- names/strs token tables → the `(graph …)` claim document.
+  -- Same leaf shape as 904_klow: only the emit_prog row; per-input
+  -- tables derive at check time (the wi leg).
+  writeLeaf "200_emit" "906_kwir"
+    ("{\"entry\":\"main\",\"fuel\":4000000"
+      ++ ",\"args\":{},\"expect\":\"refuse\",\"emit\":\"refuse\""
+      ++ ",\"file\":\"input.k\",\"emit_prog\":true"
+      ++ ",\"emit_args\":true,\"gen\":\"kwir\"}")
+    (some kwirFile)
   -- 800_forged — an asserted-wrong expectation over a deciding
   -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
@@ -915,3 +966,14 @@ def main : IO Unit := do
         ("/* input.fnv1a64:" ++ toString (fnv1a64 kchainFile)
           ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC(kChain) refused: {ax}")
+  -- kwir.c — the lowerer as compiled code: emitProgC lowers kWir's
+  -- 170 callables (span walkers, expr emitter, decl-table scans,
+  -- the row state machine) to C99.  Same stamp contract; the wi
+  -- leg races it against `korufe --lower` graph-for-graph.
+  match ISAR.emitProgC ISAR.kWir 8192 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/kwir.c"
+        ("/* input.fnv1a64:" ++ toString (fnv1a64 kwirFile)
+          ++ " */\n" ++ c)
+  | .error ax => throw (IO.userError s!"emitProgC(kWir) refused: {ax}")

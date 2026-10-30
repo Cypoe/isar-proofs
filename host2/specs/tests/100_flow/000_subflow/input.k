@@ -9,4 +9,4 @@ tor tick {n: i64}
 | stop
 
 tor dec {n: i64}
-dec -> (n - 1)
+dec -> ((n - 1))

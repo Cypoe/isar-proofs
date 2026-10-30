@@ -247,18 +247,25 @@ def prelude : String :=
 "static void xws(void){while(*xp==' '||*xp=='\\t'||*xp=='\\n'||*xp=='\\r')xp++;}\n" ++
 "static int xatom(char**o){const char*s;size_t n;char*p;\n" ++
 " xws();s=xp;\n" ++
-" if(*s=='\"'){s++;while(*s&&*s!='\"')s++;if(*s!='\"')return 0;s++;}\n" ++
+" if(*s=='\"'){s++;while(*s&&*s!='\"'){if(*s=='\\\\'&&s[1]){s+=2;continue;}s++;}if(*s!='\"')return 0;s++;}\n" ++
 " else{while(*s&&*s!=' '&&*s!='\\t'&&*s!='\\n'&&*s!='\\r'&&*s!='('&&*s!=')')s++;}\n" ++
 " if(s==xp)return 0;n=s-xp;p=xm(n+1);memcpy(p,xp,n);p[n]=0;xp=s;*o=p;return 1;}\n" ++
 "static int xopen(void){xws();if(*xp=='('){xp++;return 1;}return 0;}\n" ++
 "static int xclose(void){xws();if(*xp==')'){xp++;return 1;}return 0;}\n" ++
+"static char*xunesc(char*a){char*w=a,*r=a;\n" ++
+" for(;*r;r++){if(*r=='\\\\'&&r[1]){char d=r[1];\n" ++
+"  if(d=='\"'||d=='\\\\'){*w++=d;r++;continue;}\n" ++
+"  if(d=='n'){*w++='\\n';r++;continue;}\n" ++
+"  if(d=='t'){*w++='\\t';r++;continue;}\n" ++
+"  if(d=='r'){*w++='\\r';r++;continue;}}\n" ++
+" *w++=*r;}*w=0;return a;}\n" ++
 "static Val*xval(void){char*h;\n" ++
 " if(!xopen()||!xatom(&h))return 0;\n" ++
 " if(!strcmp(h,\"int\")){char*a;if(!xatom(&a))return 0;{k_i64 i=strtoll(a,0,10);if(!xclose())return 0;return v_int(i);}}\n" ++
 " if(!strcmp(h,\"float\")){char*a,*b;if(!xatom(&a)||!xatom(&b))return 0;{k_i64 n=strtoll(a,0,10),d=strtoll(b,0,10);if(!xclose())return 0;return v_flt(n,d);}}\n" ++
 " if(!strcmp(h,\"bool\")){char*a;if(!xatom(&a)||!xclose())return 0;\n" ++
 "  if(!strcmp(a,\"true\"))return v_bool(1);if(!strcmp(a,\"false\"))return v_bool(0);return 0;}\n" ++
-" if(!strcmp(h,\"str\")){char*a;if(!xatom(&a))return 0;{size_t n=strlen(a);if(n<2||a[0]!='\"'||a[n-1]!='\"')return 0;a[n-1]=0;if(!xclose())return 0;return v_str(a+1);}}\n" ++
+" if(!strcmp(h,\"str\")){char*a;if(!xatom(&a))return 0;{size_t n=strlen(a);if(n<2||a[0]!='\"'||a[n-1]!='\"')return 0;a[n-1]=0;if(!xclose())return 0;return v_str(xunesc(a+1));}}\n" ++
 " if(!strcmp(h,\"arr\")){Val**xs=0;int n=0,c=0;\n" ++
 "  for(;;){xws();if(*xp==')'){xp++;break;}{Val*v=xval();if(!v)return 0;\n" ++
 "   if(n==c){c=c?c*2:8;xs=xrealloc(xs,c*sizeof(Val*));}xs[n++]=v;}}return v_arr(xs,n);}\n" ++

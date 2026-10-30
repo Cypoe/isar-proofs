@@ -1,0 +1,1 @@
+{"cases":{"906_kwir":{"entry":"main","fuel":4000000,"args":{},"expect":"refuse","emit":"refuse","file":"input.k","emit_prog":true,"emit_args":true,"gen":"kwir"}}}

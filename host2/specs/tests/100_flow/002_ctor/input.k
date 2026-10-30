@@ -6,7 +6,7 @@ classify = sign(x)
 | ok p when p => pos x
 | ok _ => neg x
 
-sign -> (x < 0)
+sign -> ((x < 0))
 
 tor main {}
 main = classify(x: -(5))

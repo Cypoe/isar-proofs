@@ -2,7 +2,7 @@
 // chars arrives as (arr int) on the wire; the host does
 // bytes->codes.  arg-less invoke refuses: `chars` unbound.
 tor peek {chars: []const i64, i: i64, n: i64} -> i64
-peek -> if((i >= n)) (0 - 1) else chars[i]
+peek -> (if((i >= n)) (0 - 1) else chars[i])
 
 tor lex {chars: []const i64, i: i64, n: i64, out: string} -> string
 lex = peek(chars, i, n)
@@ -13,7 +13,7 @@ lex = peek(chars, i, n)
 | op c when (c == 43) || ((c == 42) || (c == 47)) |> lex(chars, i: (i + 1), n, out: (out ++ ("(op " ++ (@intToString(c) ++ ") "))))
 | dg c when (c >= 48) && (c <= 57) |> digits(chars, j: i, n, v: 0, out)
 | at c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> atom-end(chars, i, j: i, n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor digits {chars: []const i64, j: i64, n: i64, v: i64, out: string} -> string
 digits = peek(chars, i: j, n)

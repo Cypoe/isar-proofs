@@ -3,7 +3,7 @@
 // out (span bytes as \u00xx).  arg-less invoke refuses:
 // `src`/`rows`/`mod` unbound.
 tor pkb {t: []const i64, i: i64, n: i64} -> i64
-pkb -> if(((i < 0) || (i >= n))) (0 - 1) else t[i]
+pkb -> (if(((i < 0) || (i >= n))) (0 - 1) else t[i])
 
 tor lxt {src: []const i64, i: i64, hi: i64, d: i64, ins: i64} -> i64
 lxt = pkb(t: src, i, n: hi)
@@ -29,7 +29,7 @@ ltma = pkb(t: src, i, n: hi)
 tor ltmb {src: []const i64, lo: i64, j: i64, n: i64} -> i64
 ltmb = pkb(t: src, i: j, n)
 | ws c when (j >= lo) && ((c == 32) || ((c == 9) || ((c == 10) || (c == 13)))) |> ltmb(src, lo, j: (j - 1), n)
-| dn _ -> (j + 1)
+| dn _ -> ((j + 1))
 
 tor ltk1 {src: []const i64, i: i64, hi: i64} -> i64
 ltk1 = pkb(t: src, i, n: hi)
@@ -47,7 +47,7 @@ lty1 = pkb(t: src, i, n: hi)
 tor ltm2 {src: []const i64, lo: i64, j: i64, n: i64} -> i64
 ltm2 = pkb(t: src, i: j, n)
 | ws c when (j >= lo) && ((c == 32) || (c == 9)) |> ltm2(src, lo, j: (j - 1), n)
-| dn _ -> (j + 1)
+| dn _ -> ((j + 1))
 
 tor lln {src: []const i64, i: i64, off: i64, n: i64, l: i64} -> i64
 lln = pkb(t: src, i, n)
@@ -71,7 +71,7 @@ lpub = lbs(src, i: j, n)
 | s ls |> lpb(src, i: ls, ls, j, n)
 
 tor lhx {d: i64} -> string
-lhx -> if((d < 10)) @intToString(d) else if((d == 10)) "a" else if((d == 11)) "b" else if((d == 12)) "c" else if((d == 13)) "d" else if((d == 14)) "e" else "f"
+lhx -> (if((d < 10)) @intToString(d) else if((d == 10)) "a" else if((d == 11)) "b" else if((d == 12)) "c" else if((d == 13)) "d" else if((d == 14)) "e" else "f")
 
 tor escl {src: []const i64, i: i64, hi: i64, out: string} -> string
 escl = pkb(t: src, i, n: hi)
@@ -133,7 +133,7 @@ lclsn = pkb(t: mod, i: 0, n: nmod)
 
 tor ltail {mod: []const i64, nmod: i64, out: string} -> string
 ltail = escl(src: mod, i: 0, hi: nmod, out: (out ++ "],\"main_module_name\":\""))
-| done e -> (e ++ "\",\"parts\":[]}")
+| done e -> ((e ++ "\",\"parts\":[]}"))
 
 tor limp {rows: []const i64, i: i64, n: i64, src: []const i64, mod: []const i64, out: string, p0: i64, p1: i64} -> string
 limp = esct(src, lo: rows[((i * 6) + 2)], hi: rows[((i * 6) + 3)], n: @len(src), out: (out ++ ",{\"import_decl\":{\"path\":\""))

@@ -23,16 +23,16 @@ tor ident {x: program} -> program
 ident -> x
 
 tor tag-num {e: expr} -> i64
-tag-num -> e.tag
+tag-num -> (e.tag)
 
 tor idnum {x: i64} -> i64
 idnum -> x
 
 tor join4 {l: string, op: string, r: string} -> string
-join4 -> ("(" ++ (l ++ (" " ++ (op ++ (" " ++ (r ++ ")"))))))
+join4 -> (("(" ++ (l ++ (" " ++ (op ++ (" " ++ (r ++ ")")))))))
 
 tor paren-neg {s: string} -> string
-paren-neg -> ("(-" ++ (s ++ ")"))
+paren-neg -> (("(-" ++ (s ++ ")")))
 
 tor wrap {c: string} -> string
-wrap -> ("int main(void) { return " ++ (c ++ "; }"))
+wrap -> (("int main(void) { return " ++ (c ++ "; }")))

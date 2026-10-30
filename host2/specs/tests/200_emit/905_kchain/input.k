@@ -1,5 +1,5 @@
 // kchain.k — the composed lane as declared shape (generated)
-// a-*=kast  l-*=klow  chain=wiring;  low-txt / wir /
+// a-*=kast  l-*=klow  w-*=kwir  chain=wiring;  low-txt and
 // emt-txt are arm-less stubs — refusal names the leg.
 tor unrealized {} -> string
 unrealized -> "unrealized"
@@ -7,18 +7,19 @@ unrealized -> "unrealized"
 tor low-txt {rows: []const i64, src: []const i64} -> string
 low-txt = unrealized()
 
-tor wir {rows: []const i64, src: []const i64} -> string
-wir = unrealized()
+tor wir {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, strs: []const string, ssp: []const i64} -> string
+wir = w-w-main(rows, src, names, nsp, strs, ssp)
+| r r -> r
 
-tor emt-txt {claim: []const i64} -> string
+tor emt-txt {claim: string} -> string
 emt-txt = unrealized()
 
-tor chain {src: []const i64} -> string
+tor chain {src: []const i64, rows: []const i64, names: []const string, nsp: []const i64, strs: []const string, ssp: []const i64} -> string
 chain = a-main(chars: src)
-| rows rows |> low-txt(rows, src) : _ |> wir(rows, src) : claim |> emt-txt(claim)
+| rows rt |> low-txt(rows: rt, src) : _ |> wir(rows, src, names, nsp, strs, ssp) : claim |> emt-txt(claim)
 
 tor a-peek {chars: []const i64, i: i64, n: i64} -> i64
-a-peek -> if((i >= n)) (0 - 1) else chars[i]
+a-peek -> (if((i >= n)) (0 - 1) else chars[i])
 
 tor a-ws {chars: []const i64, i: i64, n: i64} -> i64
 a-ws = a-peek(chars, i, n)
@@ -65,13 +66,13 @@ a-typend = a-peek(chars, i, n)
 | more _ |> a-typend(chars, i: (i + 1), n)
 
 tor a-kwtor {chars: []const i64, j: i64, e: i64, n: i64} -> i64
-a-kwtor -> if(((e == (j + 3)) && ((chars[j] == 116) && ((chars[(j + 1)] == 111) && (chars[(j + 2)] == 114))))) 1 else 0
+a-kwtor -> (if(((e == (j + 3)) && ((chars[j] == 116) && ((chars[(j + 1)] == 111) && (chars[(j + 2)] == 114))))) 1 else 0)
 
 tor a-kwwhen {chars: []const i64, j: i64, e: i64, n: i64} -> i64
-a-kwwhen -> if(((e == (j + 4)) && ((chars[j] == 119) && ((chars[(j + 1)] == 104) && ((chars[(j + 2)] == 101) && (chars[(j + 3)] == 110)))))) 1 else 0
+a-kwwhen -> (if(((e == (j + 4)) && ((chars[j] == 119) && ((chars[(j + 1)] == 104) && ((chars[(j + 2)] == 101) && (chars[(j + 3)] == 110)))))) 1 else 0)
 
 tor a-kwimport {chars: []const i64, j: i64, e: i64, n: i64} -> i64
-a-kwimport -> if(((e == (j + 6)) && ((chars[j] == 105) && ((chars[(j + 1)] == 109) && ((chars[(j + 2)] == 112) && ((chars[(j + 3)] == 111) && ((chars[(j + 4)] == 114) && (chars[(j + 5)] == 116)))))))) 1 else 0
+a-kwimport -> (if(((e == (j + 6)) && ((chars[j] == 105) && ((chars[(j + 1)] == 109) && ((chars[(j + 2)] == 112) && ((chars[(j + 3)] == 111) && ((chars[(j + 4)] == 114) && (chars[(j + 5)] == 116)))))))) 1 else 0)
 
 tor a-hws {chars: []const i64, i: i64, n: i64} -> i64
 a-hws = a-peek(chars, i, n)
@@ -86,7 +87,7 @@ tor a-top-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-top-at = a-peek(chars, i, n)
 | fin c when c < 0 -> out
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : e |> a-kwd(chars, i, n, out, e)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-kwd {chars: []const i64, i: i64, e: i64, n: i64, out: string} -> string
 a-kwd = a-kwtor(chars, j: i, e, n)
@@ -114,7 +115,7 @@ tor a-morf-at {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string}
 a-morf-at = a-peek(chars, i, n)
 | impl c when (c == 45) && (chars[(i + 1)] == 62) |> a-impl-body(chars, i: (i + 2), n, out, j, ne)
 | flow c when (c == 61) && !((chars[(i + 1)] == 62)) |> a-flow-pre(chars, i: (i + 1), n, out, j, ne)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-impl-body {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string} -> string
 a-impl-body = a-ws(chars, i, n)
@@ -132,7 +133,7 @@ tor a-flow-pre0 {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: strin
 a-flow-pre0 = a-peek(chars, i, n)
 | lbl c when c == 35 |> a-word(chars, i: (i + 1), n) : le |> a-flow-lbl(chars, i: le, n, j, ne, out: (out ++ ("(lbl " ++ (@intToString((i + 1)) ++ (" " ++ (@intToString(le) ++ ") "))))))
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : he |> a-call-open(chars, i: he, n, out: ((out ++ ("(flw " ++ (@intToString(j) ++ (" " ++ (@intToString(ne) ++ ") "))))) ++ ("(call " ++ (@intToString(i) ++ (" " ++ (@intToString(he) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-flow-lbl {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string} -> string
 a-flow-lbl = a-ws(chars, i, n)
@@ -141,7 +142,7 @@ a-flow-lbl = a-ws(chars, i, n)
 tor a-flow-pre2 {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string} -> string
 a-flow-pre2 = a-peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : he |> a-call-open(chars, i: he, n, out: ((out ++ ("(flw " ++ (@intToString(j) ++ (" " ++ (@intToString(ne) ++ ") "))))) ++ ("(call " ++ (@intToString(i) ++ (" " ++ (@intToString(he) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-call-open {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-call-open = a-ws(chars, i, n)
@@ -150,7 +151,7 @@ a-call-open = a-ws(chars, i, n)
 tor a-call-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-call-at = a-peek(chars, i, n)
 | open c when c == 40 |> a-args(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-args {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-args = a-ws(chars, i, n)
@@ -187,7 +188,7 @@ tor a-argnext-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-argnext-at = a-peek(chars, i, n)
 | more c when c == 44 |> a-args(chars, i: (i + 1), n, out)
 | close c when c == 41 |> a-postcall(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-postcall {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-postcall = a-hws(chars, i, n)
@@ -205,7 +206,7 @@ a-rb-word = a-ws(chars, i, n)
 tor a-rb-word-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-rb-word-at = a-peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : we |> a-rb-tail(chars, i: we, n, out: (out ++ ("(rbind " ++ (@intToString(i) ++ (" " ++ (@intToString(we) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-rb-tail {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-rb-tail = a-hws(chars, i, n)
@@ -214,7 +215,7 @@ a-rb-tail = a-hws(chars, i, n)
 tor a-rb-tail-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-rb-tail-at = a-peek(chars, i, n)
 | step c when (c == 124) && (chars[(i + 1)] == 62) |> a-arm-step(chars, i: (i + 2), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-armloop {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-armloop = a-ws(chars, i, n)
@@ -232,7 +233,7 @@ a-arm = a-ws(chars, i, n)
 tor a-arm1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-arm1 = a-peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : be |> a-arm-tail(chars, i: be, n, out: (out ++ ("(cont " ++ (@intToString(i) ++ (" " ++ (@intToString(be) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-arm-tail {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-arm-tail = a-hws(chars, i, n)
@@ -245,7 +246,7 @@ a-arm-tok = a-peek(chars, i, n)
 | ctor c when (c == 61) && (chars[(i + 1)] == 62) |> a-arm-ctor(chars, i: (i + 2), n, out)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : we |> a-arm-kw(chars, i, n, out, we)
 | eol c when (c == 10) || (c < 0) |> a-armloop(chars, i, n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-arm-kw {chars: []const i64, i: i64, we: i64, n: i64, out: string} -> string
 a-arm-kw = a-kwwhen(chars, j: i, e: we, n)
@@ -276,7 +277,7 @@ tor a-arm-step2 {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-arm-step2 = a-peek(chars, i, n)
 | jump c when c == 64 |> a-word(chars, i: (i + 1), n) : le |> a-call-open(chars, i: le, n, out: (out ++ ("(step jump " ++ (@intToString((i + 1)) ++ (" " ++ (@intToString(le) ++ ") "))))))
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : se |> a-call-open(chars, i: se, n, out: (out ++ ("(step invoke " ++ (@intToString(i) ++ (" " ++ (@intToString(se) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-arm-ctor {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-arm-ctor = a-ws(chars, i, n)
@@ -285,7 +286,7 @@ a-arm-ctor = a-ws(chars, i, n)
 tor a-arm-ctor1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-arm-ctor1 = a-peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : ce |> a-arm-ctor2(chars, i: ce, n, out, cj: i, ce)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-arm-ctor2 {chars: []const i64, i: i64, n: i64, cj: i64, ce: i64, out: string} -> string
 a-arm-ctor2 = a-ws(chars, i, n)
@@ -302,7 +303,7 @@ a-decl = a-ws(chars, i, n)
 tor a-decl1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-decl1 = a-peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : de |> a-decl-brace(chars, i: de, n, out: (out ++ ("(ev " ++ (@intToString(i) ++ (" " ++ (@intToString(de) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-decl-brace {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-decl-brace = a-ws(chars, i, n)
@@ -311,7 +312,7 @@ a-decl-brace = a-ws(chars, i, n)
 tor a-decl-brace2 {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-decl-brace2 = a-peek(chars, i, n)
 | open c when c == 123 |> a-fields(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-fields {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-fields = a-ws(chars, i, n)
@@ -322,7 +323,7 @@ a-fields-at = a-peek(chars, i, n)
 | close c when c == 125 |> a-decl-ret(chars, i: (i + 1), n, out)
 | var c when c == 124 |> a-variant(chars, i: (i + 1), n, out)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : fe |> a-fld(chars, i, n, out, fe)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-fld {chars: []const i64, i: i64, fe: i64, n: i64, out: string} -> string
 a-fld = a-ws(chars, i: fe, n)
@@ -331,7 +332,7 @@ a-fld = a-ws(chars, i: fe, n)
 tor a-fld2 {chars: []const i64, i: i64, n: i64, fj: i64, fe: i64, out: string} -> string
 a-fld2 = a-peek(chars, i, n)
 | ty k when k == 58 |> a-ws(chars, i: (i + 1), n) : t0 |> a-fld3(chars, i: t0, n, out, fj, fe)
-| bad k -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(k) ++ ") ")))))
+| bad k -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(k) ++ ") "))))))
 
 tor a-fld3 {chars: []const i64, i: i64, n: i64, fj: i64, fe: i64, out: string} -> string
 a-fld3 = a-typend(chars, i, n)
@@ -345,7 +346,7 @@ tor a-fields2-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-fields2-at = a-peek(chars, i, n)
 | more c when c == 44 |> a-fields(chars, i: (i + 1), n, out)
 | close c when c == 125 |> a-decl-ret(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-variant {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-variant = a-ws(chars, i, n)
@@ -354,7 +355,7 @@ a-variant = a-ws(chars, i, n)
 tor a-variant1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-variant1 = a-peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : ve |> a-variant2(chars, i, n, out, ve)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-variant2 {chars: []const i64, i: i64, ve: i64, n: i64, out: string} -> string
 a-variant2 = a-ws(chars, i: ve, n)
@@ -393,7 +394,7 @@ a-branch = a-ws(chars, i, n)
 tor a-branch1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 a-branch1 = a-peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> a-word(chars, i, n) : be |> a-branch-ty(chars, i: be, n, out, bj: i, be)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor a-branch-ty {chars: []const i64, i: i64, n: i64, bj: i64, be: i64, out: string} -> string
 a-branch-ty = a-hws(chars, i, n)
@@ -409,7 +410,7 @@ a-main = a-top(chars, i: 0, n: @len(chars), out: "")
 | done s -> s
 
 tor l-pkb {t: []const i64, i: i64, n: i64} -> i64
-l-pkb -> if(((i < 0) || (i >= n))) (0 - 1) else t[i]
+l-pkb -> (if(((i < 0) || (i >= n))) (0 - 1) else t[i])
 
 tor l-lxt {src: []const i64, i: i64, hi: i64, d: i64, ins: i64} -> i64
 l-lxt = l-pkb(t: src, i, n: hi)
@@ -435,7 +436,7 @@ l-ltma = l-pkb(t: src, i, n: hi)
 tor l-ltmb {src: []const i64, lo: i64, j: i64, n: i64} -> i64
 l-ltmb = l-pkb(t: src, i: j, n)
 | ws c when (j >= lo) && ((c == 32) || ((c == 9) || ((c == 10) || (c == 13)))) |> l-ltmb(src, lo, j: (j - 1), n)
-| dn _ -> (j + 1)
+| dn _ -> ((j + 1))
 
 tor l-ltk1 {src: []const i64, i: i64, hi: i64} -> i64
 l-ltk1 = l-pkb(t: src, i, n: hi)
@@ -453,7 +454,7 @@ l-lty1 = l-pkb(t: src, i, n: hi)
 tor l-ltm2 {src: []const i64, lo: i64, j: i64, n: i64} -> i64
 l-ltm2 = l-pkb(t: src, i: j, n)
 | ws c when (j >= lo) && ((c == 32) || (c == 9)) |> l-ltm2(src, lo, j: (j - 1), n)
-| dn _ -> (j + 1)
+| dn _ -> ((j + 1))
 
 tor l-lln {src: []const i64, i: i64, off: i64, n: i64, l: i64} -> i64
 l-lln = l-pkb(t: src, i, n)
@@ -477,7 +478,7 @@ l-lpub = l-lbs(src, i: j, n)
 | s ls |> l-lpb(src, i: ls, ls, j, n)
 
 tor l-lhx {d: i64} -> string
-l-lhx -> if((d < 10)) @intToString(d) else if((d == 10)) "a" else if((d == 11)) "b" else if((d == 12)) "c" else if((d == 13)) "d" else if((d == 14)) "e" else "f"
+l-lhx -> (if((d < 10)) @intToString(d) else if((d == 10)) "a" else if((d == 11)) "b" else if((d == 12)) "c" else if((d == 13)) "d" else if((d == 14)) "e" else "f")
 
 tor l-escl {src: []const i64, i: i64, hi: i64, out: string} -> string
 l-escl = l-pkb(t: src, i, n: hi)
@@ -539,7 +540,7 @@ l-lclsn = l-pkb(t: mod, i: 0, n: nmod)
 
 tor l-ltail {mod: []const i64, nmod: i64, out: string} -> string
 l-ltail = l-escl(src: mod, i: 0, hi: nmod, out: (out ++ "],\"main_module_name\":\""))
-| done e -> (e ++ "\",\"parts\":[]}")
+| done e -> ((e ++ "\",\"parts\":[]}"))
 
 tor l-limp {rows: []const i64, i: i64, n: i64, src: []const i64, mod: []const i64, out: string, p0: i64, p1: i64} -> string
 l-limp = l-esct(src, lo: rows[((i * 6) + 2)], hi: rows[((i * 6) + 3)], n: @len(src), out: (out ++ ",{\"import_decl\":{\"path\":\""))
@@ -788,3 +789,882 @@ l-ltop = l-pkb(t: rows, i: (i * 6), n)
 tor l-main {src: []const i64, rows: []const i64, mod: []const i64} -> string
 l-main = l-escl(src: mod, i: 0, hi: @len(mod), out: "{\"module_annotations\":[],\"items\":[{\"import_decl\":{\"path\":\"std/compiler\",\"local_name\":\"std.compiler\",\"module\":\"")
 | m e |> l-ltop(rows, i: 0, n: @len(rows), src, mod, out: (e ++ "\"}}"), p0: (0 - 1), p1: (0 - 1), q0: (0 - 1))
+
+tor w-pkb {t: []const i64, i: i64, n: i64} -> i64
+w-pkb -> (if(((i < 0) || (i >= n))) (0 - 1) else t[i])
+
+tor w-wn0 {} -> i64
+w-wn0 -> 0
+
+tor w-wc2 {a: string, b: string} -> string
+w-wc2 -> ((a ++ b))
+
+tor w-wc3 {a: string, b: string, c: string} -> string
+w-wc3 -> ((a ++ (b ++ c)))
+
+tor w-wc5 {a: string, b: string, c: string, d: string, e: string} -> string
+w-wc5 -> ((a ++ (b ++ (c ++ (d ++ e)))))
+
+tor w-wc7 {a: string, b: string, c: string, d: string, e: string, f: string, g: string} -> string
+w-wc7 -> ((a ++ (b ++ (c ++ (d ++ (e ++ (f ++ g)))))))
+
+tor w-wsk {src: []const i64, i: i64, hi: i64} -> i64
+w-wsk = w-pkb(t: src, i, n: hi)
+| ws c when (c == 32) || ((c == 9) || ((c == 10) || (c == 13))) |> w-wsk(src, i: (i + 1), hi)
+| dn _ -> i
+
+tor w-wtb {src: []const i64, lo: i64, j: i64, n: i64} -> i64
+w-wtb = w-pkb(t: src, i: j, n)
+| ws c when (j >= lo) && ((c == 32) || ((c == 9) || ((c == 10) || (c == 13)))) |> w-wtb(src, lo, j: (j - 1), n)
+| dn _ -> ((j + 1))
+
+tor w-wid {c: i64} -> i64
+w-wid -> (if(((((c >= 97) && (c <= 122)) || ((c >= 65) && (c <= 90))) || (((c >= 48) && (c <= 57)) || (c == 95)))) 1 else 0)
+
+tor w-wpe {c: i64} -> i64
+w-wpe = w-wid(c)
+| ok r when r == 1 -> 1
+| mo _ -> (if((((c == 41) || (c == 93)) || ((c == 125) || (c == 34)))) 1 else 0)
+
+tor w-wnat {nsp: []const i64, nn: i64, i: i64, p: i64} -> i64
+w-wnat = w-pkb(t: nsp, i: (2 * i), n: (2 * nn))
+| hit v when (v == p) && (i < nn) -> i
+| nx _ when i < nn |> w-wnat(nsp, nn, i: (i + 1), p)
+| no _ -> ((0 - 1))
+
+tor w-wpix {nsp: []const i64, nn: i64, p: i64} -> i64
+w-wpix = w-pkb(t: nsp, i: p, n: (@len(nsp) - (5 * nn)))
+| k k -> k
+
+tor w-wnm {names: []const string, nsp: []const i64, nn: i64, p: i64} -> string
+w-wnm = w-wpix(nsp, nn, p)
+| ok k when k >= 0 -> (names[k])
+| no _ -> "(bad names)"
+
+tor w-wne {nsp: []const i64, nn: i64, p: i64} -> i64
+w-wne = w-wpix(nsp, nn, p)
+| ok k when k >= 0 -> (nsp[(((@len(nsp) - (5 * nn)) + (2 * k)) + 1)])
+| no _ -> ((0 - 1))
+
+tor w-wst {strs: []const string, ssp: []const i64, ns: i64, p: i64} -> string
+w-wst = w-wnat(nsp: ssp, nn: ns, i: 0, p)
+| ok k when k >= 0 -> (strs[k])
+| no _ -> "(bad strs)"
+
+tor w-weq {src: []const i64, a: i64, b: i64, x: i64, y: i64} -> i64
+w-weq = w-wn0()
+| ln _ when (b - a) != (y - x) -> 0
+| ok _ |> w-weql(src, a, b, x, y, i: 0)
+
+tor w-weql {src: []const i64, a: i64, b: i64, x: i64, y: i64, i: i64} -> i64
+w-weql = w-pkb(t: src, i: (a + i), n: b)
+| dn c when c < 0 -> 1
+| mm c when if(((x + i) < y)) (c != src[(x + i)]) else true -> 0
+| mo _ |> w-weql(src, a, b, x, y, i: (i + 1))
+
+tor w-wnv {src: []const i64, i: i64, hi: i64, v: i64} -> i64
+w-wnv = w-pkb(t: src, i, n: hi)
+| dg c when (c >= 48) && (c <= 57) |> w-wnv(src, i: (i + 1), hi, v: ((v * 10) + (c - 48)))
+| dn _ -> v
+
+tor w-wp10 {n: i64} -> i64
+w-wp10 = w-wn0()
+| z _ when n <= 0 -> 1
+| mo _ |> w-wp10m(n)
+
+tor w-wp10m {n: i64} -> i64
+w-wp10m = w-wp10(n: (n - 1))
+| t t -> ((t * 10))
+
+tor w-wgcd {a: i64, b: i64} -> i64
+w-wgcd = w-wn0()
+| z _ when b == 0 -> a
+| mo _ |> w-wgcd(a: b, b: (a % b))
+
+tor w-wpb {src: []const i64, lo: i64, i: i64} -> i64
+w-wpb = w-pkb(t: src, i: (i - 1), n: i)
+| nd _ when i <= lo -> 0
+| ws c when (c == 32) || ((c == 9) || ((c == 10) || (c == 13))) |> w-wpb(src, lo, i: (i - 1))
+| ch c -> c
+
+tor w-wopa {src: []const i64, lo: i64, hi: i64, i: i64, d: i64, ins: i64} -> i64
+w-wopa = w-wpb(src, lo, i)
+| op p when ((d == 0) && (ins == 0)) && (i < hi) |> w-wopb(src, i, hi, p)
+| no _ -> 0
+
+tor w-wopb {src: []const i64, i: i64, hi: i64, p: i64} -> i64
+w-wopb = w-pkb(t: src, i, n: hi)
+| cm c when (c == 47) && if(((i + 1) < hi)) (src[(i + 1)] == 47) else false -> ((0 - 2))
+| oo c when (c == 124) && if(((i + 1) < hi)) (src[(i + 1)] == 124) else false -> (((12 * 8) + 2))
+| aa c when (c == 38) && if(((i + 1) < hi)) (src[(i + 1)] == 38) else false -> (((11 * 8) + 2))
+| ee c when (c == 61) && if(((i + 1) < hi)) (src[(i + 1)] == 61) else false -> (((5 * 8) + 2))
+| ne c when (c == 33) && if(((i + 1) < hi)) (src[(i + 1)] == 61) else false -> (((6 * 8) + 2))
+| le c when (c == 60) && if(((i + 1) < hi)) (src[(i + 1)] == 61) else false -> (((8 * 8) + 2))
+| ge c when (c == 62) && if(((i + 1) < hi)) (src[(i + 1)] == 61) else false -> (((10 * 8) + 2))
+| cc c when (c == 43) && if(((i + 1) < hi)) (src[(i + 1)] == 43) else false -> (((13 * 8) + 2))
+| lt c when c == 60 -> (((7 * 8) + 1))
+| gt c when c == 62 -> (((9 * 8) + 1))
+| mu c when c == 42 -> (((2 * 8) + 1))
+| dv c when c == 47 -> (((3 * 8) + 1))
+| rm c when c == 37 -> (((4 * 8) + 1))
+| ad c when c == 43 |> w-wope(src, i, hi, p, op: 0)
+| sb c when c == 45 |> w-wops(src, i, hi, p)
+| wo c when c == 111 |> w-wopo(src, i, hi, p)
+| wa c when c == 97 |> w-wopd(src, i, hi, p)
+| no _ -> 0
+
+tor w-wope {src: []const i64, i: i64, hi: i64, p: i64, op: i64} -> i64
+w-wope = w-wpe(c: p)
+| ok v when v == 1 -> (((op * 8) + 1))
+| no _ -> 0
+
+tor w-wops {src: []const i64, i: i64, hi: i64, p: i64} -> i64
+w-wops = w-pkb(t: src, i: (i + 1), n: hi)
+| gl n when (((p >= 97) && (p <= 122)) || (((p >= 65) && (p <= 90)) || (((p >= 48) && (p <= 57)) || (p == 95)))) && ((((n >= 97) && (n <= 122)) || (((n >= 65) && (n <= 90)) || (((n >= 48) && (n <= 57)) || (n == 95)))) || (n == 45)) -> 0
+| op _ |> w-wope(src, i, hi, p, op: 1)
+| no _ -> 0
+
+tor w-wopo {src: []const i64, i: i64, hi: i64, p: i64} -> i64
+w-wopo = w-pkb(t: src, i: (i + 1), n: hi)
+| rr n when n == 114 |> w-wopo2(src, i, hi, p)
+| no _ -> 0
+
+tor w-wopo2 {src: []const i64, i: i64, hi: i64, p: i64} -> i64
+w-wopo2 = w-wpe(c: p)
+| pe v when v == 1 |> w-wopob(src, i, hi)
+| no _ -> 0
+
+tor w-wopob {src: []const i64, i: i64, hi: i64} -> i64
+w-wopob = w-pkb(t: src, i: (i + 2), n: hi)
+| fin c when c < 0 -> (((12 * 8) + 2))
+| ic c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || (((c >= 48) && (c <= 57)) || (c == 95))) -> 0
+| gl c when (c == 45) && if(((i + 3) < hi)) (((src[(i + 3)] >= 97) && (src[(i + 3)] <= 122)) || (((src[(i + 3)] >= 65) && (src[(i + 3)] <= 90)) || (((src[(i + 3)] >= 48) && (src[(i + 3)] <= 57)) || ((src[(i + 3)] == 95) || (src[(i + 3)] == 45))))) else false -> 0
+| ok _ -> (((12 * 8) + 2))
+
+tor w-wopd {src: []const i64, i: i64, hi: i64, p: i64} -> i64
+w-wopd = w-pkb(t: src, i: (i + 1), n: hi)
+| rr n when (n == 110) && if(((i + 2) < hi)) (src[(i + 2)] == 100) else false |> w-wopd2(src, i, hi, p)
+| no _ -> 0
+
+tor w-wopd2 {src: []const i64, i: i64, hi: i64, p: i64} -> i64
+w-wopd2 = w-wpe(c: p)
+| pe v when v == 1 |> w-wopdb(src, i, hi)
+| no _ -> 0
+
+tor w-wopdb {src: []const i64, i: i64, hi: i64} -> i64
+w-wopdb = w-pkb(t: src, i: (i + 3), n: hi)
+| fin c when c < 0 -> (((11 * 8) + 3))
+| ic c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || (((c >= 48) && (c <= 57)) || (c == 95))) -> 0
+| gl c when (c == 45) && if(((i + 4) < hi)) (((src[(i + 4)] >= 97) && (src[(i + 4)] <= 122)) || (((src[(i + 4)] >= 65) && (src[(i + 4)] <= 90)) || (((src[(i + 4)] >= 48) && (src[(i + 4)] <= 57)) || ((src[(i + 4)] == 95) || (src[(i + 4)] == 45))))) else false -> 0
+| ok _ -> (((11 * 8) + 3))
+
+tor w-wprc {o: i64} -> i64
+w-wprc -> (if((o == 12)) 1 else if((o == 11)) 2 else if(((o == 5) || (o == 6))) 3 else if(((o >= 7) && (o <= 10))) 4 else if((o == 13)) 5 else if(((o == 0) || (o == 1))) 6 else 7)
+
+tor w-wopn {o: i64} -> string
+w-wopn -> (if((o == 0)) "add" else if((o == 1)) "sub" else if((o == 2)) "mul" else if((o == 3)) "div" else if((o == 4)) "mod" else if((o == 5)) "eq" else if((o == 6)) "ne" else if((o == 7)) "lt" else if((o == 8)) "le" else if((o == 9)) "gt" else if((o == 10)) "ge" else if((o == 11)) "and" else if((o == 12)) "or" else "concat")
+
+tor w-wfp {src: []const i64, lo: i64, hi: i64, i: i64, d: i64, ins: i64, last: i64, prec: i64} -> i64
+w-wfp = w-wopa(src, lo, hi, i, d, ins)
+| fin o when (i >= hi) || (o == (0 - 2)) -> last
+| hit o when o != 0 |> w-wfp1(src, lo, hi, i, d, ins, last, prec, o)
+| mo _ |> w-wfpn(src, lo, hi, i, d, ins, last, prec)
+
+tor w-wfp1 {src: []const i64, lo: i64, hi: i64, i: i64, d: i64, ins: i64, last: i64, prec: i64, o: i64} -> i64
+w-wfp1 = w-wprc(o: (o / 8))
+| hit q when q == prec |> w-wfpn(src, lo, hi, i, d, ins, last: i, prec)
+| no _ |> w-wfpn(src, lo, hi, i, d, ins, last, prec)
+
+tor w-wfpn {src: []const i64, lo: i64, hi: i64, i: i64, d: i64, ins: i64, last: i64, prec: i64} -> i64
+w-wfpn = w-wfp(src, lo, hi, i: (i + (if(((ins == 1) && (src[i] == 92))) 2 else 1)), d: if(((ins == 0) && (((src[i] == 40) || (src[i] == 91)) || (src[i] == 123)))) (d + 1) else if(((ins == 0) && (((src[i] == 41) || (src[i] == 93)) || (src[i] == 125)))) (d - 1) else d, ins: if(((src[i] == 34) && (ins == 0))) 1 else if(((src[i] == 34) && (ins == 1))) 0 else ins, last, prec)
+| r r -> r
+
+tor w-wmb {src: []const i64, i: i64, hi: i64} -> i64
+w-wmb = w-pkb(t: src, i: (i + 1), n: hi)
+| st _ |> w-wmb1(src, i: (i + 1), hi, d: 1, ins: 0)
+
+tor w-wmb1 {src: []const i64, i: i64, hi: i64, d: i64, ins: i64} -> i64
+w-wmb1 = w-pkb(t: src, i, n: hi)
+| fin c when c < 0 -> hi
+| qo c when (ins == 0) && (c == 34) |> w-wmb1(src, i: (i + 1), hi, d, ins: 1)
+| qc c when (ins == 1) && (c == 34) |> w-wmb1(src, i: (i + 1), hi, d, ins: 0)
+| bs c when (ins == 1) && (c == 92) |> w-wmb1(src, i: (i + 2), hi, d, ins)
+| oo c when (ins == 0) && (((c == 40) || (c == 91)) || (c == 123)) |> w-wmb1(src, i: (i + 1), hi, d: (d + 1), ins)
+| xc c when (ins == 0) && (((c == 41) || (c == 93)) || (c == 125)) |> w-wmbx(src, i, hi, d)
+| mo _ |> w-wmb1(src, i: (i + 1), hi, d, ins)
+
+tor w-wmbx {src: []const i64, i: i64, hi: i64, d: i64} -> i64
+w-wmbx = w-wn0()
+| z _ when (d - 1) == 0 -> i
+| mo _ |> w-wmb1(src, i: (i + 1), hi, d: (d - 1), ins: 0)
+
+tor w-wss {src: []const i64, i: i64, hi: i64} -> i64
+w-wss = w-pkb(t: src, i: (i + 1), n: hi)
+| fin c when c < 0 -> hi
+| qt c when c == 34 -> ((i + 2))
+| bs c when c == 92 |> w-wss(src, i: (i + 2), hi)
+| mo _ |> w-wss(src, i: (i + 1), hi)
+
+tor w-wen {src: []const i64, i: i64, hi: i64} -> i64
+w-wen = w-pkb(t: src, i, n: hi)
+| dg c when (c >= 48) && (c <= 57) |> w-wen(src, i: (i + 1), hi)
+| dt c when (c == 46) && if(((i + 1) < hi)) ((src[(i + 1)] >= 48) && (src[(i + 1)] <= 57)) else false |> w-wen(src, i: (i + 1), hi)
+| dn _ -> i
+
+tor w-wcmx {src: []const i64, i: i64, hi: i64, d: i64, ins: i64, w: i64} -> i64
+w-wcmx = w-pkb(t: src, i, n: hi)
+| fin c when c < 0 -> i
+| cm c when (d == 0) && ((ins == 0) && (c == w)) -> i
+| qo c when (ins == 0) && (c == 34) |> w-wcmx(src, i: (i + 1), hi, d, ins: 1, w)
+| qc c when (ins == 1) && (c == 34) |> w-wcmx(src, i: (i + 1), hi, d, ins: 0, w)
+| bs c when (ins == 1) && (c == 92) |> w-wcmx(src, i: (i + 2), hi, d, ins, w)
+| oo c when (ins == 0) && (((c == 40) || (c == 91)) || (c == 123)) |> w-wcmx(src, i: (i + 1), hi, d: (d + 1), ins, w)
+| xc c when (ins == 0) && (((c == 41) || (c == 93)) || (c == 125)) |> w-wcmx(src, i: (i + 1), hi, d: (d - 1), ins, w)
+| mo _ |> w-wcmx(src, i: (i + 1), hi, d, ins, w)
+
+tor w-wfd {src: []const i64, i: i64, hi: i64, d: i64, ins: i64, last: i64} -> i64
+w-wfd = w-pkb(t: src, i, n: hi)
+| fin c when c < 0 -> last
+| dt c when (d == 0) && ((ins == 0) && (c == 46)) |> w-wfd(src, i: (i + 1), hi, d, ins, last: i)
+| qo c when (ins == 0) && (c == 34) |> w-wfd(src, i: (i + 1), hi, d, ins: 1, last)
+| qc c when (ins == 1) && (c == 34) |> w-wfd(src, i: (i + 1), hi, d, ins: 0, last)
+| bs c when (ins == 1) && (c == 92) |> w-wfd(src, i: (i + 2), hi, d, ins, last)
+| oo c when (ins == 0) && (((c == 40) || (c == 91)) || (c == 123)) |> w-wfd(src, i: (i + 1), hi, d: (d + 1), ins, last)
+| xc c when (ins == 0) && (((c == 41) || (c == 93)) || (c == 125)) |> w-wfd(src, i: (i + 1), hi, d: (d - 1), ins, last)
+| mo _ |> w-wfd(src, i: (i + 1), hi, d, ins, last)
+
+tor w-wty {nm: string} -> i64
+w-wty -> (if(((((nm == "i64") || (nm == "i32")) || ((nm == "i16") || (nm == "i8"))) || ((((nm == "u64") || (nm == "u32")) || ((nm == "u16") || (nm == "u8"))) || (((nm == "f64") || (nm == "f32")) || ((nm == "bool") || (nm == "string")))))) 1 else if((((nm == "program") || (nm == "void")) || (nm == "unit"))) 1 else 0)
+
+tor w-wbl {nm: string} -> i64
+w-wbl -> (if(((((nm == "as") || (nm == "intCast")) || ((nm == "truncate") || (nm == "divTrunc"))) || (((nm == "rem") || (nm == "mod")) || ((nm == "len") || (nm == "intToString"))))) 1 else 0)
+
+tor w-wev {lv: i64, src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wev = w-wfp(src, lo, hi, i: lo, d: 0, ins: 0, last: (0 - 1), prec: lv)
+| hit t when t >= 0 |> w-wspl(lv, src, lo, hi, t, names, nsp, nn, strs, ssp, ns)
+| dn _ |> w-wenx(lv, src, lo, hi, names, nsp, nn, strs, ssp, ns)
+
+tor w-wenx {lv: i64, src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wenx = w-wn0()
+| nx _ when lv < 7 |> w-wev(lv: (lv + 1), src, lo, hi, names, nsp, nn, strs, ssp, ns)
+| bt _ |> w-weu(src, lo, hi, names, nsp, nn, strs, ssp, ns)
+
+tor w-wspl {lv: i64, src: []const i64, lo: i64, hi: i64, t: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wspl = w-wopa(src, lo, hi, i: t, d: 0, ins: 0)
+| oi o when o > 0 |> w-wev(lv, src, lo, hi: t, names, nsp, nn, strs, ssp, ns) : l |> w-wsplr(lv, src, lo: (t + (o - ((o / 8) * 8))), hi, op: (o / 8), l, names, nsp, nn, strs, ssp, ns)
+| no _ -> "(bad expr)"
+
+tor w-wsplr {lv: i64, src: []const i64, lo: i64, hi: i64, op: i64, l: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wsplr = w-wev(lv, src, lo, hi, names, nsp, nn, strs, ssp, ns)
+| r r |> w-wc7(a: "(bin ", b: if((op == 0)) "add" else if((op == 1)) "sub" else if((op == 2)) "mul" else if((op == 3)) "div" else if((op == 4)) "mod" else if((op == 5)) "eq" else if((op == 6)) "ne" else if((op == 7)) "lt" else if((op == 8)) "le" else if((op == 9)) "gt" else if((op == 10)) "ge" else if((op == 11)) "and" else if((op == 12)) "or" else "concat", c: " ", d: l, e: " ", f: r, g: ")")
+
+tor w-weu {src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-weu = w-wsk(src, i: lo, hi)
+| nt i when if((i < hi)) (src[i] == 33) else false |> w-weu1(src, i, hi, op: 1, names, nsp, nn, strs, ssp, ns)
+| ng i when if((i < hi)) (src[i] == 45) else false |> w-weu1(src, i, hi, op: 0, names, nsp, nn, strs, ssp, ns)
+| dn _ |> w-wep(src, lo, hi, names, nsp, nn, strs, ssp, ns)
+
+tor w-weu1 {src: []const i64, i: i64, hi: i64, op: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-weu1 = w-weu(src, lo: (i + 1), hi, names, nsp, nn, strs, ssp, ns)
+| e e -> (if((op == 1)) ("(un not " ++ (e ++ ")")) else ("(un neg " ++ (e ++ ")")))
+
+tor w-wpm {src: []const i64, lo: i64, hi: i64, nsp: []const i64, nn: i64} -> i64
+w-wpm = w-wsk(src, i: lo, hi)
+| lp i when if((i < hi)) (src[i] == 40) else false |> w-wpmc(src, i, hi)
+| lb i when if((i < hi)) (src[i] == 91) else false |> w-wpmc(src, i, hi)
+| lc i when if((i < hi)) (src[i] == 123) else false |> w-wpmc(src, i, hi)
+| st i when if((i < hi)) (src[i] == 34) else false |> w-wss(src, i, hi)
+| at i when if((i < hi)) (src[i] == 64) else false -> hi
+| dg i when if((i < hi)) ((src[i] >= 48) && (src[i] <= 57)) else false |> w-wen(src, i, hi)
+| id i when if((i < hi)) (((src[i] >= 97) && (src[i] <= 122)) || (((src[i] >= 65) && (src[i] <= 90)) || (src[i] == 95))) else false |> w-wpmv(src, i, hi, nsp, nn)
+| no _ -> hi
+
+tor w-wpmc {src: []const i64, i: i64, hi: i64} -> i64
+w-wpmc = w-wmb(src, i, hi)
+| m m -> (if((m < hi)) (m + 1) else hi)
+
+tor w-wpmv {src: []const i64, i: i64, hi: i64, nsp: []const i64, nn: i64} -> i64
+w-wpmv = w-wne(nsp, nn, p: i)
+| e e |> w-wpmv1(src, i, e, hi)
+
+tor w-wpmv1 {src: []const i64, i: i64, e: i64, hi: i64} -> i64
+w-wpmv1 = w-wn0()
+| iff _ when (e == (i + 2)) && if(((i + 1) < hi)) ((src[i] == 105) && (src[(i + 1)] == 102)) else false -> hi
+| nm _ |> w-wpmv2(src, e, hi)
+
+tor w-wpmv2 {src: []const i64, e: i64, hi: i64} -> i64
+w-wpmv2 = w-wsk(src, i: e, hi)
+| ca j when if((j < hi)) (src[j] == 40) else false |> w-wpmc(src, i: j, hi)
+| dn _ -> e
+
+tor w-wep {src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep = w-wpm(src, lo, hi, nsp, nn)
+| pe p |> w-wem(src, lo, hi: p, names, nsp, nn, strs, ssp, ns) : a |> w-wep1(src, i: p, hi, acc: a, names, nsp, nn, strs, ssp, ns)
+
+tor w-wep1 {src: []const i64, i: i64, hi: i64, acc: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep1 = w-wsk(src, i, hi)
+| dt j when if((j < hi)) (src[j] == 46) else false |> w-wep1f(src, j, hi, acc, names, nsp, nn, strs, ssp, ns)
+| ix j when if((j < hi)) (src[j] == 91) else false |> w-wep1i(src, j, hi, acc, names, nsp, nn, strs, ssp, ns)
+| ca j when if((j < hi)) (src[j] == 40) else false -> "(bad expr-call)"
+| ws j when if((j < hi)) ((src[j] == 32) || ((src[j] == 9) || ((src[j] == 10) || (src[j] == 13)))) else false |> w-wep1(src, i: (j + 1), hi, acc, names, nsp, nn, strs, ssp, ns)
+| dn _ -> acc
+
+tor w-wep1f {src: []const i64, j: i64, hi: i64, acc: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep1f = w-wne(nsp, nn, p: (j + 1))
+| ok e when e > (j + 1) |> w-wnm(names, nsp, nn, p: (j + 1)) : nm |> w-wep1(src, i: e, hi, acc: ("(field " ++ (acc ++ (" " ++ (nm ++ ")")))), names, nsp, nn, strs, ssp, ns)
+| no _ -> "(bad expr)"
+
+tor w-wep1i {src: []const i64, j: i64, hi: i64, acc: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep1i = w-wsk(src, i: (j + 1), hi)
+| ty k |> w-wep1t(src, j, k, hi, acc, names, nsp, nn, strs, ssp, ns)
+
+tor w-wep1t {src: []const i64, j: i64, k: i64, hi: i64, acc: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep1t = w-wnm(names, nsp, nn, p: k)
+| an nm |> w-wty(nm) : t |> w-wep1u(src, j, k, hi, acc, t, names, nsp, nn, strs, ssp, ns)
+
+tor w-wep1u {src: []const i64, j: i64, k: i64, hi: i64, acc: string, t: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep1u = w-wne(nsp, nn, p: k)
+| sk e when (t == 1) && (e > k) |> w-wep1v(src, j, e, hi, acc, names, nsp, nn, strs, ssp, ns)
+| ix _ |> w-wmb(src, i: j, hi) : m |> w-wev(lv: 1, src, lo: (j + 1), hi: m, names, nsp, nn, strs, ssp, ns) : x |> w-wep1w(src, m, hi, acc, x, names, nsp, nn, strs, ssp, ns)
+
+tor w-wep1v {src: []const i64, j: i64, e: i64, hi: i64, acc: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep1v = w-wsk(src, i: e, hi)
+| rb q when if((q < hi)) (src[q] == 93) else false |> w-wep1(src, i: (q + 1), hi, acc, names, nsp, nn, strs, ssp, ns)
+| ix _ |> w-wmb(src, i: j, hi) : m |> w-wev(lv: 1, src, lo: (j + 1), hi: m, names, nsp, nn, strs, ssp, ns) : x |> w-wep1w(src, m, hi, acc, x, names, nsp, nn, strs, ssp, ns)
+
+tor w-wep1w {src: []const i64, m: i64, hi: i64, acc: string, x: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wep1w = w-wc5(a: "(index ", b: acc, c: " ", d: x, e: ")")
+| a a |> w-wep1(src, i: (m + 1), hi, acc: a, names, nsp, nn, strs, ssp, ns)
+
+tor w-wem {src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wem = w-wsk(src, i: lo, hi)
+| lp i when if((i < hi)) (src[i] == 40) else false |> w-wemg(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| lb i when if((i < hi)) (src[i] == 91) else false |> w-wema(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| lc i when if((i < hi)) (src[i] == 123) else false |> w-wemc(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| at i when if((i < hi)) (src[i] == 64) else false |> w-wemb(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| st i when if((i < hi)) (src[i] == 34) else false |> w-wems(src, i, strs, ssp, ns)
+| dg i when if((i < hi)) ((src[i] >= 48) && (src[i] <= 57)) else false |> w-wnum(src, lo: i, hi, names, nsp, nn, strs, ssp, ns) : x |> w-wc3(a: "(lit ", b: x, c: ")")
+| id i when if((i < hi)) (((src[i] >= 97) && (src[i] <= 122)) || (((src[i] >= 65) && (src[i] <= 90)) || (src[i] == 95))) else false |> w-wemv(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| no _ -> "(bad expr)"
+
+tor w-wems {src: []const i64, i: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wems = w-wst(strs, ssp, ns, p: i)
+| s s |> w-wc5(a: "(lit (str ", b: "\"", c: s, d: "\"", e: "))")
+
+tor w-wemg {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemg = w-wmb(src, i, hi)
+| m m |> w-wev(lv: 1, src, lo: (i + 1), hi: m, names, nsp, nn, strs, ssp, ns)
+
+tor w-wema {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wema = w-wmb(src, i, hi)
+| m m |> w-weal(src, i: (i + 1), hi: m, out: "(lit (arr", names, nsp, nn, strs, ssp, ns) : t |> w-wc3(a: t, b: ")", c: ")")
+
+tor w-weal {src: []const i64, i: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-weal = w-wsk(src, i, hi)
+| dn j when j >= hi -> out
+| el j |> w-wcmx(src, i: j, hi, d: 0, ins: 0, w: 44) : c |> w-weal1(src, j, c, hi, out, names, nsp, nn, strs, ssp, ns)
+
+tor w-weal1 {src: []const i64, j: i64, c: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-weal1 = w-wel(src, lo: j, hi: c, names, nsp, nn, strs, ssp, ns)
+| x x |> w-wc3(a: out, b: " ", c: x) : o |> w-weal(src, i: (c + 1), hi, out: o, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemc {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemc = w-wmb(src, i, hi)
+| m m |> w-wecl(src, i: (i + 1), hi: m, out: "(lit (cell", names, nsp, nn, strs, ssp, ns) : t |> w-wc3(a: t, b: ")", c: ")")
+
+tor w-wecl {src: []const i64, i: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wecl = w-wsk(src, i, hi)
+| dn j when j >= hi -> out
+| f j |> w-wcmx(src, i: j, hi, d: 0, ins: 0, w: 58) : c |> w-wecl1(src, j, c, hi, out, names, nsp, nn, strs, ssp, ns)
+
+tor w-wecl1 {src: []const i64, j: i64, c: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wecl1 = w-wcmx(src, i: (c + 1), hi, d: 0, ins: 0, w: 44)
+| m m |> w-wecl2(src, j, c, m, hi, out, names, nsp, nn, strs, ssp, ns)
+
+tor w-wecl2 {src: []const i64, j: i64, c: i64, m: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wecl2 = w-wnm(names, nsp, nn, p: j)
+| fn nm |> w-wel(src, lo: (c + 1), hi: m, names, nsp, nn, strs, ssp, ns) : x |> w-wecl3(src, m, hi, out, nm, x, names, nsp, nn, strs, ssp, ns)
+
+tor w-wecl3 {src: []const i64, m: i64, hi: i64, out: string, nm: string, x: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wecl3 = w-wc5(a: out, b: " (", c: nm, d: " ", e: x)
+| o o |> w-wc3(a: o, b: ")", c: "") : p |> w-wecl(src, i: (m + 1), hi, out: p, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemb {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemb = w-wnm(names, nsp, nn, p: (i + 1))
+| bn nm |> w-wbl(nm) : b |> w-wemb1(src, i, hi, nm, b, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemb1 {src: []const i64, i: i64, hi: i64, nm: string, b: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemb1 = w-wn0()
+| no _ when b == 0 -> "(bad builtin)"
+| ok _ |> w-wne(nsp, nn, p: (i + 1)) : e |> w-wemb2(src, e, hi, nm, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemb2 {src: []const i64, e: i64, hi: i64, nm: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemb2 = w-wsk(src, i: e, hi)
+| lp j when if((j < hi)) (src[j] == 40) else false |> w-wmb(src, i: j, hi) : m |> w-wc3(a: "(builtin ", b: nm, c: "") : p |> w-webal(src, i: (j + 1), hi: m, out: p, names, nsp, nn, strs, ssp, ns) : t |> w-wc2(a: t, b: ")")
+| no _ -> "(bad builtin)"
+
+tor w-webal {src: []const i64, i: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-webal = w-wsk(src, i, hi)
+| dn j when j >= hi -> out
+| el j |> w-wcmx(src, i: j, hi, d: 0, ins: 0, w: 44) : v |> w-webal1(src, j, v, hi, out, names, nsp, nn, strs, ssp, ns)
+
+tor w-webal1 {src: []const i64, j: i64, v: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-webal1 = w-wcmx(src, i: j, hi, d: 0, ins: 0, w: 58)
+| na c when c < v |> w-wc3(a: out, b: " ", c: "(bad builtin-arg)") : o |> w-webal(src, i: (v + 1), hi, out: o, names, nsp, nn, strs, ssp, ns)
+| ok _ |> w-wev(lv: 1, src, lo: j, hi: v, names, nsp, nn, strs, ssp, ns) : x |> w-wc3(a: out, b: " ", c: x) : o |> w-webal(src, i: (v + 1), hi, out: o, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemv {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemv = w-wnm(names, nsp, nn, p: i)
+| iff nm when nm == "if" |> w-wemi(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| tru nm when nm == "true" -> "(lit (bool true))"
+| fls nm when nm == "false" -> "(lit (bool false))"
+| kwd nm when ((nm == "else") || (nm == "when")) || ((nm == "or") || (nm == "and")) -> "(bad expr)"
+| var nm |> w-wemvd(src, i, hi, nm, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemvd {src: []const i64, i: i64, hi: i64, nm: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemvd = w-wne(nsp, nn, p: i)
+| e e |> w-wsk(src, i: e, hi) : j |> w-wemve(src, j, hi, nm)
+
+tor w-wemve {src: []const i64, j: i64, hi: i64, nm: string} -> string
+w-wemve = w-wn0()
+| ca _ when if((j < hi)) (src[j] == 40) else false -> "(bad expr-call)"
+| dn _ |> w-wc3(a: "(var ", b: nm, c: ")")
+
+tor w-wemi {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemi = w-wne(nsp, nn, p: i)
+| e e |> w-wsk(src, i: e, hi) : j |> w-wemi1(src, j, hi, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemi1 {src: []const i64, j: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemi1 = w-pkb(t: src, i: j, n: hi)
+| lp c when c == 40 |> w-wmb(src, i: j, hi) : m |> w-wemi2(src, j, m, hi, names, nsp, nn, strs, ssp, ns)
+| no _ -> "(bad if)"
+
+tor w-wemi2 {src: []const i64, j: i64, m: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemi2 = w-wev(lv: 1, src, lo: (j + 1), hi: m, names, nsp, nn, strs, ssp, ns)
+| c c |> w-wfel(src, i: (m + 1), hi, d: 0, ins: 0, ifd: 0) : el |> w-wemi3(src, m, el, c, hi, names, nsp, nn, strs, ssp, ns)
+
+tor w-wemi3 {src: []const i64, m: i64, el: i64, c: string, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wemi3 = w-wev(lv: 1, src, lo: (m + 1), hi: el, names, nsp, nn, strs, ssp, ns)
+| t t |> w-wev(lv: 1, src, lo: (el + 4), hi, names, nsp, nn, strs, ssp, ns) : fv |> w-wc7(a: "(cond ", b: c, c: " ", d: t, e: " ", f: fv, g: ")")
+
+tor w-wtek {src: []const i64, i: i64, hi: i64, d: i64, ins: i64} -> i64
+w-wtek = w-pkb(t: src, i, n: hi)
+| fin c when c < 0 -> ((0 - 1))
+| top _ when (d != 0) || (ins != 0) -> 0
+| el c when c == 101 |> w-wtek1(src, i, hi)
+| fi c when c == 105 |> w-wtek2(src, i, hi)
+| mo _ -> 0
+
+tor w-wtek1 {src: []const i64, i: i64, hi: i64} -> i64
+w-wtek1 = w-wbd(src, pv: (i - 1), nx: (i + 4), hi)
+| nb b when b == 0 -> 0
+| ls _ |> w-wtek1b(src, i, hi)
+
+tor w-wtek1b {src: []const i64, i: i64, hi: i64} -> i64
+w-wtek1b = w-pkb(t: src, i: (i + 1), n: hi)
+| ls c when (c == 108) && if(((i + 3) < hi)) ((src[(i + 2)] == 115) && (src[(i + 3)] == 101)) else false -> 1
+| no _ -> 0
+
+tor w-wtek2 {src: []const i64, i: i64, hi: i64} -> i64
+w-wtek2 = w-wbd(src, pv: (i - 1), nx: (i + 2), hi)
+| nb b when b == 0 -> 0
+| ff _ |> w-wtek2b(src, i, hi)
+
+tor w-wtek2b {src: []const i64, i: i64, hi: i64} -> i64
+w-wtek2b = w-pkb(t: src, i: (i + 1), n: hi)
+| ff c when c == 102 -> 2
+| no _ -> 0
+
+tor w-wbd {src: []const i64, pv: i64, nx: i64, hi: i64} -> i64
+w-wbd = w-pkb(t: src, i: pv, n: hi)
+| pi c when (((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || (((c >= 48) && (c <= 57)) || (c == 95)))) || (c == 45) -> 0
+| po _ |> w-wbd1(src, nx, hi)
+
+tor w-wbd1 {src: []const i64, nx: i64, hi: i64} -> i64
+w-wbd1 = w-pkb(t: src, i: nx, n: hi)
+| ni c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || (((c >= 48) && (c <= 57)) || (c == 95))) -> 0
+| gl c when (c == 45) && if(((nx + 1) < hi)) (((src[(nx + 1)] >= 97) && (src[(nx + 1)] <= 122)) || (((src[(nx + 1)] >= 65) && (src[(nx + 1)] <= 90)) || (((src[(nx + 1)] >= 48) && (src[(nx + 1)] <= 57)) || ((src[(nx + 1)] == 95) || (src[(nx + 1)] == 45))))) else false -> 0
+| ok _ -> 1
+
+tor w-wfel {src: []const i64, i: i64, hi: i64, d: i64, ins: i64, ifd: i64} -> i64
+w-wfel = w-wtek(src, i, hi, d, ins)
+| fin r when r < 0 -> hi
+| el r when (r == 1) && (ifd == 0) -> i
+| es r when r == 1 |> w-wfel(src, i: (i + 4), hi, d, ins, ifd: (ifd - 1))
+| fi r when r == 2 |> w-wfel(src, i: (i + 2), hi, d, ins, ifd: (ifd + 1))
+| mo _ |> w-wfeln(src, i, hi, d, ins, ifd)
+
+tor w-wfeln {src: []const i64, i: i64, hi: i64, d: i64, ins: i64, ifd: i64} -> i64
+w-wfeln = w-wfel(src, i: (i + (if(((ins == 1) && (src[i] == 92))) 2 else 1)), hi, d: if(((ins == 0) && (((src[i] == 40) || (src[i] == 91)) || (src[i] == 123)))) (d + 1) else if(((ins == 0) && (((src[i] == 41) || (src[i] == 93)) || (src[i] == 125)))) (d - 1) else d, ins: if(((src[i] == 34) && (ins == 0))) 1 else if(((src[i] == 34) && (ins == 1))) 0 else ins, ifd)
+| r r -> r
+
+tor w-wnum {src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wnum = w-wen(src, i: lo, hi)
+| e e |> w-wfd(src, i: lo, hi: e, d: 0, ins: 0, last: (0 - 1)) : d |> w-wnum1(src, lo, e, d)
+
+tor w-wnum1 {src: []const i64, lo: i64, e: i64, d: i64} -> string
+w-wnum1 = w-wnv(src, i: lo, hi: e, v: 0)
+| w v when d < 0 |> w-wc3(a: "(int ", b: @intToString(v), c: ")")
+| fw v |> w-wnum2(src, e, d, w: v)
+
+tor w-wnum2 {src: []const i64, e: i64, d: i64, w: i64} -> string
+w-wnum2 = w-wnv(src, i: (d + 1), hi: e, v: 0)
+| f f |> w-wp10(n: (e - (d + 1))) : dn |> w-wnum3(e, d, w, f, dn)
+
+tor w-wnum3 {e: i64, d: i64, w: i64, f: i64, dn: i64} -> string
+w-wnum3 = w-wgcd(a: f, b: dn)
+| g g when g > 0 |> w-wc5(a: "(float ", b: @intToString(((w * (dn / g)) + (f / g))), c: " ", d: @intToString((dn / g)), e: ")")
+| z _ -> "(bad float)"
+
+tor w-wel {src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wel = w-wsk(src, i: lo, hi)
+| lp i when if((i < hi)) (src[i] == 40) else false |> w-welg(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| lb i when if((i < hi)) (src[i] == 91) else false |> w-wela(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| lc i when if((i < hi)) (src[i] == 123) else false |> w-welc(src, i, hi, names, nsp, nn, strs, ssp, ns)
+| st i when if((i < hi)) (src[i] == 34) else false |> w-wst(strs, ssp, ns, p: i) : s |> w-wc5(a: "(str ", b: "\"", c: s, d: "\"", e: ")")
+| dg i when if((i < hi)) ((src[i] >= 48) && (src[i] <= 57)) else false |> w-wnum(src, lo: i, hi, names, nsp, nn, strs, ssp, ns)
+| tr i when if((i < hi)) (src[i] == 116) else false |> w-wel1(src, i, hi, nm: "true", names, nsp, nn)
+| fa i when if((i < hi)) (src[i] == 102) else false |> w-wel1(src, i, hi, nm: "false", names, nsp, nn)
+| no _ -> "(bad lit)"
+
+tor w-wel1 {src: []const i64, i: i64, hi: i64, nm: string, names: []const string, nsp: []const i64, nn: i64} -> string
+w-wel1 = w-wnm(names, nsp, nn, p: i)
+| t v when v == nm |> w-wc3(a: "(bool ", b: nm, c: ")")
+| no _ -> "(bad lit)"
+
+tor w-welg {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-welg = w-wmb(src, i, hi)
+| m m |> w-wel(src, lo: (i + 1), hi: m, names, nsp, nn, strs, ssp, ns)
+
+tor w-wela {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wela = w-wmb(src, i, hi)
+| m m |> w-well(src, i: (i + 1), hi: m, out: "(arr", names, nsp, nn, strs, ssp, ns) : t |> w-wc2(a: t, b: ")")
+
+tor w-well {src: []const i64, i: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-well = w-wsk(src, i, hi)
+| dn j when j >= hi -> out
+| el j |> w-wcmx(src, i: j, hi, d: 0, ins: 0, w: 44) : c |> w-well1(src, j, c, hi, out, names, nsp, nn, strs, ssp, ns)
+
+tor w-well1 {src: []const i64, j: i64, c: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-well1 = w-wel(src, lo: j, hi: c, names, nsp, nn, strs, ssp, ns)
+| x x |> w-wc3(a: out, b: " ", c: x) : o |> w-well(src, i: (c + 1), hi, out: o, names, nsp, nn, strs, ssp, ns)
+
+tor w-welc {src: []const i64, i: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-welc = w-wmb(src, i, hi)
+| m m |> w-welcl(src, i: (i + 1), hi: m, out: "(cell", names, nsp, nn, strs, ssp, ns) : t |> w-wc2(a: t, b: ")")
+
+tor w-welcl {src: []const i64, i: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-welcl = w-wsk(src, i, hi)
+| dn j when j >= hi -> out
+| f j |> w-wcmx(src, i: j, hi, d: 0, ins: 0, w: 58) : c |> w-welcl1(src, j, c, hi, out, names, nsp, nn, strs, ssp, ns)
+
+tor w-welcl1 {src: []const i64, j: i64, c: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-welcl1 = w-wcmx(src, i: (c + 1), hi, d: 0, ins: 0, w: 44)
+| m m |> w-welcl2(src, j, c, m, hi, out, names, nsp, nn, strs, ssp, ns)
+
+tor w-welcl2 {src: []const i64, j: i64, c: i64, m: i64, hi: i64, out: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-welcl2 = w-wnm(names, nsp, nn, p: j)
+| fn nm |> w-wel(src, lo: (c + 1), hi: m, names, nsp, nn, strs, ssp, ns) : x |> w-welcl3(src, m, hi, out, nm, x, names, nsp, nn, strs, ssp, ns)
+
+tor w-welcl3 {src: []const i64, m: i64, hi: i64, out: string, nm: string, x: string, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-welcl3 = w-wc5(a: out, b: " (", c: nm, d: " ", e: x)
+| o o |> w-wc3(a: o, b: ")", c: "") : p |> w-welcl(src, i: (m + 1), hi, out: p, names, nsp, nn, strs, ssp, ns)
+
+tor w-wrk {rows: []const i64, i: i64, nr: i64} -> i64
+w-wrk = w-pkb(t: rows, i, n: (nr * 6))
+| k k -> k
+
+tor w-wevf {nsp: []const i64, nn: i64, lo: i64} -> i64
+w-wevf = w-wpix(nsp, nn, p: lo)
+| ok k when k >= 0 -> (nsp[((@len(nsp) - (3 * nn)) + k)])
+| no _ -> ((0 - 1))
+
+tor w-wdpe {nsp: []const i64, nn: i64, rows: []const i64, i: i64} -> i64
+w-wdpe = w-wpix(nsp, nn, p: rows[(i + 2)])
+| ok k when k >= 0 -> (if((nsp[((@len(nsp) - nn) + k)] > 1)) 1 else 0)
+| no _ -> 0
+
+tor w-whi {nsp: []const i64, nn: i64, lo: i64} -> i64
+w-whi = w-wpix(nsp, nn, p: lo)
+| ok k when k >= 0 -> (nsp[((@len(nsp) - (2 * nn)) + k)])
+| no _ -> 0
+
+tor w-wfdn {rows: []const i64, evi: i64, i: i64, nr: i64} -> i64
+w-wfdn = w-pkb(t: rows, i: (evi + (i * 6)), n: (nr * 6))
+| fn k when k != 2 -> i
+| mo _ |> w-wfdn(rows, evi, i: (i + 1), nr)
+
+tor w-wfdh {rows: []const i64, evi: i64, src: []const i64, lo: i64, hi: i64, i: i64, nr: i64} -> i64
+w-wfdh = w-pkb(t: rows, i: (evi + (i * 6)), n: (nr * 6))
+| fn k when k != 2 -> 0
+| mo _ |> w-wfdh1(rows, evi, src, lo, hi, i, nr)
+
+tor w-wfdh1 {rows: []const i64, evi: i64, src: []const i64, lo: i64, hi: i64, i: i64, nr: i64} -> i64
+w-wfdh1 = w-weq(src, a: rows[((evi + (i * 6)) + 2)], b: rows[((evi + (i * 6)) + 3)], x: lo, y: hi)
+| eq v when v == 1 -> 1
+| no _ |> w-wfdh(rows, evi, src, lo, hi, i: (i + 1), nr)
+
+tor w-wbr0 {rows: []const i64, evi: i64, i: i64, nr: i64} -> i64
+w-wbr0 = w-pkb(t: rows, i: (evi + (i * 6)), n: (nr * 6))
+| sk k when (k == 2) || (k == 3) |> w-wbr0(rows, evi, i: (i + 1), nr)
+| mo _ -> ((evi + (i * 6)))
+
+tor w-wbrn {rows: []const i64, evi: i64, nr: i64} -> i64
+w-wbrn = w-wbr0(rows, evi, i: 1, nr)
+| b b |> w-wbrn1(rows, b, i: 0, nr)
+
+tor w-wbrn1 {rows: []const i64, b: i64, i: i64, nr: i64} -> i64
+w-wbrn1 = w-pkb(t: rows, i: (b + (i * 6)), n: (nr * 6))
+| fn k when k != 4 -> i
+| mo _ |> w-wbrn1(rows, b, i: (i + 1), nr)
+
+tor w-wbrh {rows: []const i64, evi: i64, src: []const i64, lo: i64, hi: i64, nr: i64} -> i64
+w-wbrh = w-wbr0(rows, evi, i: 1, nr)
+| b b |> w-wbrh1(rows, b, src, lo, hi, i: 0, nr)
+
+tor w-wbrh1 {rows: []const i64, b: i64, src: []const i64, lo: i64, hi: i64, i: i64, nr: i64} -> i64
+w-wbrh1 = w-pkb(t: rows, i: (b + (i * 6)), n: (nr * 6))
+| fn k when k != 4 -> 0
+| mo _ |> w-wbrh2(rows, b, src, lo, hi, i, nr)
+
+tor w-wbrh2 {rows: []const i64, b: i64, src: []const i64, lo: i64, hi: i64, i: i64, nr: i64} -> i64
+w-wbrh2 = w-weq(src, a: rows[((b + (i * 6)) + 2)], b: rows[((b + (i * 6)) + 3)], x: lo, y: hi)
+| eq v when v == 1 -> 1
+| no _ |> w-wbrh1(rows, b, src, lo, hi, i: (i + 1), nr)
+
+tor w-wrp {k: i64} -> string
+w-wrp = w-wn0()
+| z _ when k <= 0 -> ""
+| mo _ |> w-wrp1(k)
+
+tor w-wrp1 {k: i64} -> string
+w-wrp1 = w-wrp(k: (k - 1))
+| t t |> w-wc2(a: ")", b: t)
+
+tor w-wclo {inf: i64, iopen: i64, curk: i64, dep: i64} -> string
+w-wclo = w-wn0()
+| z _ when inf == 0 -> ""
+| y _ |> w-wcloa(iopen, curk, dep)
+
+tor w-wcloa {iopen: i64, curk: i64, dep: i64} -> string
+w-wcloa = w-wrp(k: (iopen + (if((curk != 0)) (1 + (dep * 2)) else 0)))
+| a a |> w-wc3(a: if((curk == (0 - 1))) " (node terminal)" else "", b: a, c: "))")
+
+tor w-wcls {iopen: i64, curk: i64, dep: i64} -> string
+w-wcls = w-wn0()
+| z _ when curk == 0 |> w-wrp(k: iopen)
+| tm _ when curk == (0 - 1) |> w-wrp(k: ((iopen + 1) + (dep * 2))) : p |> w-wc2(a: " (node terminal)", b: p)
+| y _ |> w-wrp(k: ((iopen + 1) + (dep * 2)))
+
+tor w-wex {src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
+w-wex = w-wtb(src, lo, j: (hi - 1), n: hi)
+| b b |> w-wsk(src, i: lo, hi: b) : a |> w-wev(lv: 1, src, lo: a, hi: b, names, nsp, nn, strs, ssp, ns)
+
+tor w-wpun {src: []const i64, lo: i64, hi: i64, nsp: []const i64, nn: i64} -> i64
+w-wpun = w-wtb(src, lo, j: (hi - 1), n: hi)
+| b b |> w-wsk(src, i: lo, hi: b) : a |> w-wpun1(src, a, b, nsp, nn)
+
+tor w-wpun1 {src: []const i64, a: i64, b: i64, nsp: []const i64, nn: i64} -> i64
+w-wpun1 = w-wne(nsp, nn, p: a)
+| pu e when e == b -> a
+| fd _ |> w-wfd(src, i: a, hi: b, d: 0, ins: 0, last: (0 - 1)) : f |> w-wpun2(src, b, f, nsp, nn)
+
+tor w-wpun2 {src: []const i64, b: i64, f: i64, nsp: []const i64, nn: i64} -> i64
+w-wpun2 = w-wne(nsp, nn, p: (f + 1))
+| ok e when (f >= 0) && (e == b) |> w-wpun3(src, f)
+| no _ -> ((0 - 1))
+
+tor w-wpun3 {src: []const i64, f: i64} -> i64
+w-wpun3 = w-pkb(t: src, i: (f - 1), n: @len(src))
+| a c |> w-wpun3b(c, f)
+
+tor w-wpun3b {c: i64, f: i64} -> i64
+w-wpun3b = w-wpe(c)
+| ok _ -> ((f + 1))
+| no _ -> ((0 - 1))
+
+tor w-wdk {nsp: []const i64, nn: i64, ltk: i64, ltl: i64, lth: i64, htl: i64, hth: i64, fevi: i64} -> i64
+w-wdk = w-wn0()
+| iv _ when (ltk == 1) || (ltk == 2) |> w-wevf(nsp, nn, lo: ltl)
+| jp _ when ltk == 3 |> w-wevf(nsp, nn, lo: htl)
+| ow _ -> fevi
+
+tor w-warg {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64, i: i64, ltk: i64, ltl: i64, lth: i64, htl: i64, hth: i64, argi: i64, fevi: i64} -> string
+w-warg = w-wex(src, lo: rows[(i + 4)], hi: rows[(i + 5)], names, nsp, nn, strs, ssp, ns)
+| e e |> w-wdk(nsp, nn, ltk, ltl, lth, htl, hth, fevi) : d |> w-warg1(rows, nr, src, names, nsp, nn, i, d, argi, e)
+
+tor w-warg1 {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, d: i64, argi: i64, e: string} -> string
+w-warg1 = w-wn0()
+| na _ when rows[(i + 2)] > 0 |> w-warg2(rows, nr, src, names, nsp, nn, i, d, e)
+| po _ |> w-wpun(src, lo: rows[(i + 4)], hi: rows[(i + 5)], nsp, nn) : p |> w-warg3(rows, nr, src, names, nsp, nn, i, d, argi, e, p)
+
+tor w-warg2 {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, d: i64, e: string} -> string
+w-warg2 = w-wfdh(rows, evi: d, src, lo: rows[(i + 2)], hi: rows[(i + 3)], i: 1, nr)
+| h h when (d < 0) || (h == 1) |> w-warg2a(rows, names, nsp, nn, i, e)
+| no _ -> "(bad decl-param)"
+
+tor w-warg2a {rows: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, e: string} -> string
+w-warg2a = w-wnm(names, nsp, nn, p: rows[(i + 2)])
+| nm nm |> w-wc5(a: " (", b: nm, c: " ", d: e, e: ")")
+
+tor w-warg3 {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, d: i64, argi: i64, e: string, p: i64} -> string
+w-warg3 = w-wne(nsp, nn, p)
+| pe pe |> w-warg3a(rows, nr, src, names, nsp, nn, i, d, argi, e, p, pe)
+
+tor w-warg3a {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, d: i64, argi: i64, e: string, p: i64, pe: i64} -> string
+w-warg3a = w-wfdh(rows, evi: d, src, lo: p, hi: pe, i: 1, nr)
+| h h when (p >= 0) && ((d < 0) || (h == 1)) |> w-wnm(names, nsp, nn, p) : nm |> w-wc5(a: " (", b: nm, c: " ", d: e, e: ")")
+| ix _ |> w-warg4(rows, nr, src, names, nsp, nn, d, argi, e)
+
+tor w-warg4 {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, d: i64, argi: i64, e: string} -> string
+w-warg4 = w-wn0()
+| y _ when d >= 0 |> w-warg5(rows, nr, src, names, nsp, nn, d, argi, e)
+| n _ -> "(bad arg-name)"
+
+tor w-warg5 {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, d: i64, argi: i64, e: string} -> string
+w-warg5 = w-wfdn(rows, evi: d, i: 1, nr)
+| n n when (argi + 1) < n |> w-wnm(names, nsp, nn, p: rows[((d + ((argi + 1) * 6)) + 2)]) : nm |> w-wc5(a: " (", b: nm, c: " ", d: e, e: ")")
+| no _ -> "(bad arg-name)"
+
+tor w-whev {nsp: []const i64, nn: i64, rows: []const i64, i: i64} -> string
+w-whev = w-wdpe(nsp, nn, rows, i)
+| d d -> (if((d == 1)) " (bad dup-tor)" else "")
+
+tor w-whim {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64, i: i64} -> string
+w-whim = w-wex(src, lo: rows[(i + 4)], hi: rows[(i + 5)], names, nsp, nn, strs, ssp, ns)
+| e e |> w-wnm(names, nsp, nn, p: rows[(i + 2)]) : nm |> w-wc7(a: " (def ", b: nm, c: " (bare ", d: e, e: "))", f: "", g: "")
+
+tor w-whfw {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, plbl: i64} -> string
+w-whfw = w-wnm(names, nsp, nn, p: rows[(i + 2)])
+| nm nm |> w-whfw1(names, nsp, nn, plbl, nm)
+
+tor w-whfw1 {names: []const string, nsp: []const i64, nn: i64, plbl: i64, nm: string} -> string
+w-whfw1 = w-wn0()
+| lb _ when plbl >= 0 |> w-wnm(names, nsp, nn, p: plbl) : lb |> w-wc5(a: " (def ", b: nm, c: " (subflow", d: (" (label " ++ (lb ++ ")")), e: "")
+| nl _ |> w-wc5(a: " (def ", b: nm, c: " (subflow", d: "", e: "")
+
+tor w-whca {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64} -> string
+w-whca = w-wnm(names, nsp, nn, p: rows[(i + 2)])
+| nm nm |> w-wc3(a: " (head ", b: nm, c: "")
+
+tor w-whco {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, fevi: i64} -> string
+w-whco = w-wbrh(rows, evi: fevi, src, lo: rows[(i + 2)], hi: rows[(i + 3)], nr)
+| b b |> w-wbrn(rows, evi: fevi, nr) : n |> w-whco1(rows, names, nsp, nn, i, fevi, b, n)
+
+tor w-whco1 {rows: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, fevi: i64, b: i64, n: i64} -> string
+w-whco1 = w-wnm(names, nsp, nn, p: rows[(i + 2)])
+| ca nm when nm == "_" -> " (arm catchall"
+| nm nm -> (if((((fevi >= 0) && (n > 0)) && (b == 0))) " (bad decl-branch)" else (" (arm (tag " ++ (nm ++ ")")))
+
+tor w-whbi {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64} -> string
+w-whbi = w-wnm(names, nsp, nn, p: rows[(i + 2)])
+| nm nm |> w-wc3(a: " (bind ", b: nm, c: ")")
+
+tor w-whcn {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64, i: i64} -> string
+w-whcn = w-wex(src, lo: rows[(i + 2)], hi: rows[(i + 3)], names, nsp, nn, strs, ssp, ns)
+| e e |> w-wc3(a: " (when ", b: e, c: ")")
+
+tor w-whct {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64, i: i64, fevi: i64, nr: i64} -> string
+w-whct = w-wbrh(rows, evi: fevi, src, lo: rows[(i + 2)], hi: rows[(i + 3)], nr)
+| b b |> w-whct1(rows, src, names, nsp, nn, strs, ssp, ns, i, fevi, b)
+
+tor w-whct1 {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64, i: i64, fevi: i64, b: i64} -> string
+w-whct1 = w-wnm(names, nsp, nn, p: rows[(i + 2)])
+| nm _ when (fevi >= 0) && (b == 0) -> "(bad ctor-branch)"
+| nm nm |> w-whct2(rows, src, names, nsp, nn, strs, ssp, ns, i, nm)
+
+tor w-whct2 {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64, i: i64, nm: string} -> string
+w-whct2 = w-wtb(src, lo: rows[(i + 4)], j: (rows[(i + 5)] - 1), n: rows[(i + 5)])
+| e be when rows[(i + 4)] < be |> w-wex(src, lo: rows[(i + 4)], hi: be, names, nsp, nn, strs, ssp, ns) : x |> w-wc7(a: " (node (ctor ", b: nm, c: " ", d: x, e: "))", f: "", g: "")
+| mt _ |> w-wc7(a: " (node (ctor ", b: nm, c: " ", d: "(lit (cell))", e: "))", f: "", g: "")
+
+tor w-wsti {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, curk: i64, pend: i64, flbl: i64, flbh: i64, jump: i64} -> string
+w-wsti = w-wnm(names, nsp, nn, p: rows[(i + 2)])
+| nm nm |> w-wsti1(rows, src, names, nsp, nn, i, curk, pend, flbl, flbh, jump, nm)
+
+tor w-wsti1 {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, curk: i64, pend: i64, flbl: i64, flbh: i64, jump: i64, nm: string} -> string
+w-wsti1 = w-weq(src, a: flbl, b: flbh, x: rows[(i + 2)], y: rows[(i + 3)])
+| jl j when (jump == 1) && (j == 0) -> "(bad jump-label)"
+| ok _ |> w-wsti2(curk, pend, jump, nm, names, nsp, nn)
+
+tor w-wsti2 {curk: i64, pend: i64, jump: i64, nm: string, names: []const string, nsp: []const i64, nn: i64} -> string
+w-wsti2 = w-wn0()
+| bp _ when pend >= 0 |> w-wnm(names, nsp, nn, p: pend) : b |> w-wsti3(curk, pend, jump, nm, b)
+| np _ |> w-wsti3(curk, pend, jump, nm, b: "")
+
+tor w-wsti3 {curk: i64, pend: i64, jump: i64, nm: string, b: string} -> string
+w-wsti3 = w-wn0()
+| a0 _ when (curk == 0) && (pend >= 0) -> ((" (arm (tag _chain) (bind " ++ (b ++ (") (node (" ++ ((if((jump == 1)) "jump " else "invoke ") ++ nm)))))
+| a1 _ when curk == 0 -> ((" (arm (tag _chain) (node (" ++ ((if((jump == 1)) "jump " else "invoke ") ++ nm)))
+| a2 _ when ((curk == 3) || (curk == 4)) && (pend >= 0) -> ((")) (conts (arm (tag _chain) (bind " ++ (b ++ (") (node (" ++ ((if((jump == 1)) "jump " else "invoke ") ++ nm)))))
+| a3 _ when (curk == 3) || (curk == 4) -> ((")) (conts (arm (tag _chain) (node (" ++ ((if((jump == 1)) "jump " else "invoke ") ++ nm)))
+| a4 _ -> ((" (node (" ++ ((if((jump == 1)) "jump " else "invoke ") ++ nm)))
+
+tor w-wfin {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, out: string, inf: i64, iopen: i64, curk: i64, dep: i64, pend: i64} -> string
+w-wfin = w-wn0()
+| bd _ when pend >= 0 -> ((out ++ "(bad pend)"))
+| ok _ |> w-wclo(inf, iopen, curk, dep) : c |> w-wfin1(rows, nr, src, names, nsp, nn, out, c)
+
+tor w-wfin1 {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, out: string, c: string} -> string
+w-wfin1 = w-wth(rows, nr, src, names, nsp, nn, i: 0, out: (out ++ c))
+| t t |> w-wc2(a: t, b: ")")
+
+tor w-wth {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, out: string} -> string
+w-wth = w-wrk(rows, i, nr)
+| fn _ when i >= (nr * 6) -> out
+| ev k when k == 1 |> w-wthi(rows, nr, src, names, nsp, nn, i, out)
+| mo _ |> w-wth(rows, nr, src, names, nsp, nn, i: (i + 6), out)
+
+tor w-wthi {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, out: string} -> string
+w-wthi = w-whi(nsp, nn, lo: rows[(i + 2)])
+| h h |> w-wnm(names, nsp, nn, p: rows[(i + 2)]) : nm |> w-wthi1(rows, nr, src, names, nsp, nn, i, out, h, nm)
+
+tor w-wthi1 {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, i: i64, out: string, h: i64, nm: string} -> string
+w-wthi1 = w-wc5(a: out, b: if((h == 1)) "" else " (def ", c: if((h == 1)) "" else nm, d: if((h == 1)) "" else " thunk)", e: "")
+| o o |> w-wth(rows, nr, src, names, nsp, nn, i: (i + 6), out: o)
+
+tor w-w-wk {rows: []const i64, nr: i64, src: []const i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64, i: i64, out: string, dead: i64, inev: i64, inf: i64, iopen: i64, ltk: i64, ltl: i64, lth: i64, htl: i64, hth: i64, argi: i64, curk: i64, ctk: i64, dep: i64, pend: i64, plbl: i64, ple: i64, flbl: i64, flbh: i64, fevi: i64, ano: i64} -> string
+w-w-wk = w-wrk(rows, i, nr)
+| fin _ when i >= (nr * 6) |> w-wfin(rows, nr, src, names, nsp, nn, out, inf, iopen, curk, dep, pend)
+| bwd k when k == 17 |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad wire-bad)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| ev k when (dead == 0) && (k == 1) |> w-wclo(inf, iopen, curk, dep) : c |> w-whev(nsp, nn, rows, i) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ (c ++ t)), dead: if((t == " (bad dup-tor)")) 1 else dead, inev: 1, inf: 0, iopen: 0, ltk: 0, ltl, lth, htl, hth, argi: 0, curk: 0, ctk: 0, dep: 0, pend, plbl, ple, flbl, flbh, fevi: (0 - 1), ano: 0)
+| fl k when (dead == 0) && (k == 2) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ (if((inev == 0)) "(bad fld-out)" else "")), dead: if((inev == 0)) 1 else dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| rt k when (dead == 0) && (k == 3) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ (if((inev == 0)) "(bad ret-out)" else "")), dead: if((inev == 0)) 1 else dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| br k when (dead == 0) && (k == 4) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ (if((inev == 0)) "(bad brd-out)" else "")), dead: if((inev == 0)) 1 else dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| im k when (dead == 0) && (k == 5) |> w-wclo(inf, iopen, curk, dep) : c |> w-whim(rows, src, names, nsp, nn, strs, ssp, ns, i) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ (c ++ t)), dead, inev: 0, inf: 0, iopen: 0, ltk: 0, ltl, lth, htl, hth, argi: 0, curk: 0, ctk: 0, dep: 0, pend, plbl, ple, flbl, flbh, fevi: (0 - 1), ano: 0)
+| lb k when (dead == 0) && (k == 6) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out, dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl: rows[(i + 2)], ple: rows[(i + 3)], flbl, flbh, fevi, ano)
+| fw0 k when ((dead == 0) && (k == 7)) && (pend >= 0) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad pend)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| fw k when (dead == 0) && (k == 7) |> w-wclo(inf, iopen, curk, dep) : c |> w-whfw(rows, src, names, nsp, nn, i, plbl) : t |> w-wevf(nsp, nn, lo: rows[(i + 2)]) : f |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ (c ++ t)), dead, inev: 0, inf: 1, iopen: 0, ltk: 0, ltl, lth, htl, hth, argi: 0, curk: 0, ctk: 0, dep: 0, pend: (0 - 1), plbl: (0 - 1), ple: (0 - 1), flbl: plbl, flbh: ple, fevi: f, ano: 0)
+| ca0 k when ((dead == 0) && (k == 8)) && ((inf == 0) || (ltk != 0)) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad head)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| ca k when (dead == 0) && (k == 8) |> w-whca(rows, src, names, nsp, nn, i) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead, inev, inf, iopen: 1, ltk: 1, ltl: rows[(i + 2)], lth: rows[(i + 3)], htl: rows[(i + 2)], hth: rows[(i + 3)], argi: 0, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| ar0 k when ((dead == 0) && (k == 9)) && (iopen == 0) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad arg)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| ar k when (dead == 0) && (k == 9) |> w-warg(rows, nr, src, names, nsp, nn, strs, ssp, ns, i, ltk, ltl, lth, htl, hth, argi, fevi) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi: (argi + 1), curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| rb0 k when ((dead == 0) && (k == 10)) && (ltk == 0) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad rbind)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| rb k when (dead == 0) && (k == 10) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out, dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend: rows[(i + 2)], plbl, ple, flbl, flbh, fevi, ano)
+| co0 k when ((dead == 0) && (k == 11)) && (inf == 0) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad cont)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| co1 k when ((dead == 0) && (k == 11)) && (pend >= 0) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad pend)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| co2 k when ((dead == 0) && (k == 11)) && (ano == 1) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad chain-scope)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| co k when (dead == 0) && (k == 11) |> w-wcls(iopen, curk, dep) : c |> w-wevf(nsp, nn, lo: htl) : d |> w-whco(rows, nr, src, names, nsp, nn, i, fevi: d) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ (c ++ t)), dead: if((t == " (bad decl-branch)")) 1 else dead, inev, inf, iopen: 0, ltk: 0, ltl, lth, htl, hth, argi: 0, curk: (0 - 1), ctk: 0, dep: 0, pend: (0 - 1), plbl, ple, flbl, flbh, fevi, ano)
+| bi0 k when ((dead == 0) && (k == 12)) && (curk == 0) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad bind)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| bi k when (dead == 0) && (k == 12) |> w-whbi(rows, src, names, nsp, nn, i) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| cn0 k when ((dead == 0) && (k == 13)) && (curk == 0) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad cond)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| cn k when (dead == 0) && (k == 13) |> w-whcn(rows, src, names, nsp, nn, strs, ssp, ns, i) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| se0 k when (((dead == 0) && (k == 14)) && (rows[(i + 1)] == 1)) && ((curk != (0 - 1)) || (inf == 0)) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad step-expr)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| se k when ((dead == 0) && (k == 14)) && (rows[(i + 1)] == 1) |> w-wex(src, lo: rows[(i + 2)], hi: rows[(i + 3)], names, nsp, nn, strs, ssp, ns) : e |> w-wc5(a: " (node (produce ", b: e, c: ")", d: ")", e: "") : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead, inev, inf, iopen: 0, ltk: 0, ltl, lth, htl, hth, argi: 0, curk: 1, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| si0 k when (((dead == 0) && (k == 14)) && (rows[(i + 1)] == 2)) && (((curk == 1) || (curk == 2)) || (curk == 5)) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad chain-after)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| si k when ((dead == 0) && (k == 14)) && (rows[(i + 1)] == 2) |> w-wsti(rows, src, names, nsp, nn, i, curk, pend, flbl, flbh, jump: 0) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead: if((t == "(bad jump-label)")) 1 else dead, inev, inf, iopen: 2, ltk: 2, ltl: rows[(i + 2)], lth: rows[(i + 3)], htl, hth, argi: 0, curk: if((curk == 0)) 3 else if((curk == (0 - 1))) 3 else curk, ctk: 3, dep: if(((curk == 3) || (curk == 4))) (dep + 1) else dep, pend: (0 - 1), plbl, ple, flbl, flbh, fevi, ano: if((curk == 0)) 1 else ano)
+| sj0 k when (((dead == 0) && (k == 14)) && (rows[(i + 1)] == 3)) && (((curk == 1) || (curk == 2)) || (curk == 5)) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad chain-after)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| sj k when ((dead == 0) && (k == 14)) && (rows[(i + 1)] == 3) |> w-wsti(rows, src, names, nsp, nn, i, curk, pend, flbl, flbh, jump: 1) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead: if((t == "(bad jump-label)")) 1 else dead, inev, inf, iopen: 2, ltk: 3, ltl: rows[(i + 2)], lth: rows[(i + 3)], htl, hth, argi: 0, curk: if((curk == 0)) 4 else if((curk == (0 - 1))) 4 else curk, ctk: 4, dep: if(((curk == 3) || (curk == 4))) (dep + 1) else dep, pend: (0 - 1), plbl, ple, flbl, flbh, fevi, ano: if((curk == 0)) 1 else ano)
+| ct0 k when ((dead == 0) && (k == 15)) && ((curk != (0 - 1)) || (inf == 0)) |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ "(bad ctor)"), dead: 1, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| ct k when (dead == 0) && (k == 15) |> w-whct(rows, src, names, nsp, nn, strs, ssp, ns, i, fevi, nr) : t |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ t), dead: if((t == "(bad ctor-branch)")) 1 else dead, inev, inf, iopen: 0, ltk: 0, ltl, lth, htl, hth, argi: 0, curk: 2, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| ip k when (dead == 0) && (k == 16) |> w-wclo(inf, iopen, curk, dep) : c |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out: (out ++ c), dead, inev: 0, inf: 0, iopen: 0, ltk: 0, ltl, lth, htl, hth, argi: 0, curk: 0, ctk: 0, dep: 0, pend: (0 - 1), plbl, ple, flbl, flbh, fevi: (0 - 1), ano: 0)
+| dd _ when dead == 1 |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out, dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+| mo _ |> w-w-wk(rows, nr, src, names, nsp, nn, strs, ssp, ns, i: (i + 6), out, dead, inev, inf, iopen, ltk, ltl, lth, htl, hth, argi, curk, ctk, dep, pend, plbl, ple, flbl, flbh, fevi, ano)
+
+tor w-w-main {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, strs: []const string, ssp: []const i64} -> string
+w-w-main = w-w-wk(rows, nr: (@len(rows) / 6), src, names, nsp, nn: @len(names), strs, ssp, ns: @len(strs), i: 0, out: "(graph", dead: 0, inev: 0, inf: 0, iopen: 0, ltk: 0, ltl: 0, lth: 0, htl: 0, hth: 0, argi: 0, curk: 0, ctk: 0, dep: 0, pend: (0 - 1), plbl: (0 - 1), ple: (0 - 1), flbl: (0 - 1), flbh: (0 - 1), fevi: (0 - 1), ano: 0)
+| g g -> g
+
+tor w-main {rows: []const i64, src: []const i64, names: []const string, nsp: []const i64, strs: []const string, ssp: []const i64} -> string
+w-main = w-w-main(rows, src, names, nsp, strs, ssp)
+| r r -> r

@@ -3110,36 +3110,24 @@ def kLowDecls : List (String × KDecl) :=
   ("ltop", { params := [("rows", "[]const i64"), ("i", "i64"), ("n", "i64"), ("src", "[]const i64"), ("mod", "[]const i64"), ("out", "string"), ("p0", "i64"), ("p1", "i64"), ("q0", "i64")], ret := some "string" }),
   ("main", { params := [("src", "[]const i64"), ("rows", "[]const i64"), ("mod", "[]const i64")], ret := some "string" }) ]
 
-/-! ## `kChain` — the composed lane as a declared shape
+/-! ## `kWir` — the koru-spelled lowerer — the koru-spelled lowerer (rows → claim sexp)
 
-Composition is graph union, but every boundary in the subset is
-TEXT — composite values can't be constructed inside eval — so the
-chain passes documents, not cells:
-
-    src ──a-*──▶ row-text ──l-*──▶ ast.json   (authority mirror)
-                       └──wir──▶ claim-sexp ──emt──▶ C text
-
-Each phase's tors carry a one-letter prefix (`main`/`peek` collide
-across rungs); `jump` stays label-local and needs no rename.
-
-Three legs are still unwritten and stand in the graph as
-*arm-less subflows*: the head invoke resolves (to `unrealized`),
-dispatch finds no arm, and the refusal names the leg by position
-in the chain — refuse by default, axis named.  As each leg lands,
-its stub is replaced by the real tor under the contracted name:
-
-  * `low-txt` — klow's row-TEXT variant (the kl leg's flat-int
-    projection `klow_flat` spelled in-language; text-mediated so
-    `a-main`'s output feeds it directly)
-  * `wir` — the lowerer: rows+src → `[flow-eval]` claim sexp text
-    (the `lower.c` mirror; ast.json is NOT on the emit path)
-  * `emt-txt` — emit on claim TEXT via span-index navigation
-    (today `kEmit.emit` gates on program CELLS — a composite-value
-    input the subset can't produce in-language; bucket-3 axis)
-
-`chain`'s arm spine spells the intended data flow: `doc` is bound
-but not consumed downstream — ast.json is the authority race's
-side output, not the compile interface. -/
+Mirrors `host2/src/korufe/lower.c` as a surface program: the
+same six-int row projection `klow` consumes plus the token
+tables a producer hands across the boundary (ident text keyed
+by span start in `names`/`nsp`, claim-side string payloads
+keyed by quote position in `strs`/`ssp` — koru cannot slice
+strings, so name/string text arrives AS DATA).  `nsp` rides
+as a packed table — `pix | pairs | eix | hix | xix` — so
+name lookup, decl-of-name, dup-tor, and has-impl are O(1)
+probes of declared input data rather than O(n) row scans.
+Emits the
+`(graph …)` document `lower.c` writes; refusal states ride
+in-band as `(bad axis)` markers the evaluator refuses.
+Generated from `wir.k`'s authority parse — see
+_scratch/wir_to_lean.py; the wi/wii races compare the
+emitted graph slice against `korufe --lower` byte-for-byte.
+-/
 
 /-- Rename invoke/head targets (NOT `jump` — label-local). -/
 def renameNode (f : String → String) : KArmNode → KArmNode
@@ -3165,22 +3153,1212 @@ def prefixGraph (pre : String) (g : List (String × KCallable)) :
     List (String × KCallable) :=
   g.map fun (n, c) => (pre ++ n, renameCallable (pre ++ ·) c)
 
+def kWirPkb : KCallable := .bare
+  (.cond (.bin .or (.bin .lt (.var "i") (.lit (.int 0))) (.bin .ge (.var "i") (.var "n"))) (.bin .sub (.lit (.int 0)) (.lit (.int 1))) (.index (.var "t") (.var "i")))
+
+def kWirWn0 : KCallable := .bare
+  (.lit (.int 0))
+
+def kWirWc2 : KCallable := .bare
+  (.bin .concat (.var "a") (.var "b"))
+
+def kWirWc3 : KCallable := .bare
+  (.bin .concat (.var "a") (.bin .concat (.var "b") (.var "c")))
+
+def kWirWc5 : KCallable := .bare
+  (.bin .concat (.var "a") (.bin .concat (.var "b") (.bin .concat (.var "c") (.bin .concat (.var "d") (.var "e")))))
+
+def kWirWc7 : KCallable := .bare
+  (.bin .concat (.var "a") (.bin .concat (.var "b") (.bin .concat (.var "c") (.bin .concat (.var "d") (.bin .concat (.var "e") (.bin .concat (.var "f") (.var "g")))))))
+
+def kWirWsk : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "ws" false (some "c") (some (.bin .or (.bin .eq (.var "c") (.lit (.int 32))) (.bin .or (.bin .eq (.var "c") (.lit (.int 9))) (.bin .or (.bin .eq (.var "c") (.lit (.int 10))) (.bin .eq (.var "c") (.lit (.int 13))))))) (some (.invoke "wsk" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi"))])) [], .mk "dn" false (some "_") none (some (.produce (.var "i"))) []] }
+
+def kWirWtb : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "j")), ("n", (.var "n"))])
+  arms := [.mk "ws" false (some "c") (some (.bin .and (.bin .ge (.var "j") (.var "lo")) (.bin .or (.bin .eq (.var "c") (.lit (.int 32))) (.bin .or (.bin .eq (.var "c") (.lit (.int 9))) (.bin .or (.bin .eq (.var "c") (.lit (.int 10))) (.bin .eq (.var "c") (.lit (.int 13)))))))) (some (.invoke "wtb" [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "j") (.lit (.int 1)))), ("n", (.var "n"))])) [], .mk "dn" false (some "_") none (some (.produce (.bin .add (.var "j") (.lit (.int 1))))) []] }
+
+def kWirWid : KCallable := .bare
+  (.cond (.bin .or (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 97))) (.bin .le (.var "c") (.lit (.int 122)))) (.bin .and (.bin .ge (.var "c") (.lit (.int 65))) (.bin .le (.var "c") (.lit (.int 90))))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 48))) (.bin .le (.var "c") (.lit (.int 57)))) (.bin .eq (.var "c") (.lit (.int 95))))) (.lit (.int 1)) (.lit (.int 0)))
+
+def kWirWpe : KCallable := .subflow {
+  preLabel := none
+  head := ("wid", [("c", (.var "c"))])
+  arms := [.mk "ok" false (some "r") (some (.bin .eq (.var "r") (.lit (.int 1)))) (some (.produce (.lit (.int 1)))) [], .mk "mo" false (some "_") none (some (.produce (.cond (.bin .or (.bin .or (.bin .eq (.var "c") (.lit (.int 41))) (.bin .eq (.var "c") (.lit (.int 93)))) (.bin .or (.bin .eq (.var "c") (.lit (.int 125))) (.bin .eq (.var "c") (.lit (.int 34))))) (.lit (.int 1)) (.lit (.int 0))))) []] }
+
+def kWirWnat : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "nsp")), ("i", (.bin .mul (.lit (.int 2)) (.var "i"))), ("n", (.bin .mul (.lit (.int 2)) (.var "nn")))])
+  arms := [.mk "hit" false (some "v") (some (.bin .and (.bin .eq (.var "v") (.var "p")) (.bin .lt (.var "i") (.var "nn")))) (some (.produce (.var "i"))) [], .mk "nx" false (some "_") (some (.bin .lt (.var "i") (.var "nn"))) (some (.invoke "wnat" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("p", (.var "p"))])) [], .mk "no" false (some "_") none (some (.produce (.bin .sub (.lit (.int 0)) (.lit (.int 1))))) []] }
+
+def kWirWpix : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "nsp")), ("i", (.var "p")), ("n", (.bin .sub (.builtin "len" [(.var "nsp")]) (.bin .mul (.lit (.int 5)) (.var "nn"))))])
+  arms := [.mk "k" false (some "k") none (some (.produce (.var "k"))) []] }
+
+def kWirWnm : KCallable := .subflow {
+  preLabel := none
+  head := ("wpix", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "p"))])
+  arms := [.mk "ok" false (some "k") (some (.bin .ge (.var "k") (.lit (.int 0)))) (some (.produce (.index (.var "names") (.var "k")))) [], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad names)")))) []] }
+
+def kWirWne : KCallable := .subflow {
+  preLabel := none
+  head := ("wpix", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "p"))])
+  arms := [.mk "ok" false (some "k") (some (.bin .ge (.var "k") (.lit (.int 0)))) (some (.produce (.index (.var "nsp") (.bin .add (.bin .add (.bin .sub (.builtin "len" [(.var "nsp")]) (.bin .mul (.lit (.int 5)) (.var "nn"))) (.bin .mul (.lit (.int 2)) (.var "k"))) (.lit (.int 1)))))) [], .mk "no" false (some "_") none (some (.produce (.bin .sub (.lit (.int 0)) (.lit (.int 1))))) []] }
+
+def kWirWst : KCallable := .subflow {
+  preLabel := none
+  head := ("wnat", [("nsp", (.var "ssp")), ("nn", (.var "ns")), ("i", (.lit (.int 0))), ("p", (.var "p"))])
+  arms := [.mk "ok" false (some "k") (some (.bin .ge (.var "k") (.lit (.int 0)))) (some (.produce (.index (.var "strs") (.var "k")))) [], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad strs)")))) []] }
+
+def kWirWeq : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "ln" false (some "_") (some (.bin .ne (.bin .sub (.var "b") (.var "a")) (.bin .sub (.var "y") (.var "x")))) (some (.produce (.lit (.int 0)))) [], .mk "ok" false (some "_") none (some (.invoke "weql" [("src", (.var "src")), ("a", (.var "a")), ("b", (.var "b")), ("x", (.var "x")), ("y", (.var "y")), ("i", (.lit (.int 0)))])) []] }
+
+def kWirWeql : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "a") (.var "i"))), ("n", (.var "b"))])
+  arms := [.mk "dn" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.lit (.int 1)))) [], .mk "mm" false (some "c") (some (.cond (.bin .lt (.bin .add (.var "x") (.var "i")) (.var "y")) (.bin .ne (.var "c") (.index (.var "src") (.bin .add (.var "x") (.var "i")))) (.lit (.bool true)))) (some (.produce (.lit (.int 0)))) [], .mk "mo" false (some "_") none (some (.invoke "weql" [("src", (.var "src")), ("a", (.var "a")), ("b", (.var "b")), ("x", (.var "x")), ("y", (.var "y")), ("i", (.bin .add (.var "i") (.lit (.int 1))))])) []] }
+
+def kWirWnv : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "dg" false (some "c") (some (.bin .and (.bin .ge (.var "c") (.lit (.int 48))) (.bin .le (.var "c") (.lit (.int 57))))) (some (.invoke "wnv" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("v", (.bin .add (.bin .mul (.var "v") (.lit (.int 10))) (.bin .sub (.var "c") (.lit (.int 48)))))])) [], .mk "dn" false (some "_") none (some (.produce (.var "v"))) []] }
+
+def kWirWp10 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "z" false (some "_") (some (.bin .le (.var "n") (.lit (.int 0)))) (some (.produce (.lit (.int 1)))) [], .mk "mo" false (some "_") none (some (.invoke "wp10m" [("n", (.var "n"))])) []] }
+
+def kWirWp10m : KCallable := .subflow {
+  preLabel := none
+  head := ("wp10", [("n", (.bin .sub (.var "n") (.lit (.int 1))))])
+  arms := [.mk "t" false (some "t") none (some (.produce (.bin .mul (.var "t") (.lit (.int 10))))) []] }
+
+def kWirWgcd : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "z" false (some "_") (some (.bin .eq (.var "b") (.lit (.int 0)))) (some (.produce (.var "a"))) [], .mk "mo" false (some "_") none (some (.invoke "wgcd" [("a", (.var "b")), ("b", (.bin .mod (.var "a") (.var "b")))])) []] }
+
+def kWirWpb : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .sub (.var "i") (.lit (.int 1)))), ("n", (.var "i"))])
+  arms := [.mk "nd" false (some "_") (some (.bin .le (.var "i") (.var "lo"))) (some (.produce (.lit (.int 0)))) [], .mk "ws" false (some "c") (some (.bin .or (.bin .eq (.var "c") (.lit (.int 32))) (.bin .or (.bin .eq (.var "c") (.lit (.int 9))) (.bin .or (.bin .eq (.var "c") (.lit (.int 10))) (.bin .eq (.var "c") (.lit (.int 13))))))) (some (.invoke "wpb" [("src", (.var "src")), ("lo", (.var "lo")), ("i", (.bin .sub (.var "i") (.lit (.int 1))))])) [], .mk "ch" false (some "c") none (some (.produce (.var "c"))) []] }
+
+def kWirWopa : KCallable := .subflow {
+  preLabel := none
+  head := ("wpb", [("src", (.var "src")), ("lo", (.var "lo")), ("i", (.var "i"))])
+  arms := [.mk "op" false (some "p") (some (.bin .and (.bin .and (.bin .eq (.var "d") (.lit (.int 0))) (.bin .eq (.var "ins") (.lit (.int 0)))) (.bin .lt (.var "i") (.var "hi")))) (some (.invoke "wopb" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWopb : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "cm" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 47))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 47))) (.lit (.bool false))))) (some (.produce (.bin .sub (.lit (.int 0)) (.lit (.int 2))))) [], .mk "oo" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 124))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 124))) (.lit (.bool false))))) (some (.produce (.bin .add (.bin .mul (.lit (.int 12)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "aa" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 38))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 38))) (.lit (.bool false))))) (some (.produce (.bin .add (.bin .mul (.lit (.int 11)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "ee" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 61))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 61))) (.lit (.bool false))))) (some (.produce (.bin .add (.bin .mul (.lit (.int 5)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "ne" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 33))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 61))) (.lit (.bool false))))) (some (.produce (.bin .add (.bin .mul (.lit (.int 6)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "le" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 60))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 61))) (.lit (.bool false))))) (some (.produce (.bin .add (.bin .mul (.lit (.int 8)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "ge" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 62))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 61))) (.lit (.bool false))))) (some (.produce (.bin .add (.bin .mul (.lit (.int 10)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "cc" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 43))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 43))) (.lit (.bool false))))) (some (.produce (.bin .add (.bin .mul (.lit (.int 13)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "lt" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 60)))) (some (.produce (.bin .add (.bin .mul (.lit (.int 7)) (.lit (.int 8))) (.lit (.int 1))))) [], .mk "gt" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 62)))) (some (.produce (.bin .add (.bin .mul (.lit (.int 9)) (.lit (.int 8))) (.lit (.int 1))))) [], .mk "mu" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 42)))) (some (.produce (.bin .add (.bin .mul (.lit (.int 2)) (.lit (.int 8))) (.lit (.int 1))))) [], .mk "dv" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 47)))) (some (.produce (.bin .add (.bin .mul (.lit (.int 3)) (.lit (.int 8))) (.lit (.int 1))))) [], .mk "rm" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 37)))) (some (.produce (.bin .add (.bin .mul (.lit (.int 4)) (.lit (.int 8))) (.lit (.int 1))))) [], .mk "ad" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 43)))) (some (.invoke "wope" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p")), ("op", (.lit (.int 0)))])) [], .mk "sb" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 45)))) (some (.invoke "wops" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p"))])) [], .mk "wo" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 111)))) (some (.invoke "wopo" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p"))])) [], .mk "wa" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 97)))) (some (.invoke "wopd" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWope : KCallable := .subflow {
+  preLabel := none
+  head := ("wpe", [("c", (.var "p"))])
+  arms := [.mk "ok" false (some "v") (some (.bin .eq (.var "v") (.lit (.int 1)))) (some (.produce (.bin .add (.bin .mul (.var "op") (.lit (.int 8))) (.lit (.int 1))))) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWops : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "gl" false (some "n") (some (.bin .and (.bin .or (.bin .and (.bin .ge (.var "p") (.lit (.int 97))) (.bin .le (.var "p") (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.var "p") (.lit (.int 65))) (.bin .le (.var "p") (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.var "p") (.lit (.int 48))) (.bin .le (.var "p") (.lit (.int 57)))) (.bin .eq (.var "p") (.lit (.int 95)))))) (.bin .or (.bin .or (.bin .and (.bin .ge (.var "n") (.lit (.int 97))) (.bin .le (.var "n") (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.var "n") (.lit (.int 65))) (.bin .le (.var "n") (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.var "n") (.lit (.int 48))) (.bin .le (.var "n") (.lit (.int 57)))) (.bin .eq (.var "n") (.lit (.int 95)))))) (.bin .eq (.var "n") (.lit (.int 45)))))) (some (.produce (.lit (.int 0)))) [], .mk "op" false (some "_") none (some (.invoke "wope" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p")), ("op", (.lit (.int 1)))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWopo : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "rr" false (some "n") (some (.bin .eq (.var "n") (.lit (.int 114)))) (some (.invoke "wopo2" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWopo2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wpe", [("c", (.var "p"))])
+  arms := [.mk "pe" false (some "v") (some (.bin .eq (.var "v") (.lit (.int 1)))) (some (.invoke "wopob" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWopob : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 2)))), ("n", (.var "hi"))])
+  arms := [.mk "fin" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.bin .add (.bin .mul (.lit (.int 12)) (.lit (.int 8))) (.lit (.int 2))))) [], .mk "ic" false (some "c") (some (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 97))) (.bin .le (.var "c") (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 65))) (.bin .le (.var "c") (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 48))) (.bin .le (.var "c") (.lit (.int 57)))) (.bin .eq (.var "c") (.lit (.int 95))))))) (some (.produce (.lit (.int 0)))) [], .mk "gl" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 45))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 3))) (.var "hi")) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 97))) (.bin .le (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 65))) (.bin .le (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 48))) (.bin .le (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 57)))) (.bin .or (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 95))) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 45))))))) (.lit (.bool false))))) (some (.produce (.lit (.int 0)))) [], .mk "ok" false (some "_") none (some (.produce (.bin .add (.bin .mul (.lit (.int 12)) (.lit (.int 8))) (.lit (.int 2))))) []] }
+
+def kWirWopd : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "rr" false (some "n") (some (.bin .and (.bin .eq (.var "n") (.lit (.int 110))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 2))) (.var "hi")) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 2)))) (.lit (.int 100))) (.lit (.bool false))))) (some (.invoke "wopd2" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("p", (.var "p"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWopd2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wpe", [("c", (.var "p"))])
+  arms := [.mk "pe" false (some "v") (some (.bin .eq (.var "v") (.lit (.int 1)))) (some (.invoke "wopdb" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWopdb : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 3)))), ("n", (.var "hi"))])
+  arms := [.mk "fin" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.bin .add (.bin .mul (.lit (.int 11)) (.lit (.int 8))) (.lit (.int 3))))) [], .mk "ic" false (some "c") (some (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 97))) (.bin .le (.var "c") (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 65))) (.bin .le (.var "c") (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 48))) (.bin .le (.var "c") (.lit (.int 57)))) (.bin .eq (.var "c") (.lit (.int 95))))))) (some (.produce (.lit (.int 0)))) [], .mk "gl" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 45))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 4))) (.var "hi")) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 97))) (.bin .le (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 65))) (.bin .le (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 48))) (.bin .le (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 57)))) (.bin .or (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 95))) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 4)))) (.lit (.int 45))))))) (.lit (.bool false))))) (some (.produce (.lit (.int 0)))) [], .mk "ok" false (some "_") none (some (.produce (.bin .add (.bin .mul (.lit (.int 11)) (.lit (.int 8))) (.lit (.int 3))))) []] }
+
+def kWirWprc : KCallable := .bare
+  (.cond (.bin .eq (.var "o") (.lit (.int 12))) (.lit (.int 1)) (.cond (.bin .eq (.var "o") (.lit (.int 11))) (.lit (.int 2)) (.cond (.bin .or (.bin .eq (.var "o") (.lit (.int 5))) (.bin .eq (.var "o") (.lit (.int 6)))) (.lit (.int 3)) (.cond (.bin .and (.bin .ge (.var "o") (.lit (.int 7))) (.bin .le (.var "o") (.lit (.int 10)))) (.lit (.int 4)) (.cond (.bin .eq (.var "o") (.lit (.int 13))) (.lit (.int 5)) (.cond (.bin .or (.bin .eq (.var "o") (.lit (.int 0))) (.bin .eq (.var "o") (.lit (.int 1)))) (.lit (.int 6)) (.lit (.int 7))))))))
+
+def kWirWopn : KCallable := .bare
+  (.cond (.bin .eq (.var "o") (.lit (.int 0))) (.lit (.str "add")) (.cond (.bin .eq (.var "o") (.lit (.int 1))) (.lit (.str "sub")) (.cond (.bin .eq (.var "o") (.lit (.int 2))) (.lit (.str "mul")) (.cond (.bin .eq (.var "o") (.lit (.int 3))) (.lit (.str "div")) (.cond (.bin .eq (.var "o") (.lit (.int 4))) (.lit (.str "mod")) (.cond (.bin .eq (.var "o") (.lit (.int 5))) (.lit (.str "eq")) (.cond (.bin .eq (.var "o") (.lit (.int 6))) (.lit (.str "ne")) (.cond (.bin .eq (.var "o") (.lit (.int 7))) (.lit (.str "lt")) (.cond (.bin .eq (.var "o") (.lit (.int 8))) (.lit (.str "le")) (.cond (.bin .eq (.var "o") (.lit (.int 9))) (.lit (.str "gt")) (.cond (.bin .eq (.var "o") (.lit (.int 10))) (.lit (.str "ge")) (.cond (.bin .eq (.var "o") (.lit (.int 11))) (.lit (.str "and")) (.cond (.bin .eq (.var "o") (.lit (.int 12))) (.lit (.str "or")) (.lit (.str "concat")))))))))))))))
+
+def kWirWfp : KCallable := .subflow {
+  preLabel := none
+  head := ("wopa", [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "i")), ("d", (.var "d")), ("ins", (.var "ins"))])
+  arms := [.mk "fin" false (some "o") (some (.bin .or (.bin .ge (.var "i") (.var "hi")) (.bin .eq (.var "o") (.bin .sub (.lit (.int 0)) (.lit (.int 2)))))) (some (.produce (.var "last"))) [], .mk "hit" false (some "o") (some (.bin .ne (.var "o") (.lit (.int 0)))) (some (.invoke "wfp1" [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "i")), ("d", (.var "d")), ("ins", (.var "ins")), ("last", (.var "last")), ("prec", (.var "prec")), ("o", (.var "o"))])) [], .mk "mo" false (some "_") none (some (.invoke "wfpn" [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "i")), ("d", (.var "d")), ("ins", (.var "ins")), ("last", (.var "last")), ("prec", (.var "prec"))])) []] }
+
+def kWirWfp1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wprc", [("o", (.bin .div (.var "o") (.lit (.int 8))))])
+  arms := [.mk "hit" false (some "q") (some (.bin .eq (.var "q") (.var "prec"))) (some (.invoke "wfpn" [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "i")), ("d", (.var "d")), ("ins", (.var "ins")), ("last", (.var "i")), ("prec", (.var "prec"))])) [], .mk "no" false (some "_") none (some (.invoke "wfpn" [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "i")), ("d", (.var "d")), ("ins", (.var "ins")), ("last", (.var "last")), ("prec", (.var "prec"))])) []] }
+
+def kWirWfpn : KCallable := .subflow {
+  preLabel := none
+  head := ("wfp", [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.bin .add (.var "i") (.cond (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 92)))) (.lit (.int 2)) (.lit (.int 1))))), ("d", (.cond (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 40))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 91)))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 123))))) (.bin .add (.var "d") (.lit (.int 1))) (.cond (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 41))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 93)))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 125))))) (.bin .sub (.var "d") (.lit (.int 1))) (.var "d")))), ("ins", (.cond (.bin .and (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 34))) (.bin .eq (.var "ins") (.lit (.int 0)))) (.lit (.int 1)) (.cond (.bin .and (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 34))) (.bin .eq (.var "ins") (.lit (.int 1)))) (.lit (.int 0)) (.var "ins")))), ("last", (.var "last")), ("prec", (.var "prec"))])
+  arms := [.mk "r" false (some "r") none (some (.produce (.var "r"))) []] }
+
+def kWirWmb : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "st" false (some "_") none (some (.invoke "wmb1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.lit (.int 1))), ("ins", (.lit (.int 0)))])) []] }
+
+def kWirWmb1 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "fin" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.var "hi"))) [], .mk "qo" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .eq (.var "c") (.lit (.int 34))))) (some (.invoke "wmb1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.lit (.int 1)))])) [], .mk "qc" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.var "c") (.lit (.int 34))))) (some (.invoke "wmb1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.lit (.int 0)))])) [], .mk "bs" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.var "c") (.lit (.int 92))))) (some (.invoke "wmb1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 2)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])) [], .mk "oo" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.var "c") (.lit (.int 40))) (.bin .eq (.var "c") (.lit (.int 91)))) (.bin .eq (.var "c") (.lit (.int 123)))))) (some (.invoke "wmb1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.bin .add (.var "d") (.lit (.int 1)))), ("ins", (.var "ins"))])) [], .mk "xc" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.var "c") (.lit (.int 41))) (.bin .eq (.var "c") (.lit (.int 93)))) (.bin .eq (.var "c") (.lit (.int 125)))))) (some (.invoke "wmbx" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("d", (.var "d"))])) [], .mk "mo" false (some "_") none (some (.invoke "wmb1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])) []] }
+
+def kWirWmbx : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "z" false (some "_") (some (.bin .eq (.bin .sub (.var "d") (.lit (.int 1))) (.lit (.int 0)))) (some (.produce (.var "i"))) [], .mk "mo" false (some "_") none (some (.invoke "wmb1" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.bin .sub (.var "d") (.lit (.int 1)))), ("ins", (.lit (.int 0)))])) []] }
+
+def kWirWss : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "fin" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.var "hi"))) [], .mk "qt" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 34)))) (some (.produce (.bin .add (.var "i") (.lit (.int 2))))) [], .mk "bs" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 92)))) (some (.invoke "wss" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 2)))), ("hi", (.var "hi"))])) [], .mk "mo" false (some "_") none (some (.invoke "wss" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi"))])) []] }
+
+def kWirWen : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "dg" false (some "c") (some (.bin .and (.bin .ge (.var "c") (.lit (.int 48))) (.bin .le (.var "c") (.lit (.int 57))))) (some (.invoke "wen" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi"))])) [], .mk "dt" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 46))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 48))) (.bin .le (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 57)))) (.lit (.bool false))))) (some (.invoke "wen" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi"))])) [], .mk "dn" false (some "_") none (some (.produce (.var "i"))) []] }
+
+def kWirWcmx : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "fin" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.var "i"))) [], .mk "cm" false (some "c") (some (.bin .and (.bin .eq (.var "d") (.lit (.int 0))) (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .eq (.var "c") (.var "w"))))) (some (.produce (.var "i"))) [], .mk "qo" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .eq (.var "c") (.lit (.int 34))))) (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.lit (.int 1))), ("w", (.var "w"))])) [], .mk "qc" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.var "c") (.lit (.int 34))))) (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.lit (.int 0))), ("w", (.var "w"))])) [], .mk "bs" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.var "c") (.lit (.int 92))))) (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 2)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("w", (.var "w"))])) [], .mk "oo" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.var "c") (.lit (.int 40))) (.bin .eq (.var "c") (.lit (.int 91)))) (.bin .eq (.var "c") (.lit (.int 123)))))) (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.bin .add (.var "d") (.lit (.int 1)))), ("ins", (.var "ins")), ("w", (.var "w"))])) [], .mk "xc" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.var "c") (.lit (.int 41))) (.bin .eq (.var "c") (.lit (.int 93)))) (.bin .eq (.var "c") (.lit (.int 125)))))) (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.bin .sub (.var "d") (.lit (.int 1)))), ("ins", (.var "ins")), ("w", (.var "w"))])) [], .mk "mo" false (some "_") none (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("w", (.var "w"))])) []] }
+
+def kWirWfd : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "fin" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.var "last"))) [], .mk "dt" false (some "c") (some (.bin .and (.bin .eq (.var "d") (.lit (.int 0))) (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .eq (.var "c") (.lit (.int 46)))))) (some (.invoke "wfd" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("last", (.var "i"))])) [], .mk "qo" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .eq (.var "c") (.lit (.int 34))))) (some (.invoke "wfd" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.lit (.int 1))), ("last", (.var "last"))])) [], .mk "qc" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.var "c") (.lit (.int 34))))) (some (.invoke "wfd" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.lit (.int 0))), ("last", (.var "last"))])) [], .mk "bs" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.var "c") (.lit (.int 92))))) (some (.invoke "wfd" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 2)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("last", (.var "last"))])) [], .mk "oo" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.var "c") (.lit (.int 40))) (.bin .eq (.var "c") (.lit (.int 91)))) (.bin .eq (.var "c") (.lit (.int 123)))))) (some (.invoke "wfd" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.bin .add (.var "d") (.lit (.int 1)))), ("ins", (.var "ins")), ("last", (.var "last"))])) [], .mk "xc" false (some "c") (some (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.var "c") (.lit (.int 41))) (.bin .eq (.var "c") (.lit (.int 93)))) (.bin .eq (.var "c") (.lit (.int 125)))))) (some (.invoke "wfd" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.bin .sub (.var "d") (.lit (.int 1)))), ("ins", (.var "ins")), ("last", (.var "last"))])) [], .mk "mo" false (some "_") none (some (.invoke "wfd" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("last", (.var "last"))])) []] }
+
+def kWirWty : KCallable := .bare
+  (.cond (.bin .or (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "i64"))) (.bin .eq (.var "nm") (.lit (.str "i32")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "i16"))) (.bin .eq (.var "nm") (.lit (.str "i8"))))) (.bin .or (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "u64"))) (.bin .eq (.var "nm") (.lit (.str "u32")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "u16"))) (.bin .eq (.var "nm") (.lit (.str "u8"))))) (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "f64"))) (.bin .eq (.var "nm") (.lit (.str "f32")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "bool"))) (.bin .eq (.var "nm") (.lit (.str "string"))))))) (.lit (.int 1)) (.cond (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "program"))) (.bin .eq (.var "nm") (.lit (.str "void")))) (.bin .eq (.var "nm") (.lit (.str "unit")))) (.lit (.int 1)) (.lit (.int 0))))
+
+def kWirWbl : KCallable := .bare
+  (.cond (.bin .or (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "as"))) (.bin .eq (.var "nm") (.lit (.str "intCast")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "truncate"))) (.bin .eq (.var "nm") (.lit (.str "divTrunc"))))) (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "rem"))) (.bin .eq (.var "nm") (.lit (.str "mod")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "len"))) (.bin .eq (.var "nm") (.lit (.str "intToString")))))) (.lit (.int 1)) (.lit (.int 0)))
+
+def kWirWev : KCallable := .subflow {
+  preLabel := none
+  head := ("wfp", [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "lo")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("last", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("prec", (.var "lv"))])
+  arms := [.mk "hit" false (some "t") (some (.bin .ge (.var "t") (.lit (.int 0)))) (some (.invoke "wspl" [("lv", (.var "lv")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("t", (.var "t")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "dn" false (some "_") none (some (.invoke "wenx" [("lv", (.var "lv")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWenx : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "nx" false (some "_") (some (.bin .lt (.var "lv") (.lit (.int 7)))) (some (.invoke "wev" [("lv", (.bin .add (.var "lv") (.lit (.int 1)))), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "bt" false (some "_") none (some (.invoke "weu" [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWspl : KCallable := .subflow {
+  preLabel := none
+  head := ("wopa", [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "t")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0)))])
+  arms := [.mk "oi" false (some "o") (some (.bin .gt (.var "o") (.lit (.int 0)))) (some (.invoke "wev" [("lv", (.var "lv")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "t")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "l") none (some (.invoke "wsplr" [("lv", (.var "lv")), ("src", (.var "src")), ("lo", (.bin .add (.var "t") (.bin .sub (.var "o") (.bin .mul (.bin .div (.var "o") (.lit (.int 8))) (.lit (.int 8)))))), ("hi", (.var "hi")), ("op", (.bin .div (.var "o") (.lit (.int 8)))), ("l", (.var "l")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad expr)")))) []] }
+
+def kWirWsplr : KCallable := .subflow {
+  preLabel := none
+  head := ("wev", [("lv", (.var "lv")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "r" false (some "r") none (some (.invoke "wc7" [("a", (.lit (.str "(bin "))), ("b", (.cond (.bin .eq (.var "op") (.lit (.int 0))) (.lit (.str "add")) (.cond (.bin .eq (.var "op") (.lit (.int 1))) (.lit (.str "sub")) (.cond (.bin .eq (.var "op") (.lit (.int 2))) (.lit (.str "mul")) (.cond (.bin .eq (.var "op") (.lit (.int 3))) (.lit (.str "div")) (.cond (.bin .eq (.var "op") (.lit (.int 4))) (.lit (.str "mod")) (.cond (.bin .eq (.var "op") (.lit (.int 5))) (.lit (.str "eq")) (.cond (.bin .eq (.var "op") (.lit (.int 6))) (.lit (.str "ne")) (.cond (.bin .eq (.var "op") (.lit (.int 7))) (.lit (.str "lt")) (.cond (.bin .eq (.var "op") (.lit (.int 8))) (.lit (.str "le")) (.cond (.bin .eq (.var "op") (.lit (.int 9))) (.lit (.str "gt")) (.cond (.bin .eq (.var "op") (.lit (.int 10))) (.lit (.str "ge")) (.cond (.bin .eq (.var "op") (.lit (.int 11))) (.lit (.str "and")) (.cond (.bin .eq (.var "op") (.lit (.int 12))) (.lit (.str "or")) (.lit (.str "concat")))))))))))))))), ("c", (.lit (.str " "))), ("d", (.var "l")), ("e", (.lit (.str " "))), ("f", (.var "r")), ("g", (.lit (.str ")")))])) []] }
+
+def kWirWeu : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "hi"))])
+  arms := [.mk "nt" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 33))) (.lit (.bool false)))) (some (.invoke "weu1" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("op", (.lit (.int 1))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "ng" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 45))) (.lit (.bool false)))) (some (.invoke "weu1" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("op", (.lit (.int 0))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "dn" false (some "_") none (some (.invoke "wep" [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWeu1 : KCallable := .subflow {
+  preLabel := none
+  head := ("weu", [("src", (.var "src")), ("lo", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "e" false (some "e") none (some (.produce (.cond (.bin .eq (.var "op") (.lit (.int 1))) (.bin .concat (.lit (.str "(un not ")) (.bin .concat (.var "e") (.lit (.str ")")))) (.bin .concat (.lit (.str "(un neg ")) (.bin .concat (.var "e") (.lit (.str ")"))))))) []] }
+
+def kWirWpm : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "hi"))])
+  arms := [.mk "lp" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 40))) (.lit (.bool false)))) (some (.invoke "wpmc" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "lb" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 91))) (.lit (.bool false)))) (some (.invoke "wpmc" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "lc" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 123))) (.lit (.bool false)))) (some (.invoke "wpmc" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "st" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 34))) (.lit (.bool false)))) (some (.invoke "wss" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "at" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 64))) (.lit (.bool false)))) (some (.produce (.var "hi"))) [], .mk "dg" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .and (.bin .ge (.index (.var "src") (.var "i")) (.lit (.int 48))) (.bin .le (.index (.var "src") (.var "i")) (.lit (.int 57)))) (.lit (.bool false)))) (some (.invoke "wen" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "id" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.var "i")) (.lit (.int 97))) (.bin .le (.index (.var "src") (.var "i")) (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.var "i")) (.lit (.int 65))) (.bin .le (.index (.var "src") (.var "i")) (.lit (.int 90)))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 95))))) (.lit (.bool false)))) (some (.invoke "wpmv" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])) [], .mk "no" false (some "_") none (some (.produce (.var "hi"))) []] }
+
+def kWirWpmc : KCallable := .subflow {
+  preLabel := none
+  head := ("wmb", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "m" false (some "m") none (some (.produce (.cond (.bin .lt (.var "m") (.var "hi")) (.bin .add (.var "m") (.lit (.int 1))) (.var "hi")))) []] }
+
+def kWirWpmv : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "i"))])
+  arms := [.mk "e" false (some "e") none (some (.invoke "wpmv1" [("src", (.var "src")), ("i", (.var "i")), ("e", (.var "e")), ("hi", (.var "hi"))])) []] }
+
+def kWirWpmv1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "iff" false (some "_") (some (.bin .and (.bin .eq (.var "e") (.bin .add (.var "i") (.lit (.int 2)))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 1))) (.var "hi")) (.bin .and (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 105))) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 102)))) (.lit (.bool false))))) (some (.produce (.var "hi"))) [], .mk "nm" false (some "_") none (some (.invoke "wpmv2" [("src", (.var "src")), ("e", (.var "e")), ("hi", (.var "hi"))])) []] }
+
+def kWirWpmv2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "e")), ("hi", (.var "hi"))])
+  arms := [.mk "ca" false (some "j") (some (.cond (.bin .lt (.var "j") (.var "hi")) (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 40))) (.lit (.bool false)))) (some (.invoke "wpmc" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi"))])) [], .mk "dn" false (some "_") none (some (.produce (.var "e"))) []] }
+
+def kWirWep : KCallable := .subflow {
+  preLabel := none
+  head := ("wpm", [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])
+  arms := [.mk "pe" false (some "p") none (some (.invoke "wem" [("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "p")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "a") none (some (.invoke "wep1" [("src", (.var "src")), ("i", (.var "p")), ("hi", (.var "hi")), ("acc", (.var "a")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWep1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "dt" false (some "j") (some (.cond (.bin .lt (.var "j") (.var "hi")) (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 46))) (.lit (.bool false)))) (some (.invoke "wep1f" [("src", (.var "src")), ("j", (.var "j")), ("hi", (.var "hi")), ("acc", (.var "acc")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "ix" false (some "j") (some (.cond (.bin .lt (.var "j") (.var "hi")) (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 91))) (.lit (.bool false)))) (some (.invoke "wep1i" [("src", (.var "src")), ("j", (.var "j")), ("hi", (.var "hi")), ("acc", (.var "acc")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "ca" false (some "j") (some (.cond (.bin .lt (.var "j") (.var "hi")) (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 40))) (.lit (.bool false)))) (some (.produce (.lit (.str "(bad expr-call)")))) [], .mk "ws" false (some "j") (some (.cond (.bin .lt (.var "j") (.var "hi")) (.bin .or (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 32))) (.bin .or (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 9))) (.bin .or (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 10))) (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 13)))))) (.lit (.bool false)))) (some (.invoke "wep1" [("src", (.var "src")), ("i", (.bin .add (.var "j") (.lit (.int 1)))), ("hi", (.var "hi")), ("acc", (.var "acc")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "dn" false (some "_") none (some (.produce (.var "acc"))) []] }
+
+def kWirWep1f : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.bin .add (.var "j") (.lit (.int 1))))])
+  arms := [.mk "ok" false (some "e") (some (.bin .gt (.var "e") (.bin .add (.var "j") (.lit (.int 1))))) (some (.invoke "wnm" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.bin .add (.var "j") (.lit (.int 1))))])) [.mk "_chain" false (some "nm") none (some (.invoke "wep1" [("src", (.var "src")), ("i", (.var "e")), ("hi", (.var "hi")), ("acc", (.bin .concat (.lit (.str "(field ")) (.bin .concat (.var "acc") (.bin .concat (.lit (.str " ")) (.bin .concat (.var "nm") (.lit (.str ")"))))))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad expr)")))) []] }
+
+def kWirWep1i : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.bin .add (.var "j") (.lit (.int 1)))), ("hi", (.var "hi"))])
+  arms := [.mk "ty" false (some "k") none (some (.invoke "wep1t" [("src", (.var "src")), ("j", (.var "j")), ("k", (.var "k")), ("hi", (.var "hi")), ("acc", (.var "acc")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWep1t : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "k"))])
+  arms := [.mk "an" false (some "nm") none (some (.invoke "wty" [("nm", (.var "nm"))])) [.mk "_chain" false (some "t") none (some (.invoke "wep1u" [("src", (.var "src")), ("j", (.var "j")), ("k", (.var "k")), ("hi", (.var "hi")), ("acc", (.var "acc")), ("t", (.var "t")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWep1u : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "k"))])
+  arms := [.mk "sk" false (some "e") (some (.bin .and (.bin .eq (.var "t") (.lit (.int 1))) (.bin .gt (.var "e") (.var "k")))) (some (.invoke "wep1v" [("src", (.var "src")), ("j", (.var "j")), ("e", (.var "e")), ("hi", (.var "hi")), ("acc", (.var "acc")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "ix" false (some "_") none (some (.invoke "wmb" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi"))])) [.mk "_chain" false (some "m") none (some (.invoke "wev" [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.bin .add (.var "j") (.lit (.int 1)))), ("hi", (.var "m")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "x") none (some (.invoke "wep1w" [("src", (.var "src")), ("m", (.var "m")), ("hi", (.var "hi")), ("acc", (.var "acc")), ("x", (.var "x")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]]] }
+
+def kWirWep1v : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "e")), ("hi", (.var "hi"))])
+  arms := [.mk "rb" false (some "q") (some (.cond (.bin .lt (.var "q") (.var "hi")) (.bin .eq (.index (.var "src") (.var "q")) (.lit (.int 93))) (.lit (.bool false)))) (some (.invoke "wep1" [("src", (.var "src")), ("i", (.bin .add (.var "q") (.lit (.int 1)))), ("hi", (.var "hi")), ("acc", (.var "acc")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "ix" false (some "_") none (some (.invoke "wmb" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi"))])) [.mk "_chain" false (some "m") none (some (.invoke "wev" [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.bin .add (.var "j") (.lit (.int 1)))), ("hi", (.var "m")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "x") none (some (.invoke "wep1w" [("src", (.var "src")), ("m", (.var "m")), ("hi", (.var "hi")), ("acc", (.var "acc")), ("x", (.var "x")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]]] }
+
+def kWirWep1w : KCallable := .subflow {
+  preLabel := none
+  head := ("wc5", [("a", (.lit (.str "(index "))), ("b", (.var "acc")), ("c", (.lit (.str " "))), ("d", (.var "x")), ("e", (.lit (.str ")")))])
+  arms := [.mk "a" false (some "a") none (some (.invoke "wep1" [("src", (.var "src")), ("i", (.bin .add (.var "m") (.lit (.int 1)))), ("hi", (.var "hi")), ("acc", (.var "a")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWem : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "hi"))])
+  arms := [.mk "lp" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 40))) (.lit (.bool false)))) (some (.invoke "wemg" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "lb" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 91))) (.lit (.bool false)))) (some (.invoke "wema" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "lc" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 123))) (.lit (.bool false)))) (some (.invoke "wemc" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "at" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 64))) (.lit (.bool false)))) (some (.invoke "wemb" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "st" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 34))) (.lit (.bool false)))) (some (.invoke "wems" [("src", (.var "src")), ("i", (.var "i")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "dg" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .and (.bin .ge (.index (.var "src") (.var "i")) (.lit (.int 48))) (.bin .le (.index (.var "src") (.var "i")) (.lit (.int 57)))) (.lit (.bool false)))) (some (.invoke "wnum" [("src", (.var "src")), ("lo", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "x") none (some (.invoke "wc3" [("a", (.lit (.str "(lit "))), ("b", (.var "x")), ("c", (.lit (.str ")")))])) []], .mk "id" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.var "i")) (.lit (.int 97))) (.bin .le (.index (.var "src") (.var "i")) (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.var "i")) (.lit (.int 65))) (.bin .le (.index (.var "src") (.var "i")) (.lit (.int 90)))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 95))))) (.lit (.bool false)))) (some (.invoke "wemv" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad expr)")))) []] }
+
+def kWirWems : KCallable := .subflow {
+  preLabel := none
+  head := ("wst", [("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("p", (.var "i"))])
+  arms := [.mk "s" false (some "s") none (some (.invoke "wc5" [("a", (.lit (.str "(lit (str "))), ("b", (.lit (.str "\""))), ("c", (.var "s")), ("d", (.lit (.str "\""))), ("e", (.lit (.str "))")))])) []] }
+
+def kWirWemg : KCallable := .subflow {
+  preLabel := none
+  head := ("wmb", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "wev" [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "m")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWema : KCallable := .subflow {
+  preLabel := none
+  head := ("wmb", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "weal" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "m")), ("out", (.lit (.str "(lit (arr"))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "t") none (some (.invoke "wc3" [("a", (.var "t")), ("b", (.lit (.str ")"))), ("c", (.lit (.str ")")))])) []]] }
+
+def kWirWeal : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "dn" false (some "j") (some (.bin .ge (.var "j") (.var "hi"))) (some (.produce (.var "out"))) [], .mk "el" false (some "j") none (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 44)))])) [.mk "_chain" false (some "c") none (some (.invoke "weal1" [("src", (.var "src")), ("j", (.var "j")), ("c", (.var "c")), ("hi", (.var "hi")), ("out", (.var "out")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWeal1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wel", [("src", (.var "src")), ("lo", (.var "j")), ("hi", (.var "c")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "x" false (some "x") none (some (.invoke "wc3" [("a", (.var "out")), ("b", (.lit (.str " "))), ("c", (.var "x"))])) [.mk "_chain" false (some "o") none (some (.invoke "weal" [("src", (.var "src")), ("i", (.bin .add (.var "c") (.lit (.int 1)))), ("hi", (.var "hi")), ("out", (.var "o")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWemc : KCallable := .subflow {
+  preLabel := none
+  head := ("wmb", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "wecl" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "m")), ("out", (.lit (.str "(lit (cell"))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "t") none (some (.invoke "wc3" [("a", (.var "t")), ("b", (.lit (.str ")"))), ("c", (.lit (.str ")")))])) []]] }
+
+def kWirWecl : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "dn" false (some "j") (some (.bin .ge (.var "j") (.var "hi"))) (some (.produce (.var "out"))) [], .mk "f" false (some "j") none (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 58)))])) [.mk "_chain" false (some "c") none (some (.invoke "wecl1" [("src", (.var "src")), ("j", (.var "j")), ("c", (.var "c")), ("hi", (.var "hi")), ("out", (.var "out")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWecl1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wcmx", [("src", (.var "src")), ("i", (.bin .add (.var "c") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 44)))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "wecl2" [("src", (.var "src")), ("j", (.var "j")), ("c", (.var "c")), ("m", (.var "m")), ("hi", (.var "hi")), ("out", (.var "out")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWecl2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "j"))])
+  arms := [.mk "fn" false (some "nm") none (some (.invoke "wel" [("src", (.var "src")), ("lo", (.bin .add (.var "c") (.lit (.int 1)))), ("hi", (.var "m")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "x") none (some (.invoke "wecl3" [("src", (.var "src")), ("m", (.var "m")), ("hi", (.var "hi")), ("out", (.var "out")), ("nm", (.var "nm")), ("x", (.var "x")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWecl3 : KCallable := .subflow {
+  preLabel := none
+  head := ("wc5", [("a", (.var "out")), ("b", (.lit (.str " ("))), ("c", (.var "nm")), ("d", (.lit (.str " "))), ("e", (.var "x"))])
+  arms := [.mk "o" false (some "o") none (some (.invoke "wc3" [("a", (.var "o")), ("b", (.lit (.str ")"))), ("c", (.lit (.str "")))])) [.mk "_chain" false (some "p") none (some (.invoke "wecl" [("src", (.var "src")), ("i", (.bin .add (.var "m") (.lit (.int 1)))), ("hi", (.var "hi")), ("out", (.var "p")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWemb : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.bin .add (.var "i") (.lit (.int 1))))])
+  arms := [.mk "bn" false (some "nm") none (some (.invoke "wbl" [("nm", (.var "nm"))])) [.mk "_chain" false (some "b") none (some (.invoke "wemb1" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("nm", (.var "nm")), ("b", (.var "b")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWemb1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "no" false (some "_") (some (.bin .eq (.var "b") (.lit (.int 0)))) (some (.produce (.lit (.str "(bad builtin)")))) [], .mk "ok" false (some "_") none (some (.invoke "wne" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.bin .add (.var "i") (.lit (.int 1))))])) [.mk "_chain" false (some "e") none (some (.invoke "wemb2" [("src", (.var "src")), ("e", (.var "e")), ("hi", (.var "hi")), ("nm", (.var "nm")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWemb2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "e")), ("hi", (.var "hi"))])
+  arms := [.mk "lp" false (some "j") (some (.cond (.bin .lt (.var "j") (.var "hi")) (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 40))) (.lit (.bool false)))) (some (.invoke "wmb" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi"))])) [.mk "_chain" false (some "m") none (some (.invoke "wc3" [("a", (.lit (.str "(builtin "))), ("b", (.var "nm")), ("c", (.lit (.str "")))])) [.mk "_chain" false (some "p") none (some (.invoke "webal" [("src", (.var "src")), ("i", (.bin .add (.var "j") (.lit (.int 1)))), ("hi", (.var "m")), ("out", (.var "p")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "t") none (some (.invoke "wc2" [("a", (.var "t")), ("b", (.lit (.str ")")))])) []]]], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad builtin)")))) []] }
+
+def kWirWebal : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "dn" false (some "j") (some (.bin .ge (.var "j") (.var "hi"))) (some (.produce (.var "out"))) [], .mk "el" false (some "j") none (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 44)))])) [.mk "_chain" false (some "v") none (some (.invoke "webal1" [("src", (.var "src")), ("j", (.var "j")), ("v", (.var "v")), ("hi", (.var "hi")), ("out", (.var "out")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWebal1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wcmx", [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 58)))])
+  arms := [.mk "na" false (some "c") (some (.bin .lt (.var "c") (.var "v"))) (some (.invoke "wc3" [("a", (.var "out")), ("b", (.lit (.str " "))), ("c", (.lit (.str "(bad builtin-arg)")))])) [.mk "_chain" false (some "o") none (some (.invoke "webal" [("src", (.var "src")), ("i", (.bin .add (.var "v") (.lit (.int 1)))), ("hi", (.var "hi")), ("out", (.var "o")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []], .mk "ok" false (some "_") none (some (.invoke "wev" [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.var "j")), ("hi", (.var "v")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "x") none (some (.invoke "wc3" [("a", (.var "out")), ("b", (.lit (.str " "))), ("c", (.var "x"))])) [.mk "_chain" false (some "o") none (some (.invoke "webal" [("src", (.var "src")), ("i", (.bin .add (.var "v") (.lit (.int 1)))), ("hi", (.var "hi")), ("out", (.var "o")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]]] }
+
+def kWirWemv : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "i"))])
+  arms := [.mk "iff" false (some "nm") (some (.bin .eq (.var "nm") (.lit (.str "if")))) (some (.invoke "wemi" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "tru" false (some "nm") (some (.bin .eq (.var "nm") (.lit (.str "true")))) (some (.produce (.lit (.str "(lit (bool true))")))) [], .mk "fls" false (some "nm") (some (.bin .eq (.var "nm") (.lit (.str "false")))) (some (.produce (.lit (.str "(lit (bool false))")))) [], .mk "kwd" false (some "nm") (some (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "else"))) (.bin .eq (.var "nm") (.lit (.str "when")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "or"))) (.bin .eq (.var "nm") (.lit (.str "and")))))) (some (.produce (.lit (.str "(bad expr)")))) [], .mk "var" false (some "nm") none (some (.invoke "wemvd" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("nm", (.var "nm")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWemvd : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "i"))])
+  arms := [.mk "e" false (some "e") none (some (.invoke "wsk" [("src", (.var "src")), ("i", (.var "e")), ("hi", (.var "hi"))])) [.mk "_chain" false (some "j") none (some (.invoke "wemve" [("src", (.var "src")), ("j", (.var "j")), ("hi", (.var "hi")), ("nm", (.var "nm"))])) []]] }
+
+def kWirWemve : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "ca" false (some "_") (some (.cond (.bin .lt (.var "j") (.var "hi")) (.bin .eq (.index (.var "src") (.var "j")) (.lit (.int 40))) (.lit (.bool false)))) (some (.produce (.lit (.str "(bad expr-call)")))) [], .mk "dn" false (some "_") none (some (.invoke "wc3" [("a", (.lit (.str "(var "))), ("b", (.var "nm")), ("c", (.lit (.str ")")))])) []] }
+
+def kWirWemi : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "i"))])
+  arms := [.mk "e" false (some "e") none (some (.invoke "wsk" [("src", (.var "src")), ("i", (.var "e")), ("hi", (.var "hi"))])) [.mk "_chain" false (some "j") none (some (.invoke "wemi1" [("src", (.var "src")), ("j", (.var "j")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWemi1 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "j")), ("n", (.var "hi"))])
+  arms := [.mk "lp" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 40)))) (some (.invoke "wmb" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi"))])) [.mk "_chain" false (some "m") none (some (.invoke "wemi2" [("src", (.var "src")), ("j", (.var "j")), ("m", (.var "m")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad if)")))) []] }
+
+def kWirWemi2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wev", [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.bin .add (.var "j") (.lit (.int 1)))), ("hi", (.var "m")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "c" false (some "c") none (some (.invoke "wfel" [("src", (.var "src")), ("i", (.bin .add (.var "m") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("ifd", (.lit (.int 0)))])) [.mk "_chain" false (some "el") none (some (.invoke "wemi3" [("src", (.var "src")), ("m", (.var "m")), ("el", (.var "el")), ("c", (.var "c")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWemi3 : KCallable := .subflow {
+  preLabel := none
+  head := ("wev", [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.bin .add (.var "m") (.lit (.int 1)))), ("hi", (.var "el")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "t" false (some "t") none (some (.invoke "wev" [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.bin .add (.var "el") (.lit (.int 4)))), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "fv") none (some (.invoke "wc7" [("a", (.lit (.str "(cond "))), ("b", (.var "c")), ("c", (.lit (.str " "))), ("d", (.var "t")), ("e", (.lit (.str " "))), ("f", (.var "fv")), ("g", (.lit (.str ")")))])) []]] }
+
+def kWirWtek : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "i")), ("n", (.var "hi"))])
+  arms := [.mk "fin" false (some "c") (some (.bin .lt (.var "c") (.lit (.int 0)))) (some (.produce (.bin .sub (.lit (.int 0)) (.lit (.int 1))))) [], .mk "top" false (some "_") (some (.bin .or (.bin .ne (.var "d") (.lit (.int 0))) (.bin .ne (.var "ins") (.lit (.int 0))))) (some (.produce (.lit (.int 0)))) [], .mk "el" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 101)))) (some (.invoke "wtek1" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "fi" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 105)))) (some (.invoke "wtek2" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) [], .mk "mo" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWtek1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wbd", [("src", (.var "src")), ("pv", (.bin .sub (.var "i") (.lit (.int 1)))), ("nx", (.bin .add (.var "i") (.lit (.int 4)))), ("hi", (.var "hi"))])
+  arms := [.mk "nb" false (some "b") (some (.bin .eq (.var "b") (.lit (.int 0)))) (some (.produce (.lit (.int 0)))) [], .mk "ls" false (some "_") none (some (.invoke "wtek1b" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) []] }
+
+def kWirWtek1b : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "ls" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 108))) (.cond (.bin .lt (.bin .add (.var "i") (.lit (.int 3))) (.var "hi")) (.bin .and (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 2)))) (.lit (.int 115))) (.bin .eq (.index (.var "src") (.bin .add (.var "i") (.lit (.int 3)))) (.lit (.int 101)))) (.lit (.bool false))))) (some (.produce (.lit (.int 1)))) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWtek2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wbd", [("src", (.var "src")), ("pv", (.bin .sub (.var "i") (.lit (.int 1)))), ("nx", (.bin .add (.var "i") (.lit (.int 2)))), ("hi", (.var "hi"))])
+  arms := [.mk "nb" false (some "b") (some (.bin .eq (.var "b") (.lit (.int 0)))) (some (.produce (.lit (.int 0)))) [], .mk "ff" false (some "_") none (some (.invoke "wtek2b" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])) []] }
+
+def kWirWtek2b : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "ff" false (some "c") (some (.bin .eq (.var "c") (.lit (.int 102)))) (some (.produce (.lit (.int 2)))) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWbd : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "pv")), ("n", (.var "hi"))])
+  arms := [.mk "pi" false (some "c") (some (.bin .or (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 97))) (.bin .le (.var "c") (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 65))) (.bin .le (.var "c") (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 48))) (.bin .le (.var "c") (.lit (.int 57)))) (.bin .eq (.var "c") (.lit (.int 95)))))) (.bin .eq (.var "c") (.lit (.int 45))))) (some (.produce (.lit (.int 0)))) [], .mk "po" false (some "_") none (some (.invoke "wbd1" [("src", (.var "src")), ("nx", (.var "nx")), ("hi", (.var "hi"))])) []] }
+
+def kWirWbd1 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.var "nx")), ("n", (.var "hi"))])
+  arms := [.mk "ni" false (some "c") (some (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 97))) (.bin .le (.var "c") (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 65))) (.bin .le (.var "c") (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.var "c") (.lit (.int 48))) (.bin .le (.var "c") (.lit (.int 57)))) (.bin .eq (.var "c") (.lit (.int 95))))))) (some (.produce (.lit (.int 0)))) [], .mk "gl" false (some "c") (some (.bin .and (.bin .eq (.var "c") (.lit (.int 45))) (.cond (.bin .lt (.bin .add (.var "nx") (.lit (.int 1))) (.var "hi")) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 97))) (.bin .le (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 122)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 65))) (.bin .le (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 90)))) (.bin .or (.bin .and (.bin .ge (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 48))) (.bin .le (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 57)))) (.bin .or (.bin .eq (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 95))) (.bin .eq (.index (.var "src") (.bin .add (.var "nx") (.lit (.int 1)))) (.lit (.int 45))))))) (.lit (.bool false))))) (some (.produce (.lit (.int 0)))) [], .mk "ok" false (some "_") none (some (.produce (.lit (.int 1)))) []] }
+
+def kWirWfel : KCallable := .subflow {
+  preLabel := none
+  head := ("wtek", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins"))])
+  arms := [.mk "fin" false (some "r") (some (.bin .lt (.var "r") (.lit (.int 0)))) (some (.produce (.var "hi"))) [], .mk "el" false (some "r") (some (.bin .and (.bin .eq (.var "r") (.lit (.int 1))) (.bin .eq (.var "ifd") (.lit (.int 0))))) (some (.produce (.var "i"))) [], .mk "es" false (some "r") (some (.bin .eq (.var "r") (.lit (.int 1)))) (some (.invoke "wfel" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 4)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("ifd", (.bin .sub (.var "ifd") (.lit (.int 1))))])) [], .mk "fi" false (some "r") (some (.bin .eq (.var "r") (.lit (.int 2)))) (some (.invoke "wfel" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 2)))), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("ifd", (.bin .add (.var "ifd") (.lit (.int 1))))])) [], .mk "mo" false (some "_") none (some (.invoke "wfeln" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("d", (.var "d")), ("ins", (.var "ins")), ("ifd", (.var "ifd"))])) []] }
+
+def kWirWfeln : KCallable := .subflow {
+  preLabel := none
+  head := ("wfel", [("src", (.var "src")), ("i", (.bin .add (.var "i") (.cond (.bin .and (.bin .eq (.var "ins") (.lit (.int 1))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 92)))) (.lit (.int 2)) (.lit (.int 1))))), ("hi", (.var "hi")), ("d", (.cond (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 40))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 91)))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 123))))) (.bin .add (.var "d") (.lit (.int 1))) (.cond (.bin .and (.bin .eq (.var "ins") (.lit (.int 0))) (.bin .or (.bin .or (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 41))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 93)))) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 125))))) (.bin .sub (.var "d") (.lit (.int 1))) (.var "d")))), ("ins", (.cond (.bin .and (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 34))) (.bin .eq (.var "ins") (.lit (.int 0)))) (.lit (.int 1)) (.cond (.bin .and (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 34))) (.bin .eq (.var "ins") (.lit (.int 1)))) (.lit (.int 0)) (.var "ins")))), ("ifd", (.var "ifd"))])
+  arms := [.mk "r" false (some "r") none (some (.produce (.var "r"))) []] }
+
+def kWirWnum : KCallable := .subflow {
+  preLabel := none
+  head := ("wen", [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "hi"))])
+  arms := [.mk "e" false (some "e") none (some (.invoke "wfd" [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "e")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("last", (.bin .sub (.lit (.int 0)) (.lit (.int 1))))])) [.mk "_chain" false (some "d") none (some (.invoke "wnum1" [("src", (.var "src")), ("lo", (.var "lo")), ("e", (.var "e")), ("d", (.var "d"))])) []]] }
+
+def kWirWnum1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wnv", [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "e")), ("v", (.lit (.int 0)))])
+  arms := [.mk "w" false (some "v") (some (.bin .lt (.var "d") (.lit (.int 0)))) (some (.invoke "wc3" [("a", (.lit (.str "(int "))), ("b", (.builtin "intToString" [(.var "v")])), ("c", (.lit (.str ")")))])) [], .mk "fw" false (some "v") none (some (.invoke "wnum2" [("src", (.var "src")), ("e", (.var "e")), ("d", (.var "d")), ("w", (.var "v"))])) []] }
+
+def kWirWnum2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wnv", [("src", (.var "src")), ("i", (.bin .add (.var "d") (.lit (.int 1)))), ("hi", (.var "e")), ("v", (.lit (.int 0)))])
+  arms := [.mk "f" false (some "f") none (some (.invoke "wp10" [("n", (.bin .sub (.var "e") (.bin .add (.var "d") (.lit (.int 1)))))])) [.mk "_chain" false (some "dn") none (some (.invoke "wnum3" [("e", (.var "e")), ("d", (.var "d")), ("w", (.var "w")), ("f", (.var "f")), ("dn", (.var "dn"))])) []]] }
+
+def kWirWnum3 : KCallable := .subflow {
+  preLabel := none
+  head := ("wgcd", [("a", (.var "f")), ("b", (.var "dn"))])
+  arms := [.mk "g" false (some "g") (some (.bin .gt (.var "g") (.lit (.int 0)))) (some (.invoke "wc5" [("a", (.lit (.str "(float "))), ("b", (.builtin "intToString" [(.bin .add (.bin .mul (.var "w") (.bin .div (.var "dn") (.var "g"))) (.bin .div (.var "f") (.var "g")))])), ("c", (.lit (.str " "))), ("d", (.builtin "intToString" [(.bin .div (.var "dn") (.var "g"))])), ("e", (.lit (.str ")")))])) [], .mk "z" false (some "_") none (some (.produce (.lit (.str "(bad float)")))) []] }
+
+def kWirWel : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "hi"))])
+  arms := [.mk "lp" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 40))) (.lit (.bool false)))) (some (.invoke "welg" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "lb" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 91))) (.lit (.bool false)))) (some (.invoke "wela" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "lc" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 123))) (.lit (.bool false)))) (some (.invoke "welc" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "st" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 34))) (.lit (.bool false)))) (some (.invoke "wst" [("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("p", (.var "i"))])) [.mk "_chain" false (some "s") none (some (.invoke "wc5" [("a", (.lit (.str "(str "))), ("b", (.lit (.str "\""))), ("c", (.var "s")), ("d", (.lit (.str "\""))), ("e", (.lit (.str ")")))])) []], .mk "dg" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .and (.bin .ge (.index (.var "src") (.var "i")) (.lit (.int 48))) (.bin .le (.index (.var "src") (.var "i")) (.lit (.int 57)))) (.lit (.bool false)))) (some (.invoke "wnum" [("src", (.var "src")), ("lo", (.var "i")), ("hi", (.var "hi")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [], .mk "tr" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 116))) (.lit (.bool false)))) (some (.invoke "wel1" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("nm", (.lit (.str "true"))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])) [], .mk "fa" false (some "i") (some (.cond (.bin .lt (.var "i") (.var "hi")) (.bin .eq (.index (.var "src") (.var "i")) (.lit (.int 102))) (.lit (.bool false)))) (some (.invoke "wel1" [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi")), ("nm", (.lit (.str "false"))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad lit)")))) []] }
+
+def kWirWel1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "i"))])
+  arms := [.mk "t" false (some "v") (some (.bin .eq (.var "v") (.var "nm"))) (some (.invoke "wc3" [("a", (.lit (.str "(bool "))), ("b", (.var "nm")), ("c", (.lit (.str ")")))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad lit)")))) []] }
+
+def kWirWelg : KCallable := .subflow {
+  preLabel := none
+  head := ("wmb", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "wel" [("src", (.var "src")), ("lo", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "m")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWela : KCallable := .subflow {
+  preLabel := none
+  head := ("wmb", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "well" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "m")), ("out", (.lit (.str "(arr"))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "t") none (some (.invoke "wc2" [("a", (.var "t")), ("b", (.lit (.str ")")))])) []]] }
+
+def kWirWell : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "dn" false (some "j") (some (.bin .ge (.var "j") (.var "hi"))) (some (.produce (.var "out"))) [], .mk "el" false (some "j") none (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 44)))])) [.mk "_chain" false (some "c") none (some (.invoke "well1" [("src", (.var "src")), ("j", (.var "j")), ("c", (.var "c")), ("hi", (.var "hi")), ("out", (.var "out")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWell1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wel", [("src", (.var "src")), ("lo", (.var "j")), ("hi", (.var "c")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "x" false (some "x") none (some (.invoke "wc3" [("a", (.var "out")), ("b", (.lit (.str " "))), ("c", (.var "x"))])) [.mk "_chain" false (some "o") none (some (.invoke "well" [("src", (.var "src")), ("i", (.bin .add (.var "c") (.lit (.int 1)))), ("hi", (.var "hi")), ("out", (.var "o")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWelc : KCallable := .subflow {
+  preLabel := none
+  head := ("wmb", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "welcl" [("src", (.var "src")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("hi", (.var "m")), ("out", (.lit (.str "(cell"))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "t") none (some (.invoke "wc2" [("a", (.var "t")), ("b", (.lit (.str ")")))])) []]] }
+
+def kWirWelcl : KCallable := .subflow {
+  preLabel := none
+  head := ("wsk", [("src", (.var "src")), ("i", (.var "i")), ("hi", (.var "hi"))])
+  arms := [.mk "dn" false (some "j") (some (.bin .ge (.var "j") (.var "hi"))) (some (.produce (.var "out"))) [], .mk "f" false (some "j") none (some (.invoke "wcmx" [("src", (.var "src")), ("i", (.var "j")), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 58)))])) [.mk "_chain" false (some "c") none (some (.invoke "welcl1" [("src", (.var "src")), ("j", (.var "j")), ("c", (.var "c")), ("hi", (.var "hi")), ("out", (.var "out")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWelcl1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wcmx", [("src", (.var "src")), ("i", (.bin .add (.var "c") (.lit (.int 1)))), ("hi", (.var "hi")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("w", (.lit (.int 44)))])
+  arms := [.mk "m" false (some "m") none (some (.invoke "welcl2" [("src", (.var "src")), ("j", (.var "j")), ("c", (.var "c")), ("m", (.var "m")), ("hi", (.var "hi")), ("out", (.var "out")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []] }
+
+def kWirWelcl2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "j"))])
+  arms := [.mk "fn" false (some "nm") none (some (.invoke "wel" [("src", (.var "src")), ("lo", (.bin .add (.var "c") (.lit (.int 1)))), ("hi", (.var "m")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "x") none (some (.invoke "welcl3" [("src", (.var "src")), ("m", (.var "m")), ("hi", (.var "hi")), ("out", (.var "out")), ("nm", (.var "nm")), ("x", (.var "x")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWelcl3 : KCallable := .subflow {
+  preLabel := none
+  head := ("wc5", [("a", (.var "out")), ("b", (.lit (.str " ("))), ("c", (.var "nm")), ("d", (.lit (.str " "))), ("e", (.var "x"))])
+  arms := [.mk "o" false (some "o") none (some (.invoke "wc3" [("a", (.var "o")), ("b", (.lit (.str ")"))), ("c", (.lit (.str "")))])) [.mk "_chain" false (some "p") none (some (.invoke "welcl" [("src", (.var "src")), ("i", (.bin .add (.var "m") (.lit (.int 1)))), ("hi", (.var "hi")), ("out", (.var "p")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWrk : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "rows")), ("i", (.var "i")), ("n", (.bin .mul (.var "nr") (.lit (.int 6))))])
+  arms := [.mk "k" false (some "k") none (some (.produce (.var "k"))) []] }
+
+def kWirWevf : KCallable := .subflow {
+  preLabel := none
+  head := ("wpix", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "lo"))])
+  arms := [.mk "ok" false (some "k") (some (.bin .ge (.var "k") (.lit (.int 0)))) (some (.produce (.index (.var "nsp") (.bin .add (.bin .sub (.builtin "len" [(.var "nsp")]) (.bin .mul (.lit (.int 3)) (.var "nn"))) (.var "k"))))) [], .mk "no" false (some "_") none (some (.produce (.bin .sub (.lit (.int 0)) (.lit (.int 1))))) []] }
+
+def kWirWdpe : KCallable := .subflow {
+  preLabel := none
+  head := ("wpix", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "ok" false (some "k") (some (.bin .ge (.var "k") (.lit (.int 0)))) (some (.produce (.cond (.bin .gt (.index (.var "nsp") (.bin .add (.bin .sub (.builtin "len" [(.var "nsp")]) (.var "nn")) (.var "k"))) (.lit (.int 1))) (.lit (.int 1)) (.lit (.int 0))))) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWhi : KCallable := .subflow {
+  preLabel := none
+  head := ("wpix", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "lo"))])
+  arms := [.mk "ok" false (some "k") (some (.bin .ge (.var "k") (.lit (.int 0)))) (some (.produce (.index (.var "nsp") (.bin .add (.bin .sub (.builtin "len" [(.var "nsp")]) (.bin .mul (.lit (.int 2)) (.var "nn"))) (.var "k"))))) [], .mk "no" false (some "_") none (some (.produce (.lit (.int 0)))) []] }
+
+def kWirWfdn : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "rows")), ("i", (.bin .add (.var "evi") (.bin .mul (.var "i") (.lit (.int 6))))), ("n", (.bin .mul (.var "nr") (.lit (.int 6))))])
+  arms := [.mk "fn" false (some "k") (some (.bin .ne (.var "k") (.lit (.int 2)))) (some (.produce (.var "i"))) [], .mk "mo" false (some "_") none (some (.invoke "wfdn" [("rows", (.var "rows")), ("evi", (.var "evi")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("nr", (.var "nr"))])) []] }
+
+def kWirWfdh : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "rows")), ("i", (.bin .add (.var "evi") (.bin .mul (.var "i") (.lit (.int 6))))), ("n", (.bin .mul (.var "nr") (.lit (.int 6))))])
+  arms := [.mk "fn" false (some "k") (some (.bin .ne (.var "k") (.lit (.int 2)))) (some (.produce (.lit (.int 0)))) [], .mk "mo" false (some "_") none (some (.invoke "wfdh1" [("rows", (.var "rows")), ("evi", (.var "evi")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "i")), ("nr", (.var "nr"))])) []] }
+
+def kWirWfdh1 : KCallable := .subflow {
+  preLabel := none
+  head := ("weq", [("src", (.var "src")), ("a", (.index (.var "rows") (.bin .add (.bin .add (.var "evi") (.bin .mul (.var "i") (.lit (.int 6)))) (.lit (.int 2))))), ("b", (.index (.var "rows") (.bin .add (.bin .add (.var "evi") (.bin .mul (.var "i") (.lit (.int 6)))) (.lit (.int 3))))), ("x", (.var "lo")), ("y", (.var "hi"))])
+  arms := [.mk "eq" false (some "v") (some (.bin .eq (.var "v") (.lit (.int 1)))) (some (.produce (.lit (.int 1)))) [], .mk "no" false (some "_") none (some (.invoke "wfdh" [("rows", (.var "rows")), ("evi", (.var "evi")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("nr", (.var "nr"))])) []] }
+
+def kWirWbr0 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "rows")), ("i", (.bin .add (.var "evi") (.bin .mul (.var "i") (.lit (.int 6))))), ("n", (.bin .mul (.var "nr") (.lit (.int 6))))])
+  arms := [.mk "sk" false (some "k") (some (.bin .or (.bin .eq (.var "k") (.lit (.int 2))) (.bin .eq (.var "k") (.lit (.int 3))))) (some (.invoke "wbr0" [("rows", (.var "rows")), ("evi", (.var "evi")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("nr", (.var "nr"))])) [], .mk "mo" false (some "_") none (some (.produce (.bin .add (.var "evi") (.bin .mul (.var "i") (.lit (.int 6)))))) []] }
+
+def kWirWbrn : KCallable := .subflow {
+  preLabel := none
+  head := ("wbr0", [("rows", (.var "rows")), ("evi", (.var "evi")), ("i", (.lit (.int 1))), ("nr", (.var "nr"))])
+  arms := [.mk "b" false (some "b") none (some (.invoke "wbrn1" [("rows", (.var "rows")), ("b", (.var "b")), ("i", (.lit (.int 0))), ("nr", (.var "nr"))])) []] }
+
+def kWirWbrn1 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "rows")), ("i", (.bin .add (.var "b") (.bin .mul (.var "i") (.lit (.int 6))))), ("n", (.bin .mul (.var "nr") (.lit (.int 6))))])
+  arms := [.mk "fn" false (some "k") (some (.bin .ne (.var "k") (.lit (.int 4)))) (some (.produce (.var "i"))) [], .mk "mo" false (some "_") none (some (.invoke "wbrn1" [("rows", (.var "rows")), ("b", (.var "b")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("nr", (.var "nr"))])) []] }
+
+def kWirWbrh : KCallable := .subflow {
+  preLabel := none
+  head := ("wbr0", [("rows", (.var "rows")), ("evi", (.var "evi")), ("i", (.lit (.int 1))), ("nr", (.var "nr"))])
+  arms := [.mk "b" false (some "b") none (some (.invoke "wbrh1" [("rows", (.var "rows")), ("b", (.var "b")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.lit (.int 0))), ("nr", (.var "nr"))])) []] }
+
+def kWirWbrh1 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "rows")), ("i", (.bin .add (.var "b") (.bin .mul (.var "i") (.lit (.int 6))))), ("n", (.bin .mul (.var "nr") (.lit (.int 6))))])
+  arms := [.mk "fn" false (some "k") (some (.bin .ne (.var "k") (.lit (.int 4)))) (some (.produce (.lit (.int 0)))) [], .mk "mo" false (some "_") none (some (.invoke "wbrh2" [("rows", (.var "rows")), ("b", (.var "b")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.var "i")), ("nr", (.var "nr"))])) []] }
+
+def kWirWbrh2 : KCallable := .subflow {
+  preLabel := none
+  head := ("weq", [("src", (.var "src")), ("a", (.index (.var "rows") (.bin .add (.bin .add (.var "b") (.bin .mul (.var "i") (.lit (.int 6)))) (.lit (.int 2))))), ("b", (.index (.var "rows") (.bin .add (.bin .add (.var "b") (.bin .mul (.var "i") (.lit (.int 6)))) (.lit (.int 3))))), ("x", (.var "lo")), ("y", (.var "hi"))])
+  arms := [.mk "eq" false (some "v") (some (.bin .eq (.var "v") (.lit (.int 1)))) (some (.produce (.lit (.int 1)))) [], .mk "no" false (some "_") none (some (.invoke "wbrh1" [("rows", (.var "rows")), ("b", (.var "b")), ("src", (.var "src")), ("lo", (.var "lo")), ("hi", (.var "hi")), ("i", (.bin .add (.var "i") (.lit (.int 1)))), ("nr", (.var "nr"))])) []] }
+
+def kWirWrp : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "z" false (some "_") (some (.bin .le (.var "k") (.lit (.int 0)))) (some (.produce (.lit (.str "")))) [], .mk "mo" false (some "_") none (some (.invoke "wrp1" [("k", (.var "k"))])) []] }
+
+def kWirWrp1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wrp", [("k", (.bin .sub (.var "k") (.lit (.int 1))))])
+  arms := [.mk "t" false (some "t") none (some (.invoke "wc2" [("a", (.lit (.str ")"))), ("b", (.var "t"))])) []] }
+
+def kWirWclo : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "z" false (some "_") (some (.bin .eq (.var "inf") (.lit (.int 0)))) (some (.produce (.lit (.str "")))) [], .mk "y" false (some "_") none (some (.invoke "wcloa" [("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep"))])) []] }
+
+def kWirWcloa : KCallable := .subflow {
+  preLabel := none
+  head := ("wrp", [("k", (.bin .add (.var "iopen") (.cond (.bin .ne (.var "curk") (.lit (.int 0))) (.bin .add (.lit (.int 1)) (.bin .mul (.var "dep") (.lit (.int 2)))) (.lit (.int 0)))))])
+  arms := [.mk "a" false (some "a") none (some (.invoke "wc3" [("a", (.cond (.bin .eq (.var "curk") (.bin .sub (.lit (.int 0)) (.lit (.int 1)))) (.lit (.str " (node terminal)")) (.lit (.str "")))), ("b", (.var "a")), ("c", (.lit (.str "))")))])) []] }
+
+def kWirWcls : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "z" false (some "_") (some (.bin .eq (.var "curk") (.lit (.int 0)))) (some (.invoke "wrp" [("k", (.var "iopen"))])) [], .mk "tm" false (some "_") (some (.bin .eq (.var "curk") (.bin .sub (.lit (.int 0)) (.lit (.int 1))))) (some (.invoke "wrp" [("k", (.bin .add (.bin .add (.var "iopen") (.lit (.int 1))) (.bin .mul (.var "dep") (.lit (.int 2)))))])) [.mk "_chain" false (some "p") none (some (.invoke "wc2" [("a", (.lit (.str " (node terminal)"))), ("b", (.var "p"))])) []], .mk "y" false (some "_") none (some (.invoke "wrp" [("k", (.bin .add (.bin .add (.var "iopen") (.lit (.int 1))) (.bin .mul (.var "dep") (.lit (.int 2)))))])) []] }
+
+def kWirWex : KCallable := .subflow {
+  preLabel := none
+  head := ("wtb", [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "hi") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "b" false (some "b") none (some (.invoke "wsk" [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "b"))])) [.mk "_chain" false (some "a") none (some (.invoke "wev" [("lv", (.lit (.int 1))), ("src", (.var "src")), ("lo", (.var "a")), ("hi", (.var "b")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) []]] }
+
+def kWirWpun : KCallable := .subflow {
+  preLabel := none
+  head := ("wtb", [("src", (.var "src")), ("lo", (.var "lo")), ("j", (.bin .sub (.var "hi") (.lit (.int 1)))), ("n", (.var "hi"))])
+  arms := [.mk "b" false (some "b") none (some (.invoke "wsk" [("src", (.var "src")), ("i", (.var "lo")), ("hi", (.var "b"))])) [.mk "_chain" false (some "a") none (some (.invoke "wpun1" [("src", (.var "src")), ("a", (.var "a")), ("b", (.var "b")), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])) []]] }
+
+def kWirWpun1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "a"))])
+  arms := [.mk "pu" false (some "e") (some (.bin .eq (.var "e") (.var "b"))) (some (.produce (.var "a"))) [], .mk "fd" false (some "_") none (some (.invoke "wfd" [("src", (.var "src")), ("i", (.var "a")), ("hi", (.var "b")), ("d", (.lit (.int 0))), ("ins", (.lit (.int 0))), ("last", (.bin .sub (.lit (.int 0)) (.lit (.int 1))))])) [.mk "_chain" false (some "f") none (some (.invoke "wpun2" [("src", (.var "src")), ("b", (.var "b")), ("f", (.var "f")), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])) []]] }
+
+def kWirWpun2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.bin .add (.var "f") (.lit (.int 1))))])
+  arms := [.mk "ok" false (some "e") (some (.bin .and (.bin .ge (.var "f") (.lit (.int 0))) (.bin .eq (.var "e") (.var "b")))) (some (.invoke "wpun3" [("src", (.var "src")), ("f", (.var "f"))])) [], .mk "no" false (some "_") none (some (.produce (.bin .sub (.lit (.int 0)) (.lit (.int 1))))) []] }
+
+def kWirWpun3 : KCallable := .subflow {
+  preLabel := none
+  head := ("pkb", [("t", (.var "src")), ("i", (.bin .sub (.var "f") (.lit (.int 1)))), ("n", (.builtin "len" [(.var "src")]))])
+  arms := [.mk "a" false (some "c") none (some (.invoke "wpun3b" [("c", (.var "c")), ("f", (.var "f"))])) []] }
+
+def kWirWpun3b : KCallable := .subflow {
+  preLabel := none
+  head := ("wpe", [("c", (.var "c"))])
+  arms := [.mk "ok" false (some "_") none (some (.produce (.bin .add (.var "f") (.lit (.int 1))))) [], .mk "no" false (some "_") none (some (.produce (.bin .sub (.lit (.int 0)) (.lit (.int 1))))) []] }
+
+def kWirWdk : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "iv" false (some "_") (some (.bin .or (.bin .eq (.var "ltk") (.lit (.int 1))) (.bin .eq (.var "ltk") (.lit (.int 2))))) (some (.invoke "wevf" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("lo", (.var "ltl"))])) [], .mk "jp" false (some "_") (some (.bin .eq (.var "ltk") (.lit (.int 3)))) (some (.invoke "wevf" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("lo", (.var "htl"))])) [], .mk "ow" false (some "_") none (some (.produce (.var "fevi"))) []] }
+
+def kWirWarg : KCallable := .subflow {
+  preLabel := none
+  head := ("wex", [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 4))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 5))))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "e" false (some "e") none (some (.invoke "wdk" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("fevi", (.var "fevi"))])) [.mk "_chain" false (some "d") none (some (.invoke "warg1" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("d", (.var "d")), ("argi", (.var "argi")), ("e", (.var "e"))])) []]] }
+
+def kWirWarg1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "na" false (some "_") (some (.bin .gt (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))) (.lit (.int 0)))) (some (.invoke "warg2" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("d", (.var "d")), ("e", (.var "e"))])) [], .mk "po" false (some "_") none (some (.invoke "wpun" [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 4))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 5))))), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])) [.mk "_chain" false (some "p") none (some (.invoke "warg3" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("d", (.var "d")), ("argi", (.var "argi")), ("e", (.var "e")), ("p", (.var "p"))])) []]] }
+
+def kWirWarg2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wfdh", [("rows", (.var "rows")), ("evi", (.var "d")), ("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("i", (.lit (.int 1))), ("nr", (.var "nr"))])
+  arms := [.mk "h" false (some "h") (some (.bin .or (.bin .lt (.var "d") (.lit (.int 0))) (.bin .eq (.var "h") (.lit (.int 1))))) (some (.invoke "warg2a" [("rows", (.var "rows")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("e", (.var "e"))])) [], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad decl-param)")))) []] }
+
+def kWirWarg2a : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "nm" false (some "nm") none (some (.invoke "wc5" [("a", (.lit (.str " ("))), ("b", (.var "nm")), ("c", (.lit (.str " "))), ("d", (.var "e")), ("e", (.lit (.str ")")))])) []] }
+
+def kWirWarg3 : KCallable := .subflow {
+  preLabel := none
+  head := ("wne", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "p"))])
+  arms := [.mk "pe" false (some "pe") none (some (.invoke "warg3a" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("d", (.var "d")), ("argi", (.var "argi")), ("e", (.var "e")), ("p", (.var "p")), ("pe", (.var "pe"))])) []] }
+
+def kWirWarg3a : KCallable := .subflow {
+  preLabel := none
+  head := ("wfdh", [("rows", (.var "rows")), ("evi", (.var "d")), ("src", (.var "src")), ("lo", (.var "p")), ("hi", (.var "pe")), ("i", (.lit (.int 1))), ("nr", (.var "nr"))])
+  arms := [.mk "h" false (some "h") (some (.bin .and (.bin .ge (.var "p") (.lit (.int 0))) (.bin .or (.bin .lt (.var "d") (.lit (.int 0))) (.bin .eq (.var "h") (.lit (.int 1)))))) (some (.invoke "wnm" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "p"))])) [.mk "_chain" false (some "nm") none (some (.invoke "wc5" [("a", (.lit (.str " ("))), ("b", (.var "nm")), ("c", (.lit (.str " "))), ("d", (.var "e")), ("e", (.lit (.str ")")))])) []], .mk "ix" false (some "_") none (some (.invoke "warg4" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("d", (.var "d")), ("argi", (.var "argi")), ("e", (.var "e"))])) []] }
+
+def kWirWarg4 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "y" false (some "_") (some (.bin .ge (.var "d") (.lit (.int 0)))) (some (.invoke "warg5" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("d", (.var "d")), ("argi", (.var "argi")), ("e", (.var "e"))])) [], .mk "n" false (some "_") none (some (.produce (.lit (.str "(bad arg-name)")))) []] }
+
+def kWirWarg5 : KCallable := .subflow {
+  preLabel := none
+  head := ("wfdn", [("rows", (.var "rows")), ("evi", (.var "d")), ("i", (.lit (.int 1))), ("nr", (.var "nr"))])
+  arms := [.mk "n" false (some "n") (some (.bin .lt (.bin .add (.var "argi") (.lit (.int 1))) (.var "n"))) (some (.invoke "wnm" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.bin .add (.var "d") (.bin .mul (.bin .add (.var "argi") (.lit (.int 1))) (.lit (.int 6)))) (.lit (.int 2)))))])) [.mk "_chain" false (some "nm") none (some (.invoke "wc5" [("a", (.lit (.str " ("))), ("b", (.var "nm")), ("c", (.lit (.str " "))), ("d", (.var "e")), ("e", (.lit (.str ")")))])) []], .mk "no" false (some "_") none (some (.produce (.lit (.str "(bad arg-name)")))) []] }
+
+def kWirWhev : KCallable := .subflow {
+  preLabel := none
+  head := ("wdpe", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("rows", (.var "rows")), ("i", (.var "i"))])
+  arms := [.mk "d" false (some "d") none (some (.produce (.cond (.bin .eq (.var "d") (.lit (.int 1))) (.lit (.str " (bad dup-tor)")) (.lit (.str ""))))) []] }
+
+def kWirWhim : KCallable := .subflow {
+  preLabel := none
+  head := ("wex", [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 4))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 5))))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "e" false (some "e") none (some (.invoke "wnm" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])) [.mk "_chain" false (some "nm") none (some (.invoke "wc7" [("a", (.lit (.str " (def "))), ("b", (.var "nm")), ("c", (.lit (.str " (bare "))), ("d", (.var "e")), ("e", (.lit (.str "))"))), ("f", (.lit (.str ""))), ("g", (.lit (.str "")))])) []]] }
+
+def kWirWhfw : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "nm" false (some "nm") none (some (.invoke "whfw1" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("plbl", (.var "plbl")), ("nm", (.var "nm"))])) []] }
+
+def kWirWhfw1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "lb" false (some "_") (some (.bin .ge (.var "plbl") (.lit (.int 0)))) (some (.invoke "wnm" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "plbl"))])) [.mk "_chain" false (some "lb") none (some (.invoke "wc5" [("a", (.lit (.str " (def "))), ("b", (.var "nm")), ("c", (.lit (.str " (subflow"))), ("d", (.bin .concat (.lit (.str " (label ")) (.bin .concat (.var "lb") (.lit (.str ")"))))), ("e", (.lit (.str "")))])) []], .mk "nl" false (some "_") none (some (.invoke "wc5" [("a", (.lit (.str " (def "))), ("b", (.var "nm")), ("c", (.lit (.str " (subflow"))), ("d", (.lit (.str ""))), ("e", (.lit (.str "")))])) []] }
+
+def kWirWhca : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "nm" false (some "nm") none (some (.invoke "wc3" [("a", (.lit (.str " (head "))), ("b", (.var "nm")), ("c", (.lit (.str "")))])) []] }
+
+def kWirWhco : KCallable := .subflow {
+  preLabel := none
+  head := ("wbrh", [("rows", (.var "rows")), ("evi", (.var "fevi")), ("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("nr", (.var "nr"))])
+  arms := [.mk "b" false (some "b") none (some (.invoke "wbrn" [("rows", (.var "rows")), ("evi", (.var "fevi")), ("nr", (.var "nr"))])) [.mk "_chain" false (some "n") none (some (.invoke "whco1" [("rows", (.var "rows")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("fevi", (.var "fevi")), ("b", (.var "b")), ("n", (.var "n"))])) []]] }
+
+def kWirWhco1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "ca" false (some "nm") (some (.bin .eq (.var "nm") (.lit (.str "_")))) (some (.produce (.lit (.str " (arm catchall")))) [], .mk "nm" false (some "nm") none (some (.produce (.cond (.bin .and (.bin .and (.bin .ge (.var "fevi") (.lit (.int 0))) (.bin .gt (.var "n") (.lit (.int 0)))) (.bin .eq (.var "b") (.lit (.int 0)))) (.lit (.str " (bad decl-branch)")) (.bin .concat (.lit (.str " (arm (tag ")) (.bin .concat (.var "nm") (.lit (.str ")"))))))) []] }
+
+def kWirWhbi : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "nm" false (some "nm") none (some (.invoke "wc3" [("a", (.lit (.str " (bind "))), ("b", (.var "nm")), ("c", (.lit (.str ")")))])) []] }
+
+def kWirWhcn : KCallable := .subflow {
+  preLabel := none
+  head := ("wex", [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])
+  arms := [.mk "e" false (some "e") none (some (.invoke "wc3" [("a", (.lit (.str " (when "))), ("b", (.var "e")), ("c", (.lit (.str ")")))])) []] }
+
+def kWirWhct : KCallable := .subflow {
+  preLabel := none
+  head := ("wbrh", [("rows", (.var "rows")), ("evi", (.var "fevi")), ("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("nr", (.var "nr"))])
+  arms := [.mk "b" false (some "b") none (some (.invoke "whct1" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.var "i")), ("fevi", (.var "fevi")), ("b", (.var "b"))])) []] }
+
+def kWirWhct1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "nm" false (some "_") (some (.bin .and (.bin .ge (.var "fevi") (.lit (.int 0))) (.bin .eq (.var "b") (.lit (.int 0))))) (some (.produce (.lit (.str "(bad ctor-branch)")))) [], .mk "nm" false (some "nm") none (some (.invoke "whct2" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.var "i")), ("nm", (.var "nm"))])) []] }
+
+def kWirWhct2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wtb", [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 4))))), ("j", (.bin .sub (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 5)))) (.lit (.int 1)))), ("n", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 5)))))])
+  arms := [.mk "e" false (some "be") (some (.bin .lt (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 4)))) (.var "be"))) (some (.invoke "wex" [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 4))))), ("hi", (.var "be")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "x") none (some (.invoke "wc7" [("a", (.lit (.str " (node (ctor "))), ("b", (.var "nm")), ("c", (.lit (.str " "))), ("d", (.var "x")), ("e", (.lit (.str "))"))), ("f", (.lit (.str ""))), ("g", (.lit (.str "")))])) []], .mk "mt" false (some "_") none (some (.invoke "wc7" [("a", (.lit (.str " (node (ctor "))), ("b", (.var "nm")), ("c", (.lit (.str " "))), ("d", (.lit (.str "(lit (cell))"))), ("e", (.lit (.str "))"))), ("f", (.lit (.str ""))), ("g", (.lit (.str "")))])) []] }
+
+def kWirWsti : KCallable := .subflow {
+  preLabel := none
+  head := ("wnm", [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "nm" false (some "nm") none (some (.invoke "wsti1" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("curk", (.var "curk")), ("pend", (.var "pend")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("jump", (.var "jump")), ("nm", (.var "nm"))])) []] }
+
+def kWirWsti1 : KCallable := .subflow {
+  preLabel := none
+  head := ("weq", [("src", (.var "src")), ("a", (.var "flbl")), ("b", (.var "flbh")), ("x", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("y", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3)))))])
+  arms := [.mk "jl" false (some "j") (some (.bin .and (.bin .eq (.var "jump") (.lit (.int 1))) (.bin .eq (.var "j") (.lit (.int 0))))) (some (.produce (.lit (.str "(bad jump-label)")))) [], .mk "ok" false (some "_") none (some (.invoke "wsti2" [("curk", (.var "curk")), ("pend", (.var "pend")), ("jump", (.var "jump")), ("nm", (.var "nm")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn"))])) []] }
+
+def kWirWsti2 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "bp" false (some "_") (some (.bin .ge (.var "pend") (.lit (.int 0)))) (some (.invoke "wnm" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.var "pend"))])) [.mk "_chain" false (some "b") none (some (.invoke "wsti3" [("curk", (.var "curk")), ("pend", (.var "pend")), ("jump", (.var "jump")), ("nm", (.var "nm")), ("b", (.var "b"))])) []], .mk "np" false (some "_") none (some (.invoke "wsti3" [("curk", (.var "curk")), ("pend", (.var "pend")), ("jump", (.var "jump")), ("nm", (.var "nm")), ("b", (.lit (.str "")))])) []] }
+
+def kWirWsti3 : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "a0" false (some "_") (some (.bin .and (.bin .eq (.var "curk") (.lit (.int 0))) (.bin .ge (.var "pend") (.lit (.int 0))))) (some (.produce (.bin .concat (.lit (.str " (arm (tag _chain) (bind ")) (.bin .concat (.var "b") (.bin .concat (.lit (.str ") (node (")) (.bin .concat (.cond (.bin .eq (.var "jump") (.lit (.int 1))) (.lit (.str "jump ")) (.lit (.str "invoke "))) (.var "nm"))))))) [], .mk "a1" false (some "_") (some (.bin .eq (.var "curk") (.lit (.int 0)))) (some (.produce (.bin .concat (.lit (.str " (arm (tag _chain) (node (")) (.bin .concat (.cond (.bin .eq (.var "jump") (.lit (.int 1))) (.lit (.str "jump ")) (.lit (.str "invoke "))) (.var "nm"))))) [], .mk "a2" false (some "_") (some (.bin .and (.bin .or (.bin .eq (.var "curk") (.lit (.int 3))) (.bin .eq (.var "curk") (.lit (.int 4)))) (.bin .ge (.var "pend") (.lit (.int 0))))) (some (.produce (.bin .concat (.lit (.str ")) (conts (arm (tag _chain) (bind ")) (.bin .concat (.var "b") (.bin .concat (.lit (.str ") (node (")) (.bin .concat (.cond (.bin .eq (.var "jump") (.lit (.int 1))) (.lit (.str "jump ")) (.lit (.str "invoke "))) (.var "nm"))))))) [], .mk "a3" false (some "_") (some (.bin .or (.bin .eq (.var "curk") (.lit (.int 3))) (.bin .eq (.var "curk") (.lit (.int 4))))) (some (.produce (.bin .concat (.lit (.str ")) (conts (arm (tag _chain) (node (")) (.bin .concat (.cond (.bin .eq (.var "jump") (.lit (.int 1))) (.lit (.str "jump ")) (.lit (.str "invoke "))) (.var "nm"))))) [], .mk "a4" false (some "_") none (some (.produce (.bin .concat (.lit (.str " (node (")) (.bin .concat (.cond (.bin .eq (.var "jump") (.lit (.int 1))) (.lit (.str "jump ")) (.lit (.str "invoke "))) (.var "nm"))))) []] }
+
+def kWirWfin : KCallable := .subflow {
+  preLabel := none
+  head := ("wn0", [])
+  arms := [.mk "bd" false (some "_") (some (.bin .ge (.var "pend") (.lit (.int 0)))) (some (.produce (.bin .concat (.var "out") (.lit (.str "(bad pend)"))))) [], .mk "ok" false (some "_") none (some (.invoke "wclo" [("inf", (.var "inf")), ("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep"))])) [.mk "_chain" false (some "c") none (some (.invoke "wfin1" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("out", (.var "out")), ("c", (.var "c"))])) []]] }
+
+def kWirWfin1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wth", [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.lit (.int 0))), ("out", (.bin .concat (.var "out") (.var "c")))])
+  arms := [.mk "t" false (some "t") none (some (.invoke "wc2" [("a", (.var "t")), ("b", (.lit (.str ")")))])) []] }
+
+def kWirWth : KCallable := .subflow {
+  preLabel := none
+  head := ("wrk", [("rows", (.var "rows")), ("i", (.var "i")), ("nr", (.var "nr"))])
+  arms := [.mk "fn" false (some "_") (some (.bin .ge (.var "i") (.bin .mul (.var "nr") (.lit (.int 6))))) (some (.produce (.var "out"))) [], .mk "ev" false (some "k") (some (.bin .eq (.var "k") (.lit (.int 1)))) (some (.invoke "wthi" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("out", (.var "out"))])) [], .mk "mo" false (some "_") none (some (.invoke "wth" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.var "out"))])) []] }
+
+def kWirWthi : KCallable := .subflow {
+  preLabel := none
+  head := ("whi", [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])
+  arms := [.mk "h" false (some "h") none (some (.invoke "wnm" [("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("p", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])) [.mk "_chain" false (some "nm") none (some (.invoke "wthi1" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("out", (.var "out")), ("h", (.var "h")), ("nm", (.var "nm"))])) []]] }
+
+def kWirWthi1 : KCallable := .subflow {
+  preLabel := none
+  head := ("wc5", [("a", (.var "out")), ("b", (.cond (.bin .eq (.var "h") (.lit (.int 1))) (.lit (.str "")) (.lit (.str " (def ")))), ("c", (.cond (.bin .eq (.var "h") (.lit (.int 1))) (.lit (.str "")) (.var "nm"))), ("d", (.cond (.bin .eq (.var "h") (.lit (.int 1))) (.lit (.str "")) (.lit (.str " thunk)")))), ("e", (.lit (.str "")))])
+  arms := [.mk "o" false (some "o") none (some (.invoke "wth" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.var "o"))])) []] }
+
+def kWirWWk : KCallable := .subflow {
+  preLabel := none
+  head := ("wrk", [("rows", (.var "rows")), ("i", (.var "i")), ("nr", (.var "nr"))])
+  arms := [.mk "fin" false (some "_") (some (.bin .ge (.var "i") (.bin .mul (.var "nr") (.lit (.int 6))))) (some (.invoke "wfin" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("out", (.var "out")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep")), ("pend", (.var "pend"))])) [], .mk "bwd" false (some "k") (some (.bin .eq (.var "k") (.lit (.int 17)))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad wire-bad)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "ev" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 1))))) (some (.invoke "wclo" [("inf", (.var "inf")), ("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep"))])) [.mk "_chain" false (some "c") none (some (.invoke "whev" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("rows", (.var "rows")), ("i", (.var "i"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.bin .concat (.var "c") (.var "t")))), ("dead", (.cond (.bin .eq (.var "t") (.lit (.str " (bad dup-tor)"))) (.lit (.int 1)) (.var "dead"))), ("inev", (.lit (.int 1))), ("inf", (.lit (.int 0))), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.lit (.int 0))), ("ctk", (.lit (.int 0))), ("dep", (.lit (.int 0))), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("ano", (.lit (.int 0)))])) []]], .mk "fl" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 2))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.cond (.bin .eq (.var "inev") (.lit (.int 0))) (.lit (.str "(bad fld-out)")) (.lit (.str ""))))), ("dead", (.cond (.bin .eq (.var "inev") (.lit (.int 0))) (.lit (.int 1)) (.var "dead"))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "rt" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 3))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.cond (.bin .eq (.var "inev") (.lit (.int 0))) (.lit (.str "(bad ret-out)")) (.lit (.str ""))))), ("dead", (.cond (.bin .eq (.var "inev") (.lit (.int 0))) (.lit (.int 1)) (.var "dead"))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "br" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 4))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.cond (.bin .eq (.var "inev") (.lit (.int 0))) (.lit (.str "(bad brd-out)")) (.lit (.str ""))))), ("dead", (.cond (.bin .eq (.var "inev") (.lit (.int 0))) (.lit (.int 1)) (.var "dead"))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "im" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 5))))) (some (.invoke "wclo" [("inf", (.var "inf")), ("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep"))])) [.mk "_chain" false (some "c") none (some (.invoke "whim" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.var "i"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.bin .concat (.var "c") (.var "t")))), ("dead", (.var "dead")), ("inev", (.lit (.int 0))), ("inf", (.lit (.int 0))), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.lit (.int 0))), ("ctk", (.lit (.int 0))), ("dep", (.lit (.int 0))), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("ano", (.lit (.int 0)))])) []]], .mk "lb" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 6))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.var "out")), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("ple", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "fw0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 7)))) (.bin .ge (.var "pend") (.lit (.int 0))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad pend)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "fw" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 7))))) (some (.invoke "wclo" [("inf", (.var "inf")), ("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep"))])) [.mk "_chain" false (some "c") none (some (.invoke "whfw" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("plbl", (.var "plbl"))])) [.mk "_chain" false (some "t") none (some (.invoke "wevf" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2)))))])) [.mk "_chain" false (some "f") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.bin .concat (.var "c") (.var "t")))), ("dead", (.var "dead")), ("inev", (.lit (.int 0))), ("inf", (.lit (.int 1))), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.lit (.int 0))), ("ctk", (.lit (.int 0))), ("dep", (.lit (.int 0))), ("pend", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("plbl", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("ple", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("flbl", (.var "plbl")), ("flbh", (.var "ple")), ("fevi", (.var "f")), ("ano", (.lit (.int 0)))])) []]]], .mk "ca0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 8)))) (.bin .or (.bin .eq (.var "inf") (.lit (.int 0))) (.bin .ne (.var "ltk") (.lit (.int 0)))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad head)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "ca" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 8))))) (some (.invoke "whca" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.lit (.int 1))), ("ltk", (.lit (.int 1))), ("ltl", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("lth", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("htl", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("hth", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("argi", (.lit (.int 0))), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []], .mk "ar0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 9)))) (.bin .eq (.var "iopen") (.lit (.int 0))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad arg)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "ar" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 9))))) (some (.invoke "warg" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.var "i")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("fevi", (.var "fevi"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.bin .add (.var "argi") (.lit (.int 1)))), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []], .mk "rb0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 10)))) (.bin .eq (.var "ltk") (.lit (.int 0))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad rbind)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "rb" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 10))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.var "out")), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "co0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 11)))) (.bin .eq (.var "inf") (.lit (.int 0))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad cont)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "co1" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 11)))) (.bin .ge (.var "pend") (.lit (.int 0))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad pend)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "co2" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 11)))) (.bin .eq (.var "ano") (.lit (.int 1))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad chain-scope)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "co" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 11))))) (some (.invoke "wcls" [("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep"))])) [.mk "_chain" false (some "c") none (some (.invoke "wevf" [("nsp", (.var "nsp")), ("nn", (.var "nn")), ("lo", (.var "htl"))])) [.mk "_chain" false (some "d") none (some (.invoke "whco" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("fevi", (.var "d"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.bin .concat (.var "c") (.var "t")))), ("dead", (.cond (.bin .eq (.var "t") (.lit (.str " (bad decl-branch)"))) (.lit (.int 1)) (.var "dead"))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("ctk", (.lit (.int 0))), ("dep", (.lit (.int 0))), ("pend", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []]]], .mk "bi0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 12)))) (.bin .eq (.var "curk") (.lit (.int 0))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad bind)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "bi" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 12))))) (some (.invoke "whbi" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []], .mk "cn0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 13)))) (.bin .eq (.var "curk") (.lit (.int 0))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad cond)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "cn" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 13))))) (some (.invoke "whcn" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.var "i"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []], .mk "se0" false (some "k") (some (.bin .and (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 14)))) (.bin .eq (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 1)))) (.bin .or (.bin .ne (.var "curk") (.bin .sub (.lit (.int 0)) (.lit (.int 1)))) (.bin .eq (.var "inf") (.lit (.int 0)))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad step-expr)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "se" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 14)))) (.bin .eq (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 1))))) (some (.invoke "wex" [("src", (.var "src")), ("lo", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("hi", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns"))])) [.mk "_chain" false (some "e") none (some (.invoke "wc5" [("a", (.lit (.str " (node (produce "))), ("b", (.var "e")), ("c", (.lit (.str ")"))), ("d", (.lit (.str ")"))), ("e", (.lit (.str "")))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.lit (.int 1))), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []]], .mk "si0" false (some "k") (some (.bin .and (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 14)))) (.bin .eq (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 2)))) (.bin .or (.bin .or (.bin .eq (.var "curk") (.lit (.int 1))) (.bin .eq (.var "curk") (.lit (.int 2)))) (.bin .eq (.var "curk") (.lit (.int 5)))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad chain-after)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "si" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 14)))) (.bin .eq (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 2))))) (some (.invoke "wsti" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("curk", (.var "curk")), ("pend", (.var "pend")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("jump", (.lit (.int 0)))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.cond (.bin .eq (.var "t") (.lit (.str "(bad jump-label)"))) (.lit (.int 1)) (.var "dead"))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.lit (.int 2))), ("ltk", (.lit (.int 2))), ("ltl", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("lth", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.cond (.bin .eq (.var "curk") (.lit (.int 0))) (.lit (.int 3)) (.cond (.bin .eq (.var "curk") (.bin .sub (.lit (.int 0)) (.lit (.int 1)))) (.lit (.int 3)) (.var "curk")))), ("ctk", (.lit (.int 3))), ("dep", (.cond (.bin .or (.bin .eq (.var "curk") (.lit (.int 3))) (.bin .eq (.var "curk") (.lit (.int 4)))) (.bin .add (.var "dep") (.lit (.int 1))) (.var "dep"))), ("pend", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.cond (.bin .eq (.var "curk") (.lit (.int 0))) (.lit (.int 1)) (.var "ano")))])) []], .mk "sj0" false (some "k") (some (.bin .and (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 14)))) (.bin .eq (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 3)))) (.bin .or (.bin .or (.bin .eq (.var "curk") (.lit (.int 1))) (.bin .eq (.var "curk") (.lit (.int 2)))) (.bin .eq (.var "curk") (.lit (.int 5)))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad chain-after)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "sj" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 14)))) (.bin .eq (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 1)))) (.lit (.int 3))))) (some (.invoke "wsti" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("i", (.var "i")), ("curk", (.var "curk")), ("pend", (.var "pend")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("jump", (.lit (.int 1)))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.cond (.bin .eq (.var "t") (.lit (.str "(bad jump-label)"))) (.lit (.int 1)) (.var "dead"))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.lit (.int 2))), ("ltk", (.lit (.int 3))), ("ltl", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 2))))), ("lth", (.index (.var "rows") (.bin .add (.var "i") (.lit (.int 3))))), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.cond (.bin .eq (.var "curk") (.lit (.int 0))) (.lit (.int 4)) (.cond (.bin .eq (.var "curk") (.bin .sub (.lit (.int 0)) (.lit (.int 1)))) (.lit (.int 4)) (.var "curk")))), ("ctk", (.lit (.int 4))), ("dep", (.cond (.bin .or (.bin .eq (.var "curk") (.lit (.int 3))) (.bin .eq (.var "curk") (.lit (.int 4)))) (.bin .add (.var "dep") (.lit (.int 1))) (.var "dep"))), ("pend", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.cond (.bin .eq (.var "curk") (.lit (.int 0))) (.lit (.int 1)) (.var "ano")))])) []], .mk "ct0" false (some "k") (some (.bin .and (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 15)))) (.bin .or (.bin .ne (.var "curk") (.bin .sub (.lit (.int 0)) (.lit (.int 1)))) (.bin .eq (.var "inf") (.lit (.int 0)))))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.lit (.str "(bad ctor)")))), ("dead", (.lit (.int 1))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "ct" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 15))))) (some (.invoke "whct" [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.var "i")), ("fevi", (.var "fevi")), ("nr", (.var "nr"))])) [.mk "_chain" false (some "t") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "t"))), ("dead", (.cond (.bin .eq (.var "t") (.lit (.str "(bad ctor-branch)"))) (.lit (.int 1)) (.var "dead"))), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.lit (.int 2))), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []], .mk "ip" false (some "k") (some (.bin .and (.bin .eq (.var "dead") (.lit (.int 0))) (.bin .eq (.var "k") (.lit (.int 16))))) (some (.invoke "wclo" [("inf", (.var "inf")), ("iopen", (.var "iopen")), ("curk", (.var "curk")), ("dep", (.var "dep"))])) [.mk "_chain" false (some "c") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.bin .concat (.var "out") (.var "c"))), ("dead", (.var "dead")), ("inev", (.lit (.int 0))), ("inf", (.lit (.int 0))), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.lit (.int 0))), ("curk", (.lit (.int 0))), ("ctk", (.lit (.int 0))), ("dep", (.lit (.int 0))), ("pend", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("ano", (.lit (.int 0)))])) []], .mk "dd" false (some "_") (some (.bin .eq (.var "dead") (.lit (.int 1)))) (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.var "out")), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) [], .mk "mo" false (some "_") none (some (.invoke "w-wk" [("rows", (.var "rows")), ("nr", (.var "nr")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.var "nn")), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.var "ns")), ("i", (.bin .add (.var "i") (.lit (.int 6)))), ("out", (.var "out")), ("dead", (.var "dead")), ("inev", (.var "inev")), ("inf", (.var "inf")), ("iopen", (.var "iopen")), ("ltk", (.var "ltk")), ("ltl", (.var "ltl")), ("lth", (.var "lth")), ("htl", (.var "htl")), ("hth", (.var "hth")), ("argi", (.var "argi")), ("curk", (.var "curk")), ("ctk", (.var "ctk")), ("dep", (.var "dep")), ("pend", (.var "pend")), ("plbl", (.var "plbl")), ("ple", (.var "ple")), ("flbl", (.var "flbl")), ("flbh", (.var "flbh")), ("fevi", (.var "fevi")), ("ano", (.var "ano"))])) []] }
+
+def kWirWMain : KCallable := .subflow {
+  preLabel := none
+  head := ("w-wk", [("rows", (.var "rows")), ("nr", (.bin .div (.builtin "len" [(.var "rows")]) (.lit (.int 6)))), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("nn", (.builtin "len" [(.var "names")])), ("strs", (.var "strs")), ("ssp", (.var "ssp")), ("ns", (.builtin "len" [(.var "strs")])), ("i", (.lit (.int 0))), ("out", (.lit (.str "(graph"))), ("dead", (.lit (.int 0))), ("inev", (.lit (.int 0))), ("inf", (.lit (.int 0))), ("iopen", (.lit (.int 0))), ("ltk", (.lit (.int 0))), ("ltl", (.lit (.int 0))), ("lth", (.lit (.int 0))), ("htl", (.lit (.int 0))), ("hth", (.lit (.int 0))), ("argi", (.lit (.int 0))), ("curk", (.lit (.int 0))), ("ctk", (.lit (.int 0))), ("dep", (.lit (.int 0))), ("pend", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("plbl", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("ple", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("flbl", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("flbh", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("fevi", (.bin .sub (.lit (.int 0)) (.lit (.int 1)))), ("ano", (.lit (.int 0)))])
+  arms := [.mk "g" false (some "g") none (some (.produce (.var "g"))) []] }
+
+def kWirMain : KCallable := .subflow {
+  preLabel := none
+  head := ("w-main", [("rows", (.var "rows")), ("src", (.var "src")), ("names", (.var "names")), ("nsp", (.var "nsp")), ("strs", (.var "strs")), ("ssp", (.var "ssp"))])
+  arms := [.mk "r" false (some "r") none (some (.produce (.var "r"))) []] }
+
+def kWir : KProg := {
+  graph := [
+    ("pkb", kWirPkb),
+    ("wn0", kWirWn0),
+    ("wc2", kWirWc2),
+    ("wc3", kWirWc3),
+    ("wc5", kWirWc5),
+    ("wc7", kWirWc7),
+    ("wsk", kWirWsk),
+    ("wtb", kWirWtb),
+    ("wid", kWirWid),
+    ("wpe", kWirWpe),
+    ("wnat", kWirWnat),
+    ("wpix", kWirWpix),
+    ("wnm", kWirWnm),
+    ("wne", kWirWne),
+    ("wst", kWirWst),
+    ("weq", kWirWeq),
+    ("weql", kWirWeql),
+    ("wnv", kWirWnv),
+    ("wp10", kWirWp10),
+    ("wp10m", kWirWp10m),
+    ("wgcd", kWirWgcd),
+    ("wpb", kWirWpb),
+    ("wopa", kWirWopa),
+    ("wopb", kWirWopb),
+    ("wope", kWirWope),
+    ("wops", kWirWops),
+    ("wopo", kWirWopo),
+    ("wopo2", kWirWopo2),
+    ("wopob", kWirWopob),
+    ("wopd", kWirWopd),
+    ("wopd2", kWirWopd2),
+    ("wopdb", kWirWopdb),
+    ("wprc", kWirWprc),
+    ("wopn", kWirWopn),
+    ("wfp", kWirWfp),
+    ("wfp1", kWirWfp1),
+    ("wfpn", kWirWfpn),
+    ("wmb", kWirWmb),
+    ("wmb1", kWirWmb1),
+    ("wmbx", kWirWmbx),
+    ("wss", kWirWss),
+    ("wen", kWirWen),
+    ("wcmx", kWirWcmx),
+    ("wfd", kWirWfd),
+    ("wty", kWirWty),
+    ("wbl", kWirWbl),
+    ("wev", kWirWev),
+    ("wenx", kWirWenx),
+    ("wspl", kWirWspl),
+    ("wsplr", kWirWsplr),
+    ("weu", kWirWeu),
+    ("weu1", kWirWeu1),
+    ("wpm", kWirWpm),
+    ("wpmc", kWirWpmc),
+    ("wpmv", kWirWpmv),
+    ("wpmv1", kWirWpmv1),
+    ("wpmv2", kWirWpmv2),
+    ("wep", kWirWep),
+    ("wep1", kWirWep1),
+    ("wep1f", kWirWep1f),
+    ("wep1i", kWirWep1i),
+    ("wep1t", kWirWep1t),
+    ("wep1u", kWirWep1u),
+    ("wep1v", kWirWep1v),
+    ("wep1w", kWirWep1w),
+    ("wem", kWirWem),
+    ("wems", kWirWems),
+    ("wemg", kWirWemg),
+    ("wema", kWirWema),
+    ("weal", kWirWeal),
+    ("weal1", kWirWeal1),
+    ("wemc", kWirWemc),
+    ("wecl", kWirWecl),
+    ("wecl1", kWirWecl1),
+    ("wecl2", kWirWecl2),
+    ("wecl3", kWirWecl3),
+    ("wemb", kWirWemb),
+    ("wemb1", kWirWemb1),
+    ("wemb2", kWirWemb2),
+    ("webal", kWirWebal),
+    ("webal1", kWirWebal1),
+    ("wemv", kWirWemv),
+    ("wemvd", kWirWemvd),
+    ("wemve", kWirWemve),
+    ("wemi", kWirWemi),
+    ("wemi1", kWirWemi1),
+    ("wemi2", kWirWemi2),
+    ("wemi3", kWirWemi3),
+    ("wtek", kWirWtek),
+    ("wtek1", kWirWtek1),
+    ("wtek1b", kWirWtek1b),
+    ("wtek2", kWirWtek2),
+    ("wtek2b", kWirWtek2b),
+    ("wbd", kWirWbd),
+    ("wbd1", kWirWbd1),
+    ("wfel", kWirWfel),
+    ("wfeln", kWirWfeln),
+    ("wnum", kWirWnum),
+    ("wnum1", kWirWnum1),
+    ("wnum2", kWirWnum2),
+    ("wnum3", kWirWnum3),
+    ("wel", kWirWel),
+    ("wel1", kWirWel1),
+    ("welg", kWirWelg),
+    ("wela", kWirWela),
+    ("well", kWirWell),
+    ("well1", kWirWell1),
+    ("welc", kWirWelc),
+    ("welcl", kWirWelcl),
+    ("welcl1", kWirWelcl1),
+    ("welcl2", kWirWelcl2),
+    ("welcl3", kWirWelcl3),
+    ("wrk", kWirWrk),
+    ("wevf", kWirWevf),
+    ("wdpe", kWirWdpe),
+    ("whi", kWirWhi),
+    ("wfdn", kWirWfdn),
+    ("wfdh", kWirWfdh),
+    ("wfdh1", kWirWfdh1),
+    ("wbr0", kWirWbr0),
+    ("wbrn", kWirWbrn),
+    ("wbrn1", kWirWbrn1),
+    ("wbrh", kWirWbrh),
+    ("wbrh1", kWirWbrh1),
+    ("wbrh2", kWirWbrh2),
+    ("wrp", kWirWrp),
+    ("wrp1", kWirWrp1),
+    ("wclo", kWirWclo),
+    ("wcloa", kWirWcloa),
+    ("wcls", kWirWcls),
+    ("wex", kWirWex),
+    ("wpun", kWirWpun),
+    ("wpun1", kWirWpun1),
+    ("wpun2", kWirWpun2),
+    ("wpun3", kWirWpun3),
+    ("wpun3b", kWirWpun3b),
+    ("wdk", kWirWdk),
+    ("warg", kWirWarg),
+    ("warg1", kWirWarg1),
+    ("warg2", kWirWarg2),
+    ("warg2a", kWirWarg2a),
+    ("warg3", kWirWarg3),
+    ("warg3a", kWirWarg3a),
+    ("warg4", kWirWarg4),
+    ("warg5", kWirWarg5),
+    ("whev", kWirWhev),
+    ("whim", kWirWhim),
+    ("whfw", kWirWhfw),
+    ("whfw1", kWirWhfw1),
+    ("whca", kWirWhca),
+    ("whco", kWirWhco),
+    ("whco1", kWirWhco1),
+    ("whbi", kWirWhbi),
+    ("whcn", kWirWhcn),
+    ("whct", kWirWhct),
+    ("whct1", kWirWhct1),
+    ("whct2", kWirWhct2),
+    ("wsti", kWirWsti),
+    ("wsti1", kWirWsti1),
+    ("wsti2", kWirWsti2),
+    ("wsti3", kWirWsti3),
+    ("wfin", kWirWfin),
+    ("wfin1", kWirWfin1),
+    ("wth", kWirWth),
+    ("wthi", kWirWthi),
+    ("wthi1", kWirWthi1),
+    ("w-wk", kWirWWk),
+    ("w-main", kWirWMain),
+    ("main", kWirMain)
+  ]
+  entry := "main"
+  args := [] }
+
+def kWirDecls : List (String × KDecl) := [
+("pkb", { params := [("t", "[]const i64"), ("i", "i64"), ("n", "i64")], ret := some "i64" })
+  , ("wn0", { params := [], ret := some "i64" })
+  , ("wc2", { params := [("a", "string"), ("b", "string")], ret := some "string" })
+  , ("wc3", { params := [("a", "string"), ("b", "string"), ("c", "string")], ret := some "string" })
+  , ("wc5", { params := [("a", "string"), ("b", "string"), ("c", "string"), ("d", "string"), ("e", "string")], ret := some "string" })
+  , ("wc7", { params := [("a", "string"), ("b", "string"), ("c", "string"), ("d", "string"), ("e", "string"), ("f", "string"), ("g", "string")], ret := some "string" })
+  , ("wsk", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wtb", { params := [("src", "[]const i64"), ("lo", "i64"), ("j", "i64"), ("n", "i64")], ret := some "i64" })
+  , ("wid", { params := [("c", "i64")], ret := some "i64" })
+  , ("wpe", { params := [("c", "i64")], ret := some "i64" })
+  , ("wnat", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wpix", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wnm", { params := [("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("p", "i64")], ret := some "string" })
+  , ("wne", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wst", { params := [("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("p", "i64")], ret := some "string" })
+  , ("weq", { params := [("src", "[]const i64"), ("a", "i64"), ("b", "i64"), ("x", "i64"), ("y", "i64")], ret := some "i64" })
+  , ("weql", { params := [("src", "[]const i64"), ("a", "i64"), ("b", "i64"), ("x", "i64"), ("y", "i64"), ("i", "i64")], ret := some "i64" })
+  , ("wnv", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("v", "i64")], ret := some "i64" })
+  , ("wp10", { params := [("n", "i64")], ret := some "i64" })
+  , ("wp10m", { params := [("n", "i64")], ret := some "i64" })
+  , ("wgcd", { params := [("a", "i64"), ("b", "i64")], ret := some "i64" })
+  , ("wpb", { params := [("src", "[]const i64"), ("lo", "i64"), ("i", "i64")], ret := some "i64" })
+  , ("wopa", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("d", "i64"), ("ins", "i64")], ret := some "i64" })
+  , ("wopb", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wope", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("p", "i64"), ("op", "i64")], ret := some "i64" })
+  , ("wops", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wopo", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wopo2", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wopob", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wopd", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wopd2", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("p", "i64")], ret := some "i64" })
+  , ("wopdb", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wprc", { params := [("o", "i64")], ret := some "i64" })
+  , ("wopn", { params := [("o", "i64")], ret := some "string" })
+  , ("wfp", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("d", "i64"), ("ins", "i64"), ("last", "i64"), ("prec", "i64")], ret := some "i64" })
+  , ("wfp1", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("d", "i64"), ("ins", "i64"), ("last", "i64"), ("prec", "i64"), ("o", "i64")], ret := some "i64" })
+  , ("wfpn", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("d", "i64"), ("ins", "i64"), ("last", "i64"), ("prec", "i64")], ret := some "i64" })
+  , ("wmb", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wmb1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64"), ("ins", "i64")], ret := some "i64" })
+  , ("wmbx", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64")], ret := some "i64" })
+  , ("wss", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wen", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wcmx", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64"), ("ins", "i64"), ("w", "i64")], ret := some "i64" })
+  , ("wfd", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64"), ("ins", "i64"), ("last", "i64")], ret := some "i64" })
+  , ("wty", { params := [("nm", "string")], ret := some "i64" })
+  , ("wbl", { params := [("nm", "string")], ret := some "i64" })
+  , ("wev", { params := [("lv", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wenx", { params := [("lv", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wspl", { params := [("lv", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("t", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wsplr", { params := [("lv", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("op", "i64"), ("l", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("weu", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("weu1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("op", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wpm", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("nsp", "[]const i64"), ("nn", "i64")], ret := some "i64" })
+  , ("wpmc", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wpmv", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("nsp", "[]const i64"), ("nn", "i64")], ret := some "i64" })
+  , ("wpmv1", { params := [("src", "[]const i64"), ("i", "i64"), ("e", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wpmv2", { params := [("src", "[]const i64"), ("e", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wep", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wep1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("acc", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wep1f", { params := [("src", "[]const i64"), ("j", "i64"), ("hi", "i64"), ("acc", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wep1i", { params := [("src", "[]const i64"), ("j", "i64"), ("hi", "i64"), ("acc", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wep1t", { params := [("src", "[]const i64"), ("j", "i64"), ("k", "i64"), ("hi", "i64"), ("acc", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wep1u", { params := [("src", "[]const i64"), ("j", "i64"), ("k", "i64"), ("hi", "i64"), ("acc", "string"), ("t", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wep1v", { params := [("src", "[]const i64"), ("j", "i64"), ("e", "i64"), ("hi", "i64"), ("acc", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wep1w", { params := [("src", "[]const i64"), ("m", "i64"), ("hi", "i64"), ("acc", "string"), ("x", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wem", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wems", { params := [("src", "[]const i64"), ("i", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemg", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wema", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("weal", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("weal1", { params := [("src", "[]const i64"), ("j", "i64"), ("c", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemc", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wecl", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wecl1", { params := [("src", "[]const i64"), ("j", "i64"), ("c", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wecl2", { params := [("src", "[]const i64"), ("j", "i64"), ("c", "i64"), ("m", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wecl3", { params := [("src", "[]const i64"), ("m", "i64"), ("hi", "i64"), ("out", "string"), ("nm", "string"), ("x", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemb", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemb1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("nm", "string"), ("b", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemb2", { params := [("src", "[]const i64"), ("e", "i64"), ("hi", "i64"), ("nm", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("webal", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("webal1", { params := [("src", "[]const i64"), ("j", "i64"), ("v", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemv", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemvd", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("nm", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemve", { params := [("src", "[]const i64"), ("j", "i64"), ("hi", "i64"), ("nm", "string")], ret := some "string" })
+  , ("wemi", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemi1", { params := [("src", "[]const i64"), ("j", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemi2", { params := [("src", "[]const i64"), ("j", "i64"), ("m", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wemi3", { params := [("src", "[]const i64"), ("m", "i64"), ("el", "i64"), ("c", "string"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wtek", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64"), ("ins", "i64")], ret := some "i64" })
+  , ("wtek1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wtek1b", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wtek2", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wtek2b", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wbd", { params := [("src", "[]const i64"), ("pv", "i64"), ("nx", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wbd1", { params := [("src", "[]const i64"), ("nx", "i64"), ("hi", "i64")], ret := some "i64" })
+  , ("wfel", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64"), ("ins", "i64"), ("ifd", "i64")], ret := some "i64" })
+  , ("wfeln", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("d", "i64"), ("ins", "i64"), ("ifd", "i64")], ret := some "i64" })
+  , ("wnum", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wnum1", { params := [("src", "[]const i64"), ("lo", "i64"), ("e", "i64"), ("d", "i64")], ret := some "string" })
+  , ("wnum2", { params := [("src", "[]const i64"), ("e", "i64"), ("d", "i64"), ("w", "i64")], ret := some "string" })
+  , ("wnum3", { params := [("e", "i64"), ("d", "i64"), ("w", "i64"), ("f", "i64"), ("dn", "i64")], ret := some "string" })
+  , ("wel", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wel1", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("nm", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64")], ret := some "string" })
+  , ("welg", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wela", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("well", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("well1", { params := [("src", "[]const i64"), ("j", "i64"), ("c", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("welc", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("welcl", { params := [("src", "[]const i64"), ("i", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("welcl1", { params := [("src", "[]const i64"), ("j", "i64"), ("c", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("welcl2", { params := [("src", "[]const i64"), ("j", "i64"), ("c", "i64"), ("m", "i64"), ("hi", "i64"), ("out", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("welcl3", { params := [("src", "[]const i64"), ("m", "i64"), ("hi", "i64"), ("out", "string"), ("nm", "string"), ("x", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wrk", { params := [("rows", "[]const i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wevf", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("lo", "i64")], ret := some "i64" })
+  , ("wdpe", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("rows", "[]const i64"), ("i", "i64")], ret := some "i64" })
+  , ("whi", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("lo", "i64")], ret := some "i64" })
+  , ("wfdn", { params := [("rows", "[]const i64"), ("evi", "i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wfdh", { params := [("rows", "[]const i64"), ("evi", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wfdh1", { params := [("rows", "[]const i64"), ("evi", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wbr0", { params := [("rows", "[]const i64"), ("evi", "i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wbrn", { params := [("rows", "[]const i64"), ("evi", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wbrn1", { params := [("rows", "[]const i64"), ("b", "i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wbrh", { params := [("rows", "[]const i64"), ("evi", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wbrh1", { params := [("rows", "[]const i64"), ("b", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wbrh2", { params := [("rows", "[]const i64"), ("b", "i64"), ("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("i", "i64"), ("nr", "i64")], ret := some "i64" })
+  , ("wrp", { params := [("k", "i64")], ret := some "string" })
+  , ("wrp1", { params := [("k", "i64")], ret := some "string" })
+  , ("wclo", { params := [("inf", "i64"), ("iopen", "i64"), ("curk", "i64"), ("dep", "i64")], ret := some "string" })
+  , ("wcloa", { params := [("iopen", "i64"), ("curk", "i64"), ("dep", "i64")], ret := some "string" })
+  , ("wcls", { params := [("iopen", "i64"), ("curk", "i64"), ("dep", "i64")], ret := some "string" })
+  , ("wex", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64")], ret := some "string" })
+  , ("wpun", { params := [("src", "[]const i64"), ("lo", "i64"), ("hi", "i64"), ("nsp", "[]const i64"), ("nn", "i64")], ret := some "i64" })
+  , ("wpun1", { params := [("src", "[]const i64"), ("a", "i64"), ("b", "i64"), ("nsp", "[]const i64"), ("nn", "i64")], ret := some "i64" })
+  , ("wpun2", { params := [("src", "[]const i64"), ("b", "i64"), ("f", "i64"), ("nsp", "[]const i64"), ("nn", "i64")], ret := some "i64" })
+  , ("wpun3", { params := [("src", "[]const i64"), ("f", "i64")], ret := some "i64" })
+  , ("wpun3b", { params := [("c", "i64"), ("f", "i64")], ret := some "i64" })
+  , ("wdk", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("ltk", "i64"), ("ltl", "i64"), ("lth", "i64"), ("htl", "i64"), ("hth", "i64"), ("fevi", "i64")], ret := some "i64" })
+  , ("warg", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("i", "i64"), ("ltk", "i64"), ("ltl", "i64"), ("lth", "i64"), ("htl", "i64"), ("hth", "i64"), ("argi", "i64"), ("fevi", "i64")], ret := some "string" })
+  , ("warg1", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("d", "i64"), ("argi", "i64"), ("e", "string")], ret := some "string" })
+  , ("warg2", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("d", "i64"), ("e", "string")], ret := some "string" })
+  , ("warg2a", { params := [("rows", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("e", "string")], ret := some "string" })
+  , ("warg3", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("d", "i64"), ("argi", "i64"), ("e", "string"), ("p", "i64")], ret := some "string" })
+  , ("warg3a", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("d", "i64"), ("argi", "i64"), ("e", "string"), ("p", "i64"), ("pe", "i64")], ret := some "string" })
+  , ("warg4", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("d", "i64"), ("argi", "i64"), ("e", "string")], ret := some "string" })
+  , ("warg5", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("d", "i64"), ("argi", "i64"), ("e", "string")], ret := some "string" })
+  , ("whev", { params := [("nsp", "[]const i64"), ("nn", "i64"), ("rows", "[]const i64"), ("i", "i64")], ret := some "string" })
+  , ("whim", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("i", "i64")], ret := some "string" })
+  , ("whfw", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("plbl", "i64")], ret := some "string" })
+  , ("whfw1", { params := [("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("plbl", "i64"), ("nm", "string")], ret := some "string" })
+  , ("whca", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64")], ret := some "string" })
+  , ("whco", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("fevi", "i64")], ret := some "string" })
+  , ("whco1", { params := [("rows", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("fevi", "i64"), ("b", "i64"), ("n", "i64")], ret := some "string" })
+  , ("whbi", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64")], ret := some "string" })
+  , ("whcn", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("i", "i64")], ret := some "string" })
+  , ("whct", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("i", "i64"), ("fevi", "i64"), ("nr", "i64")], ret := some "string" })
+  , ("whct1", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("i", "i64"), ("fevi", "i64"), ("b", "i64")], ret := some "string" })
+  , ("whct2", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("i", "i64"), ("nm", "string")], ret := some "string" })
+  , ("wsti", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("curk", "i64"), ("pend", "i64"), ("flbl", "i64"), ("flbh", "i64"), ("jump", "i64")], ret := some "string" })
+  , ("wsti1", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("curk", "i64"), ("pend", "i64"), ("flbl", "i64"), ("flbh", "i64"), ("jump", "i64"), ("nm", "string")], ret := some "string" })
+  , ("wsti2", { params := [("curk", "i64"), ("pend", "i64"), ("jump", "i64"), ("nm", "string"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64")], ret := some "string" })
+  , ("wsti3", { params := [("curk", "i64"), ("pend", "i64"), ("jump", "i64"), ("nm", "string"), ("b", "string")], ret := some "string" })
+  , ("wfin", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("out", "string"), ("inf", "i64"), ("iopen", "i64"), ("curk", "i64"), ("dep", "i64"), ("pend", "i64")], ret := some "string" })
+  , ("wfin1", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("out", "string"), ("c", "string")], ret := some "string" })
+  , ("wth", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("out", "string")], ret := some "string" })
+  , ("wthi", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("out", "string")], ret := some "string" })
+  , ("wthi1", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("i", "i64"), ("out", "string"), ("h", "i64"), ("nm", "string")], ret := some "string" })
+  , ("w-wk", { params := [("rows", "[]const i64"), ("nr", "i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("nn", "i64"), ("strs", "[]const string"), ("ssp", "[]const i64"), ("ns", "i64"), ("i", "i64"), ("out", "string"), ("dead", "i64"), ("inev", "i64"), ("inf", "i64"), ("iopen", "i64"), ("ltk", "i64"), ("ltl", "i64"), ("lth", "i64"), ("htl", "i64"), ("hth", "i64"), ("argi", "i64"), ("curk", "i64"), ("ctk", "i64"), ("dep", "i64"), ("pend", "i64"), ("plbl", "i64"), ("ple", "i64"), ("flbl", "i64"), ("flbh", "i64"), ("fevi", "i64"), ("ano", "i64")], ret := some "string" })
+  , ("w-main", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("strs", "[]const string"), ("ssp", "[]const i64")], ret := some "string" })
+  , ("main", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("strs", "[]const string"), ("ssp", "[]const i64")], ret := some "string" })
+ ]
+
 /-- The unrealized-leg shape: head resolves, no arm matches —
 dispatch refuses and the tor NAME is the axis. -/
 def kChainStub : KCallable :=
   .subflow ⟨none, ("unrealized", []), []⟩
 
-/-- The wiring spine: `a-main` rows → the three document legs.
-Each stub invocation is where its leg's contract will sit. -/
+/-- The `wir` leg realized: the six-arg token-table interface —
+the flat rows, source bytes, and name/string tables are the
+producer's output crossing the boundary AS DATA (composite values
+can't be built inside eval, so the tables arrive as params, not
+from `a-main`'s text).  Head hands them to `w-main`; the result is
+the `(graph …)` claim text. -/
+def kChainWir : KCallable := .subflow {
+  preLabel := none
+  head := ("w-w-main",
+    [("rows", .var "rows"), ("src", .var "src"),
+     ("names", .var "names"), ("nsp", .var "nsp"),
+     ("strs", .var "strs"), ("ssp", .var "ssp")])
+  arms := [ .mk "r" false (some "r") none
+      (some (.produce (.var "r"))) [] ] }
+
+/-- The wiring spine: `a-main` row-text → low-txt (mirror doc) and
+the arg-supplied tables → `wir` → emt-txt.  `a-main`'s output binds
+`rt` — the row-TEXT lane stays the authority-mirror path; `wir`'s
+flat `rows` are `chain`'s own param, the same boundary data the
+wi/wii legs feed. -/
 def kChainMain : KCallable := .subflow {
   preLabel := none
   head := ("a-main", [("chars", .var "src")])
-  arms := [ .mk "rows" false (some "rows") none
+  arms := [ .mk "rows" false (some "rt") none
       (some (.invoke "low-txt"
-        [("rows", .var "rows"), ("src", .var "src")]))
+        [("rows", .var "rt"), ("src", .var "src")]))
       [ .mk "doc" false (some "_") none
           (some (.invoke "wir"
-            [("rows", .var "rows"), ("src", .var "src")]))
+            [("rows", .var "rows"), ("src", .var "src"),
+             ("names", .var "names"), ("nsp", .var "nsp"),
+             ("strs", .var "strs"), ("ssp", .var "ssp")]))
           [ .mk "claim" false (some "claim") none
               (some (.invoke "emt-txt" [("claim", .var "claim")]))
               [] ] ] ] }
@@ -3189,21 +4367,23 @@ def kChain : KProg := {
   graph :=
     [("unrealized", .bare (.lit (.str "unrealized")))
     ,("low-txt", kChainStub)
-    ,("wir", kChainStub)
+    ,("wir", kChainWir)
     ,("emt-txt", kChainStub)
     ,("chain", kChainMain)]
     ++ prefixGraph "a-" kAst.graph
     ++ prefixGraph "l-" kLow.graph
+    ++ prefixGraph "w-" kWir.graph
   entry := "chain"
   args := [] }
 
 def kChainDecls : List (String × KDecl) :=
-  [ ("chain", { params := [("src", "[]const i64")], ret := some "string" }),
+  [ ("chain", { params := [("src", "[]const i64"), ("rows", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("strs", "[]const string"), ("ssp", "[]const i64")], ret := some "string" }),
     ("low-txt", { params := [("rows", "[]const i64"), ("src", "[]const i64")], ret := some "string" }),
-    ("wir", { params := [("rows", "[]const i64"), ("src", "[]const i64")], ret := some "string" }),
-    ("emt-txt", { params := [("claim", "[]const i64")], ret := some "string" }) ]
+    ("wir", { params := [("rows", "[]const i64"), ("src", "[]const i64"), ("names", "[]const string"), ("nsp", "[]const i64"), ("strs", "[]const string"), ("ssp", "[]const i64")], ret := some "string" }),
+    ("emt-txt", { params := [("claim", "string")], ret := some "string" }) ]
   ++ (kAstDecls.map fun (n, d) => ("a-" ++ n, d))
   ++ (kLowDecls.map fun (n, d) => ("l-" ++ n, d))
+  ++ (kWirDecls.map fun (n, d) => ("w-" ++ n, d))
 
 /-- One flow-grammar corpus row: program + asserted oracle leaves +
 the declared `tor` contracts the surface file must carry. -/

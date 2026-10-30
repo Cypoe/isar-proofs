@@ -4,7 +4,7 @@
 // own ast keeps them as text too.  arg-less invoke
 // refuses: `chars` unbound.
 tor peek {chars: []const i64, i: i64, n: i64} -> i64
-peek -> if((i >= n)) (0 - 1) else chars[i]
+peek -> (if((i >= n)) (0 - 1) else chars[i])
 
 tor ws {chars: []const i64, i: i64, n: i64} -> i64
 ws = peek(chars, i, n)
@@ -51,13 +51,13 @@ typend = peek(chars, i, n)
 | more _ |> typend(chars, i: (i + 1), n)
 
 tor kwtor {chars: []const i64, j: i64, e: i64, n: i64} -> i64
-kwtor -> if(((e == (j + 3)) && ((chars[j] == 116) && ((chars[(j + 1)] == 111) && (chars[(j + 2)] == 114))))) 1 else 0
+kwtor -> (if(((e == (j + 3)) && ((chars[j] == 116) && ((chars[(j + 1)] == 111) && (chars[(j + 2)] == 114))))) 1 else 0)
 
 tor kwwhen {chars: []const i64, j: i64, e: i64, n: i64} -> i64
-kwwhen -> if(((e == (j + 4)) && ((chars[j] == 119) && ((chars[(j + 1)] == 104) && ((chars[(j + 2)] == 101) && (chars[(j + 3)] == 110)))))) 1 else 0
+kwwhen -> (if(((e == (j + 4)) && ((chars[j] == 119) && ((chars[(j + 1)] == 104) && ((chars[(j + 2)] == 101) && (chars[(j + 3)] == 110)))))) 1 else 0)
 
 tor kwimport {chars: []const i64, j: i64, e: i64, n: i64} -> i64
-kwimport -> if(((e == (j + 6)) && ((chars[j] == 105) && ((chars[(j + 1)] == 109) && ((chars[(j + 2)] == 112) && ((chars[(j + 3)] == 111) && ((chars[(j + 4)] == 114) && (chars[(j + 5)] == 116)))))))) 1 else 0
+kwimport -> (if(((e == (j + 6)) && ((chars[j] == 105) && ((chars[(j + 1)] == 109) && ((chars[(j + 2)] == 112) && ((chars[(j + 3)] == 111) && ((chars[(j + 4)] == 114) && (chars[(j + 5)] == 116)))))))) 1 else 0)
 
 tor hws {chars: []const i64, i: i64, n: i64} -> i64
 hws = peek(chars, i, n)
@@ -72,7 +72,7 @@ tor top-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 top-at = peek(chars, i, n)
 | fin c when c < 0 -> out
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : e |> kwd(chars, i, n, out, e)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor kwd {chars: []const i64, i: i64, e: i64, n: i64, out: string} -> string
 kwd = kwtor(chars, j: i, e, n)
@@ -100,7 +100,7 @@ tor morf-at {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string} -
 morf-at = peek(chars, i, n)
 | impl c when (c == 45) && (chars[(i + 1)] == 62) |> impl-body(chars, i: (i + 2), n, out, j, ne)
 | flow c when (c == 61) && !((chars[(i + 1)] == 62)) |> flow-pre(chars, i: (i + 1), n, out, j, ne)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor impl-body {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string} -> string
 impl-body = ws(chars, i, n)
@@ -118,7 +118,7 @@ tor flow-pre0 {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string}
 flow-pre0 = peek(chars, i, n)
 | lbl c when c == 35 |> word(chars, i: (i + 1), n) : le |> flow-lbl(chars, i: le, n, j, ne, out: (out ++ ("(lbl " ++ (@intToString((i + 1)) ++ (" " ++ (@intToString(le) ++ ") "))))))
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : he |> call-open(chars, i: he, n, out: ((out ++ ("(flw " ++ (@intToString(j) ++ (" " ++ (@intToString(ne) ++ ") "))))) ++ ("(call " ++ (@intToString(i) ++ (" " ++ (@intToString(he) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor flow-lbl {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string} -> string
 flow-lbl = ws(chars, i, n)
@@ -127,7 +127,7 @@ flow-lbl = ws(chars, i, n)
 tor flow-pre2 {chars: []const i64, i: i64, n: i64, j: i64, ne: i64, out: string} -> string
 flow-pre2 = peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : he |> call-open(chars, i: he, n, out: ((out ++ ("(flw " ++ (@intToString(j) ++ (" " ++ (@intToString(ne) ++ ") "))))) ++ ("(call " ++ (@intToString(i) ++ (" " ++ (@intToString(he) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor call-open {chars: []const i64, i: i64, n: i64, out: string} -> string
 call-open = ws(chars, i, n)
@@ -136,7 +136,7 @@ call-open = ws(chars, i, n)
 tor call-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 call-at = peek(chars, i, n)
 | open c when c == 40 |> args(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor args {chars: []const i64, i: i64, n: i64, out: string} -> string
 args = ws(chars, i, n)
@@ -173,7 +173,7 @@ tor argnext-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 argnext-at = peek(chars, i, n)
 | more c when c == 44 |> args(chars, i: (i + 1), n, out)
 | close c when c == 41 |> postcall(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor postcall {chars: []const i64, i: i64, n: i64, out: string} -> string
 postcall = hws(chars, i, n)
@@ -191,7 +191,7 @@ rb-word = ws(chars, i, n)
 tor rb-word-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 rb-word-at = peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : we |> rb-tail(chars, i: we, n, out: (out ++ ("(rbind " ++ (@intToString(i) ++ (" " ++ (@intToString(we) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor rb-tail {chars: []const i64, i: i64, n: i64, out: string} -> string
 rb-tail = hws(chars, i, n)
@@ -200,7 +200,7 @@ rb-tail = hws(chars, i, n)
 tor rb-tail-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 rb-tail-at = peek(chars, i, n)
 | step c when (c == 124) && (chars[(i + 1)] == 62) |> arm-step(chars, i: (i + 2), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor armloop {chars: []const i64, i: i64, n: i64, out: string} -> string
 armloop = ws(chars, i, n)
@@ -218,7 +218,7 @@ arm = ws(chars, i, n)
 tor arm1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 arm1 = peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : be |> arm-tail(chars, i: be, n, out: (out ++ ("(cont " ++ (@intToString(i) ++ (" " ++ (@intToString(be) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor arm-tail {chars: []const i64, i: i64, n: i64, out: string} -> string
 arm-tail = hws(chars, i, n)
@@ -231,7 +231,7 @@ arm-tok = peek(chars, i, n)
 | ctor c when (c == 61) && (chars[(i + 1)] == 62) |> arm-ctor(chars, i: (i + 2), n, out)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : we |> arm-kw(chars, i, n, out, we)
 | eol c when (c == 10) || (c < 0) |> armloop(chars, i, n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor arm-kw {chars: []const i64, i: i64, we: i64, n: i64, out: string} -> string
 arm-kw = kwwhen(chars, j: i, e: we, n)
@@ -262,7 +262,7 @@ tor arm-step2 {chars: []const i64, i: i64, n: i64, out: string} -> string
 arm-step2 = peek(chars, i, n)
 | jump c when c == 64 |> word(chars, i: (i + 1), n) : le |> call-open(chars, i: le, n, out: (out ++ ("(step jump " ++ (@intToString((i + 1)) ++ (" " ++ (@intToString(le) ++ ") "))))))
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : se |> call-open(chars, i: se, n, out: (out ++ ("(step invoke " ++ (@intToString(i) ++ (" " ++ (@intToString(se) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor arm-ctor {chars: []const i64, i: i64, n: i64, out: string} -> string
 arm-ctor = ws(chars, i, n)
@@ -271,7 +271,7 @@ arm-ctor = ws(chars, i, n)
 tor arm-ctor1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 arm-ctor1 = peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : ce |> arm-ctor2(chars, i: ce, n, out, cj: i, ce)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor arm-ctor2 {chars: []const i64, i: i64, n: i64, cj: i64, ce: i64, out: string} -> string
 arm-ctor2 = ws(chars, i, n)
@@ -288,7 +288,7 @@ decl = ws(chars, i, n)
 tor decl1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 decl1 = peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : de |> decl-brace(chars, i: de, n, out: (out ++ ("(ev " ++ (@intToString(i) ++ (" " ++ (@intToString(de) ++ ") "))))))
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor decl-brace {chars: []const i64, i: i64, n: i64, out: string} -> string
 decl-brace = ws(chars, i, n)
@@ -297,7 +297,7 @@ decl-brace = ws(chars, i, n)
 tor decl-brace2 {chars: []const i64, i: i64, n: i64, out: string} -> string
 decl-brace2 = peek(chars, i, n)
 | open c when c == 123 |> fields(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor fields {chars: []const i64, i: i64, n: i64, out: string} -> string
 fields = ws(chars, i, n)
@@ -308,7 +308,7 @@ fields-at = peek(chars, i, n)
 | close c when c == 125 |> decl-ret(chars, i: (i + 1), n, out)
 | var c when c == 124 |> variant(chars, i: (i + 1), n, out)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : fe |> fld(chars, i, n, out, fe)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor fld {chars: []const i64, i: i64, fe: i64, n: i64, out: string} -> string
 fld = ws(chars, i: fe, n)
@@ -317,7 +317,7 @@ fld = ws(chars, i: fe, n)
 tor fld2 {chars: []const i64, i: i64, n: i64, fj: i64, fe: i64, out: string} -> string
 fld2 = peek(chars, i, n)
 | ty k when k == 58 |> ws(chars, i: (i + 1), n) : t0 |> fld3(chars, i: t0, n, out, fj, fe)
-| bad k -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(k) ++ ") ")))))
+| bad k -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(k) ++ ") "))))))
 
 tor fld3 {chars: []const i64, i: i64, n: i64, fj: i64, fe: i64, out: string} -> string
 fld3 = typend(chars, i, n)
@@ -331,7 +331,7 @@ tor fields2-at {chars: []const i64, i: i64, n: i64, out: string} -> string
 fields2-at = peek(chars, i, n)
 | more c when c == 44 |> fields(chars, i: (i + 1), n, out)
 | close c when c == 125 |> decl-ret(chars, i: (i + 1), n, out)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor variant {chars: []const i64, i: i64, n: i64, out: string} -> string
 variant = ws(chars, i, n)
@@ -340,7 +340,7 @@ variant = ws(chars, i, n)
 tor variant1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 variant1 = peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : ve |> variant2(chars, i, n, out, ve)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor variant2 {chars: []const i64, i: i64, ve: i64, n: i64, out: string} -> string
 variant2 = ws(chars, i: ve, n)
@@ -379,7 +379,7 @@ branch = ws(chars, i, n)
 tor branch1 {chars: []const i64, i: i64, n: i64, out: string} -> string
 branch1 = peek(chars, i, n)
 | id c when ((c >= 97) && (c <= 122)) || (((c >= 65) && (c <= 90)) || ((c == 95) || ((c == 45) || ((c >= 48) && (c <= 57))))) |> word(chars, i, n) : be |> branch-ty(chars, i: be, n, out, bj: i, be)
-| bad c -> (out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") ")))))
+| bad c -> ((out ++ ("(bad " ++ (@intToString(i) ++ (" " ++ (@intToString(c) ++ ") "))))))
 
 tor branch-ty {chars: []const i64, i: i64, n: i64, bj: i64, be: i64, out: string} -> string
 branch-ty = hws(chars, i, n)
