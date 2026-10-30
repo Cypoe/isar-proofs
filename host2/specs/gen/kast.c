@@ -38,20 +38,32 @@ extern void exit(int);
 static void *xm(size_t n){void*p=malloc(n?n:1);if(!p){fputs("oom\n",kstderr);exit(2);}return p;}
 static void *xrealloc(void*p,size_t n){void*q=realloc(p,n?n:1);if(!q){fputs("oom\n",kstderr);exit(2);}return q;}
 static char *xsd(const char*s){size_t n=strlen(s)+1;char*p=xm(n);memcpy(p,s,n);return p;}
+/* str is a rope: concat conses (O(1)), s_flat materializes once
+   and memoizes the node to a leaf. Semantics unchanged — the repr
+   is the emitter's choice, not the program's. */
+typedef struct S S;
+struct S{size_t n;char*p;S*l,*r;};
+static S*s_leaf(char*p){S*s=xm(sizeof(S));s->n=strlen(p);s->p=p;s->l=s->r=0;return s;}
+static S*s_cat(S*a,S*b){S*s=xm(sizeof(S));s->n=a->n+b->n;s->p=0;s->l=a;s->r=b;return s;}
+static char*s_flat(S*s){
+ if(!s->l)return s->p;
+ {char*p=xm(s->n+1),*q=p;size_t cap=64,sp=0;S**st=xm(cap*sizeof(S*));S*c=s;
+  for(;;){while(c->l){if(sp==cap){cap*=2;st=xrealloc(st,cap*sizeof(S*));}st[sp++]=c->r;c=c->l;}
+   memcpy(q,c->p,c->n);q+=c->n;if(!sp){*q=0;s->p=p;s->l=s->r=0;return p;}c=st[--sp];}}}
 typedef struct Val Val;
-struct Val{int tag;k_i64 i,d;int b;char*s;Val**xs;int nx;char**ns;Val**vs;int nf;};
+struct Val{int tag;k_i64 i,d;int b;S*s;Val**xs;int nx;char**ns;Val**vs;int nf;};
 /* tags: 0 int 1 float(n/d) 2 bool 3 str 4 arr 5 cell */
 static Val*vn(int t){Val*v=xm(sizeof(Val));memset(v,0,sizeof(Val));v->tag=t;return v;}
 static Val*v_int(k_i64 i){Val*v=vn(0);v->i=i;return v;}
 static Val*v_flt(k_i64 n,k_i64 d){Val*v=vn(1);v->i=n;v->d=d;return v;}
 static Val*v_bool(int b){Val*v=vn(2);v->b=b?1:0;return v;}
-static Val*v_str(const char*s){Val*v=vn(3);v->s=xsd(s);return v;}
+static Val*v_str(const char*s){Val*v=vn(3);v->s=s_leaf(xsd(s));return v;}
 static Val*v_arr(Val**xs,int n){Val*v=vn(4);v->xs=xs;v->nx=n;return v;}
 static Val*v_cell(char**ns,Val**vs,int n){Val*v=vn(5);v->ns=ns;v->vs=vs;v->nf=n;return v;}
 static int veq(Val*a,Val*b){int i;
  if(!a||!b||a->tag!=b->tag)return 0;
  switch(a->tag){case 0:return a->i==b->i;case 1:return a->i==b->i&&a->d==b->d;
-  case 2:return a->b==b->b;case 3:return!strcmp(a->s,b->s);
+  case 2:return a->b==b->b;case 3:return!strcmp(s_flat(a->s),s_flat(b->s));
   case 4:if(a->nx!=b->nx)return 0;for(i=0;i<a->nx;i++)if(!veq(a->xs[i],b->xs[i]))return 0;return 1;
   case 5:if(a->nf!=b->nf)return 0;for(i=0;i<a->nf;i++)if(strcmp(a->ns[i],b->ns[i])||!veq(a->vs[i],b->vs[i]))return 0;return 1;}
  return 0;}
@@ -123,9 +135,8 @@ static Val*kbin(int op,Val*a,Val*b){k_i64 n1,d1,n2,d2,o;int ok;
  if(a->tag==2&&b->tag==2)switch(op){
   case 5:return v_bool(a->b==b->b);case 6:return v_bool(a->b!=b->b);}
  if(a->tag==3&&b->tag==3)switch(op){
-  case 5:return v_bool(!strcmp(a->s,b->s));case 6:return v_bool(strcmp(a->s,b->s)!=0);
-  case 13:{size_t n=strlen(a->s)+strlen(b->s)+1;char*s=xm(n);
-    strcpy(s,a->s);strcat(s,b->s);{Val*r=v_str("");r->s=s;return r;}}}
+  case 5:return v_bool(!strcmp(s_flat(a->s),s_flat(b->s)));case 6:return v_bool(strcmp(s_flat(a->s),s_flat(b->s))!=0);
+  case 13:{Val*r=vn(3);r->s=s_cat(a->s,b->s);return r;}}
  return 0;}
 static Val*kun(int op,Val*a){
  if(op==1&&a->tag==2)return v_bool(!a->b);
@@ -194,7 +205,7 @@ static void pval(Val*v,FILE*f){int i;
  switch(v->tag){case 0:fprintf(f,"(int %lld)",(long long)v->i);break;
   case 1:fprintf(f,"(float %lld %lld)",(long long)v->i,(long long)v->d);break;
   case 2:fprintf(f,"(bool %s)",v->b?"true":"false");break;
-  case 3:fprintf(f,"(str \"%s\")",v->s);break;
+  case 3:fprintf(f,"(str \"%s\")",s_flat(v->s));break;
   case 4:fputs("(arr",f);for(i=0;i<v->nx;i++){fputc(' ',f);pval(v->xs[i],f);}fputc(')',f);break;
   case 5:fputs("(cell",f);for(i=0;i<v->nf;i++){fprintf(f," (%s ",v->ns[i]);pval(v->vs[i],f);fputc(')',f);}fputc(')',f);break;}}
 static void pres(Res*r,FILE*f){
@@ -12265,5 +12276,5 @@ int main(int argc,char**argv){Val*a;E*e;Res*r;int i;
  e=0;for(i=a->nf-1;i>=0;i--)e=ecn(a->ns[i],a->vs[i],e);
  r=k_main(e);
  if(!r||(r->k!=1&&r->k!=2)){fputs("refuse\n",kstderr);return 4;}
- if(r->k==1&&!r->br&&r->v&&r->v->tag==3){fputs(r->v->s,kstdout);fputc('\n',kstdout);return 0;}
+ if(r->k==1&&!r->br&&r->v&&r->v->tag==3){fputs(s_flat(r->v->s),kstdout);fputc('\n',kstdout);return 0;}
  pres(r,kstdout);fputc('\n',kstdout);return 0;}

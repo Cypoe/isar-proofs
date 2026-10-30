@@ -126,20 +126,32 @@ def prelude : String :=
 "static void *xm(size_t n){void*p=malloc(n?n:1);if(!p){fputs(\"oom\\n\",kstderr);exit(2);}return p;}\n" ++
 "static void *xrealloc(void*p,size_t n){void*q=realloc(p,n?n:1);if(!q){fputs(\"oom\\n\",kstderr);exit(2);}return q;}\n" ++
 "static char *xsd(const char*s){size_t n=strlen(s)+1;char*p=xm(n);memcpy(p,s,n);return p;}\n" ++
+"/* str is a rope: concat conses (O(1)), s_flat materializes once\n" ++
+"   and memoizes the node to a leaf. Semantics unchanged — the repr\n" ++
+"   is the emitter's choice, not the program's. */\n" ++
+"typedef struct S S;\n" ++
+"struct S{size_t n;char*p;S*l,*r;};\n" ++
+"static S*s_leaf(char*p){S*s=xm(sizeof(S));s->n=strlen(p);s->p=p;s->l=s->r=0;return s;}\n" ++
+"static S*s_cat(S*a,S*b){S*s=xm(sizeof(S));s->n=a->n+b->n;s->p=0;s->l=a;s->r=b;return s;}\n" ++
+"static char*s_flat(S*s){\n" ++
+" if(!s->l)return s->p;\n" ++
+" {char*p=xm(s->n+1),*q=p;size_t cap=64,sp=0;S**st=xm(cap*sizeof(S*));S*c=s;\n" ++
+"  for(;;){while(c->l){if(sp==cap){cap*=2;st=xrealloc(st,cap*sizeof(S*));}st[sp++]=c->r;c=c->l;}\n" ++
+"   memcpy(q,c->p,c->n);q+=c->n;if(!sp){*q=0;s->p=p;s->l=s->r=0;return p;}c=st[--sp];}}}\n" ++
 "typedef struct Val Val;\n" ++
-"struct Val{int tag;k_i64 i,d;int b;char*s;Val**xs;int nx;char**ns;Val**vs;int nf;};\n" ++
+"struct Val{int tag;k_i64 i,d;int b;S*s;Val**xs;int nx;char**ns;Val**vs;int nf;};\n" ++
 "/* tags: 0 int 1 float(n/d) 2 bool 3 str 4 arr 5 cell */\n" ++
 "static Val*vn(int t){Val*v=xm(sizeof(Val));memset(v,0,sizeof(Val));v->tag=t;return v;}\n" ++
 "static Val*v_int(k_i64 i){Val*v=vn(0);v->i=i;return v;}\n" ++
 "static Val*v_flt(k_i64 n,k_i64 d){Val*v=vn(1);v->i=n;v->d=d;return v;}\n" ++
 "static Val*v_bool(int b){Val*v=vn(2);v->b=b?1:0;return v;}\n" ++
-"static Val*v_str(const char*s){Val*v=vn(3);v->s=xsd(s);return v;}\n" ++
+"static Val*v_str(const char*s){Val*v=vn(3);v->s=s_leaf(xsd(s));return v;}\n" ++
 "static Val*v_arr(Val**xs,int n){Val*v=vn(4);v->xs=xs;v->nx=n;return v;}\n" ++
 "static Val*v_cell(char**ns,Val**vs,int n){Val*v=vn(5);v->ns=ns;v->vs=vs;v->nf=n;return v;}\n" ++
 "static int veq(Val*a,Val*b){int i;\n" ++
 " if(!a||!b||a->tag!=b->tag)return 0;\n" ++
 " switch(a->tag){case 0:return a->i==b->i;case 1:return a->i==b->i&&a->d==b->d;\n" ++
-"  case 2:return a->b==b->b;case 3:return!strcmp(a->s,b->s);\n" ++
+"  case 2:return a->b==b->b;case 3:return!strcmp(s_flat(a->s),s_flat(b->s));\n" ++
 "  case 4:if(a->nx!=b->nx)return 0;for(i=0;i<a->nx;i++)if(!veq(a->xs[i],b->xs[i]))return 0;return 1;\n" ++
 "  case 5:if(a->nf!=b->nf)return 0;for(i=0;i<a->nf;i++)if(strcmp(a->ns[i],b->ns[i])||!veq(a->vs[i],b->vs[i]))return 0;return 1;}\n" ++
 " return 0;}\n" ++
@@ -211,9 +223,8 @@ def prelude : String :=
 " if(a->tag==2&&b->tag==2)switch(op){\n" ++
 "  case 5:return v_bool(a->b==b->b);case 6:return v_bool(a->b!=b->b);}\n" ++
 " if(a->tag==3&&b->tag==3)switch(op){\n" ++
-"  case 5:return v_bool(!strcmp(a->s,b->s));case 6:return v_bool(strcmp(a->s,b->s)!=0);\n" ++
-"  case 13:{size_t n=strlen(a->s)+strlen(b->s)+1;char*s=xm(n);\n" ++
-"    strcpy(s,a->s);strcat(s,b->s);{Val*r=v_str(\"\");r->s=s;return r;}}}\n" ++
+"  case 5:return v_bool(!strcmp(s_flat(a->s),s_flat(b->s)));case 6:return v_bool(strcmp(s_flat(a->s),s_flat(b->s))!=0);\n" ++
+"  case 13:{Val*r=vn(3);r->s=s_cat(a->s,b->s);return r;}}\n" ++
 " return 0;}\n" ++
 "static Val*kun(int op,Val*a){\n" ++
 " if(op==1&&a->tag==2)return v_bool(!a->b);\n" ++
@@ -282,7 +293,7 @@ def prelude : String :=
 " switch(v->tag){case 0:fprintf(f,\"(int %lld)\",(long long)v->i);break;\n" ++
 "  case 1:fprintf(f,\"(float %lld %lld)\",(long long)v->i,(long long)v->d);break;\n" ++
 "  case 2:fprintf(f,\"(bool %s)\",v->b?\"true\":\"false\");break;\n" ++
-"  case 3:fprintf(f,\"(str \\\"%s\\\")\",v->s);break;\n" ++
+"  case 3:fprintf(f,\"(str \\\"%s\\\")\",s_flat(v->s));break;\n" ++
 "  case 4:fputs(\"(arr\",f);for(i=0;i<v->nx;i++){fputc(' ',f);pval(v->xs[i],f);}fputc(')',f);break;\n" ++
 "  case 5:fputs(\"(cell\",f);for(i=0;i<v->nf;i++){fprintf(f,\" (%s \",v->ns[i]);pval(v->vs[i],f);fputc(')',f);}fputc(')',f);break;}}\n" ++
 "static void pres(Res*r,FILE*f){\n" ++
@@ -304,7 +315,7 @@ def driver (entry fuel : String) : String :=
 " e=0;for(i=a->nf-1;i>=0;i--)e=ecn(a->ns[i],a->vs[i],e);\n" ++
 " r=k_" ++ mangle entry ++ "(e);\n" ++
 " if(!r||(r->k!=1&&r->k!=2)){fputs(\"refuse\\n\",kstderr);return 4;}\n" ++
-" if(r->k==1&&!r->br&&r->v&&r->v->tag==3){fputs(r->v->s,kstdout);fputc('\\n',kstdout);return 0;}\n" ++
+" if(r->k==1&&!r->br&&r->v&&r->v->tag==3){fputs(s_flat(r->v->s),kstdout);fputc('\\n',kstdout);return 0;}\n" ++
 " pres(r,kstdout);fputc('\\n',kstdout);return 0;}\n"
 
 /-! ## Expression emission — one `ev_N(E *e)` per node
