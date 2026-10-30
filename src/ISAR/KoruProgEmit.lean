@@ -142,10 +142,17 @@ def prelude : String :=
 "struct Val{int tag;k_i64 i,d;int b;S*s;Val**xs;int nx;char**ns;Val**vs;int nf;};\n" ++
 "/* tags: 0 int 1 float(n/d) 2 bool 3 str 4 arr 5 cell */\n" ++
 "static Val*vn(int t){Val*v=xm(sizeof(Val));memset(v,0,sizeof(Val));v->tag=t;return v;}\n" ++
-"static Val*v_int(k_i64 i){Val*v=vn(0);v->i=i;return v;}\n" ++
+"static Val _VI[9216];static int _vok;\n" ++
+"static Val*v_int(k_i64 i){\n" ++
+" if(i>=-1024&&i<8192){\n" ++
+"  if(!_vok){int j;for(j=0;j<9216;j++){_VI[j].tag=0;_VI[j].i=j-1024;}_vok=1;}\n" ++
+"  return&_VI[(int)(i+1024)];}\n" ++
+" {Val*v=vn(0);v->i=i;return v;}}\n" ++
 "static Val*v_flt(k_i64 n,k_i64 d){Val*v=vn(1);v->i=n;v->d=d;return v;}\n" ++
-"static Val*v_bool(int b){Val*v=vn(2);v->b=b?1:0;return v;}\n" ++
+"static Val _VB[2]={{2,0,0,0,0,0,0,0,0,0},{2,0,0,1,0,0,0,0,0,0}};\n" ++
+"static Val*v_bool(int b){return&_VB[b?1:0];}\n" ++
 "static Val*v_str(const char*s){Val*v=vn(3);v->s=s_leaf(xsd(s));return v;}\n" ++
+"static Val*v_sref(char*s){Val*v=vn(3);v->s=s_leaf(s);return v;}\n" ++
 "static Val*v_arr(Val**xs,int n){Val*v=vn(4);v->xs=xs;v->nx=n;return v;}\n" ++
 "static Val*v_cell(char**ns,Val**vs,int n){Val*v=vn(5);v->ns=ns;v->vs=vs;v->nf=n;return v;}\n" ++
 "static int veq(Val*a,Val*b){int i;\n" ++
@@ -155,16 +162,28 @@ def prelude : String :=
 "  case 4:if(a->nx!=b->nx)return 0;for(i=0;i<a->nx;i++)if(!veq(a->xs[i],b->xs[i]))return 0;return 1;\n" ++
 "  case 5:if(a->nf!=b->nf)return 0;for(i=0;i<a->nf;i++)if(strcmp(a->ns[i],b->ns[i])||!veq(a->vs[i],b->vs[i]))return 0;return 1;}\n" ++
 " return 0;}\n" ++
-"typedef struct E{char*n;Val*v;struct E*x;}E;\n" ++
-"static E*ecn(const char*n,Val*v,E*x){E*e=xm(sizeof(E));e->n=xsd(n);e->v=v;e->x=x;return e;}\n" ++
-"static Val*elk(E*e,const char*n){for(;e;e=e->x)if(!strcmp(e->n,n))return e->v;return 0;}\n" ++
-"typedef struct Res{int k;char*br;Val*v;char*jl;E*ja;}Res;\n" ++
+"typedef struct E E;\n" ++
+"struct E{int cnt;const char**ns;Val**vs;const char*n;Val*v;E*x;};\n" ++
+"/* env: single-slot frames (cnt<0) for arm binds; multi-slot frames\n" ++
+"   for invoke/jump args — one alloc per call, names are literals. */\n" ++
+"static E*ecn(const char*n,Val*v,E*x){E*e=xm(sizeof(E));e->cnt=-1;e->n=n;e->v=v;e->x=x;return e;}\n" ++
+"static E*efr(const char**ns,Val**vs,int n,E*x){E*e=xm(sizeof(E)+n*sizeof(Val*));\n" ++
+" e->cnt=n;e->ns=ns;e->vs=(Val**)(e+1);memcpy(e->vs,vs,n*sizeof(Val*));e->x=x;return e;}\n" ++
+"static Val*elk(E*e,const char*n){int i;char c0=n[0];\n" ++
+" for(;e;e=e->x){\n" ++
+"  if(e->cnt<0){if(e->n[0]==c0&&!strcmp(e->n,n))return e->v;}\n" ++
+"  else{for(i=e->cnt-1;i>=0;i--)if(e->ns[i][0]==c0&&!strcmp(e->ns[i],n))return e->vs[i];}}\n" ++
+" return 0;}\n" ++
+"typedef struct Res{int k;const char*br;Val*v;const char*jl;E*ja;}Res;\n" ++
 "/* k: 1 result-bare 2 result-tag 3 done 4 jump ; 9 = internal skip */\n" ++
-"static Res*rn(int k){Res*r=xm(sizeof(Res));memset(r,0,sizeof(Res));r->k=k;return r;}\n" ++
+"static Res*rpool;\n" ++
+"static Res*rn(int k){Res*r=rpool;if(r)rpool=(Res*)r->v;else r=xm(sizeof(Res));\n" ++
+" memset(r,0,sizeof(Res));r->k=k;return r;}\n" ++
+"static void rfree(Res*r){r->v=(Val*)rpool;rpool=r;}\n" ++
 "static Res*r_bare(Val*v){Res*r=rn(1);r->v=v;return r;}\n" ++
-"static Res*r_tag(const char*b,Val*v){Res*r=rn(2);r->br=xsd(b);r->v=v;return r;}\n" ++
+"static Res*r_tag(const char*b,Val*v){Res*r=rn(2);r->br=b;r->v=v;return r;}\n" ++
 "static Res*r_done(void){return rn(3);}\n" ++
-"static Res*r_jump(const char*l,E*a){Res*r=rn(4);r->jl=xsd(l);r->ja=a;return r;}\n" ++
+"static Res*r_jump(const char*l,E*a){Res*r=rn(4);r->jl=l;r->ja=a;return r;}\n" ++
 "static Res _sk;static Res*KSKIP(void){_sk.k=9;return&_sk;}\n" ++
 "static k_i64 kfuel;\n" ++
 "#define KSTEP() do{if(--kfuel<0)return 0;}while(0)\n" ++
@@ -308,7 +327,7 @@ def driver (entry fuel : String) : String :=
 " (void)veq;(void)r_tag;(void)r_done;(void)r_jump;(void)kun;(void)fb;\n" ++
 " (void)asrat;(void)kfmod;(void)ktdiv;(void)ktmod;(void)v_flt;(void)pval;\n" ++
 " (void)v_arr;(void)v_cell;(void)ovf_mul;(void)ovf_add;(void)ovf_sub;\n" ++
-" (void)k_field;(void)k_index;\n" ++
+" (void)k_field;(void)k_index;(void)ecn;(void)efr;(void)rfree;(void)v_sref;\n" ++
 " kfuel=" ++ fuel ++ ";if(argc>1)kfuel=atoll(argv[1]);\n" ++
 " xp=xrd();a=xval();\n" ++
 " if(!a||a->tag!=5){fputs(\"refuse: args not a cell\\n\",kstderr);return 2;}\n" ++
@@ -348,7 +367,7 @@ partial def genLitVal : KVal → EM String
       return f
   | .str s => do
       let f ← EM.fresh "vl"
-      EM.put s!"static Val *{f}(void)\{\n return v_str({cstr s});}\n"
+      EM.put s!"static Val *{f}(void)\{\n return v_sref((char*){cstr s});}\n"
       return f
   | .arr xs => do
       let gs ← xs.mapM genLitVal
@@ -364,7 +383,7 @@ partial def genLitVal : KVal → EM String
       let f ← EM.fresh "vl"
       let sets := String.intercalate ""
         (gs.mapIdx fun i p =>
-          s!" ns[{i}]=xsd({cstr p.1});vs[{i}]={p.2}();\n")
+          s!" ns[{i}]=(char*){cstr p.1};vs[{i}]={p.2}();\n")
       EM.put s!"static Val *{f}(void)\{\n char**ns=xm({fs.length}*sizeof(char*));\n Val**vs=xm({fs.length}*sizeof(Val*));\n{sets} return v_cell(ns,vs,{fs.length});}\n"
       return f
 
@@ -469,18 +488,25 @@ partial def genArm (a : KArm) : EM String := do
           if a.conts.isEmpty then pure " return ir;\n"
           else do
             let d ← genDispatch a.conts
-            pure s!" return {d}(ee,ir);\n"
+            pure s!" \{Res*ct={d}(ee,ir);rfree(ir);return ct;}\n"
         pure s!" \{E*ae=0;\n{argCode} Res*ir=k_{mangle t}(ae);\n if(!ir)return 0;\n if(ir->k!=1&&ir->k!=2)return 0;\n{contStmt}}\n"
   EM.put s!"static Res *{f}(E *e, Res *r)\{\n KSTEP();\n E*ee=e;(void)r;(void)ee;\n{bindStmt}{condStmt}{nodeStmt}}\n"
   return f
 
-/-- Named-arg evaluation in source order — mirrors `evalKArgs`. -/
+/-- Named-arg evaluation in source order — mirrors `evalKArgs`.
+Each arg evaluates in the *caller* env, then all names bind as one
+frame: `an_N` is a static literal table, `efr` copies the values —
+one alloc per call where `ecn` spent one per arg plus a name dup. -/
 partial def genNamedArgs (env : String)
     (args : List (String × KExpr)) (dst : String) : EM String := do
-  let parts ← args.mapM fun p => do
-    let g ← genExpr p.2
-    pure s!" \{Val *v={g}({env});if(!v)return 0;{dst}=ecn({cstr p.1},v,{dst});}\n"
-  return String.intercalate "" parts
+  if args.isEmpty then return ""
+  let an ← EM.fresh "an"
+  let tbl := String.intercalate "," (args.map fun p => cstr p.1)
+  EM.put s!"static const char*{an}[]=\{{tbl}};\n"
+  let parts ← (args.mapIdx fun i p => (i, p)).mapM fun q => do
+    let g ← genExpr q.2.2
+    pure s!" \{Val *v={g}({env});if(!v)return 0;av[{q.1}]=v;}\n"
+  return s!" \{Val*av[{args.length}];\n{String.intercalate "" parts} {dst}=efr({an},av,{args.length},{dst});}\n"
 
 /-- One dispatch list → `ds_N`. Tag dispatch tries only matching
 branches (skipped arms cost nothing); bare dispatch tries every
@@ -514,13 +540,13 @@ partial def genCallable (name : String) (c : KCallable) : EM Unit := do
       let jumpStmt :=
         match fl.preLabel with
         | some pre =>
-            s!"   if(t->k==4)\{if(!strcmp(t->jl,{cstr pre}))\{he=t->ja;continue;}return 0;}\n"
+            s!"   if(t->k==4)\{if(!strcmp(t->jl,{cstr pre}))\{he=t->ja;rfree(h);rfree(t);continue;}return 0;}\n"
         | none => "   if(t->k==4)return 0;\n"
       let body ←
         if fl.arms.isEmpty then pure "   return h;\n"
         else do
           let d ← genDispatch fl.arms
-          pure s!"   \{Res*t={d}(ce,h);\n   if(!t)return 0;\n   if(t->k==3)return r_bare(0);\n{jumpStmt}   return t;}\n"
+          pure s!"   \{Res*t={d}(ce,h);\n   if(!t)return 0;\n   if(t->k==3)\{rfree(h);rfree(t);return r_bare(0);}\n{jumpStmt}   rfree(h);\n   return t;}\n"
       -- arm-less + arg-less flows (kChain's unrealized-leg stubs)
       -- never touch `ce` — silence -Wunused-parameter honestly.
       let unusedCe :=

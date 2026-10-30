@@ -54,10 +54,17 @@ typedef struct Val Val;
 struct Val{int tag;k_i64 i,d;int b;S*s;Val**xs;int nx;char**ns;Val**vs;int nf;};
 /* tags: 0 int 1 float(n/d) 2 bool 3 str 4 arr 5 cell */
 static Val*vn(int t){Val*v=xm(sizeof(Val));memset(v,0,sizeof(Val));v->tag=t;return v;}
-static Val*v_int(k_i64 i){Val*v=vn(0);v->i=i;return v;}
+static Val _VI[9216];static int _vok;
+static Val*v_int(k_i64 i){
+ if(i>=-1024&&i<8192){
+  if(!_vok){int j;for(j=0;j<9216;j++){_VI[j].tag=0;_VI[j].i=j-1024;}_vok=1;}
+  return&_VI[(int)(i+1024)];}
+ {Val*v=vn(0);v->i=i;return v;}}
 static Val*v_flt(k_i64 n,k_i64 d){Val*v=vn(1);v->i=n;v->d=d;return v;}
-static Val*v_bool(int b){Val*v=vn(2);v->b=b?1:0;return v;}
+static Val _VB[2]={{2,0,0,0,0,0,0,0,0,0},{2,0,0,1,0,0,0,0,0,0}};
+static Val*v_bool(int b){return&_VB[b?1:0];}
 static Val*v_str(const char*s){Val*v=vn(3);v->s=s_leaf(xsd(s));return v;}
+static Val*v_sref(char*s){Val*v=vn(3);v->s=s_leaf(s);return v;}
 static Val*v_arr(Val**xs,int n){Val*v=vn(4);v->xs=xs;v->nx=n;return v;}
 static Val*v_cell(char**ns,Val**vs,int n){Val*v=vn(5);v->ns=ns;v->vs=vs;v->nf=n;return v;}
 static int veq(Val*a,Val*b){int i;
@@ -67,16 +74,28 @@ static int veq(Val*a,Val*b){int i;
   case 4:if(a->nx!=b->nx)return 0;for(i=0;i<a->nx;i++)if(!veq(a->xs[i],b->xs[i]))return 0;return 1;
   case 5:if(a->nf!=b->nf)return 0;for(i=0;i<a->nf;i++)if(strcmp(a->ns[i],b->ns[i])||!veq(a->vs[i],b->vs[i]))return 0;return 1;}
  return 0;}
-typedef struct E{char*n;Val*v;struct E*x;}E;
-static E*ecn(const char*n,Val*v,E*x){E*e=xm(sizeof(E));e->n=xsd(n);e->v=v;e->x=x;return e;}
-static Val*elk(E*e,const char*n){for(;e;e=e->x)if(!strcmp(e->n,n))return e->v;return 0;}
-typedef struct Res{int k;char*br;Val*v;char*jl;E*ja;}Res;
+typedef struct E E;
+struct E{int cnt;const char**ns;Val**vs;const char*n;Val*v;E*x;};
+/* env: single-slot frames (cnt<0) for arm binds; multi-slot frames
+   for invoke/jump args — one alloc per call, names are literals. */
+static E*ecn(const char*n,Val*v,E*x){E*e=xm(sizeof(E));e->cnt=-1;e->n=n;e->v=v;e->x=x;return e;}
+static E*efr(const char**ns,Val**vs,int n,E*x){E*e=xm(sizeof(E)+n*sizeof(Val*));
+ e->cnt=n;e->ns=ns;e->vs=(Val**)(e+1);memcpy(e->vs,vs,n*sizeof(Val*));e->x=x;return e;}
+static Val*elk(E*e,const char*n){int i;char c0=n[0];
+ for(;e;e=e->x){
+  if(e->cnt<0){if(e->n[0]==c0&&!strcmp(e->n,n))return e->v;}
+  else{for(i=e->cnt-1;i>=0;i--)if(e->ns[i][0]==c0&&!strcmp(e->ns[i],n))return e->vs[i];}}
+ return 0;}
+typedef struct Res{int k;const char*br;Val*v;const char*jl;E*ja;}Res;
 /* k: 1 result-bare 2 result-tag 3 done 4 jump ; 9 = internal skip */
-static Res*rn(int k){Res*r=xm(sizeof(Res));memset(r,0,sizeof(Res));r->k=k;return r;}
+static Res*rpool;
+static Res*rn(int k){Res*r=rpool;if(r)rpool=(Res*)r->v;else r=xm(sizeof(Res));
+ memset(r,0,sizeof(Res));r->k=k;return r;}
+static void rfree(Res*r){r->v=(Val*)rpool;rpool=r;}
 static Res*r_bare(Val*v){Res*r=rn(1);r->v=v;return r;}
-static Res*r_tag(const char*b,Val*v){Res*r=rn(2);r->br=xsd(b);r->v=v;return r;}
+static Res*r_tag(const char*b,Val*v){Res*r=rn(2);r->br=b;r->v=v;return r;}
 static Res*r_done(void){return rn(3);}
-static Res*r_jump(const char*l,E*a){Res*r=rn(4);r->jl=xsd(l);r->ja=a;return r;}
+static Res*r_jump(const char*l,E*a){Res*r=rn(4);r->jl=l;r->ja=a;return r;}
 static Res _sk;static Res*KSKIP(void){_sk.k=9;return&_sk;}
 static k_i64 kfuel;
 #define KSTEP() do{if(--kfuel<0)return 0;}while(0)
@@ -253,244 +272,244 @@ static Res *k_peek(E *e){
  KSTEP();
  Val*v=ev11(e);
  return v?r_bare(v):0;}
-static Val *ev12(E *e){
- return elk(e,"chars");}
+static const char*an12[]={"chars","i","n"};
 static Val *ev13(E *e){
- return elk(e,"i");}
+ return elk(e,"chars");}
 static Val *ev14(E *e){
+ return elk(e,"i");}
+static Val *ev15(E *e){
  return elk(e,"n");}
-static Val *ev16(E *e){
+static Val *ev17(E *e){
  return elk(e,"c");}
-static Val *vl17(void){
+static Val *vl18(void){
  return v_int(0);}
-static Val *ev18(E *e){
- (void)e;return vl17();}
 static Val *ev19(E *e){
- Val*a=ev16(e);if(!a)return 0;
- Val*b=ev18(e);if(!b)return 0;
- return kbin(7,a,b);}
+ (void)e;return vl18();}
 static Val *ev20(E *e){
+ Val*a=ev17(e);if(!a)return 0;
+ Val*b=ev19(e);if(!b)return 0;
+ return kbin(7,a,b);}
+static Val *ev21(E *e){
  return elk(e,"out");}
-static Res *aw15(E *e, Res *r){
+static Res *aw16(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *g=ev19(ee);
+ {Val *g=ev20(ee);
  if(!g||g->tag!=2)return 0;
  if(!g->b)return KSKIP();}
- {Val *v=ev20(ee);return v?r_bare(v):0;}
+ {Val *v=ev21(ee);return v?r_bare(v):0;}
 }
-static Val *ev22(E *e){
+static Val *ev23(E *e){
  return elk(e,"c");}
-static Val *vl23(void){
+static Val *vl24(void){
  return v_int(32);}
-static Val *ev24(E *e){
- (void)e;return vl23();}
 static Val *ev25(E *e){
- Val*a=ev22(e);if(!a)return 0;
- Val*b=ev24(e);if(!b)return 0;
- return kbin(5,a,b);}
+ (void)e;return vl24();}
 static Val *ev26(E *e){
+ Val*a=ev23(e);if(!a)return 0;
+ Val*b=ev25(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static Val *ev27(E *e){
  return elk(e,"c");}
-static Val *vl27(void){
+static Val *vl28(void){
  return v_int(9);}
-static Val *ev28(E *e){
- (void)e;return vl27();}
 static Val *ev29(E *e){
- Val*a=ev26(e);if(!a)return 0;
- Val*b=ev28(e);if(!b)return 0;
- return kbin(5,a,b);}
+ (void)e;return vl28();}
 static Val *ev30(E *e){
+ Val*a=ev27(e);if(!a)return 0;
+ Val*b=ev29(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static Val *ev31(E *e){
  return elk(e,"c");}
-static Val *vl31(void){
+static Val *vl32(void){
  return v_int(10);}
-static Val *ev32(E *e){
- (void)e;return vl31();}
 static Val *ev33(E *e){
- Val*a=ev30(e);if(!a)return 0;
- Val*b=ev32(e);if(!b)return 0;
- return kbin(5,a,b);}
+ (void)e;return vl32();}
 static Val *ev34(E *e){
- return elk(e,"c");}
-static Val *vl35(void){
- return v_int(13);}
-static Val *ev36(E *e){
- (void)e;return vl35();}
-static Val *ev37(E *e){
- Val*a=ev34(e);if(!a)return 0;
- Val*b=ev36(e);if(!b)return 0;
+ Val*a=ev31(e);if(!a)return 0;
+ Val*b=ev33(e);if(!b)return 0;
  return kbin(5,a,b);}
+static Val *ev35(E *e){
+ return elk(e,"c");}
+static Val *vl36(void){
+ return v_int(13);}
+static Val *ev37(E *e){
+ (void)e;return vl36();}
 static Val *ev38(E *e){
- Val*a=ev33(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev37(e);if(!a||a->tag!=2)return 0;return a;}
+ Val*a=ev35(e);if(!a)return 0;
+ Val*b=ev37(e);if(!b)return 0;
+ return kbin(5,a,b);}
 static Val *ev39(E *e){
- Val*a=ev29(e);
+ Val*a=ev34(e);
  if(!a||a->tag!=2)return 0;
  if(a->b)return v_bool(1);
  a=ev38(e);if(!a||a->tag!=2)return 0;return a;}
 static Val *ev40(E *e){
- Val*a=ev25(e);
+ Val*a=ev30(e);
  if(!a||a->tag!=2)return 0;
  if(a->b)return v_bool(1);
  a=ev39(e);if(!a||a->tag!=2)return 0;return a;}
 static Val *ev41(E *e){
+ Val*a=ev26(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev40(e);if(!a||a->tag!=2)return 0;return a;}
+static const char*an42[]={"chars","i","n","out"};
+static Val *ev43(E *e){
  return elk(e,"chars");}
-static Val *ev42(E *e){
- return elk(e,"i");}
-static Val *vl43(void){
- return v_int(1);}
 static Val *ev44(E *e){
- (void)e;return vl43();}
-static Val *ev45(E *e){
- Val*a=ev42(e);if(!a)return 0;
- Val*b=ev44(e);if(!b)return 0;
- return kbin(0,a,b);}
+ return elk(e,"i");}
+static Val *vl45(void){
+ return v_int(1);}
 static Val *ev46(E *e){
- return elk(e,"n");}
+ (void)e;return vl45();}
 static Val *ev47(E *e){
- return elk(e,"out");}
-static Res *aw21(E *e, Res *r){
- KSTEP();
- E*ee=e;(void)r;(void)ee;
- if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
- {Val *g=ev40(ee);
- if(!g||g->tag!=2)return 0;
- if(!g->b)return KSKIP();}
- {E*ae=0;
- {Val *v=ev41(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev45(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev46(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev47(ee);if(!v)return 0;ae=ecn("out",v,ae);}
- Res*ir=k_lex(ae);
- if(!ir)return 0;
- if(ir->k!=1&&ir->k!=2)return 0;
- return ir;
-}
-}
+ Val*a=ev44(e);if(!a)return 0;
+ Val*b=ev46(e);if(!b)return 0;
+ return kbin(0,a,b);}
+static Val *ev48(E *e){
+ return elk(e,"n");}
 static Val *ev49(E *e){
- return elk(e,"c");}
-static Val *vl50(void){
- return v_int(40);}
+ return elk(e,"out");}
+static Res *aw22(E *e, Res *r){
+ KSTEP();
+ E*ee=e;(void)r;(void)ee;
+ if(!r->v)return 0;
+ ee=ecn("c",r->v,ee);
+ {Val *g=ev41(ee);
+ if(!g||g->tag!=2)return 0;
+ if(!g->b)return KSKIP();}
+ {E*ae=0;
+ {Val*av[4];
+ {Val *v=ev43(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev47(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev48(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev49(ee);if(!v)return 0;av[3]=v;}
+ ae=efr(an42,av,4,ae);}
+ Res*ir=k_lex(ae);
+ if(!ir)return 0;
+ if(ir->k!=1&&ir->k!=2)return 0;
+ return ir;
+}
+}
 static Val *ev51(E *e){
- (void)e;return vl50();}
-static Val *ev52(E *e){
- Val*a=ev49(e);if(!a)return 0;
- Val*b=ev51(e);if(!b)return 0;
- return kbin(5,a,b);}
+ return elk(e,"c");}
+static Val *vl52(void){
+ return v_int(40);}
 static Val *ev53(E *e){
- return elk(e,"chars");}
+ (void)e;return vl52();}
 static Val *ev54(E *e){
- return elk(e,"i");}
-static Val *vl55(void){
- return v_int(1);}
+ Val*a=ev51(e);if(!a)return 0;
+ Val*b=ev53(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static const char*an55[]={"chars","i","n","out"};
 static Val *ev56(E *e){
- (void)e;return vl55();}
-static Val *ev57(E *e){
- Val*a=ev54(e);if(!a)return 0;
- Val*b=ev56(e);if(!b)return 0;
- return kbin(0,a,b);}
-static Val *ev58(E *e){
- return elk(e,"n");}
-static Val *ev59(E *e){
- return elk(e,"out");}
-static Val *vl60(void){
- return v_str("(lparen) ");}
-static Val *ev61(E *e){
- (void)e;return vl60();}
-static Val *ev62(E *e){
- Val*a=ev59(e);if(!a)return 0;
- Val*b=ev61(e);if(!b)return 0;
- return kbin(13,a,b);}
-static Res *aw48(E *e, Res *r){
- KSTEP();
- E*ee=e;(void)r;(void)ee;
- if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
- {Val *g=ev52(ee);
- if(!g||g->tag!=2)return 0;
- if(!g->b)return KSKIP();}
- {E*ae=0;
- {Val *v=ev53(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev57(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev58(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev62(ee);if(!v)return 0;ae=ecn("out",v,ae);}
- Res*ir=k_lex(ae);
- if(!ir)return 0;
- if(ir->k!=1&&ir->k!=2)return 0;
- return ir;
-}
-}
-static Val *ev64(E *e){
- return elk(e,"c");}
-static Val *vl65(void){
- return v_int(41);}
-static Val *ev66(E *e){
- (void)e;return vl65();}
-static Val *ev67(E *e){
- Val*a=ev64(e);if(!a)return 0;
- Val*b=ev66(e);if(!b)return 0;
- return kbin(5,a,b);}
-static Val *ev68(E *e){
  return elk(e,"chars");}
-static Val *ev69(E *e){
+static Val *ev57(E *e){
  return elk(e,"i");}
-static Val *vl70(void){
+static Val *vl58(void){
  return v_int(1);}
-static Val *ev71(E *e){
- (void)e;return vl70();}
-static Val *ev72(E *e){
- Val*a=ev69(e);if(!a)return 0;
- Val*b=ev71(e);if(!b)return 0;
+static Val *ev59(E *e){
+ (void)e;return vl58();}
+static Val *ev60(E *e){
+ Val*a=ev57(e);if(!a)return 0;
+ Val*b=ev59(e);if(!b)return 0;
  return kbin(0,a,b);}
-static Val *ev73(E *e){
+static Val *ev61(E *e){
  return elk(e,"n");}
-static Val *ev74(E *e){
+static Val *ev62(E *e){
  return elk(e,"out");}
-static Val *vl75(void){
- return v_str("(rparen) ");}
-static Val *ev76(E *e){
- (void)e;return vl75();}
-static Val *ev77(E *e){
- Val*a=ev74(e);if(!a)return 0;
- Val*b=ev76(e);if(!b)return 0;
+static Val *vl63(void){
+ return v_sref((char*)"(lparen) ");}
+static Val *ev64(E *e){
+ (void)e;return vl63();}
+static Val *ev65(E *e){
+ Val*a=ev62(e);if(!a)return 0;
+ Val*b=ev64(e);if(!b)return 0;
  return kbin(13,a,b);}
-static Res *aw63(E *e, Res *r){
+static Res *aw50(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *g=ev67(ee);
+ {Val *g=ev54(ee);
  if(!g||g->tag!=2)return 0;
  if(!g->b)return KSKIP();}
  {E*ae=0;
- {Val *v=ev68(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev72(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev73(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev77(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[4];
+ {Val *v=ev56(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev60(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev61(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev65(ee);if(!v)return 0;av[3]=v;}
+ ae=efr(an55,av,4,ae);}
  Res*ir=k_lex(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Val *ev79(E *e){
+static Val *ev67(E *e){
  return elk(e,"c");}
-static Val *vl80(void){
- return v_int(43);}
-static Val *ev81(E *e){
- (void)e;return vl80();}
-static Val *ev82(E *e){
- Val*a=ev79(e);if(!a)return 0;
- Val*b=ev81(e);if(!b)return 0;
+static Val *vl68(void){
+ return v_int(41);}
+static Val *ev69(E *e){
+ (void)e;return vl68();}
+static Val *ev70(E *e){
+ Val*a=ev67(e);if(!a)return 0;
+ Val*b=ev69(e);if(!b)return 0;
  return kbin(5,a,b);}
+static const char*an71[]={"chars","i","n","out"};
+static Val *ev72(E *e){
+ return elk(e,"chars");}
+static Val *ev73(E *e){
+ return elk(e,"i");}
+static Val *vl74(void){
+ return v_int(1);}
+static Val *ev75(E *e){
+ (void)e;return vl74();}
+static Val *ev76(E *e){
+ Val*a=ev73(e);if(!a)return 0;
+ Val*b=ev75(e);if(!b)return 0;
+ return kbin(0,a,b);}
+static Val *ev77(E *e){
+ return elk(e,"n");}
+static Val *ev78(E *e){
+ return elk(e,"out");}
+static Val *vl79(void){
+ return v_sref((char*)"(rparen) ");}
+static Val *ev80(E *e){
+ (void)e;return vl79();}
+static Val *ev81(E *e){
+ Val*a=ev78(e);if(!a)return 0;
+ Val*b=ev80(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Res *aw66(E *e, Res *r){
+ KSTEP();
+ E*ee=e;(void)r;(void)ee;
+ if(!r->v)return 0;
+ ee=ecn("c",r->v,ee);
+ {Val *g=ev70(ee);
+ if(!g||g->tag!=2)return 0;
+ if(!g->b)return KSKIP();}
+ {E*ae=0;
+ {Val*av[4];
+ {Val *v=ev72(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev76(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev77(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev81(ee);if(!v)return 0;av[3]=v;}
+ ae=efr(an71,av,4,ae);}
+ Res*ir=k_lex(ae);
+ if(!ir)return 0;
+ if(ir->k!=1&&ir->k!=2)return 0;
+ return ir;
+}
+}
 static Val *ev83(E *e){
  return elk(e,"c");}
 static Val *vl84(void){
- return v_int(42);}
+ return v_int(43);}
 static Val *ev85(E *e){
  (void)e;return vl84();}
 static Val *ev86(E *e){
@@ -500,7 +519,7 @@ static Val *ev86(E *e){
 static Val *ev87(E *e){
  return elk(e,"c");}
 static Val *vl88(void){
- return v_int(47);}
+ return v_int(42);}
 static Val *ev89(E *e){
  (void)e;return vl88();}
 static Val *ev90(E *e){
@@ -508,842 +527,888 @@ static Val *ev90(E *e){
  Val*b=ev89(e);if(!b)return 0;
  return kbin(5,a,b);}
 static Val *ev91(E *e){
+ return elk(e,"c");}
+static Val *vl92(void){
+ return v_int(47);}
+static Val *ev93(E *e){
+ (void)e;return vl92();}
+static Val *ev94(E *e){
+ Val*a=ev91(e);if(!a)return 0;
+ Val*b=ev93(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static Val *ev95(E *e){
+ Val*a=ev90(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev94(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev96(E *e){
  Val*a=ev86(e);
  if(!a||a->tag!=2)return 0;
  if(a->b)return v_bool(1);
- a=ev90(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev92(E *e){
- Val*a=ev82(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev91(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev93(E *e){
- return elk(e,"chars");}
-static Val *ev94(E *e){
- return elk(e,"i");}
-static Val *vl95(void){
- return v_int(1);}
-static Val *ev96(E *e){
- (void)e;return vl95();}
-static Val *ev97(E *e){
- Val*a=ev94(e);if(!a)return 0;
- Val*b=ev96(e);if(!b)return 0;
- return kbin(0,a,b);}
+ a=ev95(e);if(!a||a->tag!=2)return 0;return a;}
+static const char*an97[]={"chars","i","n","out"};
 static Val *ev98(E *e){
- return elk(e,"n");}
+ return elk(e,"chars");}
 static Val *ev99(E *e){
- return elk(e,"out");}
+ return elk(e,"i");}
 static Val *vl100(void){
- return v_str("(op ");}
+ return v_int(1);}
 static Val *ev101(E *e){
  (void)e;return vl100();}
 static Val *ev102(E *e){
- return elk(e,"c");}
-static Val *ev103(E *e){
- Val*av[1];
- av[0]=ev102(e);if(!av[0])return 0;
- return kbi("intToString",av,1);}
-static Val *vl104(void){
- return v_str(") ");}
-static Val *ev105(E *e){
- (void)e;return vl104();}
-static Val *ev106(E *e){
- Val*a=ev103(e);if(!a)return 0;
- Val*b=ev105(e);if(!b)return 0;
- return kbin(13,a,b);}
-static Val *ev107(E *e){
- Val*a=ev101(e);if(!a)return 0;
- Val*b=ev106(e);if(!b)return 0;
- return kbin(13,a,b);}
-static Val *ev108(E *e){
  Val*a=ev99(e);if(!a)return 0;
- Val*b=ev107(e);if(!b)return 0;
+ Val*b=ev101(e);if(!b)return 0;
+ return kbin(0,a,b);}
+static Val *ev103(E *e){
+ return elk(e,"n");}
+static Val *ev104(E *e){
+ return elk(e,"out");}
+static Val *vl105(void){
+ return v_sref((char*)"(op ");}
+static Val *ev106(E *e){
+ (void)e;return vl105();}
+static Val *ev107(E *e){
+ return elk(e,"c");}
+static Val *ev108(E *e){
+ Val*av[1];
+ av[0]=ev107(e);if(!av[0])return 0;
+ return kbi("intToString",av,1);}
+static Val *vl109(void){
+ return v_sref((char*)") ");}
+static Val *ev110(E *e){
+ (void)e;return vl109();}
+static Val *ev111(E *e){
+ Val*a=ev108(e);if(!a)return 0;
+ Val*b=ev110(e);if(!b)return 0;
  return kbin(13,a,b);}
-static Res *aw78(E *e, Res *r){
+static Val *ev112(E *e){
+ Val*a=ev106(e);if(!a)return 0;
+ Val*b=ev111(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev113(E *e){
+ Val*a=ev104(e);if(!a)return 0;
+ Val*b=ev112(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Res *aw82(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *g=ev92(ee);
+ {Val *g=ev96(ee);
  if(!g||g->tag!=2)return 0;
  if(!g->b)return KSKIP();}
  {E*ae=0;
- {Val *v=ev93(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev97(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev98(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev108(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[4];
+ {Val *v=ev98(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev102(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev103(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev113(ee);if(!v)return 0;av[3]=v;}
+ ae=efr(an97,av,4,ae);}
  Res*ir=k_lex(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Val *ev110(E *e){
+static Val *ev115(E *e){
  return elk(e,"c");}
-static Val *vl111(void){
+static Val *vl116(void){
  return v_int(48);}
-static Val *ev112(E *e){
- (void)e;return vl111();}
-static Val *ev113(E *e){
- Val*a=ev110(e);if(!a)return 0;
- Val*b=ev112(e);if(!b)return 0;
- return kbin(10,a,b);}
-static Val *ev114(E *e){
- return elk(e,"c");}
-static Val *vl115(void){
- return v_int(57);}
-static Val *ev116(E *e){
- (void)e;return vl115();}
 static Val *ev117(E *e){
- Val*a=ev114(e);if(!a)return 0;
- Val*b=ev116(e);if(!b)return 0;
- return kbin(8,a,b);}
+ (void)e;return vl116();}
 static Val *ev118(E *e){
- Val*a=ev113(e);
+ Val*a=ev115(e);if(!a)return 0;
+ Val*b=ev117(e);if(!b)return 0;
+ return kbin(10,a,b);}
+static Val *ev119(E *e){
+ return elk(e,"c");}
+static Val *vl120(void){
+ return v_int(57);}
+static Val *ev121(E *e){
+ (void)e;return vl120();}
+static Val *ev122(E *e){
+ Val*a=ev119(e);if(!a)return 0;
+ Val*b=ev121(e);if(!b)return 0;
+ return kbin(8,a,b);}
+static Val *ev123(E *e){
+ Val*a=ev118(e);
  if(!a||a->tag!=2)return 0;
  if(!a->b)return v_bool(0);
- a=ev117(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev119(E *e){
+ a=ev122(e);if(!a||a->tag!=2)return 0;return a;}
+static const char*an124[]={"chars","j","n","v","out"};
+static Val *ev125(E *e){
  return elk(e,"chars");}
-static Val *ev120(E *e){
+static Val *ev126(E *e){
  return elk(e,"i");}
-static Val *ev121(E *e){
+static Val *ev127(E *e){
  return elk(e,"n");}
-static Val *vl122(void){
+static Val *vl128(void){
  return v_int(0);}
-static Val *ev123(E *e){
- (void)e;return vl122();}
-static Val *ev124(E *e){
+static Val *ev129(E *e){
+ (void)e;return vl128();}
+static Val *ev130(E *e){
  return elk(e,"out");}
-static Res *aw109(E *e, Res *r){
+static Res *aw114(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *g=ev118(ee);
+ {Val *g=ev123(ee);
  if(!g||g->tag!=2)return 0;
  if(!g->b)return KSKIP();}
  {E*ae=0;
- {Val *v=ev119(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev120(ee);if(!v)return 0;ae=ecn("j",v,ae);}
- {Val *v=ev121(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev123(ee);if(!v)return 0;ae=ecn("v",v,ae);}
- {Val *v=ev124(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[5];
+ {Val *v=ev125(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev126(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev127(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev129(ee);if(!v)return 0;av[3]=v;}
+ {Val *v=ev130(ee);if(!v)return 0;av[4]=v;}
+ ae=efr(an124,av,5,ae);}
  Res*ir=k_digits(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Val *ev126(E *e){
- return elk(e,"c");}
-static Val *vl127(void){
- return v_int(97);}
-static Val *ev128(E *e){
- (void)e;return vl127();}
-static Val *ev129(E *e){
- Val*a=ev126(e);if(!a)return 0;
- Val*b=ev128(e);if(!b)return 0;
- return kbin(10,a,b);}
-static Val *ev130(E *e){
- return elk(e,"c");}
-static Val *vl131(void){
- return v_int(122);}
 static Val *ev132(E *e){
- (void)e;return vl131();}
-static Val *ev133(E *e){
- Val*a=ev130(e);if(!a)return 0;
- Val*b=ev132(e);if(!b)return 0;
- return kbin(8,a,b);}
+ return elk(e,"c");}
+static Val *vl133(void){
+ return v_int(97);}
 static Val *ev134(E *e){
- Val*a=ev129(e);
- if(!a||a->tag!=2)return 0;
- if(!a->b)return v_bool(0);
- a=ev133(e);if(!a||a->tag!=2)return 0;return a;}
+ (void)e;return vl133();}
 static Val *ev135(E *e){
+ Val*a=ev132(e);if(!a)return 0;
+ Val*b=ev134(e);if(!b)return 0;
+ return kbin(10,a,b);}
+static Val *ev136(E *e){
  return elk(e,"c");}
-static Val *vl136(void){
- return v_int(65);}
-static Val *ev137(E *e){
- (void)e;return vl136();}
+static Val *vl137(void){
+ return v_int(122);}
 static Val *ev138(E *e){
- Val*a=ev135(e);if(!a)return 0;
- Val*b=ev137(e);if(!b)return 0;
- return kbin(10,a,b);}
+ (void)e;return vl137();}
 static Val *ev139(E *e){
- return elk(e,"c");}
-static Val *vl140(void){
- return v_int(90);}
+ Val*a=ev136(e);if(!a)return 0;
+ Val*b=ev138(e);if(!b)return 0;
+ return kbin(8,a,b);}
+static Val *ev140(E *e){
+ Val*a=ev135(e);
+ if(!a||a->tag!=2)return 0;
+ if(!a->b)return v_bool(0);
+ a=ev139(e);if(!a||a->tag!=2)return 0;return a;}
 static Val *ev141(E *e){
- (void)e;return vl140();}
-static Val *ev142(E *e){
- Val*a=ev139(e);if(!a)return 0;
- Val*b=ev141(e);if(!b)return 0;
- return kbin(8,a,b);}
+ return elk(e,"c");}
+static Val *vl142(void){
+ return v_int(65);}
 static Val *ev143(E *e){
- Val*a=ev138(e);
- if(!a||a->tag!=2)return 0;
- if(!a->b)return v_bool(0);
- a=ev142(e);if(!a||a->tag!=2)return 0;return a;}
+ (void)e;return vl142();}
 static Val *ev144(E *e){
- return elk(e,"c");}
-static Val *vl145(void){
- return v_int(95);}
-static Val *ev146(E *e){
- (void)e;return vl145();}
-static Val *ev147(E *e){
- Val*a=ev144(e);if(!a)return 0;
- Val*b=ev146(e);if(!b)return 0;
- return kbin(5,a,b);}
-static Val *ev148(E *e){
- return elk(e,"c");}
-static Val *vl149(void){
- return v_int(45);}
-static Val *ev150(E *e){
- (void)e;return vl149();}
-static Val *ev151(E *e){
- Val*a=ev148(e);if(!a)return 0;
- Val*b=ev150(e);if(!b)return 0;
- return kbin(5,a,b);}
-static Val *ev152(E *e){
- return elk(e,"c");}
-static Val *vl153(void){
- return v_int(48);}
-static Val *ev154(E *e){
- (void)e;return vl153();}
-static Val *ev155(E *e){
- Val*a=ev152(e);if(!a)return 0;
- Val*b=ev154(e);if(!b)return 0;
+ Val*a=ev141(e);if(!a)return 0;
+ Val*b=ev143(e);if(!b)return 0;
  return kbin(10,a,b);}
-static Val *ev156(E *e){
+static Val *ev145(E *e){
  return elk(e,"c");}
-static Val *vl157(void){
- return v_int(57);}
-static Val *ev158(E *e){
- (void)e;return vl157();}
-static Val *ev159(E *e){
- Val*a=ev156(e);if(!a)return 0;
- Val*b=ev158(e);if(!b)return 0;
+static Val *vl146(void){
+ return v_int(90);}
+static Val *ev147(E *e){
+ (void)e;return vl146();}
+static Val *ev148(E *e){
+ Val*a=ev145(e);if(!a)return 0;
+ Val*b=ev147(e);if(!b)return 0;
  return kbin(8,a,b);}
-static Val *ev160(E *e){
- Val*a=ev155(e);
+static Val *ev149(E *e){
+ Val*a=ev144(e);
  if(!a||a->tag!=2)return 0;
  if(!a->b)return v_bool(0);
- a=ev159(e);if(!a||a->tag!=2)return 0;return a;}
+ a=ev148(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev150(E *e){
+ return elk(e,"c");}
+static Val *vl151(void){
+ return v_int(95);}
+static Val *ev152(E *e){
+ (void)e;return vl151();}
+static Val *ev153(E *e){
+ Val*a=ev150(e);if(!a)return 0;
+ Val*b=ev152(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static Val *ev154(E *e){
+ return elk(e,"c");}
+static Val *vl155(void){
+ return v_int(45);}
+static Val *ev156(E *e){
+ (void)e;return vl155();}
+static Val *ev157(E *e){
+ Val*a=ev154(e);if(!a)return 0;
+ Val*b=ev156(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static Val *ev158(E *e){
+ return elk(e,"c");}
+static Val *vl159(void){
+ return v_int(48);}
+static Val *ev160(E *e){
+ (void)e;return vl159();}
 static Val *ev161(E *e){
- Val*a=ev151(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev160(e);if(!a||a->tag!=2)return 0;return a;}
+ Val*a=ev158(e);if(!a)return 0;
+ Val*b=ev160(e);if(!b)return 0;
+ return kbin(10,a,b);}
 static Val *ev162(E *e){
- Val*a=ev147(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev161(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev163(E *e){
- Val*a=ev143(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev162(e);if(!a||a->tag!=2)return 0;return a;}
+ return elk(e,"c");}
+static Val *vl163(void){
+ return v_int(57);}
 static Val *ev164(E *e){
- Val*a=ev134(e);
+ (void)e;return vl163();}
+static Val *ev165(E *e){
+ Val*a=ev162(e);if(!a)return 0;
+ Val*b=ev164(e);if(!b)return 0;
+ return kbin(8,a,b);}
+static Val *ev166(E *e){
+ Val*a=ev161(e);
+ if(!a||a->tag!=2)return 0;
+ if(!a->b)return v_bool(0);
+ a=ev165(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev167(E *e){
+ Val*a=ev157(e);
  if(!a||a->tag!=2)return 0;
  if(a->b)return v_bool(1);
- a=ev163(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev165(E *e){
- return elk(e,"chars");}
-static Val *ev166(E *e){
- return elk(e,"i");}
-static Val *ev167(E *e){
- return elk(e,"i");}
+ a=ev166(e);if(!a||a->tag!=2)return 0;return a;}
 static Val *ev168(E *e){
- return elk(e,"n");}
+ Val*a=ev153(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev167(e);if(!a||a->tag!=2)return 0;return a;}
 static Val *ev169(E *e){
+ Val*a=ev149(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev168(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev170(E *e){
+ Val*a=ev140(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev169(e);if(!a||a->tag!=2)return 0;return a;}
+static const char*an171[]={"chars","i","j","n","out"};
+static Val *ev172(E *e){
+ return elk(e,"chars");}
+static Val *ev173(E *e){
+ return elk(e,"i");}
+static Val *ev174(E *e){
+ return elk(e,"i");}
+static Val *ev175(E *e){
+ return elk(e,"n");}
+static Val *ev176(E *e){
  return elk(e,"out");}
-static Res *aw125(E *e, Res *r){
+static Res *aw131(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *g=ev164(ee);
+ {Val *g=ev170(ee);
  if(!g||g->tag!=2)return 0;
  if(!g->b)return KSKIP();}
  {E*ae=0;
- {Val *v=ev165(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev166(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev167(ee);if(!v)return 0;ae=ecn("j",v,ae);}
- {Val *v=ev168(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev169(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[5];
+ {Val *v=ev172(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev173(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev174(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev175(ee);if(!v)return 0;av[3]=v;}
+ {Val *v=ev176(ee);if(!v)return 0;av[4]=v;}
+ ae=efr(an171,av,5,ae);}
  Res*ir=k_atom_end(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Val *ev171(E *e){
- return elk(e,"out");}
-static Val *vl172(void){
- return v_str("(bad ");}
-static Val *ev173(E *e){
- (void)e;return vl172();}
-static Val *ev174(E *e){
- return elk(e,"i");}
-static Val *ev175(E *e){
- Val*av[1];
- av[0]=ev174(e);if(!av[0])return 0;
- return kbi("intToString",av,1);}
-static Val *vl176(void){
- return v_str(" ");}
-static Val *ev177(E *e){
- (void)e;return vl176();}
 static Val *ev178(E *e){
- return elk(e,"c");}
-static Val *ev179(E *e){
- Val*av[1];
- av[0]=ev178(e);if(!av[0])return 0;
- return kbi("intToString",av,1);}
-static Val *vl180(void){
- return v_str(") ");}
+ return elk(e,"out");}
+static Val *vl179(void){
+ return v_sref((char*)"(bad ");}
+static Val *ev180(E *e){
+ (void)e;return vl179();}
 static Val *ev181(E *e){
- (void)e;return vl180();}
+ return elk(e,"i");}
 static Val *ev182(E *e){
- Val*a=ev179(e);if(!a)return 0;
- Val*b=ev181(e);if(!b)return 0;
- return kbin(13,a,b);}
-static Val *ev183(E *e){
- Val*a=ev177(e);if(!a)return 0;
- Val*b=ev182(e);if(!b)return 0;
- return kbin(13,a,b);}
+ Val*av[1];
+ av[0]=ev181(e);if(!av[0])return 0;
+ return kbi("intToString",av,1);}
+static Val *vl183(void){
+ return v_sref((char*)" ");}
 static Val *ev184(E *e){
- Val*a=ev175(e);if(!a)return 0;
- Val*b=ev183(e);if(!b)return 0;
- return kbin(13,a,b);}
+ (void)e;return vl183();}
 static Val *ev185(E *e){
- Val*a=ev173(e);if(!a)return 0;
- Val*b=ev184(e);if(!b)return 0;
- return kbin(13,a,b);}
+ return elk(e,"c");}
 static Val *ev186(E *e){
- Val*a=ev171(e);if(!a)return 0;
- Val*b=ev185(e);if(!b)return 0;
+ Val*av[1];
+ av[0]=ev185(e);if(!av[0])return 0;
+ return kbi("intToString",av,1);}
+static Val *vl187(void){
+ return v_sref((char*)") ");}
+static Val *ev188(E *e){
+ (void)e;return vl187();}
+static Val *ev189(E *e){
+ Val*a=ev186(e);if(!a)return 0;
+ Val*b=ev188(e);if(!b)return 0;
  return kbin(13,a,b);}
-static Res *aw170(E *e, Res *r){
+static Val *ev190(E *e){
+ Val*a=ev184(e);if(!a)return 0;
+ Val*b=ev189(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev191(E *e){
+ Val*a=ev182(e);if(!a)return 0;
+ Val*b=ev190(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev192(E *e){
+ Val*a=ev180(e);if(!a)return 0;
+ Val*b=ev191(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev193(E *e){
+ Val*a=ev178(e);if(!a)return 0;
+ Val*b=ev192(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Res *aw177(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *v=ev186(ee);return v?r_bare(v):0;}
+ {Val *v=ev193(ee);return v?r_bare(v):0;}
 }
-static Res *ds187(E *e, Res *r){
+static Res *ds194(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"fin")){Res*t=aw15(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"ws")){Res*t=aw21(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"lp")){Res*t=aw48(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"rp")){Res*t=aw63(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"op")){Res*t=aw78(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"dg")){Res*t=aw109(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"at")){Res*t=aw125(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"bad")){Res*t=aw170(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"fin")){Res*t=aw16(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"ws")){Res*t=aw22(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"lp")){Res*t=aw50(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"rp")){Res*t=aw66(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"op")){Res*t=aw82(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"dg")){Res*t=aw114(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"at")){Res*t=aw131(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"bad")){Res*t=aw177(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
- {Res*t=aw15(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw21(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw48(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw63(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw78(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw109(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw125(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw170(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw16(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw22(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw50(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw66(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw82(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw114(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw131(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw177(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
 static Res *k_lex(E *ce){
  KSTEP();
  E*he=0;
- {Val *v=ev12(ce);if(!v)return 0;he=ecn("chars",v,he);}
- {Val *v=ev13(ce);if(!v)return 0;he=ecn("i",v,he);}
- {Val *v=ev14(ce);if(!v)return 0;he=ecn("n",v,he);}
+ {Val*av[3];
+ {Val *v=ev13(ce);if(!v)return 0;av[0]=v;}
+ {Val *v=ev14(ce);if(!v)return 0;av[1]=v;}
+ {Val *v=ev15(ce);if(!v)return 0;av[2]=v;}
+ he=efr(an12,av,3,he);}
  for(;;){
   KSTEP();
   Res*h=k_peek(he);
   if(!h||(h->k!=1&&h->k!=2))return 0;
-   {Res*t=ds187(ce,h);
+   {Res*t=ds194(ce,h);
    if(!t)return 0;
-   if(t->k==3)return r_bare(0);
+   if(t->k==3){rfree(h);rfree(t);return r_bare(0);}
    if(t->k==4)return 0;
+   rfree(h);
    return t;}
  }
 }
-static Val *ev188(E *e){
- return elk(e,"chars");}
-static Val *ev189(E *e){
- return elk(e,"j");}
-static Val *ev190(E *e){
- return elk(e,"n");}
-static Val *ev192(E *e){
- return elk(e,"c");}
-static Val *vl193(void){
- return v_int(48);}
-static Val *ev194(E *e){
- (void)e;return vl193();}
-static Val *ev195(E *e){
- Val*a=ev192(e);if(!a)return 0;
- Val*b=ev194(e);if(!b)return 0;
- return kbin(10,a,b);}
+static const char*an195[]={"chars","i","n"};
 static Val *ev196(E *e){
- return elk(e,"c");}
-static Val *vl197(void){
- return v_int(57);}
+ return elk(e,"chars");}
+static Val *ev197(E *e){
+ return elk(e,"j");}
 static Val *ev198(E *e){
- (void)e;return vl197();}
-static Val *ev199(E *e){
- Val*a=ev196(e);if(!a)return 0;
- Val*b=ev198(e);if(!b)return 0;
- return kbin(8,a,b);}
+ return elk(e,"n");}
 static Val *ev200(E *e){
- Val*a=ev195(e);
+ return elk(e,"c");}
+static Val *vl201(void){
+ return v_int(48);}
+static Val *ev202(E *e){
+ (void)e;return vl201();}
+static Val *ev203(E *e){
+ Val*a=ev200(e);if(!a)return 0;
+ Val*b=ev202(e);if(!b)return 0;
+ return kbin(10,a,b);}
+static Val *ev204(E *e){
+ return elk(e,"c");}
+static Val *vl205(void){
+ return v_int(57);}
+static Val *ev206(E *e){
+ (void)e;return vl205();}
+static Val *ev207(E *e){
+ Val*a=ev204(e);if(!a)return 0;
+ Val*b=ev206(e);if(!b)return 0;
+ return kbin(8,a,b);}
+static Val *ev208(E *e){
+ Val*a=ev203(e);
  if(!a||a->tag!=2)return 0;
  if(!a->b)return v_bool(0);
- a=ev199(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev201(E *e){
- return elk(e,"chars");}
-static Val *ev202(E *e){
- return elk(e,"j");}
-static Val *vl203(void){
- return v_int(1);}
-static Val *ev204(E *e){
- (void)e;return vl203();}
-static Val *ev205(E *e){
- Val*a=ev202(e);if(!a)return 0;
- Val*b=ev204(e);if(!b)return 0;
- return kbin(0,a,b);}
-static Val *ev206(E *e){
- return elk(e,"n");}
-static Val *ev207(E *e){
- return elk(e,"v");}
-static Val *vl208(void){
- return v_int(10);}
-static Val *ev209(E *e){
- (void)e;return vl208();}
+ a=ev207(e);if(!a||a->tag!=2)return 0;return a;}
+static const char*an209[]={"chars","j","n","v","out"};
 static Val *ev210(E *e){
- Val*a=ev207(e);if(!a)return 0;
- Val*b=ev209(e);if(!b)return 0;
- return kbin(2,a,b);}
+ return elk(e,"chars");}
 static Val *ev211(E *e){
- return elk(e,"c");}
+ return elk(e,"j");}
 static Val *vl212(void){
- return v_int(48);}
+ return v_int(1);}
 static Val *ev213(E *e){
  (void)e;return vl212();}
 static Val *ev214(E *e){
  Val*a=ev211(e);if(!a)return 0;
  Val*b=ev213(e);if(!b)return 0;
- return kbin(1,a,b);}
-static Val *ev215(E *e){
- Val*a=ev210(e);if(!a)return 0;
- Val*b=ev214(e);if(!b)return 0;
  return kbin(0,a,b);}
+static Val *ev215(E *e){
+ return elk(e,"n");}
 static Val *ev216(E *e){
+ return elk(e,"v");}
+static Val *vl217(void){
+ return v_int(10);}
+static Val *ev218(E *e){
+ (void)e;return vl217();}
+static Val *ev219(E *e){
+ Val*a=ev216(e);if(!a)return 0;
+ Val*b=ev218(e);if(!b)return 0;
+ return kbin(2,a,b);}
+static Val *ev220(E *e){
+ return elk(e,"c");}
+static Val *vl221(void){
+ return v_int(48);}
+static Val *ev222(E *e){
+ (void)e;return vl221();}
+static Val *ev223(E *e){
+ Val*a=ev220(e);if(!a)return 0;
+ Val*b=ev222(e);if(!b)return 0;
+ return kbin(1,a,b);}
+static Val *ev224(E *e){
+ Val*a=ev219(e);if(!a)return 0;
+ Val*b=ev223(e);if(!b)return 0;
+ return kbin(0,a,b);}
+static Val *ev225(E *e){
  return elk(e,"out");}
-static Res *aw191(E *e, Res *r){
+static Res *aw199(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *g=ev200(ee);
+ {Val *g=ev208(ee);
  if(!g||g->tag!=2)return 0;
  if(!g->b)return KSKIP();}
  {E*ae=0;
- {Val *v=ev201(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev205(ee);if(!v)return 0;ae=ecn("j",v,ae);}
- {Val *v=ev206(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev215(ee);if(!v)return 0;ae=ecn("v",v,ae);}
- {Val *v=ev216(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[5];
+ {Val *v=ev210(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev214(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev215(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev224(ee);if(!v)return 0;av[3]=v;}
+ {Val *v=ev225(ee);if(!v)return 0;av[4]=v;}
+ ae=efr(an209,av,5,ae);}
  Res*ir=k_digits(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Val *ev218(E *e){
- return elk(e,"chars");}
-static Val *ev219(E *e){
- return elk(e,"j");}
-static Val *ev220(E *e){
- return elk(e,"n");}
-static Val *ev221(E *e){
- return elk(e,"out");}
-static Val *vl222(void){
- return v_str("(num ");}
-static Val *ev223(E *e){
- (void)e;return vl222();}
-static Val *ev224(E *e){
- return elk(e,"v");}
-static Val *ev225(E *e){
- Val*av[1];
- av[0]=ev224(e);if(!av[0])return 0;
- return kbi("intToString",av,1);}
-static Val *vl226(void){
- return v_str(") ");}
-static Val *ev227(E *e){
- (void)e;return vl226();}
+static const char*an227[]={"chars","i","n","out"};
 static Val *ev228(E *e){
- Val*a=ev225(e);if(!a)return 0;
- Val*b=ev227(e);if(!b)return 0;
- return kbin(13,a,b);}
+ return elk(e,"chars");}
 static Val *ev229(E *e){
- Val*a=ev223(e);if(!a)return 0;
- Val*b=ev228(e);if(!b)return 0;
- return kbin(13,a,b);}
+ return elk(e,"j");}
 static Val *ev230(E *e){
- Val*a=ev221(e);if(!a)return 0;
- Val*b=ev229(e);if(!b)return 0;
+ return elk(e,"n");}
+static Val *ev231(E *e){
+ return elk(e,"out");}
+static Val *vl232(void){
+ return v_sref((char*)"(num ");}
+static Val *ev233(E *e){
+ (void)e;return vl232();}
+static Val *ev234(E *e){
+ return elk(e,"v");}
+static Val *ev235(E *e){
+ Val*av[1];
+ av[0]=ev234(e);if(!av[0])return 0;
+ return kbi("intToString",av,1);}
+static Val *vl236(void){
+ return v_sref((char*)") ");}
+static Val *ev237(E *e){
+ (void)e;return vl236();}
+static Val *ev238(E *e){
+ Val*a=ev235(e);if(!a)return 0;
+ Val*b=ev237(e);if(!b)return 0;
  return kbin(13,a,b);}
-static Res *aw217(E *e, Res *r){
+static Val *ev239(E *e){
+ Val*a=ev233(e);if(!a)return 0;
+ Val*b=ev238(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev240(E *e){
+ Val*a=ev231(e);if(!a)return 0;
+ Val*b=ev239(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Res *aw226(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  {E*ae=0;
- {Val *v=ev218(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev219(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev220(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev230(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[4];
+ {Val *v=ev228(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev229(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev230(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev240(ee);if(!v)return 0;av[3]=v;}
+ ae=efr(an227,av,4,ae);}
  Res*ir=k_lex(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Res *ds231(E *e, Res *r){
+static Res *ds241(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"more")){Res*t=aw191(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"stop")){Res*t=aw217(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"more")){Res*t=aw199(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"stop")){Res*t=aw226(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
- {Res*t=aw191(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw217(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw199(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw226(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
 static Res *k_digits(E *ce){
  KSTEP();
  E*he=0;
- {Val *v=ev188(ce);if(!v)return 0;he=ecn("chars",v,he);}
- {Val *v=ev189(ce);if(!v)return 0;he=ecn("i",v,he);}
- {Val *v=ev190(ce);if(!v)return 0;he=ecn("n",v,he);}
+ {Val*av[3];
+ {Val *v=ev196(ce);if(!v)return 0;av[0]=v;}
+ {Val *v=ev197(ce);if(!v)return 0;av[1]=v;}
+ {Val *v=ev198(ce);if(!v)return 0;av[2]=v;}
+ he=efr(an195,av,3,he);}
  for(;;){
   KSTEP();
   Res*h=k_peek(he);
   if(!h||(h->k!=1&&h->k!=2))return 0;
-   {Res*t=ds231(ce,h);
+   {Res*t=ds241(ce,h);
    if(!t)return 0;
-   if(t->k==3)return r_bare(0);
+   if(t->k==3){rfree(h);rfree(t);return r_bare(0);}
    if(t->k==4)return 0;
+   rfree(h);
    return t;}
  }
 }
-static Val *ev232(E *e){
- return elk(e,"chars");}
-static Val *ev233(E *e){
- return elk(e,"j");}
-static Val *ev234(E *e){
- return elk(e,"n");}
-static Val *ev236(E *e){
- return elk(e,"c");}
-static Val *vl237(void){
- return v_int(97);}
-static Val *ev238(E *e){
- (void)e;return vl237();}
-static Val *ev239(E *e){
- Val*a=ev236(e);if(!a)return 0;
- Val*b=ev238(e);if(!b)return 0;
- return kbin(10,a,b);}
-static Val *ev240(E *e){
- return elk(e,"c");}
-static Val *vl241(void){
- return v_int(122);}
-static Val *ev242(E *e){
- (void)e;return vl241();}
+static const char*an242[]={"chars","i","n"};
 static Val *ev243(E *e){
- Val*a=ev240(e);if(!a)return 0;
- Val*b=ev242(e);if(!b)return 0;
- return kbin(8,a,b);}
-static Val *ev244(E *e){
- Val*a=ev239(e);
- if(!a||a->tag!=2)return 0;
- if(!a->b)return v_bool(0);
- a=ev243(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev245(E *e){
- return elk(e,"c");}
-static Val *vl246(void){
- return v_int(65);}
-static Val *ev247(E *e){
- (void)e;return vl246();}
-static Val *ev248(E *e){
- Val*a=ev245(e);if(!a)return 0;
- Val*b=ev247(e);if(!b)return 0;
- return kbin(10,a,b);}
-static Val *ev249(E *e){
- return elk(e,"c");}
-static Val *vl250(void){
- return v_int(90);}
-static Val *ev251(E *e){
- (void)e;return vl250();}
-static Val *ev252(E *e){
- Val*a=ev249(e);if(!a)return 0;
- Val*b=ev251(e);if(!b)return 0;
- return kbin(8,a,b);}
-static Val *ev253(E *e){
- Val*a=ev248(e);
- if(!a||a->tag!=2)return 0;
- if(!a->b)return v_bool(0);
- a=ev252(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev254(E *e){
- return elk(e,"c");}
-static Val *vl255(void){
- return v_int(95);}
-static Val *ev256(E *e){
- (void)e;return vl255();}
-static Val *ev257(E *e){
- Val*a=ev254(e);if(!a)return 0;
- Val*b=ev256(e);if(!b)return 0;
- return kbin(5,a,b);}
-static Val *ev258(E *e){
- return elk(e,"c");}
-static Val *vl259(void){
- return v_int(45);}
-static Val *ev260(E *e){
- (void)e;return vl259();}
-static Val *ev261(E *e){
- Val*a=ev258(e);if(!a)return 0;
- Val*b=ev260(e);if(!b)return 0;
- return kbin(5,a,b);}
-static Val *ev262(E *e){
- return elk(e,"c");}
-static Val *vl263(void){
- return v_int(48);}
-static Val *ev264(E *e){
- (void)e;return vl263();}
-static Val *ev265(E *e){
- Val*a=ev262(e);if(!a)return 0;
- Val*b=ev264(e);if(!b)return 0;
- return kbin(10,a,b);}
-static Val *ev266(E *e){
- return elk(e,"c");}
-static Val *vl267(void){
- return v_int(57);}
-static Val *ev268(E *e){
- (void)e;return vl267();}
-static Val *ev269(E *e){
- Val*a=ev266(e);if(!a)return 0;
- Val*b=ev268(e);if(!b)return 0;
- return kbin(8,a,b);}
-static Val *ev270(E *e){
- Val*a=ev265(e);
- if(!a||a->tag!=2)return 0;
- if(!a->b)return v_bool(0);
- a=ev269(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev271(E *e){
- Val*a=ev261(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev270(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev272(E *e){
- Val*a=ev257(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev271(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev273(E *e){
- Val*a=ev253(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev272(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev274(E *e){
- Val*a=ev244(e);
- if(!a||a->tag!=2)return 0;
- if(a->b)return v_bool(1);
- a=ev273(e);if(!a||a->tag!=2)return 0;return a;}
-static Val *ev275(E *e){
  return elk(e,"chars");}
-static Val *ev276(E *e){
- return elk(e,"i");}
-static Val *ev277(E *e){
+static Val *ev244(E *e){
  return elk(e,"j");}
+static Val *ev245(E *e){
+ return elk(e,"n");}
+static Val *ev247(E *e){
+ return elk(e,"c");}
+static Val *vl248(void){
+ return v_int(97);}
+static Val *ev249(E *e){
+ (void)e;return vl248();}
+static Val *ev250(E *e){
+ Val*a=ev247(e);if(!a)return 0;
+ Val*b=ev249(e);if(!b)return 0;
+ return kbin(10,a,b);}
+static Val *ev251(E *e){
+ return elk(e,"c");}
+static Val *vl252(void){
+ return v_int(122);}
+static Val *ev253(E *e){
+ (void)e;return vl252();}
+static Val *ev254(E *e){
+ Val*a=ev251(e);if(!a)return 0;
+ Val*b=ev253(e);if(!b)return 0;
+ return kbin(8,a,b);}
+static Val *ev255(E *e){
+ Val*a=ev250(e);
+ if(!a||a->tag!=2)return 0;
+ if(!a->b)return v_bool(0);
+ a=ev254(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev256(E *e){
+ return elk(e,"c");}
+static Val *vl257(void){
+ return v_int(65);}
+static Val *ev258(E *e){
+ (void)e;return vl257();}
+static Val *ev259(E *e){
+ Val*a=ev256(e);if(!a)return 0;
+ Val*b=ev258(e);if(!b)return 0;
+ return kbin(10,a,b);}
+static Val *ev260(E *e){
+ return elk(e,"c");}
+static Val *vl261(void){
+ return v_int(90);}
+static Val *ev262(E *e){
+ (void)e;return vl261();}
+static Val *ev263(E *e){
+ Val*a=ev260(e);if(!a)return 0;
+ Val*b=ev262(e);if(!b)return 0;
+ return kbin(8,a,b);}
+static Val *ev264(E *e){
+ Val*a=ev259(e);
+ if(!a||a->tag!=2)return 0;
+ if(!a->b)return v_bool(0);
+ a=ev263(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev265(E *e){
+ return elk(e,"c");}
+static Val *vl266(void){
+ return v_int(95);}
+static Val *ev267(E *e){
+ (void)e;return vl266();}
+static Val *ev268(E *e){
+ Val*a=ev265(e);if(!a)return 0;
+ Val*b=ev267(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static Val *ev269(E *e){
+ return elk(e,"c");}
+static Val *vl270(void){
+ return v_int(45);}
+static Val *ev271(E *e){
+ (void)e;return vl270();}
+static Val *ev272(E *e){
+ Val*a=ev269(e);if(!a)return 0;
+ Val*b=ev271(e);if(!b)return 0;
+ return kbin(5,a,b);}
+static Val *ev273(E *e){
+ return elk(e,"c");}
+static Val *vl274(void){
+ return v_int(48);}
+static Val *ev275(E *e){
+ (void)e;return vl274();}
+static Val *ev276(E *e){
+ Val*a=ev273(e);if(!a)return 0;
+ Val*b=ev275(e);if(!b)return 0;
+ return kbin(10,a,b);}
+static Val *ev277(E *e){
+ return elk(e,"c");}
 static Val *vl278(void){
- return v_int(1);}
+ return v_int(57);}
 static Val *ev279(E *e){
  (void)e;return vl278();}
 static Val *ev280(E *e){
  Val*a=ev277(e);if(!a)return 0;
  Val*b=ev279(e);if(!b)return 0;
- return kbin(0,a,b);}
+ return kbin(8,a,b);}
 static Val *ev281(E *e){
- return elk(e,"n");}
+ Val*a=ev276(e);
+ if(!a||a->tag!=2)return 0;
+ if(!a->b)return v_bool(0);
+ a=ev280(e);if(!a||a->tag!=2)return 0;return a;}
 static Val *ev282(E *e){
+ Val*a=ev272(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev281(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev283(E *e){
+ Val*a=ev268(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev282(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev284(E *e){
+ Val*a=ev264(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev283(e);if(!a||a->tag!=2)return 0;return a;}
+static Val *ev285(E *e){
+ Val*a=ev255(e);
+ if(!a||a->tag!=2)return 0;
+ if(a->b)return v_bool(1);
+ a=ev284(e);if(!a||a->tag!=2)return 0;return a;}
+static const char*an286[]={"chars","i","j","n","out"};
+static Val *ev287(E *e){
+ return elk(e,"chars");}
+static Val *ev288(E *e){
+ return elk(e,"i");}
+static Val *ev289(E *e){
+ return elk(e,"j");}
+static Val *vl290(void){
+ return v_int(1);}
+static Val *ev291(E *e){
+ (void)e;return vl290();}
+static Val *ev292(E *e){
+ Val*a=ev289(e);if(!a)return 0;
+ Val*b=ev291(e);if(!b)return 0;
+ return kbin(0,a,b);}
+static Val *ev293(E *e){
+ return elk(e,"n");}
+static Val *ev294(E *e){
  return elk(e,"out");}
-static Res *aw235(E *e, Res *r){
+static Res *aw246(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("c",r->v,ee);
- {Val *g=ev274(ee);
+ {Val *g=ev285(ee);
  if(!g||g->tag!=2)return 0;
  if(!g->b)return KSKIP();}
  {E*ae=0;
- {Val *v=ev275(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev276(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev280(ee);if(!v)return 0;ae=ecn("j",v,ae);}
- {Val *v=ev281(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev282(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[5];
+ {Val *v=ev287(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev288(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev292(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev293(ee);if(!v)return 0;av[3]=v;}
+ {Val *v=ev294(ee);if(!v)return 0;av[4]=v;}
+ ae=efr(an286,av,5,ae);}
  Res*ir=k_atom_end(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Val *ev284(E *e){
- return elk(e,"chars");}
-static Val *ev285(E *e){
- return elk(e,"j");}
-static Val *ev286(E *e){
- return elk(e,"n");}
-static Val *ev287(E *e){
- return elk(e,"out");}
-static Val *vl288(void){
- return v_str("(atom ");}
-static Val *ev289(E *e){
- (void)e;return vl288();}
-static Val *ev290(E *e){
- return elk(e,"i");}
-static Val *ev291(E *e){
- Val*av[1];
- av[0]=ev290(e);if(!av[0])return 0;
- return kbi("intToString",av,1);}
-static Val *vl292(void){
- return v_str(" ");}
-static Val *ev293(E *e){
- (void)e;return vl292();}
-static Val *ev294(E *e){
- return elk(e,"j");}
-static Val *ev295(E *e){
- return elk(e,"i");}
-static Val *ev296(E *e){
- Val*a=ev294(e);if(!a)return 0;
- Val*b=ev295(e);if(!b)return 0;
- return kbin(1,a,b);}
+static const char*an296[]={"chars","i","n","out"};
 static Val *ev297(E *e){
- Val*av[1];
- av[0]=ev296(e);if(!av[0])return 0;
- return kbi("intToString",av,1);}
-static Val *vl298(void){
- return v_str(") ");}
+ return elk(e,"chars");}
+static Val *ev298(E *e){
+ return elk(e,"j");}
 static Val *ev299(E *e){
- (void)e;return vl298();}
+ return elk(e,"n");}
 static Val *ev300(E *e){
- Val*a=ev297(e);if(!a)return 0;
- Val*b=ev299(e);if(!b)return 0;
- return kbin(13,a,b);}
-static Val *ev301(E *e){
- Val*a=ev293(e);if(!a)return 0;
- Val*b=ev300(e);if(!b)return 0;
- return kbin(13,a,b);}
+ return elk(e,"out");}
+static Val *vl301(void){
+ return v_sref((char*)"(atom ");}
 static Val *ev302(E *e){
- Val*a=ev291(e);if(!a)return 0;
- Val*b=ev301(e);if(!b)return 0;
- return kbin(13,a,b);}
+ (void)e;return vl301();}
 static Val *ev303(E *e){
- Val*a=ev289(e);if(!a)return 0;
- Val*b=ev302(e);if(!b)return 0;
- return kbin(13,a,b);}
+ return elk(e,"i");}
 static Val *ev304(E *e){
- Val*a=ev287(e);if(!a)return 0;
- Val*b=ev303(e);if(!b)return 0;
+ Val*av[1];
+ av[0]=ev303(e);if(!av[0])return 0;
+ return kbi("intToString",av,1);}
+static Val *vl305(void){
+ return v_sref((char*)" ");}
+static Val *ev306(E *e){
+ (void)e;return vl305();}
+static Val *ev307(E *e){
+ return elk(e,"j");}
+static Val *ev308(E *e){
+ return elk(e,"i");}
+static Val *ev309(E *e){
+ Val*a=ev307(e);if(!a)return 0;
+ Val*b=ev308(e);if(!b)return 0;
+ return kbin(1,a,b);}
+static Val *ev310(E *e){
+ Val*av[1];
+ av[0]=ev309(e);if(!av[0])return 0;
+ return kbi("intToString",av,1);}
+static Val *vl311(void){
+ return v_sref((char*)") ");}
+static Val *ev312(E *e){
+ (void)e;return vl311();}
+static Val *ev313(E *e){
+ Val*a=ev310(e);if(!a)return 0;
+ Val*b=ev312(e);if(!b)return 0;
  return kbin(13,a,b);}
-static Res *aw283(E *e, Res *r){
+static Val *ev314(E *e){
+ Val*a=ev306(e);if(!a)return 0;
+ Val*b=ev313(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev315(E *e){
+ Val*a=ev304(e);if(!a)return 0;
+ Val*b=ev314(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev316(E *e){
+ Val*a=ev302(e);if(!a)return 0;
+ Val*b=ev315(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Val *ev317(E *e){
+ Val*a=ev300(e);if(!a)return 0;
+ Val*b=ev316(e);if(!b)return 0;
+ return kbin(13,a,b);}
+static Res *aw295(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  {E*ae=0;
- {Val *v=ev284(ee);if(!v)return 0;ae=ecn("chars",v,ae);}
- {Val *v=ev285(ee);if(!v)return 0;ae=ecn("i",v,ae);}
- {Val *v=ev286(ee);if(!v)return 0;ae=ecn("n",v,ae);}
- {Val *v=ev304(ee);if(!v)return 0;ae=ecn("out",v,ae);}
+ {Val*av[4];
+ {Val *v=ev297(ee);if(!v)return 0;av[0]=v;}
+ {Val *v=ev298(ee);if(!v)return 0;av[1]=v;}
+ {Val *v=ev299(ee);if(!v)return 0;av[2]=v;}
+ {Val *v=ev317(ee);if(!v)return 0;av[3]=v;}
+ ae=efr(an296,av,4,ae);}
  Res*ir=k_lex(ae);
  if(!ir)return 0;
  if(ir->k!=1&&ir->k!=2)return 0;
  return ir;
 }
 }
-static Res *ds305(E *e, Res *r){
+static Res *ds318(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"more")){Res*t=aw235(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- if(!strcmp(r->br,"stop")){Res*t=aw283(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"more")){Res*t=aw246(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"stop")){Res*t=aw295(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
- {Res*t=aw235(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
- {Res*t=aw283(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw246(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw295(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
 static Res *k_atom_end(E *ce){
  KSTEP();
  E*he=0;
- {Val *v=ev232(ce);if(!v)return 0;he=ecn("chars",v,he);}
- {Val *v=ev233(ce);if(!v)return 0;he=ecn("i",v,he);}
- {Val *v=ev234(ce);if(!v)return 0;he=ecn("n",v,he);}
+ {Val*av[3];
+ {Val *v=ev243(ce);if(!v)return 0;av[0]=v;}
+ {Val *v=ev244(ce);if(!v)return 0;av[1]=v;}
+ {Val *v=ev245(ce);if(!v)return 0;av[2]=v;}
+ he=efr(an242,av,3,he);}
  for(;;){
   KSTEP();
   Res*h=k_peek(he);
   if(!h||(h->k!=1&&h->k!=2))return 0;
-   {Res*t=ds305(ce,h);
+   {Res*t=ds318(ce,h);
    if(!t)return 0;
-   if(t->k==3)return r_bare(0);
+   if(t->k==3){rfree(h);rfree(t);return r_bare(0);}
    if(t->k==4)return 0;
+   rfree(h);
    return t;}
  }
 }
-static Val *ev306(E *e){
+static const char*an319[]={"chars","i","n","out"};
+static Val *ev320(E *e){
  return elk(e,"chars");}
-static Val *vl307(void){
+static Val *vl321(void){
  return v_int(0);}
-static Val *ev308(E *e){
- (void)e;return vl307();}
-static Val *ev309(E *e){
+static Val *ev322(E *e){
+ (void)e;return vl321();}
+static Val *ev323(E *e){
  return elk(e,"chars");}
-static Val *ev310(E *e){
+static Val *ev324(E *e){
  Val*av[1];
- av[0]=ev309(e);if(!av[0])return 0;
+ av[0]=ev323(e);if(!av[0])return 0;
  return kbi("len",av,1);}
-static Val *vl311(void){
- return v_str("");}
-static Val *ev312(E *e){
- (void)e;return vl311();}
-static Val *ev314(E *e){
+static Val *vl325(void){
+ return v_sref((char*)"");}
+static Val *ev326(E *e){
+ (void)e;return vl325();}
+static Val *ev328(E *e){
  return elk(e,"s");}
-static Res *aw313(E *e, Res *r){
+static Res *aw327(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
  ee=ecn("s",r->v,ee);
- {Val *v=ev314(ee);return v?r_bare(v):0;}
+ {Val *v=ev328(ee);return v?r_bare(v):0;}
 }
-static Res *ds315(E *e, Res *r){
+static Res *ds329(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"done")){Res*t=aw313(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"done")){Res*t=aw327(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
- {Res*t=aw313(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ {Res*t=aw327(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
 static Res *k_main(E *ce){
  KSTEP();
  E*he=0;
- {Val *v=ev306(ce);if(!v)return 0;he=ecn("chars",v,he);}
- {Val *v=ev308(ce);if(!v)return 0;he=ecn("i",v,he);}
- {Val *v=ev310(ce);if(!v)return 0;he=ecn("n",v,he);}
- {Val *v=ev312(ce);if(!v)return 0;he=ecn("out",v,he);}
+ {Val*av[4];
+ {Val *v=ev320(ce);if(!v)return 0;av[0]=v;}
+ {Val *v=ev322(ce);if(!v)return 0;av[1]=v;}
+ {Val *v=ev324(ce);if(!v)return 0;av[2]=v;}
+ {Val *v=ev326(ce);if(!v)return 0;av[3]=v;}
+ he=efr(an319,av,4,he);}
  for(;;){
   KSTEP();
   Res*h=k_lex(he);
   if(!h||(h->k!=1&&h->k!=2))return 0;
-   {Res*t=ds315(ce,h);
+   {Res*t=ds329(ce,h);
    if(!t)return 0;
-   if(t->k==3)return r_bare(0);
+   if(t->k==3){rfree(h);rfree(t);return r_bare(0);}
    if(t->k==4)return 0;
+   rfree(h);
    return t;}
  }
 }
@@ -1352,7 +1417,7 @@ int main(int argc,char**argv){Val*a;E*e;Res*r;int i;
  (void)veq;(void)r_tag;(void)r_done;(void)r_jump;(void)kun;(void)fb;
  (void)asrat;(void)kfmod;(void)ktdiv;(void)ktmod;(void)v_flt;(void)pval;
  (void)v_arr;(void)v_cell;(void)ovf_mul;(void)ovf_add;(void)ovf_sub;
- (void)k_field;(void)k_index;
+ (void)k_field;(void)k_index;(void)ecn;(void)efr;(void)rfree;(void)v_sref;
  kfuel=1024;if(argc>1)kfuel=atoll(argv[1]);
  xp=xrd();a=xval();
  if(!a||a->tag!=5){fputs("refuse: args not a cell\n",kstderr);return 2;}
