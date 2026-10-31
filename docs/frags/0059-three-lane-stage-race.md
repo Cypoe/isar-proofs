@@ -72,5 +72,16 @@ ccomp-verified leg is runtime-competitive with -O0 clang; koruc is
 the lane to race for throughput; emitProgC remains the semantics
 authority whose emit cost lives upstream of both.
 
+**ccomp on the koru lane — named refusal.** Probed
+`zig build-obj output_emitted.zig -target x86_64-linux-gnu -ofmt=c`:
+the zig C backend emits a complete 216K-line `out.c`, but it
+`#include "zig.h"` which pulls hosted glibc headers
+(`limits.h` → `sys/cdefs.h`) that the freestanding compcert image
+lacks — ccomp dies in the preprocessor before seeing the program.
+A koru-side ccomp axis needs either a koruc C backend (upstream
+feature) or a freestanding `zig.h` shim; neither exists today, so
+the axis is declared blocked, not silently absent.
+
 Artifacts: `_scratch/kdrv/race.py`, `race_report.json`,
-`host2/build/kwir_wi_ccv{,.s}`.
+`host2/build/kwir_wi_ccv{,.s}`, `_scratch/kdrv/out.c` (zig
+C-backend output, kept as the probe's evidence).
