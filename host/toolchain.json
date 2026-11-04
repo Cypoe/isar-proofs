@@ -1334,6 +1334,18 @@
         "native.x86_64.pe",
         "native.x86_64.pe.ir"
       ]
+    },
+    {
+      "id": "GFK",
+      "suite": "gates/flowkernel_drift",
+      "family": "staging",
+      "evidence": "structural",
+      "tier": "env",
+      "requires": [
+        "koru-src"
+      ],
+      "what": "FlowDialect mirror not drifted: LF-normalized sha256 of koru verify/semantics/FlowKernel.lean equals the upstream-sha256 pin in FlowDialect.lean's docstring (vendored by hash, not a lake dep)",
+      "witnesses": []
     }
   ],
   "selftests": [

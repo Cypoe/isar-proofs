@@ -87,6 +87,18 @@ def tool_present(name: str) -> bool:
             return cp.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             return False
+    if name == "koru-src":
+        # A koru checkout holding verify/semantics/FlowKernel.lean —
+        # env override first, then the known local landing paths.
+        rel = os.path.join("verify", "semantics", "FlowKernel.lean")
+        for d in (os.environ.get("KORU_SRC"),
+                  os.environ.get("ISAR_KORU_SRC"),
+                  "w:/src/koru", "/mnt/w/src/koru",
+                  "C:/home/cypoe/src/koru-quantity",
+                  "/home/cypoe/src/koru-quantity"):
+            if d and os.path.exists(os.path.join(d, rel)):
+                return True
+        return False
     return False
 
 

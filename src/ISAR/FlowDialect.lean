@@ -15,6 +15,14 @@ grammar: `runK` is `run`, `KCall` is `Call`, `KOutcome` is
 `Outcome`, `KOracle` is `Oracle`. The dispatch semantics are
 identical:
 
+Vendored by hash, not a lake dep: this file's claimed upstream
+revision is the LF-normalized sha256 below, checked by
+`host/gates/flowkernel_drift.py` (obligation `GFK`, env-gated on a
+reachable koru checkout) and by koru's own `flowkernel-mirror-not-drift`
+invariant row on the source side. A kernel edit fires both ends
+until the delta is ported and the pin re-set in the same commit:
+  upstream-sha256: d958d9e07f77b2a8cbd50e24ff87735c0f0d704ca1f6c9d71b0b96b9c9f4ecd2
+
   * A call result is a three-case `KResult`: tagged `{some b, _}`,
     bare `{none, some v}`, void `{none, none}` — dispatching differs
     per case, and void + arms refuses outright.
@@ -34,12 +42,17 @@ Declared divergences from the zig walker (wire-level choices, each a
 refusal or an exactness strengthening — never a silent guess):
 
   * The builtin table is extended by the emission leg: `"len"`
-    (`arr → int`) and `"intToString"` (`int → str`, decimal). These
-    are stdlib names the kernel subset did not carry; the extension
-    is strictly additive — previously deciding programs decide
-    identically, and only previously-refusing builtin calls now
-    decide. They exist because a compiler program must inspect
-    list lengths and render integers, and the wire has no other way.
+    (`arr → int`) and `"intToString"` (`int → str`, decimal), plus
+    `"chars"` (`str → arr` of UTF-8 byte ints), `"charsToString"`
+    (`arr` of byte ints `→ str`, refusing outside 0‥255 and on
+    invalid UTF-8), and `"charToString"` (byte int `→ str`,
+    ASCII-only — refuses outside 0‥127). These are stdlib names
+    the kernel subset did
+    not carry; the extension is strictly additive — previously
+    deciding programs decide identically, and only previously-
+    refusing builtin calls now decide. They exist because a
+    compiler program must inspect list lengths, render integers,
+    and mangle/escape names, and the wire has no other way.
   * `KVal.float n d` is an exact rational pair, not IEEE. `asKRat`
     normalizes `d < 0 → (-n, -d)` and REFUSES `d = 0` — the wire
     admits a shape the kernel does not invent a meaning for.
@@ -275,9 +288,9 @@ def evalKBuiltin (env : KEnv) (name : String) (args : List KExpr) : Option KVal 
       | some (.int a), some (.int b) =>
           if b == 0 then none else some (.int (kfmod a b))
       | _, _ => none
-  -- Emission-leg extensions (additive — see header): array length
-  -- and decimal rendering, the two things a compiler program cannot
-  -- otherwise do on the wire.
+  -- Emission-leg extensions (additive — see header): array length,
+  -- decimal rendering, and str↔byte-array views — the things a
+  -- compiler program cannot otherwise do on the wire.
   | "len", [e] =>
       match evalKE env e with
       | some (.arr items) => some (.int (items.length : Int))
@@ -285,6 +298,30 @@ def evalKBuiltin (env : KEnv) (name : String) (args : List KExpr) : Option KVal 
   | "intToString", [e] =>
       match evalKE env e with
       | some (.int i) => some (.str (toString i))
+      | _ => none
+  | "chars", [e] =>
+      match evalKE env e with
+      | some (.str s) =>
+          some (.arr (s.toUTF8.data.toList.map fun b => .int b.toNat))
+      | _ => none
+  | "charsToString", [e] =>
+      match evalKE env e with
+      | some (.arr xs) =>
+          match xs.mapM (fun
+            | .int i =>
+                if 0 ≤ i && i < 256 then
+                  some (UInt8.ofNat i.toNat)
+                else none
+            | _ => none) with
+          | some bs => (String.fromUTF8? ⟨bs.toArray⟩).map .str
+          | none => none
+      | _ => none
+  | "charToString", [e] =>
+      match evalKE env e with
+      | some (.int i) =>
+          if 0 ≤ i && i < 128 then
+            some (.str (String.ofList [Char.ofNat i.toNat]))
+          else none
       | _ => none
   | _, _ => none
 end
