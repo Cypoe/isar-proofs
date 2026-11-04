@@ -4,9 +4,23 @@ This document provides a comprehensive inventory of proof dependencies, first-pr
 
 ---
 
-## Program status (2026-08-16)
+## Program status (2026-11-04 — header refreshed; detailed inventory below lags to 2026-08-16)
 
-Build: `lake build ISAR` green. No `sorry` / `sorryAx` in `src/**/*.lean`.
+`master` fast-forwarded `b953437 → 96afcf7` to the
+`host-invariant-realization-pipeline` tip (120 commits): blog- and
+koru-linked files `HolonomicBridge.lean`, `Holonomic.lean`,
+`HolonomicClosure.lean`, and the new `RischDE.lean` (dominance lemmas
+behind koru's `std/sym:decide-integral` exponential lane) now resolve on
+master. The koru dialect lane (`FlowView` → `KoruProgEmit`, `kLow`)
+landed in those commits with its deferred halves stated in-file.
+
+Pending a full re-audit of this document: the inventory sections below
+(sorry/axiom tables, vacuity audit, dependency index) were written
+2026-08-16 and predate the pipeline lane; the named-axiom table remains
+accurate (`quantityToNat`, `exp_exp_not_holonomic`, `ISAR_UAT`).
+
+Build: `lake env lean` per-module checks green on touched modules
+(`RischDE` verified against cached mathlib oleans, leanprover/lean4:v4.31.0).
 
 The formal core now has: confluence and unique NFs; `cd` as a **normalizing strategy** on `HasNF` (`finite_cd_reaches_NF_iff`); online Jones–Gomard–Sestoft PE for the whole `IStep` signature (`JGS_PE`) plus the **Jones-optimality** cost criterion (`JonesOptimal`; toy `JonesIdPE` positive, `JGS_PE` / `TrivialPE` negative); a tensor **term model**; constructed HF Ackermann / ISK Gödel numbering; constructed `layerToNat` (min-Gödel enumeration); `R_empty` / `I_true` on the OperEq quotient; holonomic closure theorems with one named analytic axiom.
 
