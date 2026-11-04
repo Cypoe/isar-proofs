@@ -35,6 +35,7 @@ import ISAR.HolonomicInstances
 import ISAR.HolonomicCompose
 import ISAR.PRecursive
 import ISAR.HolonomicBridge
+import ISAR.HolonomicClosureGeneral
 import ISAR.RischDE
 import ISAR.QuineProof
 import ISAR.Eval
