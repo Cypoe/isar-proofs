@@ -479,39 +479,102 @@ private theorem denom_jetCoord_ne_zero {c : HolonomicCertificate}
     exact denom_eval_ne_zero_of_dvd (RatFunc.denom_div_dvd _ _)
       (by rw [Polynomial.eval_pow]; exact pow_ne_zero _ hx)
 
-/-- **Sum closure, general orders**: the sum of two holonomic functions is
-holonomic, with order at most `m + n`.  This is the general `via=sum` lane of
-`certClosure` in `koru_std/sym.certcomp.kz`: `m + n + 1` derivatives of
-`f + g` are expressed in the `m + n`-dimensional `ℝ(X)`-space of joint jet
-coordinates, so a nontrivial `ℝ(X)`-relation exists; clearing denominators
-gives a polynomial relation off a finite bad set, and continuity propagates it
-to all of `ℝ`. -/
-theorem isHolonomic_add {c d : HolonomicCertificate} {f g : ℝ → ℝ}
-    (hdf : ContDiff ℝ ∞ f) (hdg : ContDiff ℝ ∞ g)
-    (hf : satisfiesODE c f) (hg : satisfiesODE d g) :
-    IsHolonomic (f + g) := by
+/-- **Iterated Leibniz rule** for scalar functions: `(f·g)⁽ⁿ⁾` expands as the
+binomial sum `Σ C(n,i) f⁽ⁱ⁾ g⁽ⁿ⁻ⁱ⁾`.  Mathlib lacks this; proved by induction
+through `iteratedDeriv_succ`, `deriv_fun_mul`, and Pascal's rule. -/
+private theorem iteratedDeriv_fun_mul {f g : ℝ → ℝ} (n : ℕ)
+    (hdf : ContDiff ℝ ∞ f) (hdg : ContDiff ℝ ∞ g) :
+    ∀ x, iteratedDeriv n (f * g) x
+      = ∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+          * (iteratedDeriv i f x * iteratedDeriv (n - i) g x) := by
+  induction n with
+  | zero => intro x; simp
+  | succ n ih =>
+    intro x
+    have hfun : iteratedDeriv n (f * g) = fun y =>
+        ∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+          * (iteratedDeriv i f y * iteratedDeriv (n - i) g y) := funext ih
+    have hd1 : ∀ i, Differentiable ℝ (iteratedDeriv i f) := fun i =>
+      hdf.differentiable_iteratedDeriv i (compareOfLessAndEq_eq_lt.mp rfl)
+    have hd2 : ∀ i, Differentiable ℝ (iteratedDeriv i g) := fun i =>
+      hdg.differentiable_iteratedDeriv i (compareOfLessAndEq_eq_lt.mp rfl)
+    have hdiff : ∀ i ∈ Finset.range (n + 1), DifferentiableAt ℝ
+        (fun y => (n.choose i : ℝ)
+          * (iteratedDeriv i f y * iteratedDeriv (n - i) g y)) x := fun i _ =>
+      ((hd1 i).differentiableAt.mul (hd2 _).differentiableAt).const_mul _
+    have hstep : deriv (fun y => ∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+          * (iteratedDeriv i f y * iteratedDeriv (n - i) g y)) x
+        = ∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+            * (iteratedDeriv (i + 1) f x * iteratedDeriv (n - i) g x
+              + iteratedDeriv i f x * iteratedDeriv (n + 1 - i) g x) := by
+      rw [deriv_fun_sum hdiff]
+      refine Finset.sum_congr rfl fun i hi => ?_
+      rw [deriv_const_mul_field,
+        deriv_fun_mul (hd1 i).differentiableAt (hd2 _).differentiableAt,
+        ← iteratedDeriv_succ, ← iteratedDeriv_succ]
+      rw [show n - i + 1 = n + 1 - i from by
+        have := Nat.le_of_lt_succ (Finset.mem_range.mp hi); omega]
+    rw [iteratedDeriv_succ, hfun, hstep,
+      Finset.sum_congr rfl fun i _ => mul_add _ _ _, Finset.sum_add_distrib]
+    -- Combinatorial bookkeeping: Pascal's rule.
+    symm
+    calc ∑ j ∈ Finset.range (n + 2), ((n + 1).choose j : ℝ)
+            * (iteratedDeriv j f x * iteratedDeriv (n + 1 - j) g x)
+        = (∑ j ∈ Finset.range (n + 1),
+              ((n.choose j : ℝ) + (n.choose (j + 1) : ℝ))
+                * (iteratedDeriv (j + 1) f x * iteratedDeriv (n - j) g x))
+          + ((n + 1).choose 0 : ℝ) * (iteratedDeriv 0 f x
+              * iteratedDeriv (n + 1 - 0) g x) := by
+          rw [Finset.sum_range_succ']
+          congr 1
+          refine Finset.sum_congr rfl fun j _ => ?_
+          rw [Nat.choose_succ_succ, Nat.cast_add,
+            show n + 1 - (j + 1) = n - j from by omega]
+      _ = (∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+                * (iteratedDeriv (i + 1) f x * iteratedDeriv (n - i) g x)
+            + ∑ i ∈ Finset.range n, (n.choose (i + 1) : ℝ)
+                * (iteratedDeriv (i + 1) f x * iteratedDeriv (n - i) g x))
+          + ((n + 1).choose 0 : ℝ) * (iteratedDeriv 0 f x
+              * iteratedDeriv (n + 1 - 0) g x) := by
+          congr 1
+          rw [Finset.sum_congr rfl fun j _ => add_mul _ _ _,
+            Finset.sum_add_distrib]
+          congr 1
+          -- The i = n+1 summand vanishes since `C(n, n+1) = 0`.
+          rw [Finset.sum_range_succ]
+          simp
+      _ = ∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+                * (iteratedDeriv (i + 1) f x * iteratedDeriv (n - i) g x)
+          + (∑ i ∈ Finset.range n, (n.choose (i + 1) : ℝ)
+                * (iteratedDeriv (i + 1) f x * iteratedDeriv (n - i) g x)
+            + ((n + 1).choose 0 : ℝ) * (iteratedDeriv 0 f x
+                * iteratedDeriv (n + 1 - 0) g x)) := add_assoc _ _ _
+      _ = ∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+                * (iteratedDeriv (i + 1) f x * iteratedDeriv (n - i) g x)
+          + ∑ i ∈ Finset.range (n + 1), (n.choose i : ℝ)
+              * (iteratedDeriv i f x * iteratedDeriv (n + 1 - i) g x) := by
+          congr 1
+          rw [Finset.sum_range_succ']
+          congr 1
+          · refine Finset.sum_congr rfl fun i _ => ?_
+            rw [show n + 1 - (i + 1) = n - i from by omega]
+          · rw [Nat.choose_zero_right, Nat.choose_zero_right]
+
+/-- **Generic clearing lemma**: a nontrivial `ℝ(X)`-linear relation among the
+coordinate vectors of the first `N+1` derivatives of `h` yields a holonomic
+certificate for `h` of order `≤ N`.  `G` is an auxiliary bad set (typically
+the union of leading-coefficient roots); `hrel` supplies the pointwise
+relation off `G` wherever all coefficient denominators are nonzero. -/
+private theorem isHolonomic_of_ratFunc_relation {N : ℕ} {h : ℝ → ℝ}
+    (hh : ContDiff ℝ ∞ h)
+    (a : Fin (N + 1) → ℝ⟮X⟯) (k₀ : Fin (N + 1)) (ha0 : a k₀ ≠ 0)
+    (G : Finset ℝ)
+    (hrel : ∀ x ∉ (G : Set ℝ), (∀ k : Fin (N + 1),
+        (RatFunc.denom (a k)).eval x ≠ 0)
+      → ∑ k : Fin (N + 1), RatFunc.eval (RingHom.id ℝ) x (a k)
+          * iteratedDeriv k.val h x = 0) :
+    IsHolonomic h := by
   classical
-  set m := c.order
-  set n := d.order
-  set N := m + n with hN
-  choose qf hqf using fun r => satisfiesODE.lead_pow_mul_iteratedDeriv hdf hf r
-  choose qg hqg using fun r => satisfiesODE.lead_pow_mul_iteratedDeriv hdg hg r
-  -- The `m+n+1` coordinate vectors `v_k` in `Fin (m+n) → ℝ(X)` are dependent.
-  let v : Fin (N + 1) → Fin N → ℝ⟮X⟯ :=
-    fun k => Fin.append (jetCoord c qf k.val) (jetCoord d qg k.val)
-  have hfr : Module.finrank ℝ⟮X⟯ (Fin N → ℝ⟮X⟯) = N :=
-    (Module.finrank_fintype_fun_eq_card (R := ℝ⟮X⟯) (η := Fin N)).trans
-      (Fintype.card_fin N)
-  have hli : ¬ LinearIndependent ℝ⟮X⟯ v := fun hv => by
-    have hc := hv.fintype_card_le_finrank
-    rw [hfr, Fintype.card_fin] at hc
-    omega
-  obtain ⟨f', g', hfg, k₀, hf'g'⟩ := Fintype.not_linearIndependent_iffₛ.mp hli
-  let a : Fin (N + 1) → ℝ⟮X⟯ := fun k => f' k - g' k
-  have hsum : (∑ k : Fin (N + 1), a k • v k) = 0 := by
-    rw [Finset.sum_congr rfl fun k _ => sub_smul (f' k) (g' k) (v k),
-      Finset.sum_sub_distrib, hfg, sub_self]
-  have ha0 : a k₀ ≠ 0 := sub_ne_zero.mpr hf'g'
   -- Clear denominators: `aₖ·D` is a polynomial image.
   let den : Fin (N + 1) → ℝ[X] := fun k => RatFunc.denom (a k)
   let D : ℝ[X] := ∏ k : Fin (N + 1), den k
@@ -552,106 +615,10 @@ theorem isHolonomic_add {c d : HolonomicCertificate} {f g : ℝ → ℝ}
     · have hD0 : algebraMap ℝ[X] ℝ⟮X⟯ D = algebraMap ℝ[X] ℝ⟮X⟯ 0 := by
         rw [h2, map_zero]
       exact hDne (IsFractionRing.injective ℝ[X] ℝ⟮X⟯ hD0)
-  -- Pointwise relation on the good set, first in `RatFunc` form.
-  have hrel : ∀ x : ℝ, c.lead.eval x ≠ 0 → d.lead.eval x ≠ 0
-      → (∀ k : Fin (N + 1), (den k).eval x ≠ 0)
-      → ∑ k : Fin (N + 1), RatFunc.eval (RingHom.id ℝ) x (a k)
-          * iteratedDeriv k.val (f + g) x = 0 := by
-    intro x hx hx' hd
-    have hE : ∀ k : Fin (N + 1),
-        RatFunc.eval (RingHom.id ℝ) x (a k) * iteratedDeriv k.val (f + g) x
-          = ∑ i : Fin m, RatFunc.eval (RingHom.id ℝ) x (a k)
-              * RatFunc.eval (RingHom.id ℝ) x (jetCoord c qf k.val i)
-              * iteratedDeriv i.val f x
-            + ∑ j : Fin n, RatFunc.eval (RingHom.id ℝ) x (a k)
-              * RatFunc.eval (RingHom.id ℝ) x (jetCoord d qg k.val j)
-              * iteratedDeriv j.val g x := by
-      intro k
-      rw [iteratedDeriv_add (hdf.contDiffAt.of_le (WithTop.coe_le_coe.mpr le_top))
-          (hdg.contDiffAt.of_le (WithTop.coe_le_coe.mpr le_top)),
-        jetCoord_apply qf hqf hx k.val, jetCoord_apply qg hqg hx' k.val,
-        mul_add, Finset.mul_sum, Finset.mul_sum]
-      refine congrArg₂ (· + ·) (Finset.sum_congr rfl fun i _ => ?_)
-        (Finset.sum_congr rfl fun j _ => ?_) <;> rw [mul_assoc]
-    calc ∑ k : Fin (N + 1), RatFunc.eval (RingHom.id ℝ) x (a k)
-            * iteratedDeriv k.val (f + g) x
-        = ∑ k : Fin (N + 1), (∑ i : Fin m,
-              RatFunc.eval (RingHom.id ℝ) x (a k)
-                * RatFunc.eval (RingHom.id ℝ) x (jetCoord c qf k.val i)
-                * iteratedDeriv i.val f x
-            + ∑ j : Fin n,
-              RatFunc.eval (RingHom.id ℝ) x (a k)
-                * RatFunc.eval (RingHom.id ℝ) x (jetCoord d qg k.val j)
-                * iteratedDeriv j.val g x) :=
-          Finset.sum_congr rfl fun k _ => hE k
-      _ = ∑ i : Fin m, (∑ k : Fin (N + 1),
-              RatFunc.eval (RingHom.id ℝ) x (a k * jetCoord c qf k.val i))
-              * iteratedDeriv i.val f x
-          + ∑ j : Fin n, (∑ k : Fin (N + 1),
-              RatFunc.eval (RingHom.id ℝ) x (a k * jetCoord d qg k.val j))
-              * iteratedDeriv j.val g x := by
-          rw [Finset.sum_add_distrib]
-          congr 1
-          · rw [Finset.sum_comm]
-            refine Finset.sum_congr rfl fun i _ => ?_
-            rw [← Finset.sum_mul]
-            congr 1
-            refine Finset.sum_congr rfl fun k _ => ?_
-            rw [RatFunc.eval_mul (RingHom.id ℝ) x (hd k)
-              (denom_jetCoord_ne_zero k.val i hx)]
-          · rw [Finset.sum_comm]
-            refine Finset.sum_congr rfl fun j _ => ?_
-            rw [← Finset.sum_mul]
-            congr 1
-            refine Finset.sum_congr rfl fun k _ => ?_
-            rw [RatFunc.eval_mul (RingHom.id ℝ) x (hd k)
-              (denom_jetCoord_ne_zero k.val j hx')]
-      _ = ∑ i : Fin m, RatFunc.eval (RingHom.id ℝ) x
-              (∑ k : Fin (N + 1), a k * jetCoord c qf k.val i)
-              * iteratedDeriv i.val f x
-          + ∑ j : Fin n, RatFunc.eval (RingHom.id ℝ) x
-              (∑ k : Fin (N + 1), a k * jetCoord d qg k.val j)
-              * iteratedDeriv j.val g x := by
-          congr 1
-          · refine Finset.sum_congr rfl fun i _ => ?_
-            congr 1
-            exact (ratFunc_eval_sum _ _ fun k _ =>
-              denom_mul_eval_ne_zero (hd k) (denom_jetCoord_ne_zero k.val i hx)).symm
-          · refine Finset.sum_congr rfl fun j _ => ?_
-            congr 1
-            exact (ratFunc_eval_sum _ _ fun k _ =>
-              denom_mul_eval_ne_zero (hd k) (denom_jetCoord_ne_zero k.val j hx')).symm
-      _ = 0 := by
-          have hdf0 : ∀ i : Fin m, ∑ k : Fin (N + 1),
-              a k * jetCoord c qf k.val i = 0 := by
-            intro i
-            have hv : ∀ k : Fin (N + 1),
-                v k (Fin.castAdd n i) = jetCoord c qf k.val i :=
-              fun k => Fin.append_left _ _ i
-            have := congrFun hsum (Fin.castAdd n i)
-            rw [Finset.sum_apply] at this
-            simp only [Pi.smul_apply, smul_eq_mul] at this
-            rw [Finset.sum_congr rfl fun k _ =>
-              congrArg (fun w => a k * w) (hv k)] at this
-            exact this
-          have hdg0 : ∀ j : Fin n, ∑ k : Fin (N + 1),
-              a k * jetCoord d qg k.val j = 0 := by
-            intro j
-            have hv : ∀ k : Fin (N + 1),
-                v k (Fin.natAdd m j) = jetCoord d qg k.val j :=
-              fun k => Fin.append_right _ _ j
-            have := congrFun hsum (Fin.natAdd m j)
-            rw [Finset.sum_apply] at this
-            simp only [Pi.smul_apply, smul_eq_mul] at this
-            rw [Finset.sum_congr rfl fun k _ =>
-              congrArg (fun w => a k * w) (hv k)] at this
-            exact this
-          simp [hdf0, hdg0]
-  -- Multiply through by `D` to clear the `RatFunc` coefficients.
-  have hclr : ∀ x : ℝ, c.lead.eval x ≠ 0 → d.lead.eval x ≠ 0
-      → (∀ k : Fin (N + 1), (den k).eval x ≠ 0)
-      → ∑ k : Fin (N + 1), (p k).eval x * iteratedDeriv k.val (f + g) x = 0 := by
-    intro x hx hx' hd
+  -- Multiply the pointwise relation through by `D` to clear coefficients.
+  have hclr : ∀ x ∉ (G : Set ℝ), (∀ k : Fin (N + 1), (den k).eval x ≠ 0)
+      → ∑ k : Fin (N + 1), (p k).eval x * iteratedDeriv k.val h x = 0 := by
+    intro x hxG hd
     have hDx : D.eval x ≠ 0 := by
       show (∏ k : Fin (N + 1), den k).eval x ≠ 0
       rw [Polynomial.eval_prod]
@@ -665,43 +632,35 @@ theorem isHolonomic_add {c d : HolonomicCertificate} {f g : ℝ → ℝ}
       rw [RatFunc.eval_algebraMap, RatFunc.eval_algebraMap, Polynomial.eval₂_id,
         Polynomial.eval₂_id] at hb
       exact hb
-    have h0 := hrel x hx hx' hd
+    have h0 := hrel x hxG hd
     have hmul : D.eval x * ∑ k : Fin (N + 1),
-        RatFunc.eval (RingHom.id ℝ) x (a k) * iteratedDeriv k.val (f + g) x
+        RatFunc.eval (RingHom.id ℝ) x (a k) * iteratedDeriv k.val h x
           = 0 := by rw [h0]; ring
     rw [Finset.mul_sum] at hmul
     rw [Finset.sum_congr rfl fun k _ => show
         D.eval x * (RatFunc.eval (RingHom.id ℝ) x (a k)
-            * iteratedDeriv k.val (f + g) x)
-          = (p k).eval x * iteratedDeriv k.val (f + g) x from by
+            * iteratedDeriv k.val h x)
+          = (p k).eval x * iteratedDeriv k.val h x from by
         rw [← mul_assoc, mul_comm (D.eval x), hde k]] at hmul
     exact hmul
-  -- The good set is the complement of a finite root set.
-  let F : Finset ℝ := c.lead.roots.toFinset ∪ d.lead.roots.toFinset ∪
+  -- The good set is `G` union the union of denominator root sets.
+  let F : Finset ℝ := G ∪
     Finset.univ.biUnion fun k : Fin (N + 1) => (den k).roots.toFinset
   have hrel' : ∀ x ∉ (F : Set ℝ),
-      ∑ k : Fin (N + 1), (p k).eval x * iteratedDeriv k.val (f + g) x = 0 := by
+      ∑ k : Fin (N + 1), (p k).eval x * iteratedDeriv k.val h x = 0 := by
     intro x hx
-    have hx1 : c.lead.eval x ≠ 0 := fun h => hx
-      (Finset.mem_union_left _ (Finset.mem_union_left _
-        (Multiset.mem_toFinset.mpr
-          ((Polynomial.mem_roots c.lead_ne).mpr h))))
-    have hx2 : d.lead.eval x ≠ 0 := fun h => hx
-      (Finset.mem_union_left _ (Finset.mem_union_right _
-        (Multiset.mem_toFinset.mpr
-          ((Polynomial.mem_roots d.lead_ne).mpr h))))
+    have hxG : x ∉ (G : Set ℝ) := fun hmem => hx (Finset.mem_union_left _ hmem)
     have hx3 : ∀ k : Fin (N + 1), (den k).eval x ≠ 0 := fun k h => hx
       (Finset.mem_union_right _ (Finset.mem_biUnion.mpr ⟨k, Finset.mem_univ _,
         Multiset.mem_toFinset.mpr
           ((Polynomial.mem_roots (RatFunc.denom_ne_zero _)).mpr h)⟩))
-    exact hclr x hx1 hx2 hx3
+    exact hclr x hxG hx3
   -- Continuity propagates the relation to all of `ℝ`.
   have hcont : Continuous fun x => ∑ k : Fin (N + 1), (p k).eval x
-      * iteratedDeriv k.val (f + g) x :=
+      * iteratedDeriv k.val h x :=
     continuous_finsetSum _ fun k _ =>
       (p k).continuous.mul
-        ((hdf.add hdg).continuous_iteratedDeriv _
-          (WithTop.coe_le_coe.mpr le_top))
+        (hh.continuous_iteratedDeriv _ (WithTop.coe_le_coe.mpr le_top))
   have hz := eq_zero_of_continuous_eq_zero_off hcont hrel'
   -- Assemble the certificate, trimming zero tail coefficients.
   let P : Finset (Fin (N + 1)) := Finset.univ.filter fun k => p k ≠ 0
@@ -720,14 +679,14 @@ theorem isHolonomic_add {c d : HolonomicCertificate} {f g : ℝ → ℝ}
     exact (Finset.mem_filter.mp hm).2
   · show (∑ i : Fin (o + 1),
         (p ⟨i.val, (Nat.lt_succ_iff.mp i.isLt).trans_lt hoN⟩).eval x
-          * iteratedDeriv i.val (f + g) x) = 0
+          * iteratedDeriv i.val h x) = 0
     -- Range-sum form of `hz` with zero-tail split.
     set s : ℕ → ℝ := fun j =>
-      if h : j < N + 1 then (p ⟨j, h⟩).eval x * iteratedDeriv j (f + g) x else 0
+      if hb : j < N + 1 then (p ⟨j, hb⟩).eval x * iteratedDeriv j h x else 0
     have hsf : ∀ i : Fin (N + 1),
-        s i.val = (p i).eval x * iteratedDeriv i.val (f + g) x := fun i => by
-      show (if h : i.val < N + 1 then (p ⟨i.val, h⟩).eval x
-          * iteratedDeriv i.val (f + g) x else 0) = _
+        s i.val = (p i).eval x * iteratedDeriv i.val h x := fun i => by
+      show (if hb : i.val < N + 1 then (p ⟨i.val, hb⟩).eval x
+          * iteratedDeriv i.val h x else 0) = _
       rw [dif_pos i.isLt]
     have hN0 : ∑ i ∈ Finset.range (N + 1), s i = 0 := by
       rw [← Fin.sum_univ_eq_sum_range s (N + 1),
@@ -737,8 +696,8 @@ theorem isHolonomic_add {c d : HolonomicCertificate} {f g : ℝ → ℝ}
       intro i hi
       have hlt : o + 1 + i < N + 1 := by
         have := Finset.mem_range.mp hi; omega
-      show (if h : o + 1 + i < N + 1 then (p ⟨o + 1 + i, h⟩).eval x
-          * iteratedDeriv (o + 1 + i) (f + g) x else 0) = 0
+      show (if hb : o + 1 + i < N + 1 then (p ⟨o + 1 + i, hb⟩).eval x
+          * iteratedDeriv (o + 1 + i) h x else 0) = 0
       rw [dif_pos hlt, htop ⟨_, hlt⟩ (by show o < o + 1 + i; omega)]
       simp
     have hsplit : ∑ i ∈ Finset.range (o + 1), s i = 0 := by
@@ -749,11 +708,334 @@ theorem isHolonomic_add {c d : HolonomicCertificate} {f g : ℝ → ℝ}
     rw [Finset.sum_congr rfl fun i : Fin (o + 1) =>
         fun _ => show s i.val
             = (p ⟨i.val, (Nat.lt_succ_iff.mp i.isLt).trans_lt hoN⟩).eval x
-              * iteratedDeriv i.val (f + g) x from by
+              * iteratedDeriv i.val h x from by
           have hlt : i.val < N + 1 := (Nat.lt_succ_iff.mp i.isLt).trans_lt hoN
-          show (if h : i.val < N + 1 then (p ⟨i.val, h⟩).eval x
-              * iteratedDeriv i.val (f + g) x else 0) = _
+          show (if hb : i.val < N + 1 then (p ⟨i.val, hb⟩).eval x
+              * iteratedDeriv i.val h x else 0) = _
           rw [dif_pos hlt]] at hsplit
     exact hsplit
+
+/-- **Sum closure, general orders**: the sum of two holonomic functions is
+holonomic, with order at most `m + n`.  This is the general `via=sum` lane of
+`certClosure` in `koru_std/sym.certcomp.kz`: `m + n + 1` derivatives of
+`f + g` are expressed in the `m + n`-dimensional `ℝ(X)`-space of joint jet
+coordinates, so a nontrivial `ℝ(X)`-relation exists; clearing denominators
+gives a polynomial relation off a finite bad set, and continuity propagates it
+to all of `ℝ`. -/
+theorem isHolonomic_add {c d : HolonomicCertificate} {f g : ℝ → ℝ}
+    (hdf : ContDiff ℝ ∞ f) (hdg : ContDiff ℝ ∞ g)
+    (hf : satisfiesODE c f) (hg : satisfiesODE d g) :
+    IsHolonomic (f + g) := by
+  classical
+  set m := c.order
+  set n := d.order
+  set N := m + n with hN
+  choose qf hqf using fun r => satisfiesODE.lead_pow_mul_iteratedDeriv hdf hf r
+  choose qg hqg using fun r => satisfiesODE.lead_pow_mul_iteratedDeriv hdg hg r
+  -- The `m+n+1` coordinate vectors `v_k` in `Fin (m+n) → ℝ(X)` are dependent.
+  let v : Fin (N + 1) → Fin N → ℝ⟮X⟯ :=
+    fun k => Fin.append (jetCoord c qf k.val) (jetCoord d qg k.val)
+  have hfr : Module.finrank ℝ⟮X⟯ (Fin N → ℝ⟮X⟯) = N :=
+    (Module.finrank_fintype_fun_eq_card (R := ℝ⟮X⟯) (η := Fin N)).trans
+      (Fintype.card_fin N)
+  have hli : ¬ LinearIndependent ℝ⟮X⟯ v := fun hv => by
+    have hc := hv.fintype_card_le_finrank
+    rw [hfr, Fintype.card_fin] at hc
+    omega
+  obtain ⟨f', g', hfg, k₀, hf'g'⟩ := Fintype.not_linearIndependent_iffₛ.mp hli
+  let a : Fin (N + 1) → ℝ⟮X⟯ := fun k => f' k - g' k
+  have hsum : (∑ k : Fin (N + 1), a k • v k) = 0 := by
+    rw [Finset.sum_congr rfl fun k _ => sub_smul (f' k) (g' k) (v k),
+      Finset.sum_sub_distrib, hfg, sub_self]
+  have ha0 : a k₀ ≠ 0 := sub_ne_zero.mpr hf'g'
+  -- Pointwise relation off the union of both leads' roots.
+  refine isHolonomic_of_ratFunc_relation (hdf.add hdg) a k₀ ha0
+    (c.lead.roots.toFinset ∪ d.lead.roots.toFinset) ?_
+  intro x hxG hd
+  have hx : c.lead.eval x ≠ 0 := fun h => hxG
+    (Finset.mem_union_left _ (Multiset.mem_toFinset.mpr
+      ((Polynomial.mem_roots c.lead_ne).mpr h)))
+  have hx' : d.lead.eval x ≠ 0 := fun h => hxG
+    (Finset.mem_union_right _ (Multiset.mem_toFinset.mpr
+      ((Polynomial.mem_roots d.lead_ne).mpr h)))
+  have hE : ∀ k : Fin (N + 1),
+      RatFunc.eval (RingHom.id ℝ) x (a k) * iteratedDeriv k.val (f + g) x
+        = ∑ i : Fin m, RatFunc.eval (RingHom.id ℝ) x (a k)
+            * RatFunc.eval (RingHom.id ℝ) x (jetCoord c qf k.val i)
+            * iteratedDeriv i.val f x
+          + ∑ j : Fin n, RatFunc.eval (RingHom.id ℝ) x (a k)
+            * RatFunc.eval (RingHom.id ℝ) x (jetCoord d qg k.val j)
+            * iteratedDeriv j.val g x := by
+    intro k
+    rw [iteratedDeriv_add (hdf.contDiffAt.of_le (WithTop.coe_le_coe.mpr le_top))
+        (hdg.contDiffAt.of_le (WithTop.coe_le_coe.mpr le_top)),
+      jetCoord_apply qf hqf hx k.val, jetCoord_apply qg hqg hx' k.val,
+      mul_add, Finset.mul_sum, Finset.mul_sum]
+    refine congrArg₂ (· + ·) (Finset.sum_congr rfl fun i _ => ?_)
+      (Finset.sum_congr rfl fun j _ => ?_) <;> rw [mul_assoc]
+  calc ∑ k : Fin (N + 1), RatFunc.eval (RingHom.id ℝ) x (a k)
+          * iteratedDeriv k.val (f + g) x
+      = ∑ k : Fin (N + 1), (∑ i : Fin m,
+            RatFunc.eval (RingHom.id ℝ) x (a k)
+              * RatFunc.eval (RingHom.id ℝ) x (jetCoord c qf k.val i)
+              * iteratedDeriv i.val f x
+          + ∑ j : Fin n,
+            RatFunc.eval (RingHom.id ℝ) x (a k)
+              * RatFunc.eval (RingHom.id ℝ) x (jetCoord d qg k.val j)
+              * iteratedDeriv j.val g x) :=
+        Finset.sum_congr rfl fun k _ => hE k
+    _ = ∑ i : Fin m, (∑ k : Fin (N + 1),
+            RatFunc.eval (RingHom.id ℝ) x (a k * jetCoord c qf k.val i))
+            * iteratedDeriv i.val f x
+        + ∑ j : Fin n, (∑ k : Fin (N + 1),
+            RatFunc.eval (RingHom.id ℝ) x (a k * jetCoord d qg k.val j))
+            * iteratedDeriv j.val g x := by
+        rw [Finset.sum_add_distrib]
+        congr 1
+        · rw [Finset.sum_comm]
+          refine Finset.sum_congr rfl fun i _ => ?_
+          rw [← Finset.sum_mul]
+          congr 1
+          refine Finset.sum_congr rfl fun k _ => ?_
+          rw [RatFunc.eval_mul (RingHom.id ℝ) x (hd k)
+            (denom_jetCoord_ne_zero k.val i hx)]
+        · rw [Finset.sum_comm]
+          refine Finset.sum_congr rfl fun j _ => ?_
+          rw [← Finset.sum_mul]
+          congr 1
+          refine Finset.sum_congr rfl fun k _ => ?_
+          rw [RatFunc.eval_mul (RingHom.id ℝ) x (hd k)
+            (denom_jetCoord_ne_zero k.val j hx')]
+    _ = ∑ i : Fin m, RatFunc.eval (RingHom.id ℝ) x
+            (∑ k : Fin (N + 1), a k * jetCoord c qf k.val i)
+            * iteratedDeriv i.val f x
+        + ∑ j : Fin n, RatFunc.eval (RingHom.id ℝ) x
+            (∑ k : Fin (N + 1), a k * jetCoord d qg k.val j)
+            * iteratedDeriv j.val g x := by
+        congr 1
+        · refine Finset.sum_congr rfl fun i _ => ?_
+          congr 1
+          exact (ratFunc_eval_sum _ _ fun k _ =>
+            denom_mul_eval_ne_zero (hd k) (denom_jetCoord_ne_zero k.val i hx)).symm
+        · refine Finset.sum_congr rfl fun j _ => ?_
+          congr 1
+          exact (ratFunc_eval_sum _ _ fun k _ =>
+            denom_mul_eval_ne_zero (hd k) (denom_jetCoord_ne_zero k.val j hx')).symm
+    _ = 0 := by
+        have hdf0 : ∀ i : Fin m, ∑ k : Fin (N + 1),
+            a k * jetCoord c qf k.val i = 0 := by
+          intro i
+          have hv : ∀ k : Fin (N + 1),
+              v k (Fin.castAdd n i) = jetCoord c qf k.val i :=
+            fun k => Fin.append_left _ _ i
+          have := congrFun hsum (Fin.castAdd n i)
+          rw [Finset.sum_apply] at this
+          simp only [Pi.smul_apply, smul_eq_mul] at this
+          rw [Finset.sum_congr rfl fun k _ =>
+            congrArg (fun w => a k * w) (hv k)] at this
+          exact this
+        have hdg0 : ∀ j : Fin n, ∑ k : Fin (N + 1),
+            a k * jetCoord d qg k.val j = 0 := by
+          intro j
+          have hv : ∀ k : Fin (N + 1),
+              v k (Fin.natAdd m j) = jetCoord d qg k.val j :=
+            fun k => Fin.append_right _ _ j
+          have := congrFun hsum (Fin.natAdd m j)
+          rw [Finset.sum_apply] at this
+          simp only [Pi.smul_apply, smul_eq_mul] at this
+          rw [Finset.sum_congr rfl fun k _ =>
+            congrArg (fun w => a k * w) (hv k)] at this
+          exact this
+        simp [hdf0, hdg0]
+
+/-! ### Stage 3 — product closure
+
+`(f·g)⁽ᵏ⁾` expands by Leibniz into `f⁽ⁱ⁾·g⁽ᵏ⁻ⁱ⁾`; each factor reduces to its
+own jet basis, so every derivative of `f·g` lands in the `m·n`-dimensional
+`ℝ(X)`-space spanned by `{f⁽ᵃ⁾·g⁽ᵇ⁾ | a < m, b < n}`.  `m·n+1` candidate
+vectors are dependent; the generic clearing lemma assembles the certificate
+of order `≤ m·n`. -/
+
+/-- `ℝ(X)`-coordinates of `(f·g)⁽ᵏ⁾` in the product jet basis
+`{f⁽ᵃ⁾·g⁽ᵇ⁾ | a < order c, b < order d}`: the Leibniz coefficient
+`Σᵢ C(k,i)·(f⁽ⁱ⁾-coords)·(g⁽ᵏ⁻ⁱ⁾-coords)`. -/
+private def prodJetCoord (c d : HolonomicCertificate) (qf qg : ℕ → ℕ → ℝ[X])
+    (k : ℕ) : Fin c.order × Fin d.order → ℝ⟮X⟯ :=
+  fun ab => ∑ i ∈ Finset.range (k + 1),
+    algebraMap ℝ[X] ℝ⟮X⟯ (C ((k.choose i : ℕ) : ℝ))
+      * jetCoord c qf i ab.1 * jetCoord d qg (k - i) ab.2
+
+/-- `algebraMap`-embedded polynomials have trivial `RatFunc` denominator. -/
+private theorem denom_algebraMap_ne_zero {p : ℝ[X]} {x : ℝ} :
+    (RatFunc.denom (algebraMap ℝ[X] ℝ⟮X⟯ p)).eval x ≠ 0 := by
+  rw [RatFunc.denom_algebraMap]; simp
+
+/-- `prodJetCoord` denominators vanish only inside both leads' root sets. -/
+private theorem denom_prodJetCoord_ne_zero {c d : HolonomicCertificate}
+    {qf qg : ℕ → ℕ → ℝ[X]} (k : ℕ) (ab : Fin c.order × Fin d.order) {x : ℝ}
+    (hx : c.lead.eval x ≠ 0) (hx' : d.lead.eval x ≠ 0) :
+    (RatFunc.denom (prodJetCoord c d qf qg k ab)).eval x ≠ 0 := by
+  refine denom_eval_ne_zero_of_dvd (ratFunc_denom_sum_dvd _ _) ?_
+  rw [Polynomial.eval_prod]
+  exact Finset.prod_ne_zero_iff.mpr fun i _ =>
+    denom_mul_eval_ne_zero (denom_mul_eval_ne_zero
+      denom_algebraMap_ne_zero
+      (denom_jetCoord_ne_zero i ab.1 hx))
+      (denom_jetCoord_ne_zero (k - i) ab.2 hx')
+
+/-- Pointwise expansion of `(f·g)⁽ᵏ⁾` in the product jet basis, valid wherever
+both leads are nonzero. -/
+private theorem prodJetCoord_apply {c d : HolonomicCertificate} {f g : ℝ → ℝ}
+    (hdf : ContDiff ℝ ∞ f) (hdg : ContDiff ℝ ∞ g)
+    (qf qg : ℕ → ℕ → ℝ[X])
+    (hqf : ∀ r x, c.lead.eval x ^ (r + 1) * iteratedDeriv (c.order + r) f x
+        = ∑ i ∈ Finset.range c.order, (qf r i).eval x * iteratedDeriv i f x)
+    (hqg : ∀ r x, d.lead.eval x ^ (r + 1) * iteratedDeriv (d.order + r) g x
+        = ∑ i ∈ Finset.range d.order, (qg r i).eval x * iteratedDeriv i g x)
+    {x : ℝ} (hx : c.lead.eval x ≠ 0) (hx' : d.lead.eval x ≠ 0) (k : ℕ) :
+    iteratedDeriv k (f * g) x
+      = ∑ a : Fin c.order, ∑ b : Fin d.order,
+          RatFunc.eval (RingHom.id ℝ) x (prodJetCoord c d qf qg k (a, b))
+            * (iteratedDeriv a.val f x * iteratedDeriv b.val g x) := by
+  rw [iteratedDeriv_fun_mul k hdf hdg]
+  calc ∑ i ∈ Finset.range (k + 1), (k.choose i : ℝ)
+          * (iteratedDeriv i f x * iteratedDeriv (k - i) g x)
+      = ∑ i ∈ Finset.range (k + 1), (k.choose i : ℝ)
+          * ((∑ a : Fin c.order, RatFunc.eval (RingHom.id ℝ) x (jetCoord c qf i a)
+                * iteratedDeriv a.val f x)
+            * (∑ b : Fin d.order, RatFunc.eval (RingHom.id ℝ) x
+                (jetCoord d qg (k - i) b) * iteratedDeriv b.val g x)) := by
+        refine Finset.sum_congr rfl fun i _ => ?_
+        rw [jetCoord_apply qf hqf hx i, jetCoord_apply qg hqg hx' (k - i)]
+    _ = ∑ i ∈ Finset.range (k + 1), ∑ a : Fin c.order, ∑ b : Fin d.order,
+          (k.choose i : ℝ)
+            * (RatFunc.eval (RingHom.id ℝ) x (jetCoord c qf i a)
+              * RatFunc.eval (RingHom.id ℝ) x (jetCoord d qg (k - i) b))
+            * (iteratedDeriv a.val f x * iteratedDeriv b.val g x) := by
+        refine Finset.sum_congr rfl fun i _ => ?_
+        rw [Finset.sum_mul_sum, Finset.mul_sum]
+        simp_rw [Finset.mul_sum]
+        refine Finset.sum_congr rfl fun a _ =>
+          Finset.sum_congr rfl fun b _ => ?_; ring
+    _ = ∑ a : Fin c.order, ∑ b : Fin d.order, ∑ i ∈ Finset.range (k + 1),
+          (k.choose i : ℝ)
+            * (RatFunc.eval (RingHom.id ℝ) x (jetCoord c qf i a)
+              * RatFunc.eval (RingHom.id ℝ) x (jetCoord d qg (k - i) b))
+            * (iteratedDeriv a.val f x * iteratedDeriv b.val g x) := by
+        rw [Finset.sum_comm,
+          Finset.sum_congr rfl fun a _ => Finset.sum_comm]
+    _ = ∑ a : Fin c.order, ∑ b : Fin d.order,
+          RatFunc.eval (RingHom.id ℝ) x (prodJetCoord c d qf qg k (a, b))
+            * (iteratedDeriv a.val f x * iteratedDeriv b.val g x) := by
+        refine Finset.sum_congr rfl fun a _ =>
+          Finset.sum_congr rfl fun b _ => ?_
+        rw [← Finset.sum_mul]
+        congr 1
+        unfold prodJetCoord
+        rw [ratFunc_eval_sum _ _ fun i _ =>
+          denom_mul_eval_ne_zero (denom_mul_eval_ne_zero
+            denom_algebraMap_ne_zero
+            (denom_jetCoord_ne_zero i a hx))
+            (denom_jetCoord_ne_zero (k - i) b hx')]
+        refine Finset.sum_congr rfl fun i _ => ?_
+        rw [RatFunc.eval_mul (RingHom.id ℝ) x
+          (denom_mul_eval_ne_zero denom_algebraMap_ne_zero
+            (denom_jetCoord_ne_zero i a hx))
+          (denom_jetCoord_ne_zero (k - i) b hx'),
+          RatFunc.eval_mul (RingHom.id ℝ) x denom_algebraMap_ne_zero
+            (denom_jetCoord_ne_zero i a hx),
+          RatFunc.eval_algebraMap]
+        simp
+        rw [mul_assoc]
+
+/-- **Product closure**: a product of holonomic functions is holonomic, of
+order at most the product of the input orders. -/
+theorem isHolonomic_mul {c d : HolonomicCertificate} {f g : ℝ → ℝ}
+    (hdf : ContDiff ℝ ∞ f) (hdg : ContDiff ℝ ∞ g)
+    (hf : satisfiesODE c f) (hg : satisfiesODE d g) :
+    IsHolonomic (f * g) := by
+  classical
+  set m := c.order
+  set n := d.order
+  set N := m * n with hN
+  choose qf hqf using fun r => satisfiesODE.lead_pow_mul_iteratedDeriv hdf hf r
+  choose qg hqg using fun r => satisfiesODE.lead_pow_mul_iteratedDeriv hdg hg r
+  -- The `m·n+1` coordinate vectors in `Fin (m·n) → ℝ(X)` are dependent.
+  let e : Fin m × Fin n ≃ Fin (m * n) := finProdFinEquiv
+  let v : Fin (N + 1) → Fin N → ℝ⟮X⟯ :=
+    fun k t => prodJetCoord c d qf qg k.val (e.symm t)
+  have hfr : Module.finrank ℝ⟮X⟯ (Fin N → ℝ⟮X⟯) = N :=
+    (Module.finrank_fintype_fun_eq_card (R := ℝ⟮X⟯) (η := Fin N)).trans
+      (Fintype.card_fin N)
+  have hli : ¬ LinearIndependent ℝ⟮X⟯ v := fun hv => by
+    have hc := hv.fintype_card_le_finrank
+    rw [hfr, Fintype.card_fin] at hc
+    omega
+  obtain ⟨f', g', hfg, k₀, hf'g'⟩ := Fintype.not_linearIndependent_iffₛ.mp hli
+  let a : Fin (N + 1) → ℝ⟮X⟯ := fun k => f' k - g' k
+  have hsum : (∑ k : Fin (N + 1), a k • v k) = 0 := by
+    rw [Finset.sum_congr rfl fun k _ => sub_smul (f' k) (g' k) (v k),
+      Finset.sum_sub_distrib, hfg, sub_self]
+  have ha0 : a k₀ ≠ 0 := sub_ne_zero.mpr hf'g'
+  -- Pointwise relation off the union of both leads' roots.
+  refine isHolonomic_of_ratFunc_relation (hdf.mul hdg) a k₀ ha0
+    (c.lead.roots.toFinset ∪ d.lead.roots.toFinset) ?_
+  intro x hxG hd
+  have hx : c.lead.eval x ≠ 0 := fun h => hxG
+    (Finset.mem_union_left _ (Multiset.mem_toFinset.mpr
+      ((Polynomial.mem_roots c.lead_ne).mpr h)))
+  have hx' : d.lead.eval x ≠ 0 := fun h => hxG
+    (Finset.mem_union_right _ (Multiset.mem_toFinset.mpr
+      ((Polynomial.mem_roots d.lead_ne).mpr h)))
+  calc ∑ k : Fin (N + 1), RatFunc.eval (RingHom.id ℝ) x (a k)
+          * iteratedDeriv k.val (f * g) x
+      = ∑ k : Fin (N + 1), ∑ i : Fin m, ∑ j : Fin n,
+          RatFunc.eval (RingHom.id ℝ) x (a k)
+            * RatFunc.eval (RingHom.id ℝ) x (prodJetCoord c d qf qg k.val (i, j))
+            * (iteratedDeriv i.val f x * iteratedDeriv j.val g x) := by
+        refine Finset.sum_congr rfl fun k _ => ?_
+        rw [prodJetCoord_apply hdf hdg qf qg hqf hqg hx hx' k.val,
+          Finset.mul_sum]
+        simp_rw [Finset.mul_sum]
+        refine Finset.sum_congr rfl fun i _ =>
+          Finset.sum_congr rfl fun j _ => ?_; rw [mul_assoc]
+    _ = ∑ i : Fin m, ∑ j : Fin n, (∑ k : Fin (N + 1),
+            RatFunc.eval (RingHom.id ℝ) x (a k)
+              * RatFunc.eval (RingHom.id ℝ) x
+                (prodJetCoord c d qf qg k.val (i, j)))
+            * (iteratedDeriv i.val f x * iteratedDeriv j.val g x) := by
+        rw [Finset.sum_comm,
+          Finset.sum_congr rfl fun i _ => Finset.sum_comm]
+        refine Finset.sum_congr rfl fun i _ =>
+          Finset.sum_congr rfl fun j _ => ?_
+        rw [← Finset.sum_mul]
+    _ = ∑ i : Fin m, ∑ j : Fin n, RatFunc.eval (RingHom.id ℝ) x
+            (∑ k : Fin (N + 1), a k * prodJetCoord c d qf qg k.val (i, j))
+            * (iteratedDeriv i.val f x * iteratedDeriv j.val g x) := by
+        refine Finset.sum_congr rfl fun i _ =>
+          Finset.sum_congr rfl fun j _ => ?_
+        congr 1
+        rw [Finset.sum_congr rfl fun k _ =>
+          (RatFunc.eval_mul (RingHom.id ℝ) x (hd k)
+            (denom_prodJetCoord_ne_zero k.val (i, j) hx hx')).symm]
+        exact (ratFunc_eval_sum _ _ fun k _ =>
+          denom_mul_eval_ne_zero (hd k)
+            (denom_prodJetCoord_ne_zero k.val (i, j) hx hx')).symm
+    _ = 0 := by
+        have hz : ∀ i : Fin m, ∀ j : Fin n,
+            ∑ k : Fin (N + 1), a k * prodJetCoord c d qf qg k.val (i, j)
+              = 0 := by
+          intro i j
+          have hv : ∀ k : Fin (N + 1),
+              v k (e (i, j)) = prodJetCoord c d qf qg k.val (i, j) :=
+            fun k => congrArg (prodJetCoord c d qf qg k.val)
+              (e.symm_apply_apply (i, j))
+          have := congrFun hsum (e (i, j))
+          rw [Finset.sum_apply] at this
+          simp only [Pi.smul_apply, smul_eq_mul] at this
+          rw [Finset.sum_congr rfl fun k _ =>
+            congrArg (fun w => a k * w) (hv k)] at this
+          exact this
+        simp [hz]
 
 end ISAR
