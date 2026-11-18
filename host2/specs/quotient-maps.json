@@ -45,6 +45,14 @@
       "notes": "the compiler is a koru program, not host code: emit gate -> recursive render walk -> op-str/join4/paren-neg/wrap assemblers. Refusals are structural (guard miss / arm exhaustion), agreeing with emitC99's Option.none."
     },
     {
+      "id": "kprog-to-progc99",
+      "in": "quoted whole KProg + declared fuel — the {src, fuel} wire args (krun --emit / --quote carry the target claim's fuel, which becomes the emitted driver's kfuel)",
+      "out": "complete C99 program text (prelude + forward decls + generated bodies + driver) | refuse",
+      "by": "specs/tests/900_wire/910_kemitp claim evaluated as data under krun --emit; compiled form = specs/gen/kemitp.c = emitProgC(kEmitProg)",
+      "ref": "emitProgC in src/ISAR/KoruProgEmit.lean",
+      "notes": "emitProgC spelled in the dialect — the self-host leg. ~60-callable walk: catalog/template rows as declared data; dc* decl-count folds derive each callee's fresh name so the counter threads forward-only (no composite runtime state in the wire). Char work rides @chars/@charToString/@charsToString byte loops — emission-leg extension builtins on the len/intToString axis. Wire row: chain/conts shapes have no surface spelling. Verified byte-identical vs emitProgC on kEmit (39KB), kWir (988KB) and itself (512KB — the fixpoint: the compiled emitter fed quote(kEmitProg) reproduces its own source). Refusals structural: empty graph, missing entry, thunk leaf, malformed quote."
+    },
+    {
       "id": "c99-to-image",
       "in": "emitted .c",
       "out": "executable + observed exit code",

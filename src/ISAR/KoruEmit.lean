@@ -1979,8 +1979,81 @@ def kAstMain : KCallable := .subflow {
   arms := [ .mk "done" false (some "s") none
       (some (.produce (.var "s"))) [] ] }
 
+/- KORU100 surface image — koru spells a discarded arm bind `_`
+and gives every `|>`-chain step the tag `_chain`.  The claims
+decode those spellings, so the graph a claim describes differs
+from the authored one by exactly these renames.  `emitProgC` and
+the claim-fed emitter must observe the same program, so the big
+programs are stated in their surface image: `kNormProg` folds the
+image over a graph once.  The renames touch only unreferenced
+binds and step tags — behavior is untouched. -/
+mutual
+def kNormUsesE (x : String) : KExpr → Bool
+  | .lit _ => false
+  | .var n => n == x
+  | .bin _ a b => kNormUsesE x a || kNormUsesE x b
+  | .cond c t e => kNormUsesE x c || kNormUsesE x t
+                   || kNormUsesE x e
+  | .un _ e => kNormUsesE x e
+  | .field o _ => kNormUsesE x o
+  | .index o i => kNormUsesE x o || kNormUsesE x i
+  | .builtin _ args => kNormUsesEs x args
+
+def kNormUsesEs (x : String) : List KExpr → Bool
+  | [] => false
+  | e :: es => kNormUsesE x e || kNormUsesEs x es
+
+def kNormUsesN (x : String) : KArmNode → Bool
+  | .terminal => false
+  | .jump _ args => kNormUsesNE x args
+  | .invoke _ args => kNormUsesNE x args
+  | .produce e => kNormUsesE x e
+  | .retCtor _ e => kNormUsesE x e
+
+def kNormUsesNE (x : String) : List (String × KExpr) → Bool
+  | [] => false
+  | (_, e) :: xs => kNormUsesE x e || kNormUsesNE x xs
+
+def kNormUsesA (x : String) : KArm → Bool
+  | .mk _ _ _ cd nd cs =>
+      (cd.map (kNormUsesE x)).getD false
+        || (nd.map (kNormUsesN x)).getD false
+        || kNormUsesAs x cs
+
+def kNormUsesAs (x : String) : List KArm → Bool
+  | [] => false
+  | a :: as => kNormUsesA x a || kNormUsesAs x as
+end
+
+mutual
+def kNormArm (inConts : Bool) (a : KArm) : KArm :=
+  match a with
+  | .mk br ca bind cond node conts =>
+      .mk (if inConts then "_chain" else br) ca
+        (match bind with
+          | some b => some (if kNormUsesA b a then b else "_")
+          | none => none)
+        cond node (kNormArms conts)
+
+def kNormArmsTop : List KArm → List KArm
+  | [] => []
+  | a :: as => kNormArm false a :: kNormArmsTop as
+
+def kNormArms : List KArm → List KArm
+  | [] => []
+  | a :: as => kNormArm true a :: kNormArms as
+end
+
+def kNormCallable : KCallable → KCallable
+  | .subflow f => .subflow { f with arms := kNormArmsTop f.arms }
+  | c => c
+
+/-- `p` spelled the way its surface file decodes. -/
+def kNormProg (p : KProg) : KProg :=
+  { p with graph := p.graph.map fun (n, c) => (n, kNormCallable c) }
+
 /-- The surface parser — scanners, the grammar machine, `main`. -/
-def kAst : KProg := {
+def kAst : KProg := kNormProg {
   graph := [
     ("peek", kLexPeek),
     ("ws", kAstWs),
@@ -3021,7 +3094,7 @@ def kLowMain : KCallable := .subflow {
       (some (.invoke "ltop" [("rows", (.var "rows")), ("i", (qint 0)), ("n", (.builtin "len" [(.var "rows")])), ("src", (.var "src")), ("mod", (.var "mod")), ("out", (.bin .concat (.var "e") (.lit (.str "\"}}")))), ("p0", (.bin .sub (qint 0) (qint 1))), ("p1", (.bin .sub (qint 0) (qint 1))), ("q0", (.bin .sub (qint 0) (qint 1)))])) [] ] }
 
 
-def kLow : KProg := {
+def kLow : KProg := kNormProg {
   graph := [("pkb", kLowPkb), ("lxt", kLowLxt), ("ltma", kLowLtma), ("ltmb", kLowLtmb), ("ltk1", kLowLtk1), ("lty1", kLowLty1), ("ltm2", kLowLtm2), ("lln", kLowLln), ("lbs", kLowLbs), ("lpb", kLowLpb), ("lpub", kLowLpub), ("lhx", kLowLhx), ("escl", kLowEscl), ("esca", kLowEsca), ("escb", kLowEscb), ("escx", kLowEscx), ("escx1", kLowEscx1), ("escx2", kLowEscx2), ("esct", kLowEsct), ("esct1", kLowEsct1), ("escty", kLowEscty), ("escty1", kLowEscty1), ("escty2", kLowEscty2), ("lcls", kLowLcls), ("lclsm", kLowLclsm), ("lclsn", kLowLclsn), ("ltail", kLowLtail), ("limp", kLowLimp), ("limp2", kLowLimp2), ("limpm", kLowLimpm), ("limpl", kLowLimpl), ("limpl2", kLowLimpl2), ("limplm", kLowLimplm), ("levo", kLowLevo), ("levoe", kLowLevoe), ("levf", kLowLevf), ("lfld", kLowLfld), ("lfldn", kLowLfldn), ("lbrdf", kLowLbrdf), ("lbrdn", kLowLbrdn), ("levcc", kLowLevcc), ("levcc2", kLowLevcc2), ("levc1", kLowLevc1), ("levcm", kLowLevcm), ("lflw", kLowLflw), ("lhead", kLowLhead), ("lcall", kLowLcall), ("linv", kLowLinv), ("larg", kLowLarg), ("largn", kLowLargn), ("largp", kLowLargp), ("largm", kLowLargm), ("lrb", kLowLrb), ("lbind", kLowLbind), ("lbd", kLowLbd), ("lcond", kLowLcond), ("lcd", kLowLcd), ("lstep", kLowLstep), ("lsxp", kLowLsxp), ("lsiv", kLowLsiv), ("lctor", kLowLctor), ("lctor1", kLowLctor1), ("lctor2", kLowLctor2), ("lctor3", kLowLctor3), ("lctor4", kLowLctor4), ("lctor5", kLowLctor5), ("lconts", kLowLconts), ("larmc", kLowLarmc), ("larmd", kLowLarmd), ("lcarmp", kLowLcarmp), ("llink", kLowLlink), ("llinkb", kLowLlinkb), ("llinkn", kLowLlinkn), ("llinke", kLowLlinke), ("litemc", kLowLitemc), ("litemd", kLowLitemd), ("litemp", kLowLitemp), ("litem3p", kLowLitem3p), ("litem3i", kLowLitem3i), ("liteml", kLowLiteml), ("ltop", kLowLtop), ("main", kLowMain)]
   entry := "main"
   args := [] }
@@ -3359,7 +3432,7 @@ def kWirWty : KCallable := .bare
   (.cond (.bin .or (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "i64"))) (.bin .eq (.var "nm") (.lit (.str "i32")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "i16"))) (.bin .eq (.var "nm") (.lit (.str "i8"))))) (.bin .or (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "u64"))) (.bin .eq (.var "nm") (.lit (.str "u32")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "u16"))) (.bin .eq (.var "nm") (.lit (.str "u8"))))) (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "f64"))) (.bin .eq (.var "nm") (.lit (.str "f32")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "bool"))) (.bin .eq (.var "nm") (.lit (.str "string"))))))) (.lit (.int 1)) (.cond (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "program"))) (.bin .eq (.var "nm") (.lit (.str "void")))) (.bin .eq (.var "nm") (.lit (.str "unit")))) (.lit (.int 1)) (.lit (.int 0))))
 
 def kWirWbl : KCallable := .bare
-  (.cond (.bin .or (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "as"))) (.bin .eq (.var "nm") (.lit (.str "intCast")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "truncate"))) (.bin .eq (.var "nm") (.lit (.str "divTrunc"))))) (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "rem"))) (.bin .eq (.var "nm") (.lit (.str "mod")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "len"))) (.bin .eq (.var "nm") (.lit (.str "intToString")))))) (.lit (.int 1)) (.lit (.int 0)))
+  (.cond (.bin .or (.bin .or (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "as"))) (.bin .eq (.var "nm") (.lit (.str "intCast")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "truncate"))) (.bin .eq (.var "nm") (.lit (.str "divTrunc"))))) (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "rem"))) (.bin .eq (.var "nm") (.lit (.str "mod")))) (.bin .or (.bin .eq (.var "nm") (.lit (.str "len"))) (.bin .eq (.var "nm") (.lit (.str "intToString")))))) (.bin .or (.bin .or (.bin .eq (.var "nm") (.lit (.str "chars"))) (.bin .eq (.var "nm") (.lit (.str "charsToString")))) (.bin .eq (.var "nm") (.lit (.str "charToString"))))) (.lit (.int 1)) (.lit (.int 0)))
 
 def kWirWev : KCallable := .subflow {
   preLabel := none
@@ -4365,7 +4438,7 @@ def kChainMain : KCallable := .subflow {
               (some (.invoke "emt-txt" [("claim", .var "claim")]))
               [] ] ] ] }
 
-def kChain : KProg := {
+def kChain : KProg := kNormProg {
   graph :=
     [("unrealized", .bare (.lit (.str "unrealized")))
     ,("low-txt", kChainStub)

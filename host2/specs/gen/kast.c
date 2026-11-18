@@ -179,6 +179,19 @@ static Val*kbi(const char*n,Val**av,int na){k_i64 o;int ok;
  if(!strcmp(n,"len")&&na==1)return(av[0]->tag==4)?v_int(av[0]->nx):0;
  if(!strcmp(n,"intToString")&&na==1){char b[32];
   if(av[0]->tag!=0)return 0;snprintf(b,32,"%lld",(long long)av[0]->i);return v_str(b);}
+ if(!strcmp(n,"chars")&&na==1){char*f;int i,nn;Val**xs;
+  if(av[0]->tag!=3)return 0;f=s_flat(av[0]->s);nn=strlen(f);
+  xs=xm((nn?nn:1)*sizeof(Val*));for(i=0;i<nn;i++)xs[i]=v_int((unsigned char)f[i]);
+  return v_arr(xs,nn);}
+ if(!strcmp(n,"charsToString")&&na==1){char*p;int i;
+  if(av[0]->tag!=4)return 0;p=xm(av[0]->nx+1);
+  for(i=0;i<av[0]->nx;i++){
+   if(av[0]->xs[i]->tag!=0||av[0]->xs[i]->i<0||av[0]->xs[i]->i>255)return 0;
+   p[i]=(char)av[0]->xs[i]->i;}
+  p[av[0]->nx]=0;return v_str(p);}
+ if(!strcmp(n,"charToString")&&na==1){char*p;
+  if(av[0]->tag!=0||av[0]->i<0||av[0]->i>127)return 0;
+  p=xm(2);p[0]=(char)av[0]->i;p[1]=0;return v_str(p);}
  return 0;}
 static Val*k_field(Val*o,const char*n){int i;
  if(!o||o->tag!=5)return 0;for(i=o->nf-1;i>=0;i--)if(!strcmp(o->ns[i],n))return o->vs[i];return 0;}
@@ -520,7 +533,7 @@ static Res *aw62(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {Val *v=ev63(ee);return v?r_bare(v):0;}
 }
 static Res *ds64(E *e, Res *r){
@@ -636,7 +649,7 @@ static Res *aw87(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[3];
  {Val *v=ev89(ee);if(!v)return 0;av[0]=v;}
@@ -842,7 +855,7 @@ static Res *aw144(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {Val *v=ev145(ee);return v?r_bare(v):0;}
 }
 static Res *ds146(E *e, Res *r){
@@ -951,7 +964,7 @@ static Res *aw169(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {Val *v=ev170(ee);return v?r_bare(v):0;}
 }
 static Res *ds171(E *e, Res *r){
@@ -1163,7 +1176,7 @@ static Res *aw224(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[3];
  {Val *v=ev226(ee);if(!v)return 0;av[0]=v;}
@@ -1614,7 +1627,7 @@ static Res *aw349(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[5];
  {Val *v=ev351(ee);if(!v)return 0;av[0]=v;}
@@ -1754,7 +1767,7 @@ static Res *aw381(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[3];
  {Val *v=ev383(ee);if(!v)return 0;av[0]=v;}
@@ -2321,7 +2334,7 @@ static Res *aw565(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {Val *v=ev566(ee);return v?r_bare(v):0;}
 }
 static Res *ds567(E *e, Res *r){
@@ -2600,7 +2613,7 @@ static Res *aw633(E *e, Res *r){
 static Res *ds640(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"e")){Res*t=aw633(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw633(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw633(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -2774,7 +2787,7 @@ static Res *aw674(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("k",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[5];
  {Val *v=ev676(ee);if(!v)return 0;av[0]=v;}
@@ -2886,7 +2899,7 @@ static Res *aw697(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("k",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[6];
  {Val *v=ev699(ee);if(!v)return 0;av[0]=v;}
@@ -3828,7 +3841,7 @@ static Res *aw909(E *e, Res *r){
 static Res *ds935(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"le")){Res*t=aw909(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw909(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw909(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -4093,7 +4106,7 @@ static Res *aw980(E *e, Res *r){
 static Res *ds1016(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"he")){Res*t=aw980(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw980(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw980(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -4518,7 +4531,7 @@ static Res *aw1096(E *e, Res *r){
 static Res *ds1132(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"he")){Res*t=aw1096(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw1096(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw1096(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -5098,7 +5111,7 @@ static Res *aw1269(E *e, Res *r){
 static Res *ds1276(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"we")){Res*t=aw1269(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw1269(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw1269(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -5136,7 +5149,7 @@ static Res *aw1277(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[4];
  {Val *v=ev1279(ee);if(!v)return 0;av[0]=v;}
@@ -5318,7 +5331,7 @@ static Res *aw1313(E *e, Res *r){
 static Res *ds1321(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"v0")){Res*t=aw1313(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw1313(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw1313(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -5356,7 +5369,7 @@ static Res *aw1322(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[4];
  {Val *v=ev1324(ee);if(!v)return 0;av[0]=v;}
@@ -6088,7 +6101,7 @@ static Res *aw1502(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[4];
  {Val *v=ev1504(ee);if(!v)return 0;av[0]=v;}
@@ -6397,7 +6410,7 @@ static Res *aw1568(E *e, Res *r){
 static Res *ds1589(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"we")){Res*t=aw1568(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw1568(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw1568(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -6896,7 +6909,7 @@ static Res *aw1703(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[4];
  {Val *v=ev1705(ee);if(!v)return 0;av[0]=v;}
@@ -7205,7 +7218,7 @@ static Res *aw1769(E *e, Res *r){
 static Res *ds1790(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"be")){Res*t=aw1769(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw1769(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw1769(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -7768,7 +7781,7 @@ static Res *aw1937(E *e, Res *r){
 static Res *ds1944(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"we")){Res*t=aw1937(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw1937(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw1937(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -8045,7 +8058,7 @@ static Res *aw1993(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("k",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[4];
  {Val *v=ev1995(ee);if(!v)return 0;av[0]=v;}
@@ -8602,7 +8615,7 @@ static Res *aw2116(E *e, Res *r){
 static Res *ds2140(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"le")){Res*t=aw2116(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2116(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2116(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -8823,7 +8836,7 @@ static Res *aw2185(E *e, Res *r){
 static Res *ds2206(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"se")){Res*t=aw2185(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2185(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2185(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -9160,7 +9173,7 @@ static Res *aw2284(E *e, Res *r){
 static Res *ds2292(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"ce")){Res*t=aw2284(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2284(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2284(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -9743,7 +9756,7 @@ static Res *aw2421(E *e, Res *r){
 static Res *ds2442(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"de")){Res*t=aw2421(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2421(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2421(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -10371,7 +10384,7 @@ static Res *aw2592(E *e, Res *r){
 static Res *ds2599(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"fe")){Res*t=aw2592(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2592(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2592(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -10619,7 +10632,7 @@ static Res *aw2647(E *e, Res *r){
 static Res *ds2655(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"t0")){Res*t=aw2647(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2647(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2647(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -11343,7 +11356,7 @@ static Res *aw2830(E *e, Res *r){
 static Res *ds2837(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"ve")){Res*t=aw2830(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2830(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2830(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -11814,7 +11827,7 @@ static Res *aw2944(E *e, Res *r){
 static Res *ds2950(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"t0")){Res*t=aw2944(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw2944(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw2944(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -11852,7 +11865,7 @@ static Res *aw2951(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[4];
  {Val *v=ev2953(ee);if(!v)return 0;av[0]=v;}
@@ -12164,7 +12177,7 @@ static Res *aw3023(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[4];
  {Val *v=ev3025(ee);if(!v)return 0;av[0]=v;}
@@ -12435,7 +12448,7 @@ static Res *aw3089(E *e, Res *r){
 static Res *ds3097(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"be")){Res*t=aw3089(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw3089(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw3089(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -12874,7 +12887,7 @@ static Res *aw3182(E *e, Res *r){
 static Res *ds3215(E *e, Res *r){
  KSTEP();
  if(r->br){
- if(!strcmp(r->br,"t1")){Res*t=aw3182(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
+ if(!strcmp(r->br,"_chain")){Res*t=aw3182(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
  return 0;}
  if(!r->v)return 0;
  {Res*t=aw3182(e,r);if(!t)return 0;if(t!=KSKIP())return t;}
@@ -12883,7 +12896,7 @@ static Res *aw3177(E *e, Res *r){
  KSTEP();
  E*ee=e;(void)r;(void)ee;
  if(!r->v)return 0;
- ee=ecn("c",r->v,ee);
+ ee=ecn("_",r->v,ee);
  {E*ae=0;
  {Val*av[3];
  {Val *v=ev3179(ee);if(!v)return 0;av[0]=v;}

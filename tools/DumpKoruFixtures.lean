@@ -893,6 +893,21 @@ def main : IO Unit := do
       ++ ",\"file\":\"input.k\",\"emit_prog\":true"
       ++ ",\"emit_args\":true,\"gen\":\"kwir\"}")
     (some kwirFile)
+  -- 910_kemitp — the whole-program emitter as a koru program:
+  -- emitProgC spelled in the dialect.  `emit {src, fuel}` args
+  -- arrive from the emit wire (the target claim's declared fuel
+  -- becomes the emitted driver's kfuel).  Wire row: the
+  -- ~60-callable walk uses chain/conts shapes with no surface
+  -- spelling — the claim IS the program.  Row fuel is the
+  -- compiled emitter's own budget — sized for the kWir emission
+  -- walk (~2e9 KSTEPs observed compiled).
+  writeLeaf "900_wire" "910_kemitp"
+    (caseRow 4294967296 ISAR.kEmitProg []
+      (",\"emit_prog\":true,\"gen\":\"kemitp\",\"claim\":\""
+        ++ jsonEsc (claimSxO ISAR.kEmitProg 4294967296
+            (ISAR.evalKProg ISAR.kEmitProg [] 4294967296) [])
+        ++ "\""))
+    none
   -- 800_forged — an asserted-wrong expectation over a deciding
   -- program: krun must DRIFT, proving claims are re-decided
   let forged : ISAR.KProg := ⟨[("main", .bare (.lit (.int 5)))], "main", []⟩
@@ -918,8 +933,10 @@ def main : IO Unit := do
   | .error ax => throw (IO.userError s!"emitProgC refused: {ax}")
   -- klex.c — the lexer as compiled code: emitProgC lowers kLex's
   -- callables (jump loops, ordered dispatch, invoke tails) to C99.
-  -- Same stamp contract as kemit.c.
-  match ISAR.emitProgC ISAR.kLex 1024 with
+  -- Same stamp contract as kemit.c.  Fuel is the row's declared
+  -- fuel: the claim declares the budget its compiled form runs
+  -- with (the emit wire passes it through as the driver kfuel).
+  match ISAR.emitProgC ISAR.kLex 512 with
   | .ok c =>
       IO.FS.createDirAll "host2/specs/gen"
       IO.FS.writeFile "host2/specs/gen/klex.c"
@@ -949,8 +966,9 @@ def main : IO Unit := do
   -- klow.c — the reifier as compiled code: emitProgC lowers kLow's
   -- 84 callables (byte scanners, escapers, the row state machine) to
   -- C99.  Same stamp contract; the kl leg races it against `korufe
-  -- --reify` and the interpreted krun lane.
-  match ISAR.emitProgC ISAR.kLow 8192 with
+  -- --reify` and the interpreted krun lane.  Fuel = row's declared
+  -- fuel (claim-fuel alignment: compiled form honors the claim).
+  match ISAR.emitProgC ISAR.kLow 4000000 with
   | .ok c =>
       IO.FS.createDirAll "host2/specs/gen"
       IO.FS.writeFile "host2/specs/gen/klow.c"
@@ -959,7 +977,8 @@ def main : IO Unit := do
   | .error ax => throw (IO.userError s!"emitProgC(kLow) refused: {ax}")
   -- kchain.c — the declared composition shape as compiled code:
   -- graph union + wiring + stubs through the same emitProgC path.
-  match ISAR.emitProgC ISAR.kChain 8192 with
+  -- Fuel = row's declared fuel.
+  match ISAR.emitProgC ISAR.kChain 4000000 with
   | .ok c =>
       IO.FS.createDirAll "host2/specs/gen"
       IO.FS.writeFile "host2/specs/gen/kchain.c"
@@ -970,10 +989,27 @@ def main : IO Unit := do
   -- 170 callables (span walkers, expr emitter, decl-table scans,
   -- the row state machine) to C99.  Same stamp contract; the wi
   -- leg races it against `korufe --lower` graph-for-graph.
-  match ISAR.emitProgC ISAR.kWir 8192 with
+  -- Fuel = row's declared fuel.
+  match ISAR.emitProgC ISAR.kWir 4000000 with
   | .ok c =>
       IO.FS.createDirAll "host2/specs/gen"
       IO.FS.writeFile "host2/specs/gen/kwir.c"
         ("/* input.fnv1a64:" ++ toString (fnv1a64 kwirFile)
           ++ " */\n" ++ c)
   | .error ax => throw (IO.userError s!"emitProgC(kWir) refused: {ax}")
+  -- kemitp.c — the WHOLE-PROGRAM emitter as compiled code:
+  -- emitProgC lowers kEmitProg itself — the self-host leg's H1
+  -- artifact.  Fuel = the 910 row's declared fuel, sized for the
+  -- kWir emission walk (~2e9 KSTEPs observed compiled).  The kp
+  -- legs in check.py feed each program's quote to the compiled
+  -- binary and byte-compare against these gen artifacts.  The
+  -- stamp binds the wire claim (no input.k exists for wire rows).
+  match ISAR.emitProgC ISAR.kEmitProg 4294967296 with
+  | .ok c =>
+      IO.FS.createDirAll "host2/specs/gen"
+      IO.FS.writeFile "host2/specs/gen/kemitp.c"
+        ("/* claim.fnv1a64:" ++ toString (fnv1a64
+            (claimSxO ISAR.kEmitProg 4294967296
+              (ISAR.evalKProg ISAR.kEmitProg [] 4294967296) []))
+          ++ " */\n" ++ c)
+  | .error ax => throw (IO.userError s!"emitProgC(kEmitProg) refused: {ax}")

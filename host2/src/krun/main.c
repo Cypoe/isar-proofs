@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
         }
         fputs("(cell (src ", stdout);
         print_val(quote_prog(&qc.prog), stdout);
-        fputs("))\n", stdout);
+        fprintf(stdout, ") (fuel (int %lld)))\n", (long long)qc.fuel);
         return 0;
     }
 
@@ -134,7 +134,10 @@ int main(int argc, char **argv) {
 
     if (argc == 4) {
         /* emit mode: this file is the compiler; quote SRC's prog,
-           invoke its `emit` entry with [("src", quoted)] */
+           invoke its `emit` entry with [("src", quoted),
+           ("fuel", SRC's declared fuel)] — the claim declares the
+           budget its compiled form runs with (kfuel= in emitProgC
+           output) */
         char *sbuf; Sx *ssx; Claim sc;
         sbuf = file_read_all(argv[3]);
         ssx = sbuf ? parse_top(sbuf) : 0;
@@ -143,11 +146,17 @@ int main(int argc, char **argv) {
             return 2;
         }
         {
-            NV arg;
-            arg.n = "src";
-            arg.v = quote_prog(&sc.prog);
+            /* the target claim's declared fuel becomes the emitted
+               driver's kfuel — kemitp's `emit {src,fuel}` entry */
+            NV arg[2];
+            Val fv;
+            arg[0].n = "src";
+            arg[0].v = quote_prog(&sc.prog);
+            fv.tag = 0; fv.i = (long long)sc.fuel;
+            arg[1].n = "fuel";
+            arg[1].v = &fv;
             if (!eval_prog(c.prog.graph, c.prog.ng, c.oracle, c.noracle,
-                           c.fuel, "emit", &arg, 1, &got)) {
+                           c.fuel, "emit", arg, 2, &got)) {
                 fprintf(stderr, "refuse: %s did not decide emit\n", argv[1]);
                 return 3;
             }

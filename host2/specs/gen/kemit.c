@@ -179,6 +179,19 @@ static Val*kbi(const char*n,Val**av,int na){k_i64 o;int ok;
  if(!strcmp(n,"len")&&na==1)return(av[0]->tag==4)?v_int(av[0]->nx):0;
  if(!strcmp(n,"intToString")&&na==1){char b[32];
   if(av[0]->tag!=0)return 0;snprintf(b,32,"%lld",(long long)av[0]->i);return v_str(b);}
+ if(!strcmp(n,"chars")&&na==1){char*f;int i,nn;Val**xs;
+  if(av[0]->tag!=3)return 0;f=s_flat(av[0]->s);nn=strlen(f);
+  xs=xm((nn?nn:1)*sizeof(Val*));for(i=0;i<nn;i++)xs[i]=v_int((unsigned char)f[i]);
+  return v_arr(xs,nn);}
+ if(!strcmp(n,"charsToString")&&na==1){char*p;int i;
+  if(av[0]->tag!=4)return 0;p=xm(av[0]->nx+1);
+  for(i=0;i<av[0]->nx;i++){
+   if(av[0]->xs[i]->tag!=0||av[0]->xs[i]->i<0||av[0]->xs[i]->i>255)return 0;
+   p[i]=(char)av[0]->xs[i]->i;}
+  p[av[0]->nx]=0;return v_str(p);}
+ if(!strcmp(n,"charToString")&&na==1){char*p;
+  if(av[0]->tag!=0||av[0]->i<0||av[0]->i>127)return 0;
+  p=xm(2);p[0]=(char)av[0]->i;p[1]=0;return v_str(p);}
  return 0;}
 static Val*k_field(Val*o,const char*n){int i;
  if(!o||o->tag!=5)return 0;for(i=o->nf-1;i>=0;i--)if(!strcmp(o->ns[i],n))return o->vs[i];return 0;}

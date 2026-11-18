@@ -1039,6 +1039,11 @@ def gate():
         return claim
 
     kemit_claim = None
+    kemitp_claim = None  # the whole-program emitter's claim
+                         # (emit_prog + gen:kemitp — the 910 wire
+                         # row; its --emit supplies {src, fuel})
+    emit_progs = {}   # leaf_dir -> claim for emit_prog rows that
+                      # name a gen artifact — the kp leg's corpus
     args_progs = {}   # leaf_dir -> gen name for emit_prog rows
                       # marked emit_args — their sibling rows are
                       # the compiled binary's inputs via the
@@ -1051,8 +1056,12 @@ def gate():
             if row.get("emit_prog"):
                 if row.get("emit_args"):
                     args_progs[leaf_dir] = row.get("gen")
+                    emit_progs[row.get("gen")] = claim
+                elif row.get("gen") == "kemitp":
+                    kemitp_claim = claim
                 else:
                     kemit_claim = claim
+                    emit_progs["kemit"] = claim
 
     # ---- FlowCheck witness leg: the AUTHORITY's mechanized
     # semantics (w:/src/koru FlowKernel via FlowCheck) re-decides
@@ -1378,6 +1387,127 @@ def gate():
                         f"exit {got2 & 0xFF} != {bare2['int'] & 0xFF}")
             except subprocess.TimeoutExpired:
                 bad(f"{dkey}.h2", "docker step timed out")
+
+    # ---- kp legs: the COMPILED whole-program emitter ----
+    # specs/gen/kemitp.c is emitProgC(kEmitProg) — emitProgC spelled
+    # as a koru program, lowered by itself to C99.  Two legs:
+    #   kp.emit : krun kemitp.claim --emit claim → the claim's
+    #             program emitted as a complete C99 source,
+    #             byte-compared against gen/<prog>.c (the emit
+    #             wire carries the target claim's declared fuel
+    #             into the emitted driver's kfuel — the gen
+    #             artifacts are emitted at claim fuel, so the
+    #             comparison is byte-exact modulo the stamp line
+    #             and the wire's trailing newline).  Interpreted:
+    #             small targets only.
+    #   kp.h1   : krun --quote claim | kemitp_bin → the same
+    #             comparison through the COMPILED emitter — the
+    #             self-host leg: a koru-spelled whole-program
+    #             emitter executing as an artifact reproduces the
+    #             gen corpus byte-for-byte, including kWir's ~1MB.
+    kp_bin = os.path.join(BUILD, "kemitp_kp"
+                          + (".exe" if os.name == "nt" else ""))
+    kemitp_c = os.path.join(SPECS, "gen", "kemitp.c")
+    have_kp = False
+    if not os.path.isfile(kemitp_c):
+        skip("kp.build", "specs/gen/kemitp.c not generated")
+    else:
+        # wire-row stamp: the artifact binds the 910 claim, not an
+        # input.k — recompute fnv over the row's embedded claim.
+        kp_row = None
+        for _, _, r, _, _ in all_rows:
+            if r.get("emit_prog") and r.get("gen") == "kemitp":
+                kp_row = r
+                break
+        if kp_row is None:
+            bad("kp.build", "no emit_prog gen:kemitp row")
+        else:
+            with open(kemitp_c, encoding="utf-8") as f:
+                kp_head = f.readline().strip()
+            want_stamp = ("/* claim.fnv1a64:"
+                          + str(_fnv1a64(kp_row["claim"]
+                                         .encode("utf-8")))
+                          + " */")
+            if kp_head == want_stamp:
+                ok("kp.stamp", "kemitp.c bound to 910_kemitp claim")
+            else:
+                bad("kp.stamp",
+                    "kemitp.c stamp stale vs 910_kemitp claim — "
+                    "regenerate via tools/DumpKoruFixtures.lean")
+            # the ep-* recursion over deep quote cells needs a wide
+            # stack — same remedy the kw leg takes on Windows.
+            kp_flags = list(tc["flags"])
+            if os.name == "nt":
+                kp_flags.append("-Wl,/STACK:268435456")
+            c = subprocess.run([tc["cc"], *kp_flags, kemitp_c,
+                                "-o", kp_bin],
+                               capture_output=True, text=True)
+            if c.returncode != 0:
+                bad("kp.build", c.stderr.strip()[:300])
+            else:
+                ok("kp.build", "emitProgC(kEmitProg) via c99 toolchain")
+                have_kp = True
+
+    def _gen_expected(gname):
+        """gen/<g>.c minus its stamp line, bytes newline-normalized
+        — text mode would decode the UTF-8 prelude comments and
+        shrink the comparison."""
+        with open(os.path.join(SPECS, "gen", gname + ".c"),
+                  "rb") as f:
+            t = f.read().replace(b"\r\n", b"\n")
+        return t.split(b"\n", 1)[1].rstrip(b"\n")
+
+    if kemitp_claim is None:
+        skip("kp", "910_kemitp claim not built")
+    elif emit_progs.get("kemit") is None:
+        skip("kp", "kemit claim not built")
+    else:
+        # kp.emit — interpreted lane, small target: kemit's own
+        # claim (14KB quote).  The output IS gen/kemit.c — the
+        # koru-spelled whole-program emitter under krun ≡ emitProgC.
+        r = subprocess.run([KRUN, kemitp_claim, "--emit",
+                            emit_progs["kemit"]],
+                           capture_output=True)
+        if r.returncode == 0 and \
+                r.stdout.replace(b"\r\n", b"\n").rstrip(b"\n") \
+                == _gen_expected("kemit"):
+            ok("kp.emit", "interpreted kemitp == gen/kemit.c")
+        else:
+            bad("kp.emit",
+                f"exit={r.returncode} "
+                f"len={len(r.stdout)} want gen/kemit.c "
+                f"{r.stderr.strip()[:80]}")
+
+        # kp.h1 — compiled lane over every emit_prog's gen artifact.
+        for gname, claim in sorted(emit_progs.items()):
+            gsrc = os.path.join(SPECS, "gen", gname + ".c")
+            if not os.path.isfile(gsrc):
+                continue
+            if not have_kp:
+                skip(f"kp.{gname}.h1", "kemitp binary not built")
+                continue
+            q = subprocess.run([KRUN, "--quote", claim],
+                               capture_output=True)
+            if q.returncode != 0:
+                bad(f"kp.{gname}.h1",
+                    f"--quote refused: {q.stderr.strip()[:80]}")
+                continue
+            try:
+                rb = subprocess.run([kp_bin], input=q.stdout,
+                                    capture_output=True,
+                                    timeout=300)
+            except subprocess.TimeoutExpired:
+                bad(f"kp.{gname}.h1", "kemitp run timed out")
+                continue
+            if rb.returncode == 0 and \
+                    rb.stdout.replace(b"\r\n", b"\n").rstrip(b"\n") \
+                    == _gen_expected(gname):
+                ok(f"kp.{gname}.h1",
+                   f"compiled kemitp == gen/{gname}.c")
+            else:
+                bad(f"kp.{gname}.h1",
+                    f"exit={rb.returncode} "
+                    f"len={len(rb.stdout)} want gen/{gname}.c")
 
     # ---- compiled emit_args programs: kl/ks/… legs ----
     # specs/gen/<g>.c is ISAR.KoruProgEmit.emitProgC(<prog>) — a

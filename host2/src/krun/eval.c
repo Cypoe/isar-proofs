@@ -206,6 +206,36 @@ static Val *eval_kbuiltin(NV *env, int nenv, char *name, Expr **args, int nargs)
         snprintf(buf, sizeof buf, "%lld", (long long)va->i);
         return v_str(xstrdup(buf));
     }
+    if (strcmp(name, "chars") == 0 && nargs == 1) {
+        Val **xs; int i, n;
+        va = eval_ke(env, nenv, args[0]);
+        if (!is_str(va)) return 0;
+        n = (int)strlen(va->s);
+        xs = xmalloc((n ? n : 1) * sizeof *xs);
+        for (i = 0; i < n; i++) xs[i] = v_int((unsigned char)va->s[i]);
+        return v_arr(xs, n);
+    }
+    if (strcmp(name, "charsToString") == 0 && nargs == 1) {
+        char *p; int i;
+        va = eval_ke(env, nenv, args[0]);
+        if (!is_arr(va)) return 0;
+        p = xmalloc(va->nx + 1);
+        for (i = 0; i < va->nx; i++) {
+            if (!is_int(va->xs[i]) || va->xs[i]->i < 0 ||
+                va->xs[i]->i > 255) return 0;
+            p[i] = (char)va->xs[i]->i;
+        }
+        p[va->nx] = 0;
+        return v_str(p);
+    }
+    if (strcmp(name, "charToString") == 0 && nargs == 1) {
+        char *p;
+        va = eval_ke(env, nenv, args[0]);
+        if (!is_int(va) || va->i < 0 || va->i > 127) return 0;
+        p = xmalloc(2);
+        p[0] = (char)va->i; p[1] = 0;
+        return v_str(p);
+    }
     return 0;
 }
 
