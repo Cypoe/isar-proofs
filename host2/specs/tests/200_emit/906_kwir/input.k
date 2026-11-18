@@ -248,7 +248,7 @@ tor wty {nm: string} -> i64
 wty -> (if(((((nm == "i64") || (nm == "i32")) || ((nm == "i16") || (nm == "i8"))) || ((((nm == "u64") || (nm == "u32")) || ((nm == "u16") || (nm == "u8"))) || (((nm == "f64") || (nm == "f32")) || ((nm == "bool") || (nm == "string")))))) 1 else if((((nm == "program") || (nm == "void")) || (nm == "unit"))) 1 else 0)
 
 tor wbl {nm: string} -> i64
-wbl -> (if((((((nm == "as") || (nm == "intCast")) || ((nm == "truncate") || (nm == "divTrunc"))) || (((nm == "rem") || (nm == "mod")) || ((nm == "len") || (nm == "intToString")))) || ((((nm == "chars") || (nm == "charsToString")) || (nm == "charToString")) || (nm == "contains")))) 1 else 0)
+wbl -> (if(((((((nm == "as") || (nm == "intCast")) || ((nm == "truncate") || (nm == "divTrunc"))) || (((nm == "rem") || (nm == "mod")) || ((nm == "len") || (nm == "intToString")))) || ((((nm == "chars") || (nm == "charsToString")) || (nm == "charToString")) || (nm == "contains"))) || ((nm == "push") || (nm == "set")))) 1 else 0)
 
 tor wev {lv: i64, src: []const i64, lo: i64, hi: i64, names: []const string, nsp: []const i64, nn: i64, strs: []const string, ssp: []const i64, ns: i64} -> string
 wev = wfp(src, lo, hi, i: lo, d: 0, ins: 0, last: (0 - 1), prec: lv)

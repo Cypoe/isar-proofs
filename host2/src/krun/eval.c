@@ -243,6 +243,28 @@ static Val *eval_kbuiltin(NV *env, int nenv, char *name, Expr **args, int nargs)
         if (!is_str(va) || !is_str(vb)) return 0;
         return v_bool(strstr(va->s, vb->s) != 0);
     }
+    if (strcmp(name, "push") == 0 && nargs == 2) {
+        Val *vb, **xs;
+        va = eval_ke(env, nenv, args[0]);
+        vb = eval_ke(env, nenv, args[1]);
+        if (!is_arr(va)) return 0;
+        xs = xmalloc((va->nx + 1) * sizeof(Val *));
+        memcpy(xs, va->xs, va->nx * sizeof(Val *));
+        xs[va->nx] = vb;
+        return v_arr(xs, va->nx + 1);
+    }
+    if (strcmp(name, "set") == 0 && nargs == 3) {
+        Val *vb, *vi, **xs;
+        va = eval_ke(env, nenv, args[0]);
+        vi = eval_ke(env, nenv, args[1]);
+        vb = eval_ke(env, nenv, args[2]);
+        if (!is_arr(va) || !is_int(vi) ||
+            vi->i < 0 || vi->i >= va->nx) return 0;
+        xs = xmalloc((va->nx ? va->nx : 1) * sizeof(Val *));
+        memcpy(xs, va->xs, va->nx * sizeof(Val *));
+        xs[vi->i] = vb;
+        return v_arr(xs, va->nx);
+    }
     return 0;
 }
 

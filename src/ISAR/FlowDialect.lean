@@ -46,9 +46,13 @@ refusal or an exactness strengthening — never a silent guess):
     `"chars"` (`str → arr` of UTF-8 byte ints), `"charsToString"`
     (`arr` of byte ints `→ str`, refusing outside 0‥255 and on
     invalid UTF-8), `"charToString"` (byte int `→ str`,
-    ASCII-only — refuses outside 0‥127), and `"contains"`
+    ASCII-only — refuses outside 0‥127), `"contains"`
     (`str × str → bool`, substring predicate — a membership check
-    the emitter would otherwise spell as a per-char invoke loop).
+    the emitter would otherwise spell as a per-char invoke loop),
+    `"push"` (`arr × v → arr`, pure functional append — the
+    composite constructor the dialect lacked; `{n',text}` pairs
+    are `[n',text]` arrs), and `"set"` (`arr × int × v → arr`,
+    pure functional update — out-of-range refuses).
     These are stdlib names
     the kernel subset did
     not carry; the extension is strictly additive — previously
@@ -331,6 +335,17 @@ def evalKBuiltin (env : KEnv) (name : String) (args : List KExpr) : Option KVal 
       | some (.str h), some (.str n) =>
           some (.bool (h.contains n.toSlice))
       | _, _ => none
+  | "push", [a, e] =>
+      match evalKE env a, evalKE env e with
+      | some (.arr xs), some v => some (.arr (xs ++ [v]))
+      | _, _ => none
+  | "set", [a, i, e] =>
+      match evalKE env a, evalKE env i, evalKE env e with
+      | some (.arr xs), some (.int n), some v =>
+          if 0 ≤ n && n < xs.length then
+            some (.arr (xs.set n.toNat v))
+          else none
+      | _, _, _ => none
   | _, _ => none
 end
 

@@ -285,6 +285,14 @@ def prelude : String :=
 " if(!strcmp(n,\"contains\")&&na==2){\n" ++
 "  if(av[0]->tag!=3||av[1]->tag!=3)return 0;\n" ++
 "  return v_bool(strstr(s_flat(av[0]->s),s_flat(av[1]->s))!=0);}\n" ++
+" if(!strcmp(n,\"push\")&&na==2){Val**xs;\n" ++
+"  if(av[0]->tag!=4)return 0;\n" ++
+"  xs=xm((av[0]->nx+1)*sizeof(Val*));memcpy(xs,av[0]->xs,av[0]->nx*sizeof(Val*));\n" ++
+"  xs[av[0]->nx]=av[1];return v_arr(xs,av[0]->nx+1);}\n" ++
+" if(!strcmp(n,\"set\")&&na==3){Val**xs;\n" ++
+"  if(av[0]->tag!=4||av[1]->tag!=0||av[1]->i<0||av[1]->i>=av[0]->nx)return 0;\n" ++
+"  xs=xm((av[0]->nx?av[0]->nx:1)*sizeof(Val*));memcpy(xs,av[0]->xs,av[0]->nx*sizeof(Val*));\n" ++
+"  xs[av[1]->i]=av[2];return v_arr(xs,av[0]->nx);}\n" ++
 " return 0;}\n" ++
 "static Val*k_field(Val*o,const char*n){int i;\n" ++
 " if(!o||o->tag!=5)return 0;for(i=o->nf-1;i>=0;i--)if(!strcmp(o->ns[i],n))return o->vs[i];return 0;}\n" ++
@@ -859,605 +867,275 @@ private def kEpMems : String × KCallable :=
               (qcc [qs "|", qv "s", qs "|"])])
           (qint 1) (qint 0)))
 
--- ---------- dc family: structural EM.fresh counts ----------
--- Each `dc*` computes exactly the fresh names `gen*` allocates
--- in its subtree: `aw`/`an` allocate first in their frame,
--- `ev`/`vl`/`ds` last.  The caller can then name each child's
--- thunk `ev_(n + dc(child) - 1)` without threading state.
+-- ---------- emit family: [text,cnt] pair returns ----------
+-- Every `ep-g*` emitter returns `[text,cnt]` (an `arr` built by
+-- `push`): `cnt` is exactly the fresh names it allocated.  The
+-- `ep-d*` shadow-fold family is gone — a child's count arrives
+-- in the child's pair, so each subtree is walked once instead
+-- of being re-walked per sibling base (the old O(S·D̄) mass).
+-- Multi-child folds merge the three old passes (decls, set/slot
+-- lines, recount) into one traversal returning
+-- `[decls, slots, cnt]`; consumers that need per-child
+-- positions read an `idx` arr accumulated by the same fold.
 
-/-- `ep-dv {v}` — `dcV`. -/
-private def kEpDv : String × KCallable :=
-  ("ep-dv", .subflow {
-    preLabel := none
-    head := ("ep-tg", [("x", qv "v")])
-    arms := [
-      qp "leaf" (some "t") (some (qle (qv "t") (qint 4)))
-        (qint 1)
-    , qivc (some "t") "ep-dvl"
-        [("xs", qk (qv "v") 0), ("i", qint 0),
-         ("n", qlen (qk (qv "v") 0))]
-        [] "m" (qadd (qv "m") (qint 1))
-        |> qArmG (qeq (qv "t") (qint 5))
-    , qivc (some "t") "ep-dpl"
-        [("xs", qk (qv "v") 0), ("i", qint 0),
-         ("n", qlen (qk (qv "v") 0))]
-        [] "m" (qadd (qv "m") (qint 1))
-        |> qArmG (qeq (qv "t") (qint 6))
-    ] })
+/-- `push a x` — pure functional append (frag 0065 rung 1). -/
+private def qpush (a x : KExpr) : KExpr := .builtin "push" [a, x]
 
-/-- `ep-dvl {xs,i,n}` — `dcV` summed over a quoted arr's elems. -/
-private def kEpDvl : String × KCallable :=
-  ("ep-dvl", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qint 0)
-    , qivc (some "c") "ep-dv" [("v", qix (qv "xs") (qv "c"))]
-        [("m", "ep-dvl", [("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n")])]
-        "r" (qadd (qv "m") (qv "r"))
-    ] })
+/-- `[a,b]` via `push` — the composite return the dialect
+lacked (frag 0060's `{n',text}` wall). -/
+private def qarr2 (a b : KExpr) : KExpr := qpush (qpush (.lit (.arr [])) a) b
 
-/-- `ep-dpl {xs,i,n}` — `dcV` summed over pair values. -/
-private def kEpDpl : String × KCallable :=
-  ("ep-dpl", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qint 0)
-    , qivc (some "c") "ep-dv"
-        [("v", qf (qix (qv "xs") (qv "c")) "v")]
-        [("m", "ep-dpl", [("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n")])]
-        "r" (qadd (qv "m") (qv "r"))
-    ] })
+/-- `[a,b,c]` via `push`. -/
+private def qarr3 (a b c : KExpr) : KExpr := qpush (qarr2 a b) c
 
-/-- `ep-dbc {e,i,n,nm}` — one builtin arg's `dcE`; the `as`-2
-env arg contributes 0 (it is not emitted as an `ev`). -/
-private def kEpDbc : String × KCallable :=
-  ("ep-dbc", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "e")])
-    arms := [
-      qp "skip" (some "x")
-        (some (qand (qeq (qv "nm") (qs "as"))
-              (qand (qeq (qv "n") (qint 2))
-                    (qeq (qv "i") (qint 0)))))
-        (qint 0)
-    , qiv1s (some "x") "ep-de" [("e", qv "x")]
-    ] })
+/-- `p[0]`/`p[1]`/`p[2]` — pair/triple projections. -/
+private def qa0 (e : KExpr) : KExpr := qat e (qint 0)
+private def qa1 (e : KExpr) : KExpr := qat e (qint 1)
+private def qa2 (e : KExpr) : KExpr := qat e (qint 2)
 
-/-- `ep-dbb {nm,xs,i,n}` — builtin args `dcE` sum. -/
-private def kEpDbb : String × KCallable :=
-  ("ep-dbb", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qint 0)
-    , qivc (some "c") "ep-dbc"
-        [("e", qix (qv "xs") (qv "c")), ("i", qv "c"),
-         ("n", qv "n"), ("nm", qv "nm")]
-        [("m", "ep-dbb", [("nm", qv "nm"), ("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n")])]
-        "r" (qadd (qv "m") (qv "r"))
-    ] })
-
-/-- `ep-de {e}` — `dcE`. -/
-private def kEpDe : String × KCallable :=
-  ("ep-de", .subflow {
-    preLabel := none
-    head := ("ep-tg", [("x", qv "e")])
-    arms := [
-      qivc (some "t") "ep-dv" [("v", qk (qv "e") 0)]
-        [] "m" (qadd (qv "m") (qint 1))
-        |> qArmG (qeq (qv "t") (qint 8))
-    , qp "var" (some "t") (some (qeq (qv "t") (qint 9))) (qint 1)
-    , qivc (some "t") "ep-de" [("e", qk (qv "e") 1)]
-        [("a", "ep-de", [("e", qk (qv "e") 2)])]
-        "b" (qadd (qint 1) (qadd (qv "a") (qv "b")))
-        |> qArmG (qeq (qv "t") (qint 10))
-    , qivc (some "t") "ep-de" [("e", qk (qv "e") 1)]
-        [] "a" (qadd (qv "a") (qint 1))
-        |> qArmG (qeq (qv "t") (qint 11))
-    , qivc (some "t") "ep-de" [("e", qk (qv "e") 0)]
-        [("a", "ep-de", [("e", qk (qv "e") 1)]),
-         ("b", "ep-de", [("e", qk (qv "e") 2)])]
-        "c" (qadd (qint 1)
-          (qadd (qv "a") (qadd (qv "b") (qv "c"))))
-        |> qArmG (qeq (qv "t") (qint 12))
-    , qivc (some "t") "ep-de" [("e", qk (qv "e") 0)]
-        [] "a" (qadd (qv "a") (qint 1))
-        |> qArmG (qeq (qv "t") (qint 13))
-    , qivc (some "t") "ep-de" [("e", qk (qv "e") 0)]
-        [("a", "ep-de", [("e", qk (qv "e") 1)])]
-        "b" (qadd (qint 1) (qadd (qv "a") (qv "b")))
-        |> qArmG (qeq (qv "t") (qint 14))
-    , qivc (some "t") "ep-dbb"
-        [("nm", qk (qv "e") 0), ("xs", qk (qv "e") 1),
-         ("i", qint 0), ("n", qlen (qk (qv "e") 1))]
-        [] "m" (qadd (qv "m") (qint 1))
-        |> qArmG (qeq (qv "t") (qint 15))
-    ] })
-
-/-- `ep-doc {o}` — opt-expr `dcE`: none→0, some→`dcE`. -/
-private def kEpDoc : String × KCallable :=
-  ("ep-doc", .subflow {
-    preLabel := none
-    head := ("ep-tg", [("x", qv "o")])
-    arms := [
-      qp "none" (some "t") (some (qeq (qv "t") (qint 23)))
-        (qint 0)
-    , qiv "some" (some "t") (some (qeq (qv "t") (qint 24)))
-        "ep-de" [("e", qk (qv "o") 0)]
-    ] })
-
-/-- `ep-dc0 {cs}` — conts `dcD` when nonempty, else 0. -/
-private def kEpDc0 : String × KCallable :=
-  ("ep-dc0", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "cs")])
-    arms := [
-      qp "empty" (some "x")
-        (some (qeq (qlen (qv "x")) (qint 0))) (qint 0)
-    , qiv1s (some "x") "ep-dd" [("xs", qv "x")]
-    ] })
-
-/-- `ep-dn {nd,cs}` — node `dc` (conts threaded for invoke). -/
-private def kEpDn : String × KCallable :=
-  ("ep-dn", .subflow {
-    preLabel := none
-    head := ("ep-tg", [("x", qv "nd")])
-    arms := [
-      qp "term" (some "t") (some (qeq (qv "t") (qint 16)))
-        (qint 0)
-    , qiv "jmp" (some "t") (some (qeq (qv "t") (qint 17)))
-        "ep-dg" [("xs", qk (qv "nd") 1)]
-    , qivc (some "t") "ep-dg" [("xs", qk (qv "nd") 1)]
-        [("a", "ep-dc0", [("cs", qv "cs")])]
-        "b" (qadd (qv "a") (qv "b"))
-        |> qArmG (qeq (qv "t") (qint 18))
-    , qiv "prod" (some "t") (some (qeq (qv "t") (qint 19)))
-        "ep-de" [("e", qk (qv "nd") 0)]
-    , qiv "ctor" (some "t") (some (qeq (qv "t") (qint 20)))
-        "ep-de" [("e", qk (qv "nd") 1)]
-    ] })
-
-/-- `ep-don {o,cs}` — node-opt `dc`: none→0, some→`ep-dn`. -/
-private def kEpDon : String × KCallable :=
-  ("ep-don", .subflow {
-    preLabel := none
-    head := ("ep-tg", [("x", qv "o")])
-    arms := [
-      qp "none" (some "t") (some (qeq (qv "t") (qint 23)))
-        (qint 0)
-    , qiv "nd" (some "t") (some (qeq (qv "t") (qint 24)))
-        "ep-dn" [("nd", qk (qv "o") 0), ("cs", qv "cs")]
-    ] })
-
-/-- `ep-dal {xs,i,n}` — `dcA` summed over an arm list. -/
-private def kEpDal : String × KCallable :=
-  ("ep-dal", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qint 0)
-    , qivc (some "c") "ep-da" [("a", qix (qv "xs") (qv "c"))]
-        [("m", "ep-dal", [("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n")])]
-        "r" (qadd (qv "m") (qv "r"))
-    ] })
-
-/-- `ep-dd {xs}` — `dcD` = the `ds` fn + `dcA` of each arm. -/
-private def kEpDd : String × KCallable :=
-  ("ep-dd", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "xs")])
-    arms := [qivc (some "x") "ep-dal"
-      [("xs", qv "x"), ("i", qint 0), ("n", qlen (qv "x"))]
-      [] "m" (qadd (qv "m") (qint 1))] })
-
-/-- `ep-da {a}` — `dcA` = `aw` + cond `dcE` + node part. -/
-private def kEpDa : String × KCallable :=
-  ("ep-da", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "a")])
-    arms := [qivc (some "x") "ep-doc" [("o", qk (qv "x") 3)]
-      [("c", "ep-don", [("o", qk (qv "x") 4),
-          ("cs", qk (qv "x") 5)])]
-      "d" (qadd (qint 1) (qadd (qv "c") (qv "d")))] })
-
-/-- `ep-dgl {xs,i,n}` — `dcE` summed over named-expr values. -/
-private def kEpDgl : String × KCallable :=
-  ("ep-dgl", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qint 0)
-    , qivc (some "c") "ep-de"
-        [("e", qf (qix (qv "xs") (qv "c")) "v")]
-        [("m", "ep-dgl", [("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n")])]
-        "r" (qadd (qv "m") (qv "r"))
-    ] })
-
-/-- `ep-dg {xs}` — `dc` of `genNamedArgs`: 0 when empty, else
-`an` + arg expr counts. -/
-private def kEpDg : String × KCallable :=
-  ("ep-dg", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "xs")])
-    arms := [
-      qp "empty" (some "x")
-        (some (qeq (qlen (qv "x")) (qint 0))) (qint 0)
-    , qivc (some "x") "ep-dgl"
-        [("xs", qv "x"), ("i", qint 0), ("n", qlen (qv "x"))]
-        [] "m" (qadd (qv "m") (qint 1))
-    ] })
-
-/-- `ep-df2 {xs}` — arms `dcD` or 0 when empty. -/
-private def kEpDf2 : String × KCallable :=
-  ("ep-df2", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "xs")])
-    arms := [
-      qp "empty" (some "x")
-        (some (qeq (qlen (qv "x")) (qint 0))) (qint 0)
-    , qiv1s (some "x") "ep-dd" [("xs", qv "x")]
-    ] })
-
-/-- `ep-df {fl}` — `dc` of a flow: head args `dc` + arms `dc`. -/
-private def kEpDf : String × KCallable :=
-  ("ep-df", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "fl")])
-    arms := [qivc (some "x") "ep-dg"
-      [("xs", qk (qk (qv "x") 1) 1)]
-      [("a", "ep-df2", [("xs", qk (qv "x") 2)])]
-      "b" (qadd (qv "a") (qv "b"))] })
-
-/-- `ep-dc {c}` — `dcC` = the body's `dc`. The `k_<mangle>`
-decl is named, not numbered — no `EM.fresh` is consumed for it.
-Thunks match no arm → refuse. -/
-private def kEpDc : String × KCallable :=
-  ("ep-dc", .subflow {
-    preLabel := none
-    head := ("ep-tg", [("x", qv "c")])
-    arms := [
-      qivc (some "t") "ep-de" [("e", qk (qv "c") 0)]
-        [] "a" (qv "a")
-        |> qArmG (qeq (qv "t") (qint 27))
-    , qivc (some "t") "ep-df" [("fl", qk (qv "c") 0)]
-        [] "a" (qv "a")
-        |> qArmG (qeq (qv "t") (qint 29))
-    ] })
-
--- ---------- g family: declaration text ----------
-
-/-- `ep-gvl {xs,i,n,m,out}` — decls for a quoted arr's element
-values; `m` is the running counter. -/
+/-- `ep-gvl {xs,i,n,m,dout,sout,cnt}` — one pass over a quoted
+arr's element values: child decls into `dout`, `xs[i]=vl_…();`
+set lines into `sout`, fresh count into `cnt`.  Returns the
+`[dout,sout,cnt]` triple. -/
 private def kEpGvl : String × KCallable :=
   ("ep-gvl", .subflow {
     preLabel := none
     head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
     arms := [
-      qstop (qv "out")
+      qstop (qarr3 (qv "dout") (qv "sout") (qv "cnt"))
     , qivc (some "c") "ep-gv"
         [("v", qix (qv "xs") (qv "c")), ("n", qv "m")]
-        [("d", "ep-dv", [("v", qix (qv "xs") (qv "c"))]),
-         ("dm", "ep-gvl", [("xs", qv "xs"),
+        [("dm", "ep-gvl", [("xs", qv "xs"),
             ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
-            ("out", qcat (qv "out") (qv "d"))])]
-        "r" (qv "r")
-    ] })
-
-/-- `ep-gvs {xs,i,n,m,out}` — `xs[i]=vl_…();` set lines. -/
-private def kEpGvs : String × KCallable :=
-  ("ep-gvs", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qv "out")
-    , qivc (some "c") "ep-dv" [("v", qix (qv "xs") (qv "c"))]
-        [("dm", "ep-gvs", [("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
-            ("out", qcc [qv "out", qs " xs[", qitoa (qv "c"),
+            ("m", qadd (qv "m") (qa1 (qv "dm"))),
+            ("dout", qcat (qv "dout") (qa0 (qv "dm"))),
+            ("sout", qcc [qv "sout", qs " xs[", qitoa (qv "c"),
               qs "]=vl",
-              qitoa (qadd (qv "m") (qsub (qv "dm") (qint 1))),
-              qs "();\n"])])]
+              qitoa (qsub (qadd (qv "m") (qa1 (qv "dm"))) (qint 1)),
+              qs "();\n"]),
+            ("cnt", qadd (qv "cnt") (qa1 (qv "dm")))])]
         "r" (qv "r")
     ] })
 
-/-- `ep-gpl {xs,i,n,m,out}` — decls for a quoted cell's pair
-values. -/
+/-- `ep-gpl {xs,i,n,m,dout,sout,cnt}` — the cell-pair twin of
+`ep-gvl`: decls into `dout`, `ns[i]=(char*)"…";vs[i]=vl_…();`
+lines into `sout`. -/
 private def kEpGpl : String × KCallable :=
   ("ep-gpl", .subflow {
     preLabel := none
     head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
     arms := [
-      qstop (qv "out")
+      qstop (qarr3 (qv "dout") (qv "sout") (qv "cnt"))
     , qivc (some "c") "ep-gv"
         [("v", qf (qix (qv "xs") (qv "c")) "v"), ("n", qv "m")]
-        [("d", "ep-dv",
-            [("v", qf (qix (qv "xs") (qv "c")) "v")]),
+        [("qq", "ep-cq",
+            [("s", qf (qix (qv "xs") (qv "c")) "name")]),
          ("dm", "ep-gpl", [("xs", qv "xs"),
             ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
-            ("out", qcat (qv "out") (qv "d"))])]
-        "r" (qv "r")
-    ] })
-
-/-- `ep-gps {xs,i,n,m,out}` — `ns[i]=(char*)"…";vs[i]=vl_…();`
-set lines. -/
-private def kEpGps : String × KCallable :=
-  ("ep-gps", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qv "out")
-    , qivc (some "c") "ep-cq"
-        [("s", qf (qix (qv "xs") (qv "c")) "name")]
-        [("q", "ep-dv",
-            [("v", qf (qix (qv "xs") (qv "c")) "v")]),
-         ("dm", "ep-gps", [("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
-            ("out", qcc [qv "out", qs " ns[", qitoa (qv "c"),
-              qs "]=(char*)", qv "q", qs ";vs[",
+            ("m", qadd (qv "m") (qa1 (qv "qq"))),
+            ("dout", qcat (qv "dout") (qa0 (qv "qq"))),
+            ("sout", qcc [qv "sout", qs " ns[", qitoa (qv "c"),
+              qs "]=(char*)", qv "dm", qs ";vs[",
               qitoa (qv "c"), qs "]=vl",
-              qitoa (qadd (qv "m") (qsub (qv "dm") (qint 1))),
-              qs "();\n"])])]
+              qitoa (qsub (qadd (qv "m") (qa1 (qv "qq"))) (qint 1)),
+              qs "();\n"]),
+            ("cnt", qadd (qv "cnt") (qa1 (qv "qq")))])]
         "r" (qv "r")
     ] })
 
 /-- `ep-gv {v,n}` — `genLitVal`: element decls then the `vl` fn
-(last fresh in the subtree). -/
+(last fresh in the subtree).  Returns `[text,cnt]`. -/
 private def kEpGv : String × KCallable :=
   ("ep-gv", .subflow {
     preLabel := none
     head := ("ep-tg", [("x", qv "v")])
     arms := [
       qp "int" (some "t") (some (qeq (qv "t") (qint 1)))
-        (qcc [qs "static Val *vl", qitoa (qv "n"),
+        (qarr2 (qcc [qs "static Val *vl", qitoa (qv "n"),
               qs "(void){\n return v_int(",
-              qitoa (qk (qv "v") 0), qs ");}\n"])
+              qitoa (qk (qv "v") 0), qs ");}\n"]) (qint 1))
     , qp "flt" (some "t") (some (qeq (qv "t") (qint 2)))
-        (qcc [qs "static Val *vl", qitoa (qv "n"),
+        (qarr2 (qcc [qs "static Val *vl", qitoa (qv "n"),
               qs "(void){\n return v_flt(",
               qitoa (qk (qv "v") 0), qs ",",
-              qitoa (qk (qv "v") 1), qs ");}\n"])
+              qitoa (qk (qv "v") 1), qs ");}\n"]) (qint 1))
     , qp "boo" (some "t") (some (qeq (qv "t") (qint 3)))
-        (qcc [qs "static Val *vl", qitoa (qv "n"),
+        (qarr2 (qcc [qs "static Val *vl", qitoa (qv "n"),
               qs "(void){\n return v_bool(",
-              qitoa (qk (qv "v") 0), qs ");}\n"])
+              qitoa (qk (qv "v") 0), qs ");}\n"]) (qint 1))
     , qivc (some "t") "ep-cq" [("s", qk (qv "v") 0)]
-        [] "q" (qcc [qs "static Val *vl", qitoa (qv "n"),
+        [] "q" (qarr2 (qcc [qs "static Val *vl", qitoa (qv "n"),
               qs "(void){\n return v_sref((char*)", qv "q",
-              qs ");}\n"])
+              qs ");}\n"]) (qint 1))
         |> qArmG (qeq (qv "t") (qint 4))
     , qivc (some "t") "ep-gvl"
         [("xs", qk (qv "v") 0), ("i", qint 0),
          ("n", qlen (qk (qv "v") 0)), ("m", qv "n"),
-         ("out", qs "")]
-        [("d", "ep-gvs",
-            [("xs", qk (qv "v") 0), ("i", qint 0),
-             ("n", qlen (qk (qv "v") 0)), ("m", qv "n"),
-             ("out", qs "")]),
-         ("st", "ep-dvl",
-            [("xs", qk (qv "v") 0), ("i", qint 0),
-             ("n", qlen (qk (qv "v") 0))])]
-        "dm" (qcc [qv "d", qs "static Val *vl",
-              qitoa (qadd (qv "n") (qv "dm")),
+         ("dout", qs ""), ("sout", qs ""), ("cnt", qint 0)]
+        [] "dm" (qarr2 (qcc [qa0 (qv "dm"), qs "static Val *vl",
+              qitoa (qadd (qv "n") (qa2 (qv "dm"))),
               qs "(void){\n Val**xs=xm(",
               qitoa (qlen (qk (qv "v") 0)),
-              qs "*sizeof(Val*));\n", qv "st",
+              qs "*sizeof(Val*));\n", qa1 (qv "dm"),
               qs " return v_arr(xs,",
               qitoa (qlen (qk (qv "v") 0)), qs ");}\n"])
+            (qadd (qa2 (qv "dm")) (qint 1)))
         |> qArmG (qeq (qv "t") (qint 5))
     , qivc (some "t") "ep-gpl"
         [("xs", qk (qv "v") 0), ("i", qint 0),
          ("n", qlen (qk (qv "v") 0)), ("m", qv "n"),
-         ("out", qs "")]
-        [("d", "ep-gps",
-            [("xs", qk (qv "v") 0), ("i", qint 0),
-             ("n", qlen (qk (qv "v") 0)), ("m", qv "n"),
-             ("out", qs "")]),
-         ("st", "ep-dpl",
-            [("xs", qk (qv "v") 0), ("i", qint 0),
-             ("n", qlen (qk (qv "v") 0))])]
-        "dm" (qcc [qv "d", qs "static Val *vl",
-              qitoa (qadd (qv "n") (qv "dm")),
+         ("dout", qs ""), ("sout", qs ""), ("cnt", qint 0)]
+        [] "dm" (qarr2 (qcc [qa0 (qv "dm"), qs "static Val *vl",
+              qitoa (qadd (qv "n") (qa2 (qv "dm"))),
               qs "(void){\n char**ns=xm(",
               qitoa (qlen (qk (qv "v") 0)),
               qs "*sizeof(char*));\n Val**vs=xm(",
               qitoa (qlen (qk (qv "v") 0)),
-              qs "*sizeof(Val*));\n", qv "st",
+              qs "*sizeof(Val*));\n", qa1 (qv "dm"),
               qs " return v_cell(ns,vs,",
               qitoa (qlen (qk (qv "v") 0)), qs ");}\n"])
+            (qadd (qa2 (qv "dm")) (qint 1)))
         |> qArmG (qeq (qv "t") (qint 6))
     ] })
 
-/-- `ep-gebd {nm,xs,i,n,m,out}` — builtin-arg `ev` decls, honoring
-the `as`-2 skip; `m` running counter. -/
-private def kEpGeb2 : String × KCallable :=
-  ("ep-geb2", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "dm")])
-    arms := [
-      qiv "skip" (some "k") (some (qeq (qv "k") (qint 0)))
-        "ep-gebd"
-        [("nm", qv "nm"), ("xs", qv "xs"), ("i", qv "i"),
-         ("n", qv "n"), ("m", qv "m"), ("out", qv "out")]
-    , qivc (some "k") "ep-ge"
-        [("e", qv "x2"), ("n", qv "m")]
-        [("d", "ep-gebd",
-            [("nm", qv "nm"), ("xs", qv "xs"), ("i", qv "i"),
-             ("n", qv "n"), ("m", qadd (qv "m") (qv "dm")),
-             ("out", qcat (qv "out") (qv "d"))])]
-        "r" (qv "r")
-    ] })
-
-/-- `ep-gebd` — the loop itself. -/
+/-- `ep-gebd {nm,xs,i,n,m,dout,sout,cnt}` — builtin-arg `ev`
+decls AND `av[i]=ev_…(e)` slots in one pass; the `as`-2 env
+arg (`nm=="as"`, two args, position 0) is skipped inline.
+Returns `[dout,sout,cnt]`. -/
 private def kEpGebd : String × KCallable :=
   ("ep-gebd", .subflow {
     preLabel := none
     head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
     arms := [
-      qstop (qv "out")
-    , qivc (some "c") "ep-dbc"
-        [("e", qix (qv "xs") (qv "c")), ("i", qv "c"),
-         ("n", qv "n"), ("nm", qv "nm")]
-        [("m0", "ep-geb2",
-            [("dm", qv "m0"), ("x2", qix (qv "xs") (qv "c")),
-             ("nm", qv "nm"), ("xs", qv "xs"),
+      qstop (qarr3 (qv "dout") (qv "sout") (qv "cnt"))
+    , qiv1s (some "c") "ep-gebd"
+        [("nm", qv "nm"), ("xs", qv "xs"),
+         ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
+         ("m", qv "m"), ("dout", qv "dout"), ("sout", qv "sout"),
+         ("cnt", qv "cnt")]
+        |> qArmG (qand (qeq (qv "nm") (qs "as"))
+                  (qand (qeq (qv "n") (qint 2))
+                        (qeq (qv "c") (qint 0))))
+    , qivc (some "c") "ep-ge"
+        [("e", qix (qv "xs") (qv "c")), ("n", qv "m")]
+        [("dm", "ep-gebd",
+            [("nm", qv "nm"), ("xs", qv "xs"),
              ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-             ("m", qv "m"), ("out", qv "out")])]
+             ("m", qadd (qv "m") (qa1 (qv "dm"))),
+             ("dout", qcat (qv "dout") (qa0 (qv "dm"))),
+             ("sout", qcc [qv "sout", qs " av[", qitoa (qv "c"),
+               qs "]=ev",
+               qitoa (qsub (qadd (qv "m") (qa1 (qv "dm"))) (qint 1)),
+               qs "(e);if(!av[", qitoa (qv "c"),
+               qs "])return 0;\n"]),
+             ("cnt", qadd (qv "cnt") (qa1 (qv "dm")))])]
         "r" (qv "r")
     ] })
 
-/-- `ep-ges2 {x,i,dm,nm,xs,n,m,out}` — builtin slot step. -/
-private def kEpGes2 : String × KCallable :=
-  ("ep-ges2", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "dm")])
-    arms := [
-      qiv "skip" (some "k") (some (qeq (qv "k") (qint 0)))
-        "ep-gebs"
-        [("nm", qv "nm"), ("xs", qv "xs"), ("i", qv "i"),
-         ("n", qv "n"), ("m", qv "m"), ("out", qv "out")]
-    , qiv1s (some "k") "ep-gebs"
-        [("nm", qv "nm"), ("xs", qv "xs"), ("i", qv "i"),
-         ("n", qv "n"), ("m", qadd (qv "m") (qv "dm")),
-         ("out", qcc [qv "out", qs " av[", qitoa (qv "ii"),
-           qs "]=ev",
-           qitoa (qadd (qv "m") (qsub (qv "dm") (qint 1))),
-           qs "(e);if(!av[", qitoa (qv "ii"), qs "])return 0;\n"])]
-    ] })
-
-/-- `ep-gebs {nm,xs,i,n,m,out}` — builtin `av[i]=ev_…(e)` slots. -/
-private def kEpGebs : String × KCallable :=
-  ("ep-gebs", .subflow {
-    preLabel := none
-    head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
-    arms := [
-      qstop (qv "out")
-    , qivc (some "c") "ep-dbc"
-        [("e", qix (qv "xs") (qv "c")), ("i", qv "c"),
-         ("n", qv "n"), ("nm", qv "nm")]
-        [("m0", "ep-ges2",
-            [("dm", qv "m0"), ("x", qix (qv "xs") (qv "c")),
-             ("ii", qv "c"), ("nm", qv "nm"), ("xs", qv "xs"),
-             ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-             ("m", qv "m"), ("out", qv "out")])]
-        "r" (qv "r")
-    ] })
-
-/-- `ep-ge {e,n}` — `genExpr`: children `ev` decls first, then the
-node's own `ev` (last fresh = `n + dcE - 1`). -/
+/-- `ep-ge {e,n}` — `genExpr`: children `ev` decls first, then
+the node's own `ev` (last fresh = `n + cnt - 1`).  Returns
+`[text,cnt]`. -/
 private def kEpGe : String × KCallable :=
   ("ep-ge", .subflow {
     preLabel := none
     head := ("ep-tg", [("x", qv "e")])
     arms := [
       qivc (some "t") "ep-gv" [("v", qk (qv "e") 0), ("n", qv "n")]
-        [("d", "ep-dv", [("v", qk (qv "e") 0)])]
-        "m" (qcc [qv "d", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qv "m")),
+        [] "m" (qarr2 (qcc [qa0 (qv "m"), qs "static Val *ev",
+              qitoa (qadd (qv "n") (qa1 (qv "m"))),
               qs "(E *e){\n (void)e;return vl",
-              qitoa (qadd (qv "n") (qsub (qv "m") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "m")) (qint 1))),
               qs "();}\n"])
+            (qadd (qa1 (qv "m")) (qint 1)))
         |> qArmG (qeq (qv "t") (qint 8))
     , qivc (some "t") "ep-cq" [("s", qk (qv "e") 0)]
-        [] "q" (qcc [qs "static Val *ev", qitoa (qv "n"),
+        [] "q" (qarr2 (qcc [qs "static Val *ev", qitoa (qv "n"),
               qs "(E *e){\n return elk(e,", qv "q", qs ");}\n"])
+            (qint 1))
         |> qArmG (qeq (qv "t") (qint 9))
     , qivc (some "t") "ep-ge2"
         [("e", qv "e"), ("n", qv "n")] [] "r" (qv "r")
         |> qArmG (qeq (qv "t") (qint 10))
     , qivc (some "t") "ep-ge" [("e", qk (qv "e") 1), ("n", qv "n")]
-        [("d", "ep-de", [("e", qk (qv "e") 1)])]
-        "mx" (qcc [qv "d", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qv "mx")),
+        [] "mx" (qarr2 (qcc [qa0 (qv "mx"), qs "static Val *ev",
+              qitoa (qadd (qv "n") (qa1 (qv "mx"))),
               qs "(E *e){\n Val*a=ev",
-              qitoa (qadd (qv "n") (qsub (qv "mx") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "mx")) (qint 1))),
               qs "(e);if(!a)return 0;\n return kun(",
               qitoa (qk (qv "e") 0), qs ",a);}\n"])
+            (qadd (qa1 (qv "mx")) (qint 1)))
         |> qArmG (qeq (qv "t") (qint 11))
     , qivc (some "t") "ep-ge" [("e", qk (qv "e") 0), ("n", qv "n")]
-        [("dc", "ep-de", [("e", qk (qv "e") 0)]),
-         ("mc", "ep-ge",
+        [("pb", "ep-ge",
             [("e", qk (qv "e") 1),
-             ("n", qadd (qv "n") (qv "mc"))]),
-         ("dt", "ep-de", [("e", qk (qv "e") 1)]),
-         ("mt", "ep-ge",
+             ("n", qadd (qv "n") (qa1 (qv "pb")))]),
+         ("pc", "ep-ge",
             [("e", qk (qv "e") 2),
              ("n", qadd (qv "n")
-                (qadd (qv "mc") (qv "mt")))]),
-         ("de2", "ep-de", [("e", qk (qv "e") 2)])]
-        "me" (qcc [qv "dc", qv "dt", qv "de2",
+                (qadd (qa1 (qv "pb")) (qa1 (qv "pc"))))])]
+        "pd" (qarr2 (qcc [qa0 (qv "pb"), qa0 (qv "pc"), qa0 (qv "pd"),
               qs "static Val *ev",
               qitoa (qadd (qv "n")
-                (qadd (qv "mc") (qadd (qv "mt") (qv "me")))),
+                (qadd (qa1 (qv "pb"))
+                  (qadd (qa1 (qv "pc")) (qa1 (qv "pd"))))),
               qs "(E *e){\n Val*a=ev",
-              qitoa (qadd (qv "n") (qsub (qv "mc") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "pb")) (qint 1))),
               qs "(e);\n if(!a||a->tag!=2)return 0;\n return a->b?ev",
               qitoa (qadd (qv "n")
-                (qadd (qv "mc") (qsub (qv "mt") (qint 1)))),
+                (qadd (qa1 (qv "pb")) (qsub (qa1 (qv "pc")) (qint 1)))),
               qs "(e):ev",
               qitoa (qadd (qv "n")
-                (qadd (qv "mc")
-                  (qadd (qv "mt") (qsub (qv "me") (qint 1))))),
+                (qadd (qa1 (qv "pb"))
+                  (qadd (qa1 (qv "pc"))
+                    (qsub (qa1 (qv "pd")) (qint 1))))),
               qs "(e);}\n"])
+            (qadd (qa1 (qv "pb"))
+              (qadd (qa1 (qv "pc")) (qadd (qa1 (qv "pd")) (qint 1)))))
         |> qArmG (qeq (qv "t") (qint 12))
     , qivc (some "t") "ep-ge" [("e", qk (qv "e") 0), ("n", qv "n")]
-        [("d", "ep-de", [("e", qk (qv "e") 0)]),
-         ("m", "ep-cq", [("s", qk (qv "e") 1)])]
-        "q" (qcc [qv "d", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qv "m")),
+        [("m", "ep-cq", [("s", qk (qv "e") 1)])]
+        "q" (qarr2 (qcc [qa0 (qv "m"), qs "static Val *ev",
+              qitoa (qadd (qv "n") (qa1 (qv "m"))),
               qs "(E *e){\n Val*a=ev",
-              qitoa (qadd (qv "n") (qsub (qv "m") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "m")) (qint 1))),
               qs "(e);if(!a)return 0;\n return k_field(a,",
               qv "q", qs ");}\n"])
+            (qadd (qa1 (qv "m")) (qint 1)))
         |> qArmG (qeq (qv "t") (qint 13))
     , qivc (some "t") "ep-ge" [("e", qk (qv "e") 0), ("n", qv "n")]
-        [("d", "ep-de", [("e", qk (qv "e") 0)]),
-         ("m1", "ep-ge",
+        [("p2", "ep-ge",
             [("e", qk (qv "e") 1),
-             ("n", qadd (qv "n") (qv "m1"))]),
-         ("d2", "ep-de", [("e", qk (qv "e") 1)])]
-        "m2" (qcc [qv "d", qv "d2", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qadd (qv "m1") (qv "m2"))),
+             ("n", qadd (qv "n") (qa1 (qv "p2")))])]
+        "m2" (qarr2 (qcc [qa0 (qv "p2"), qa0 (qv "m2"),
+              qs "static Val *ev",
+              qitoa (qadd (qv "n") (qadd (qa1 (qv "p2")) (qa1 (qv "m2")))),
               qs "(E *e){\n Val*a=ev",
-              qitoa (qadd (qv "n") (qsub (qv "m1") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "p2")) (qint 1))),
               qs "(e);if(!a)return 0;\n Val*b=ev",
               qitoa (qadd (qv "n")
-                (qadd (qv "m1") (qsub (qv "m2") (qint 1)))),
+                (qadd (qa1 (qv "p2")) (qsub (qa1 (qv "m2")) (qint 1)))),
               qs "(e);if(!b)return 0;\n return k_index(a,b);}\n"])
+            (qadd (qa1 (qv "p2")) (qadd (qa1 (qv "m2")) (qint 1))))
         |> qArmG (qeq (qv "t") (qint 14))
     , qivc (some "t") "ep-gebd"
         [("nm", qk (qv "e") 0), ("xs", qk (qv "e") 1),
          ("i", qint 0), ("n", qlen (qk (qv "e") 1)),
-         ("m", qv "n"), ("out", qs "")]
-        [("d", "ep-gebs",
-            [("nm", qk (qv "e") 0), ("xs", qk (qv "e") 1),
-             ("i", qint 0), ("n", qlen (qk (qv "e") 1)),
-             ("m", qv "n"), ("out", qs "")]),
-         ("sl", "ep-cq", [("s", qk (qv "e") 0)]),
-         ("q", "ep-dbb",
-            [("nm", qk (qv "e") 0), ("xs", qk (qv "e") 1),
-             ("i", qint 0), ("n", qlen (qk (qv "e") 1))])]
-        "mt" (qcc [qv "d", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qv "mt")),
+         ("m", qv "n"), ("dout", qs ""), ("sout", qs ""),
+         ("cnt", qint 0)]
+        [("sl", "ep-cq", [("s", qk (qv "e") 0)])]
+        "q" (qarr2 (qcc [qa0 (qv "sl"), qs "static Val *ev",
+              qitoa (qadd (qv "n") (qa2 (qv "sl"))),
               qs "(E *e){\n Val*av[",
               qitoa (qlen (qk (qv "e") 1)), qs "];\n",
-              qv "sl", qs " return kbi(", qv "q", qs ",av,",
+              qa1 (qv "sl"), qs " return kbi(", qv "q", qs ",av,",
               qitoa (qlen (qk (qv "e") 1)), qs ");}\n"])
+            (qadd (qa2 (qv "sl")) (qint 1)))
         |> qArmG (qeq (qv "t") (qint 15))
     ] })
 
 /-- `ep-ge2 {e,n}` — the `.bin` inner dispatch: `and`, `or`, or a
-`kbin` op. `l`'s decls first, `r` at `n+dcE(l)`, self last. -/
+`kbin` op.  `l`'s decls first, `r` at `n+l.cnt`, self last.
+Returns `[text,cnt]`. -/
 private def kEpGe2 : String × KCallable :=
   ("ep-ge2", .subflow {
     preLabel := none
@@ -1465,52 +1143,52 @@ private def kEpGe2 : String × KCallable :=
     arms := [
       qivc (some "op") "ep-ge"
         [("e", qk (qv "e") 1), ("n", qv "n")]
-        [("dl", "ep-de", [("e", qk (qv "e") 1)]),
-         ("ml", "ep-ge",
+        [("pr", "ep-ge",
             [("e", qk (qv "e") 2),
-             ("n", qadd (qv "n") (qv "ml"))]),
-         ("dr", "ep-de", [("e", qk (qv "e") 2)])]
-        "mr" (qcc [qv "dl", qv "dr", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qadd (qv "ml") (qv "mr"))),
+             ("n", qadd (qv "n") (qa1 (qv "pr")))])]
+        "pm" (qarr2 (qcc [qa0 (qv "pr"), qa0 (qv "pm"),
+              qs "static Val *ev",
+              qitoa (qadd (qv "n") (qadd (qa1 (qv "pr")) (qa1 (qv "pm")))),
               qs "(E *e){\n Val*a=ev",
-              qitoa (qadd (qv "n") (qsub (qv "ml") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "pr")) (qint 1))),
               qs "(e);\n if(!a||a->tag!=2)return 0;\n if(!a->b)return v_bool(0);\n a=ev",
               qitoa (qadd (qv "n")
-                (qadd (qv "ml") (qsub (qv "mr") (qint 1)))),
+                (qadd (qa1 (qv "pr")) (qsub (qa1 (qv "pm")) (qint 1)))),
               qs "(e);if(!a||a->tag!=2)return 0;return a;}\n"])
+            (qadd (qa1 (qv "pr")) (qadd (qa1 (qv "pm")) (qint 1))))
         |> qArmG (qeq (qv "op") (qint 11))
     , qivc (some "op") "ep-ge"
         [("e", qk (qv "e") 1), ("n", qv "n")]
-        [("dl", "ep-de", [("e", qk (qv "e") 1)]),
-         ("ml", "ep-ge",
+        [("pr", "ep-ge",
             [("e", qk (qv "e") 2),
-             ("n", qadd (qv "n") (qv "ml"))]),
-         ("dr", "ep-de", [("e", qk (qv "e") 2)])]
-        "mr" (qcc [qv "dl", qv "dr", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qadd (qv "ml") (qv "mr"))),
+             ("n", qadd (qv "n") (qa1 (qv "pr")))])]
+        "pm" (qarr2 (qcc [qa0 (qv "pr"), qa0 (qv "pm"),
+              qs "static Val *ev",
+              qitoa (qadd (qv "n") (qadd (qa1 (qv "pr")) (qa1 (qv "pm")))),
               qs "(E *e){\n Val*a=ev",
-              qitoa (qadd (qv "n") (qsub (qv "ml") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "pr")) (qint 1))),
               qs "(e);\n if(!a||a->tag!=2)return 0;\n if(a->b)return v_bool(1);\n a=ev",
               qitoa (qadd (qv "n")
-                (qadd (qv "ml") (qsub (qv "mr") (qint 1)))),
+                (qadd (qa1 (qv "pr")) (qsub (qa1 (qv "pm")) (qint 1)))),
               qs "(e);if(!a||a->tag!=2)return 0;return a;}\n"])
+            (qadd (qa1 (qv "pr")) (qadd (qa1 (qv "pm")) (qint 1))))
         |> qArmG (qeq (qv "op") (qint 12))
     , qivc (some "op") "ep-ge"
         [("e", qk (qv "e") 1), ("n", qv "n")]
-        [("dl", "ep-de", [("e", qk (qv "e") 1)]),
-         ("ml", "ep-ge",
+        [("pr", "ep-ge",
             [("e", qk (qv "e") 2),
-             ("n", qadd (qv "n") (qv "ml"))]),
-         ("dr", "ep-de", [("e", qk (qv "e") 2)])]
-        "mr" (qcc [qv "dl", qv "dr", qs "static Val *ev",
-              qitoa (qadd (qv "n") (qadd (qv "ml") (qv "mr"))),
+             ("n", qadd (qv "n") (qa1 (qv "pr")))])]
+        "pm" (qarr2 (qcc [qa0 (qv "pr"), qa0 (qv "pm"),
+              qs "static Val *ev",
+              qitoa (qadd (qv "n") (qadd (qa1 (qv "pr")) (qa1 (qv "pm")))),
               qs "(E *e){\n Val*a=ev",
-              qitoa (qadd (qv "n") (qsub (qv "ml") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "pr")) (qint 1))),
               qs "(e);if(!a)return 0;\n Val*b=ev",
               qitoa (qadd (qv "n")
-                (qadd (qv "ml") (qsub (qv "mr") (qint 1)))),
+                (qadd (qa1 (qv "pr")) (qsub (qa1 (qv "pm")) (qint 1)))),
               qs "(e);if(!b)return 0;\n return kbin(",
               qitoa (qv "op"), qs ",a,b);}\n"])
+            (qadd (qa1 (qv "pr")) (qadd (qa1 (qv "pm")) (qint 1))))
     ] })
 
 
@@ -1533,76 +1211,81 @@ private def kEpGan : String × KCallable :=
         "r" (qv "r")
     ] })
 
-/-- `ep-gaed {xs,i,n,m,out}` — arg-expr `ev` decls; `m` runs
-(`n+1` at entry — the `an` table takes the first fresh). -/
+/-- `ep-gaed {xs,i,n,m,dout,idx,cnt}` — one pass over arg exprs:
+`ev` decls into `dout`, each arg's `ev` index into `idx`,
+fresh count into `cnt` (`m` runs; `n+1` at entry — the `an`
+table takes the first fresh). -/
 private def kEpGaed : String × KCallable :=
   ("ep-gaed", .subflow {
     preLabel := none
     head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
     arms := [
-      qstop (qv "out")
+      qstop (qarr3 (qv "dout") (qv "idx") (qv "cnt"))
     , qivc (some "c") "ep-ge"
         [("e", qf (qix (qv "xs") (qv "c")) "v"), ("n", qv "m")]
-        [("d", "ep-de",
-            [("e", qf (qix (qv "xs") (qv "c")) "v")]),
-         ("dm", "ep-gaed", [("xs", qv "xs"),
+        [("dm", "ep-gaed", [("xs", qv "xs"),
             ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
-            ("out", qcat (qv "out") (qv "d"))])]
+            ("m", qadd (qv "m") (qa1 (qv "dm"))),
+            ("dout", qcat (qv "dout") (qa0 (qv "dm"))),
+            ("idx", qpush (qv "idx")
+                (qsub (qadd (qv "m") (qa1 (qv "dm"))) (qint 1))),
+            ("cnt", qadd (qv "cnt") (qa1 (qv "dm")))])]
         "r" (qv "r")
     ] })
 
-/-- `ep-gasl {xs,i,n,m,e,out}` — `av[i]=ev_…(e)` slot lines. -/
+/-- `ep-gasl {idx,i,n,e,out}` — `av[i]=ev_{idx[i]}(e)` slot
+lines from the arg-index arr `gaed` produced. -/
 private def kEpGasl : String × KCallable :=
   ("ep-gasl", .subflow {
     preLabel := none
     head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
     arms := [
       qstop (qv "out")
-    , qivc (some "c") "ep-de"
-        [("e", qf (qix (qv "xs") (qv "c")) "v")]
-        [("dm", "ep-gasl", [("xs", qv "xs"),
-            ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")), ("e", qv "e"),
-            ("out", qcc [qv "out", qs " {Val *v=ev",
-              qitoa (qadd (qv "m") (qsub (qv "dm") (qint 1))),
-              qs "(", qv "e", qs ");if(!v)return 0;av[",
-              qitoa (qv "c"), qs "]=v;}\n"])])]
-        "r" (qv "r")
+    , qiv1s (some "c") "ep-gasl"
+        [("idx", qv "idx"), ("e", qv "e"),
+         ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
+         ("out", qcc [qv "out", qs " {Val *v=ev",
+           qitoa (qat (qv "idx") (qv "c")),
+           qs "(", qv "e", qs ");if(!v)return 0;av[",
+           qitoa (qv "c"), qs "]=v;}\n"])]
     ] })
 
-/-- `ep-gad {xs,n}` — `genNamedArgs` decls: `an` table + arg `ev`s
-(empty args → ""). -/
+/-- `ep-gad {xs,n}` — `genNamedArgs` decls: `an` table + arg
+`ev`s (empty args → `["",0,[]]`).  Returns `[text,cnt,idx]`. -/
 private def kEpGad : String × KCallable :=
   ("ep-gad", .subflow {
     preLabel := none
     head := ("ep-id", [("x", qv "xs")])
     arms := [
       qp "empty" (some "x")
-        (some (qeq (qlen (qv "x")) (qint 0))) (qs "")
+        (some (qeq (qlen (qv "x")) (qint 0)))
+        (qarr3 (qs "") (qint 0) (.lit (.arr [])))
     , qivc (some "x") "ep-gan"
         [("xs", qv "x"), ("i", qint 0), ("n", qlen (qv "x")),
          ("out", qs "")]
         [("csv", "ep-gaed",
             [("xs", qv "x"), ("i", qint 0), ("n", qlen (qv "x")),
-             ("m", qadd (qv "n") (qint 1)), ("out", qs "")])]
-        "d" (qcc [qs "static const char*an", qitoa (qv "n"),
-              qs "[]={", qv "csv", qs "};\n", qv "d"])
+             ("m", qadd (qv "n") (qint 1)), ("dout", qs ""),
+             ("idx", .lit (.arr [])), ("cnt", qint 0)])]
+        "d" (qarr3 (qcc [qs "static const char*an", qitoa (qv "n"),
+              qs "[]={", qv "csv", qs "};\n", qa0 (qv "d")])
+            (qadd (qa2 (qv "d")) (qint 1))
+            (qa1 (qv "d")))
     ] })
 
-/-- `ep-gas {xs,e,d,n}` — `genNamedArgs` snippet: the caller-side
-`av` array + `efr` call into `d` (`ja`/`ae`/`he`). -/
+/-- `ep-gas {idx,e,d,n}` — `genNamedArgs` snippet: the `av`
+array + `efr` call into `d` (`ja`/`ae`/`he`), slot lines from
+the `idx` arr `gad` produced. -/
 private def kEpGas : String × KCallable :=
   ("ep-gas", .subflow {
     preLabel := none
-    head := ("ep-id", [("x", qv "xs")])
+    head := ("ep-id", [("x", qv "idx")])
     arms := [
       qp "empty" (some "x")
         (some (qeq (qlen (qv "x")) (qint 0))) (qs "")
     , qivc (some "x") "ep-gasl"
-        [("xs", qv "x"), ("i", qint 0), ("n", qlen (qv "x")),
-         ("m", qadd (qv "n") (qint 1)), ("e", qv "e"),
-         ("out", qs "")]
+        [("idx", qv "x"), ("i", qint 0), ("n", qlen (qv "x")),
+         ("e", qv "e"), ("out", qs "")]
         [] "p" (qcc [qs " {Val*av[",
               qitoa (qlen (qv "x")), qs "];\n", qv "p", qs " ",
               qv "d", qs "=efr(an", qitoa (qv "n"), qs ",av,",
@@ -1611,42 +1294,49 @@ private def kEpGas : String × KCallable :=
 
 -- ---------- nodes / arms / dispatch ----------
 
-/-- `ep-gcd {cs,n}` — conts dispatch decls or "". -/
+/-- `ep-gcd {cs,n}` — conts dispatch decls or `["",0]`. -/
 private def kEpGcd : String × KCallable :=
   ("ep-gcd", .subflow {
     preLabel := none
     head := ("ep-id", [("x", qv "cs")])
     arms := [
       qp "empty" (some "x")
-        (some (qeq (qlen (qv "x")) (qint 0))) (qs "")
+        (some (qeq (qlen (qv "x")) (qint 0)))
+        (qarr2 (qs "") (qint 0))
     , qiv1s (some "x") "ep-gd" [("xs", qv "x"), ("n", qv "n")]
     ] })
 
-/-- `ep-gnd {nd,cs,n}` — node decls. -/
+/-- `ep-gnd {nd,cs,n}` — node decls; returns `[text,cnt,idx]`
+where `idx` is the named-arg `ev` indices (empty for nodes
+that carry no args). -/
 private def kEpGnd : String × KCallable :=
   ("ep-gnd", .subflow {
     preLabel := none
     head := ("ep-tg", [("x", qv "nd")])
     arms := [
       qp "term" (some "t") (some (qeq (qv "t") (qint 16)))
-        (qs "")
+        (qarr3 (qs "") (qint 0) (.lit (.arr [])))
     , qiv "jmp" (some "t") (some (qeq (qv "t") (qint 17)))
         "ep-gad" [("xs", qk (qv "nd") 1), ("n", qv "n")]
     , qivc (some "t") "ep-gad"
         [("xs", qk (qv "nd") 1), ("n", qv "n")]
-        [("d", "ep-dg", [("xs", qk (qv "nd") 1)]),
-         ("dg", "ep-gcd", [("cs", qv "cs"),
-            ("n", qadd (qv "n") (qv "dg"))])]
-        "cd" (qcat (qv "d") (qv "cd"))
+        [("p", "ep-gcd", [("cs", qv "cs"),
+            ("n", qadd (qv "n") (qa1 (qv "p")))])]
+        "cd" (qarr3 (qcat (qa0 (qv "p")) (qa0 (qv "cd")))
+            (qadd (qa1 (qv "p")) (qa1 (qv "cd")))
+            (qa2 (qv "p")))
         |> qArmG (qeq (qv "t") (qint 18))
-    , qiv "prod" (some "t") (some (qeq (qv "t") (qint 19)))
-        "ep-ge" [("e", qk (qv "nd") 0), ("n", qv "n")]
-    , qiv "ctor" (some "t") (some (qeq (qv "t") (qint 20)))
-        "ep-ge" [("e", qk (qv "nd") 1), ("n", qv "n")]
+    , qivc (some "t") "ep-ge" [("e", qk (qv "nd") 0), ("n", qv "n")]
+        [] "p" (qarr3 (qa0 (qv "p")) (qa1 (qv "p")) (.lit (.arr [])))
+        |> qArmG (qeq (qv "t") (qint 19))
+    , qivc (some "t") "ep-ge" [("e", qk (qv "nd") 1), ("n", qv "n")]
+        [] "p" (qarr3 (qa0 (qv "p")) (qa1 (qv "p")) (.lit (.arr [])))
+        |> qArmG (qeq (qv "t") (qint 20))
     ] })
 
-/-- `ep-gcs {cs,n}` — invoke conts stmt: `return ir` or a `ds`
-call. -/
+/-- `ep-gcs {cs,ds}` — invoke conts stmt: `return ir` or a
+`ds{ds}` call; `ds` is the dispatch index resolved by the
+caller. -/
 private def kEpGcs : String × KCallable :=
   ("ep-gcs", .subflow {
     preLabel := none
@@ -1655,13 +1345,13 @@ private def kEpGcs : String × KCallable :=
       qp "empty" (some "x")
         (some (qeq (qlen (qv "x")) (qint 0)))
         (qs " return ir;\n")
-    , qivc (some "x") "ep-dd" [("xs", qv "x")]
-        [] "dd" (qcc [qs " {Res*ct=ds",
-              qitoa (qadd (qv "n") (qsub (qv "dd") (qint 1))),
-              qs "(ee,ir);rfree(ir);return ct;}\n"])
+    , qp1 (some "x") (qcc [qs " {Res*ct=ds", qitoa (qv "ds"),
+          qs "(ee,ir);rfree(ir);return ct;}\n"])
     ] })
 
-/-- `ep-gns {nd,cs,n}` — node stmt (`ee` env). -/
+/-- `ep-gns {nd,cs,n,li,idx}` — node stmt (`ee` env); `n` is the
+node base (`an_{n}` table), `li` the subtree's last fresh index
+(the node's own `ev`/`ds`), `idx` the named-arg `ev` indices. -/
 private def kEpGns : String × KCallable :=
   ("ep-gns", .subflow {
     preLabel := none
@@ -1670,33 +1360,27 @@ private def kEpGns : String × KCallable :=
       qp "term" (some "t") (some (qeq (qv "t") (qint 16)))
         (qs " return r_done();\n")
     , qivc (some "t") "ep-gas"
-        [("xs", qk (qv "nd") 1), ("e", qs "ee"),
-         ("d", qs "ja"), ("n", qv "n")]
+        [("idx", qv "idx"), ("e", qs "ee"), ("d", qs "ja"),
+         ("n", qv "n")]
         [("ac", "ep-cq", [("s", qk (qv "nd") 0)])]
         "q" (qcc [qs " {E*ja=0;\n", qv "ac",
               qs " return r_jump(", qv "q", qs ",ja);}\n"])
         |> qArmG (qeq (qv "t") (qint 17))
     , qivc (some "t") "ep-gas"
-        [("xs", qk (qv "nd") 1), ("e", qs "ee"),
-         ("d", qs "ae"), ("n", qv "n")]
+        [("idx", qv "idx"), ("e", qs "ee"), ("d", qs "ae"),
+         ("n", qv "n")]
         [("ac", "ep-m", [("s", qk (qv "nd") 0)]),
-         ("km", "ep-dg", [("xs", qk (qv "nd") 1)]),
-         ("dg", "ep-gcs", [("cs", qv "cs"),
-            ("n", qadd (qv "n") (qv "dg"))])]
+         ("km", "ep-gcs", [("cs", qv "cs"), ("ds", qv "li")])]
         "ct" (qcc [qs " {E*ae=0;\n", qv "ac",
               qs " Res*ir=k_", qv "km",
               qs "(ae);\n if(!ir)return 0;\n if(ir->k!=1&&ir->k!=2)return 0;\n",
               qv "ct", qs "}\n"])
         |> qArmG (qeq (qv "t") (qint 18))
-    , qivc (some "t") "ep-de" [("e", qk (qv "nd") 0)]
-        [] "m" (qcc [qs " {Val *v=ev",
-              qitoa (qadd (qv "n") (qsub (qv "m") (qint 1))),
+    , qp "prod" (some "t") (some (qeq (qv "t") (qint 19)))
+        (qcc [qs " {Val *v=ev", qitoa (qv "li"),
               qs "(ee);return v?r_bare(v):0;}\n"])
-        |> qArmG (qeq (qv "t") (qint 19))
-    , qivc (some "t") "ep-de" [("e", qk (qv "nd") 1)]
-        [("m", "ep-cq", [("s", qk (qv "nd") 0)])]
-        "q" (qcc [qs " {Val *v=ev",
-              qitoa (qadd (qv "n") (qsub (qv "m") (qint 1))),
+    , qivc (some "t") "ep-cq" [("s", qk (qv "nd") 0)]
+        [] "q" (qcc [qs " {Val *v=ev", qitoa (qv "li"),
               qs "(ee);return v?r_tag(", qv "q", qs ",v):0;}\n"])
         |> qArmG (qeq (qv "t") (qint 20))
     ] })
@@ -1715,19 +1399,21 @@ private def kEpAnb : String × KCallable :=
         |> qArmG (qeq (qv "t") (qint 24))
     ] })
 
-/-- `ep-acd {o,n}` — cond decls from the cond-opt. -/
+/-- `ep-acd {o,n}` — cond decls from the cond-opt; returns
+`[text,cnt]`. -/
 private def kEpAcd : String × KCallable :=
   ("ep-acd", .subflow {
     preLabel := none
     head := ("ep-tg", [("x", qv "o")])
     arms := [
       qp "none" (some "t") (some (qeq (qv "t") (qint 23)))
-        (qs "")
+        (qarr2 (qs "") (qint 0))
     , qiv "some" (some "t") (some (qeq (qv "t") (qint 24)))
         "ep-ge" [("e", qk (qv "o") 0), ("n", qv "n")]
     ] })
 
-/-- `ep-acs {o,n}` — cond stmt from the cond-opt. -/
+/-- `ep-acs {o,ev}` — cond stmt from the cond-opt; `ev` is the
+cond's own `ev` index resolved by the caller. -/
 private def kEpAcs : String × KCallable :=
   ("ep-acs", .subflow {
     preLabel := none
@@ -1735,27 +1421,26 @@ private def kEpAcs : String × KCallable :=
     arms := [
       qp "none" (some "t") (some (qeq (qv "t") (qint 23)))
         (qs "")
-    , qivc (some "t") "ep-de" [("e", qk (qv "o") 0)]
-        [] "m" (qcc [qs " {Val *g=ev",
-              qitoa (qadd (qv "n") (qsub (qv "m") (qint 1))),
+    , qp "some" (some "t") (some (qeq (qv "t") (qint 24)))
+        (qcc [qs " {Val *g=ev", qitoa (qv "ev"),
               qs "(ee);\n if(!g||g->tag!=2)return 0;\n if(!g->b)return KSKIP();}\n"])
-        |> qArmG (qeq (qv "t") (qint 24))
     ] })
 
-/-- `ep-ano {o,cs,n}` — node decls from the node-opt. -/
+/-- `ep-ano {o,cs,n}` — node decls from the node-opt; returns
+`[text,cnt,idx]`. -/
 private def kEpAno : String × KCallable :=
   ("ep-ano", .subflow {
     preLabel := none
     head := ("ep-tg", [("x", qv "o")])
     arms := [
       qp "none" (some "t") (some (qeq (qv "t") (qint 23)))
-        (qs "")
+        (qarr3 (qs "") (qint 0) (.lit (.arr [])))
     , qiv "nd" (some "t") (some (qeq (qv "t") (qint 24)))
         "ep-gnd" [("nd", qk (qv "o") 0), ("cs", qv "cs"),
                   ("n", qv "n")]
     ] })
 
-/-- `ep-ann {o,cs,n}` — node stmt from the node-opt. -/
+/-- `ep-ann {o,cs,n,li,idx}` — node stmt from the node-opt. -/
 private def kEpAnn : String × KCallable :=
   ("ep-ann", .subflow {
     preLabel := none
@@ -1765,48 +1450,54 @@ private def kEpAnn : String × KCallable :=
         (qs " return r_done();\n")
     , qiv "nd" (some "t") (some (qeq (qv "t") (qint 24)))
         "ep-gns" [("nd", qk (qv "o") 0), ("cs", qv "cs"),
-                  ("n", qv "n")]
+                  ("n", qv "n"), ("li", qv "li"), ("idx", qv "idx")]
     ] })
 
 /-- `ep-ga {a,n}` — `genArm`: `aw_n` first; cond subtree at
-`n+1`, node subtree at `n+1+dcE(cond)`. -/
+`n+1`, node subtree at `n+1+cond.cnt`.  Returns `[text,cnt]`. -/
 private def kEpGa : String × KCallable :=
   ("ep-ga", .subflow {
     preLabel := none
     head := ("ep-id", [("x", qv "a")])
     arms := [qivc (some "x") "ep-acd"
       [("o", qk (qv "x") 3), ("n", qadd (qv "n") (qint 1))]
-      [("cd", "ep-doc", [("o", qk (qv "x") 3)]),
-       ("cm", "ep-ano", [("o", qk (qv "x") 4),
+      [("p1", "ep-ano", [("o", qk (qv "x") 4),
           ("cs", qk (qv "x") 5),
           ("n", qadd (qv "n")
-            (qadd (qint 1) (qv "cm")))]),
-       ("nd", "ep-anb", [("o", qk (qv "x") 2)]),
-       ("bs", "ep-acs", [("o", qk (qv "x") 3),
-          ("n", qadd (qv "n") (qint 1))]),
-       ("cs", "ep-ann", [("o", qk (qv "x") 4),
+            (qadd (qint 1) (qa1 (qv "p1"))))]),
+       ("p2", "ep-anb", [("o", qk (qv "x") 2)]),
+       ("nd", "ep-acs", [("o", qk (qv "x") 3),
+          ("ev", qadd (qv "n") (qa1 (qv "p1")))]),
+       ("bs", "ep-ann", [("o", qk (qv "x") 4),
           ("cs", qk (qv "x") 5),
           ("n", qadd (qv "n")
-            (qadd (qint 1) (qv "cm")))])]
-      "ns" (qcc [qv "cd", qv "nd",
+            (qadd (qint 1) (qa1 (qv "p1")))),
+          ("li", qadd (qv "n")
+            (qadd (qa1 (qv "p1")) (qa1 (qv "p2")))),
+          ("idx", qa2 (qv "p2"))])]
+      "cs" (qarr2 (qcc [qa0 (qv "p1"), qa0 (qv "p2"),
             qs "static Res *aw", qitoa (qv "n"),
             qs "(E *e, Res *r){\n KSTEP();\n E*ee=e;(void)r;(void)ee;\n",
-            qv "bs", qv "cs", qv "ns", qs "}\n"])] })
+            qv "nd", qv "bs", qv "cs", qs "}\n"])
+          (qadd (qint 1)
+            (qadd (qa1 (qv "p1")) (qa1 (qv "p2")))))] })
 
-/-- `ep-gal2 {xs,i,n,m,out}` — arm decls loop; `m` runs. -/
+/-- `ep-gal2 {xs,i,n,m,dout,idx,cnt}` — arm decls loop; `m`
+runs, each arm's base pushed to `idx`. -/
 private def kEpGal2 : String × KCallable :=
   ("ep-gal2", .subflow {
     preLabel := none
     head := ("ep-step", [("i", qv "i"), ("n", qv "n")])
     arms := [
-      qstop (qv "out")
+      qstop (qarr3 (qv "dout") (qv "idx") (qv "cnt"))
     , qivc (some "c") "ep-ga"
         [("a", qix (qv "xs") (qv "c")), ("n", qv "m")]
-        [("d", "ep-da", [("a", qix (qv "xs") (qv "c"))]),
-         ("dm", "ep-gal2", [("xs", qv "xs"),
+        [("dm", "ep-gal2", [("xs", qv "xs"),
             ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
-            ("out", qcat (qv "out") (qv "d"))])]
+            ("m", qadd (qv "m") (qa1 (qv "dm"))),
+            ("dout", qcat (qv "dout") (qa0 (qv "dm"))),
+            ("idx", qpush (qv "idx") (qv "m")),
+            ("cnt", qadd (qv "cnt") (qa1 (qv "dm")))])]
         "r" (qv "r")
     ] })
 
@@ -1820,7 +1511,8 @@ private def kEpGtt : String × KCallable :=
             qs ")){Res*t=aw", qitoa (qv "n"),
             qs "(e,r);if(!t)return 0;if(t!=KSKIP())return t;}\n"])] })
 
-/-- `ep-gdt {xs,i,n,m,out}` — tag-dispatch tries loop. -/
+/-- `ep-gdt {xs,idx,i,n,out}` — tag-dispatch tries loop; `idx`
+carries each arm's `aw` number. -/
 private def kEpGdt : String × KCallable :=
   ("ep-gdt", .subflow {
     preLabel := none
@@ -1828,11 +1520,10 @@ private def kEpGdt : String × KCallable :=
     arms := [
       qstop (qv "out")
     , qivc (some "c") "ep-gtt"
-        [("a", qix (qv "xs") (qv "c")), ("n", qv "m")]
-        [("t", "ep-da", [("a", qix (qv "xs") (qv "c"))]),
-         ("dm", "ep-gdt", [("xs", qv "xs"),
+        [("a", qix (qv "xs") (qv "c")),
+         ("n", qat (qv "idx") (qv "c"))]
+        [("t", "ep-gdt", [("xs", qv "xs"), ("idx", qv "idx"),
             ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
             ("out", qcat (qv "out") (qv "t"))])]
         "r" (qv "r")
     ] })
@@ -1847,7 +1538,7 @@ private def kEpGbt : String × KCallable :=
       (qcc [qs " {Res*t=aw", qitoa (qv "n"),
             qs "(e,r);if(!t)return 0;if(t!=KSKIP())return t;}\n"])))
 
-/-- `ep-gdb {xs,i,n,m,out}` — bare-dispatch tries loop. -/
+/-- `ep-gdb {xs,idx,i,n,out}` — bare-dispatch tries loop. -/
 private def kEpGdb : String × KCallable :=
   ("ep-gdb", .subflow {
     preLabel := none
@@ -1855,47 +1546,48 @@ private def kEpGdb : String × KCallable :=
     arms := [
       qstop (qv "out")
     , qivc (some "c") "ep-gbt"
-        [("a", qix (qv "xs") (qv "c")), ("n", qv "m")]
-        [("t", "ep-da", [("a", qix (qv "xs") (qv "c"))]),
-         ("dm", "ep-gdb", [("xs", qv "xs"),
+        [("a", qix (qv "xs") (qv "c")),
+         ("n", qat (qv "idx") (qv "c"))]
+        [("t", "ep-gdb", [("xs", qv "xs"), ("idx", qv "idx"),
             ("i", qadd (qv "c") (qint 1)), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
             ("out", qcat (qv "out") (qv "t"))])]
         "r" (qv "r")
     ] })
 
 /-- `ep-gd {xs,n}` — `genDispatch`: arm fns first, `ds` last
-(`ds` number = `n + Σ dcA`). -/
+(`ds` number = `n + cnt`).  Returns `[text,cnt]`. -/
 private def kEpGd : String × KCallable :=
   ("ep-gd", .subflow {
     preLabel := none
     head := ("ep-id", [("x", qv "xs")])
     arms := [qivc (some "x") "ep-gal2"
       [("xs", qv "x"), ("i", qint 0), ("n", qlen (qv "x")),
-       ("m", qv "n"), ("out", qs "")]
-      [("d", "ep-gdt", [("xs", qv "x"), ("i", qint 0),
-          ("n", qlen (qv "x")), ("m", qv "n"), ("out", qs "")]),
-       ("tt", "ep-gdb", [("xs", qv "x"), ("i", qint 0),
-          ("n", qlen (qv "x")), ("m", qv "n"), ("out", qs "")]),
-       ("bt", "ep-dal", [("xs", qv "x"), ("i", qint 0),
-          ("n", qlen (qv "x"))])]
-      "dm" (qcc [qv "d", qs "static Res *ds",
-            qitoa (qadd (qv "n") (qv "dm")),
+       ("m", qv "n"), ("dout", qs ""), ("idx", .lit (.arr [])),
+       ("cnt", qint 0)]
+      [("p", "ep-gdt", [("xs", qv "x"), ("idx", qa1 (qv "p")),
+          ("i", qint 0), ("n", qlen (qv "x")), ("out", qs "")]),
+       ("tt", "ep-gdb", [("xs", qv "x"), ("idx", qa1 (qv "p")),
+          ("i", qint 0), ("n", qlen (qv "x")), ("out", qs "")])]
+      "bt" (qarr2 (qcc [qa0 (qv "p"), qs "static Res *ds",
+            qitoa (qadd (qv "n") (qa2 (qv "p"))),
             qs "(E *e, Res *r){\n KSTEP();\n if(r->br){\n",
             qv "tt", qs " return 0;}\n if(!r->v)return 0;\n",
-            qv "bt", qs " return 0;}\n"])] })
+            qv "bt", qs " return 0;}\n"])
+          (qadd (qa2 (qv "p")) (qint 1)))] })
 
 
 -- ---------- flow / callable ----------
 
-/-- `ep-gfd {xs,n}` — flow arms decls: `ds` subtree or "". -/
+/-- `ep-gfd {xs,n}` — flow arms decls: `ds` subtree or
+`["",0]`. -/
 private def kEpGfd : String × KCallable :=
   ("ep-gfd", .subflow {
     preLabel := none
     head := ("ep-id", [("x", qv "xs")])
     arms := [
       qp "empty" (some "x")
-        (some (qeq (qlen (qv "x")) (qint 0))) (qs "")
+        (some (qeq (qlen (qv "x")) (qint 0)))
+        (qarr2 (qs "") (qint 0))
     , qiv1s (some "x") "ep-gd" [("xs", qv "x"), ("n", qv "n")]
     ] })
 
@@ -1914,8 +1606,9 @@ private def kEpGfj : String × KCallable :=
         |> qArmG (qeq (qv "t") (qint 24))
     ] })
 
-/-- `ep-gfx {pl,xs,n}` — the for-body: `return h` or the dispatch
-block (`ds` number = `n + dcD - 1`). -/
+/-- `ep-gfx {pl,xs,n,dd}` — the for-body: `return h` or the
+dispatch block; `dd` is the dispatch subtree's count, resolved
+by the caller (`ds` number = `n + dd - 1`). -/
 private def kEpGfx : String × KCallable :=
   ("ep-gfx", .subflow {
     preLabel := none
@@ -1924,54 +1617,57 @@ private def kEpGfx : String × KCallable :=
       qp "empty" (some "x")
         (some (qeq (qlen (qv "x")) (qint 0)))
         (qs "   return h;\n")
-    , qivc (some "x") "ep-dd" [("xs", qv "x")]
-        [("dd", "ep-gfj", [("pl", qv "pl")])]
-        "js" (qcc [qs "   {Res*t=ds",
+    , qivc (some "x") "ep-gfj" [("pl", qv "pl")]
+        [] "js" (qcc [qs "   {Res*t=ds",
               qitoa (qadd (qv "n") (qsub (qv "dd") (qint 1))),
               qs "(ce,h);\n   if(!t)return 0;\n   if(t->k==3){rfree(h);rfree(t);return r_bare(0);}\n",
               qv "js", qs "   rfree(h);\n   return t;}\n"])
     ] })
 
-/-- `ep-gf {fl,kn,n}` — `genCallable`'s subflow case. -/
+/-- `ep-gf {fl,kn,n}` — `genCallable`'s subflow case.  Returns
+`[text,cnt]`. -/
 private def kEpGf : String × KCallable :=
   ("ep-gf", .subflow {
     preLabel := none
     head := ("ep-id", [("x", qv "fl")])
     arms := [qivc (some "x") "ep-gad"
       [("xs", qk (qk (qv "x") 1) 1), ("n", qv "n")]
-      [("hd", "ep-gas", [("xs", qk (qk (qv "x") 1) 1),
+      [("hd", "ep-gas", [("idx", qa2 (qv "hd")),
           ("e", qs "ce"), ("d", qs "he"), ("n", qv "n")]),
-       ("has", "ep-dg", [("xs", qk (qk (qv "x") 1) 1)]),
-       ("dg", "ep-gfd", [("xs", qk (qv "x") 2),
-          ("n", qadd (qv "n") (qv "dg"))]),
-       ("ad", "ep-gfx", [("pl", qk (qv "x") 0),
+       ("has", "ep-gfd", [("xs", qk (qv "x") 2),
+          ("n", qadd (qv "n") (qa1 (qv "hd")))]),
+       ("dg", "ep-gfx", [("pl", qk (qv "x") 0),
           ("xs", qk (qv "x") 2),
-          ("n", qadd (qv "n") (qv "dg"))]),
-       ("bd", "ep-m", [("s", qk (qk (qv "x") 1) 0)])]
-      "hm" (qcc [qv "hd", qv "ad", qs "static Res *",
+          ("n", qadd (qv "n") (qa1 (qv "hd"))),
+          ("dd", qa1 (qv "dg"))]),
+       ("ad", "ep-m", [("s", qk (qk (qv "x") 1) 0)])]
+      "bd" (qarr2 (qcc [qa0 (qv "hd"), qa0 (qv "dg"),
+            qs "static Res *",
             qv "kn", qs "(E *ce){\n KSTEP();\n",
             qcnd (qand (qeq (qlen (qk (qv "x") 2)) (qint 0))
                        (qeq (qlen (qk (qk (qv "x") 1) 1))
                             (qint 0)))
                  (qs " (void)ce;\n") (qs ""),
             qs " E*he=0;\n", qv "has",
-            qs " for(;;){\n  KSTEP();\n  Res*h=k_", qv "hm",
+            qs " for(;;){\n  KSTEP();\n  Res*h=k_", qv "bd",
             qs "(he);\n  if(!h||(h->k!=1&&h->k!=2))return 0;\n",
-            qv "bd", qs " }\n}\n"])] })
+            qv "ad", qs " }\n}\n"])
+          (qadd (qa1 (qv "hd")) (qa1 (qv "dg"))))] })
 
-/-- `ep-gc {nm,c,n}` — `genCallable` on a quoted callable. -/
+/-- `ep-gc {nm,c,n}` — `genCallable` on a quoted callable.
+Returns `[text,cnt]`. -/
 private def kEpGc : String × KCallable :=
   ("ep-gc", .subflow {
     preLabel := none
     head := ("ep-tg", [("x", qv "c")])
     arms := [
       qivc (some "t") "ep-m" [("s", qv "nm")]
-        [("mm", "ep-ge", [("e", qk (qv "c") 0), ("n", qv "n")]),
-         ("d", "ep-de", [("e", qk (qv "c") 0)])]
-        "m" (qcc [qv "d", qs "static Res *k_", qv "mm",
+        [("mm", "ep-ge", [("e", qk (qv "c") 0), ("n", qv "n")])]
+        "p" (qarr2 (qcc [qa0 (qv "p"), qs "static Res *k_", qv "mm",
               qs "(E *e){\n KSTEP();\n Val*v=ev",
-              qitoa (qadd (qv "n") (qsub (qv "m") (qint 1))),
+              qitoa (qadd (qv "n") (qsub (qa1 (qv "p")) (qint 1))),
               qs "(e);\n return v?r_bare(v):0;}\n"])
+            (qa1 (qv "p")))
         |> qArmG (qeq (qv "t") (qint 27))
     , qivc (some "t") "ep-m" [("s", qv "nm")]
         [("mm", "ep-gf",
@@ -2217,11 +1913,10 @@ private def kEpGbo3 : String × KCallable :=
     , qivc (some "k") "ep-gc"
         [("nm", qf (qv "x2") "name"), ("c", qf (qv "x2") "v"),
          ("n", qv "m")]
-        [("d", "ep-dc", [("c", qf (qv "x2") "v")]),
-         ("dm", "ep-gbo", [("g", qv "g"), ("live", qv "live"),
+        [("dm", "ep-gbo", [("g", qv "g"), ("live", qv "live"),
             ("i", qv "i"), ("n", qv "n"),
-            ("m", qadd (qv "m") (qv "dm")),
-            ("out", qcat (qv "out") (qv "d"))])]
+            ("m", qadd (qv "m") (qa1 (qv "dm"))),
+            ("out", qcat (qv "out") (qa0 (qv "dm")))])]
         "r" (qv "r")
     ] })
 
@@ -2319,11 +2014,8 @@ def kEmitProg : KProg := {
     kEpId, kEpPeek, kEpStep, kEpTg,
     kEpMl, kEpM, kEpEc, kEpEl, kEpE, kEpCq,
     kEpMems,
-    kEpDv, kEpDvl, kEpDpl, kEpDbc, kEpDbb, kEpDe,
-    kEpDoc, kEpDc0, kEpDn, kEpDon, kEpDal, kEpDd, kEpDa,
-    kEpDgl, kEpDg, kEpDf2, kEpDf, kEpDc,
-    kEpGvl, kEpGvs, kEpGpl, kEpGps, kEpGv,
-    kEpGeb2, kEpGebd, kEpGes2, kEpGebs, kEpGe, kEpGe2,
+    kEpGvl, kEpGpl, kEpGv,
+    kEpGebd, kEpGe, kEpGe2,
     kEpGan, kEpGaed, kEpGasl, kEpGad, kEpGas,
     kEpGcd, kEpGnd, kEpGcs, kEpGns,
     kEpAnb, kEpAcd, kEpAcs, kEpAno, kEpAnn,

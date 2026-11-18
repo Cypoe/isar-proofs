@@ -9,7 +9,8 @@ static void sx_expr(KExpr *e, Buf *b, char **err);
 static int is_builtin(const char *n) {
     static const char *t[] = {"as","intCast","truncate","divTrunc","rem",
                               "mod","len","intToString","chars",
-                              "charsToString","charToString","contains",0};
+                              "charsToString","charToString","contains",
+                              "push","set",0};
     int i;
     for (i = 0; t[i]; i++) if (!strcmp(n, t[i])) return 1;
     return 0;

@@ -196,6 +196,14 @@ static Val*kbi(const char*n,Val**av,int na){k_i64 o;int ok;
  if(!strcmp(n,"contains")&&na==2){
   if(av[0]->tag!=3||av[1]->tag!=3)return 0;
   return v_bool(strstr(s_flat(av[0]->s),s_flat(av[1]->s))!=0);}
+ if(!strcmp(n,"push")&&na==2){Val**xs;
+  if(av[0]->tag!=4)return 0;
+  xs=xm((av[0]->nx+1)*sizeof(Val*));memcpy(xs,av[0]->xs,av[0]->nx*sizeof(Val*));
+  xs[av[0]->nx]=av[1];return v_arr(xs,av[0]->nx+1);}
+ if(!strcmp(n,"set")&&na==3){Val**xs;
+  if(av[0]->tag!=4||av[1]->tag!=0||av[1]->i<0||av[1]->i>=av[0]->nx)return 0;
+  xs=xm((av[0]->nx?av[0]->nx:1)*sizeof(Val*));memcpy(xs,av[0]->xs,av[0]->nx*sizeof(Val*));
+  xs[av[1]->i]=av[2];return v_arr(xs,av[0]->nx);}
  return 0;}
 static Val*k_field(Val*o,const char*n){int i;
  if(!o||o->tag!=5)return 0;for(i=o->nf-1;i>=0;i--)if(!strcmp(o->ns[i],n))return o->vs[i];return 0;}
