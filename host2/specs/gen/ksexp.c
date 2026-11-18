@@ -17,6 +17,7 @@ extern size_t strlen(const char*);
 extern int strcmp(const char*,const char*);
 extern char *strcpy(char*,const char*);
 extern char *strcat(char*,const char*);
+extern char *strstr(const char*,const char*);
 extern long long strtoll(const char*,char**,int);
 extern long long atoll(const char*);
 extern int snprintf(char*,size_t,const char*,...);
@@ -192,6 +193,9 @@ static Val*kbi(const char*n,Val**av,int na){k_i64 o;int ok;
  if(!strcmp(n,"charToString")&&na==1){char*p;
   if(av[0]->tag!=0||av[0]->i<0||av[0]->i>127)return 0;
   p=xm(2);p[0]=(char)av[0]->i;p[1]=0;return v_str(p);}
+ if(!strcmp(n,"contains")&&na==2){
+  if(av[0]->tag!=3||av[1]->tag!=3)return 0;
+  return v_bool(strstr(s_flat(av[0]->s),s_flat(av[1]->s))!=0);}
  return 0;}
 static Val*k_field(Val*o,const char*n){int i;
  if(!o||o->tag!=5)return 0;for(i=o->nf-1;i>=0;i--)if(!strcmp(o->ns[i],n))return o->vs[i];return 0;}

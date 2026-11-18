@@ -236,6 +236,13 @@ static Val *eval_kbuiltin(NV *env, int nenv, char *name, Expr **args, int nargs)
         p[0] = (char)va->i; p[1] = 0;
         return v_str(p);
     }
+    if (strcmp(name, "contains") == 0 && nargs == 2) {
+        Val *vb;
+        va = eval_ke(env, nenv, args[0]);
+        vb = eval_ke(env, nenv, args[1]);
+        if (!is_str(va) || !is_str(vb)) return 0;
+        return v_bool(strstr(va->s, vb->s) != 0);
+    }
     return 0;
 }
 

@@ -106,6 +106,7 @@ def prelude : String :=
 "extern int strcmp(const char*,const char*);\n" ++
 "extern char *strcpy(char*,const char*);\n" ++
 "extern char *strcat(char*,const char*);\n" ++
+"extern char *strstr(const char*,const char*);\n" ++
 "extern long long strtoll(const char*,char**,int);\n" ++
 "extern long long atoll(const char*);\n" ++
 "extern int snprintf(char*,size_t,const char*,...);\n" ++
@@ -281,6 +282,9 @@ def prelude : String :=
 " if(!strcmp(n,\"charToString\")&&na==1){char*p;\n" ++
 "  if(av[0]->tag!=0||av[0]->i<0||av[0]->i>127)return 0;\n" ++
 "  p=xm(2);p[0]=(char)av[0]->i;p[1]=0;return v_str(p);}\n" ++
+" if(!strcmp(n,\"contains\")&&na==2){\n" ++
+"  if(av[0]->tag!=3||av[1]->tag!=3)return 0;\n" ++
+"  return v_bool(strstr(s_flat(av[0]->s),s_flat(av[1]->s))!=0);}\n" ++
 " return 0;}\n" ++
 "static Val*k_field(Val*o,const char*n){int i;\n" ++
 " if(!o||o->tag!=5)return 0;for(i=o->nf-1;i>=0;i--)if(!strcmp(o->ns[i],n))return o->vs[i];return 0;}\n" ++
@@ -844,57 +848,16 @@ private def kEpCq : String × KCallable :=
     arms := [qivc (some "v") "ep-e" [("s", qv "v")] []
         "b" (qcc [qs "\"", qv "b", qs "\""])] })
 
-/-- `ep-mi {cs,ss,i,j,sn}` — inner compare for `ep-mems`:
-`cs[j] == ss[i+j]` for all `j < sn` → 1 else 0. -/
-private def kEpMi : String × KCallable :=
-  ("ep-mi", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "j")])
-    arms := [
-      qp "done" (some "j") (some (qge (qv "j") (qv "sn")))
-        (qint 1)
-    , qiv "eq" (some "j")
-        (some (qeq (qix (qv "ss") (qadd (qv "i") (qv "j")))
-                   (qix (qv "cs") (qv "j"))))
-        "ep-mi"
-        [("cs", qv "cs"), ("ss", qv "ss"), ("i", qv "i"),
-         ("j", qadd (qv "j") (qint 1)), ("sn", qv "sn")]
-    , qp1 (some "j") (qint 0)
-    ] })
-
-/-- `ep-mo {cs,ss,i,sn}` — outer scan for `ep-mems`: try `|s|` at
-each position `i` of `ss`. -/
-private def kEpMo : String × KCallable :=
-  ("ep-mo", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "i")])
-    arms := [
-      qp "stop" (some "i")
-        (some (qgt (qv "i")
-          (qsub (qlen (qv "ss")) (qv "sn"))))
-        (qint 0)
-    , .mk "go" false (some "i") none
-        (some (.invoke "ep-mi"
-          [("cs", qv "cs"), ("ss", qv "ss"), ("i", qv "i"),
-           ("j", qint 0), ("sn", qv "sn")]))
-        [ qcg (some "m") (qeq (qv "m") (qint 1))
-            (.produce (qint 1))
-        , qiv "_chain" (some "m") none "ep-mo"
-            [("cs", qv "cs"), ("ss", qv "ss"),
-             ("i", qadd (qv "i") (qint 1)), ("sn", qv "sn")]
-        ]
-    ] })
-
 /-- `ep-mems {st,s}` — 1 iff `st` (a `|a|b|` set-string) contains
-`s`; the `|`-sentinel defeats prefix collisions. -/
+`s`; the `|`-sentinel defeats prefix collisions.  One `contains`
+call — the spelled-out `ep-mo`/`ep-mi` char scan it replaces was
+a full invoke *per character*, which at corpus scale was the
+dominant allocator (frag 0060, bug class 3). -/
 private def kEpMems : String × KCallable :=
-  ("ep-mems", .subflow {
-    preLabel := none
-    head := ("ep-id", [("x", qv "s")])
-    arms := [qiv1s (some "v") "ep-mo"
-      [("cs", qcs (qcc [qs "|", qv "v", qs "|"])),
-       ("ss", qcs (qv "st")), ("i", qint 0),
-       ("sn", qlen (qcs (qcc [qs "|", qv "v", qs "|"])))] ] })
+  ("ep-mems", .bare
+    (qcnd (.builtin "contains" [qv "st",
+              (qcc [qs "|", qv "s", qs "|"])])
+          (qint 1) (qint 0)))
 
 -- ---------- dc family: structural EM.fresh counts ----------
 -- Each `dc*` computes exactly the fresh names `gen*` allocates
@@ -2355,7 +2318,7 @@ def kEmitProg : KProg := {
   graph := [
     kEpId, kEpPeek, kEpStep, kEpTg,
     kEpMl, kEpM, kEpEc, kEpEl, kEpE, kEpCq,
-    kEpMi, kEpMo, kEpMems,
+    kEpMems,
     kEpDv, kEpDvl, kEpDpl, kEpDbc, kEpDbb, kEpDe,
     kEpDoc, kEpDc0, kEpDn, kEpDon, kEpDal, kEpDd, kEpDa,
     kEpDgl, kEpDg, kEpDf2, kEpDf, kEpDc,

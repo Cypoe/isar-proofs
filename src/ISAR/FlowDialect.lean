@@ -45,8 +45,11 @@ refusal or an exactness strengthening — never a silent guess):
     (`arr → int`) and `"intToString"` (`int → str`, decimal), plus
     `"chars"` (`str → arr` of UTF-8 byte ints), `"charsToString"`
     (`arr` of byte ints `→ str`, refusing outside 0‥255 and on
-    invalid UTF-8), and `"charToString"` (byte int `→ str`,
-    ASCII-only — refuses outside 0‥127). These are stdlib names
+    invalid UTF-8), `"charToString"` (byte int `→ str`,
+    ASCII-only — refuses outside 0‥127), and `"contains"`
+    (`str × str → bool`, substring predicate — a membership check
+    the emitter would otherwise spell as a per-char invoke loop).
+    These are stdlib names
     the kernel subset did
     not carry; the extension is strictly additive — previously
     deciding programs decide identically, and only previously-
@@ -323,6 +326,11 @@ def evalKBuiltin (env : KEnv) (name : String) (args : List KExpr) : Option KVal 
             some (.str (String.ofList [Char.ofNat i.toNat]))
           else none
       | _ => none
+  | "contains", [ha, ne] =>
+      match evalKE env ha, evalKE env ne with
+      | some (.str h), some (.str n) =>
+          some (.bool (h.contains n.toSlice))
+      | _, _ => none
   | _, _ => none
 end
 
