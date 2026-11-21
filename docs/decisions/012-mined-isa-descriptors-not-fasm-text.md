@@ -1,0 +1,3 @@
+# 012 Mined Isa Descriptors Not Fasm Text
+
+- Sharpen FASM/CoGen: thin QuotientMaps are mined-from-fasm (ISA descriptors adopted under OperEq), not hand-authored fasm text dialects. Host fasm_dialect.py text surface was a stand-in; the real input is ISA descriptors (x86 and others) so CoGen can choose/emit best paths for MachineContext c. Still useful source: isa-physics/plex-agent/dialect_bank (x86.rules.json, fasm_*.rules.json, fasmg_*.plex, elf64, jvm, …) — mine/adopt descriptors that match OperEq known maps; then score best realize path per ISA. fasmg product/assembler ≠ descriptor bank. Decision 011 (presentation ≠ native exec) stands; this corrects what we mine.

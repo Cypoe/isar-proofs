@@ -1,0 +1,3 @@
+# 010 Bootstrap Realize Cogen Before Fasm
+
+- Bootstrap/self-host under ISAR is Realize under O + context c — synthesize a truthful kernel representation and host toolchain for the running architecture. Never 'self-hosted compiler = IT': InvariantLayer is only ever observed via presentations; ~_O is what is preserved. FASM(g) is a QuotientMap/dialect *target*, not the first deliverable. Order: (1) principled CoGen machinery (parameters: O, host pieces, strategy, budget; choose/emit loaders that preserve O; mine-adopt only if OperEq matches known map) (2) then FASM(g) as first concrete emit dialect under that machinery. Not ad-hoc FASM emit. Not 1993 mix substitute. Not EAL/IC as S. BCWI does not entail K unchanged.
