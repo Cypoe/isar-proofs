@@ -7,11 +7,14 @@ tags: [isk, kernel, carrier, observation-regime, dialect, architecture]
 ---
 
 **ISK is a proof-of-completeness witness, not a wire format.**
-Baking `ISKSubtype` into the `Kernel` interface — every view
-implementing `view_of : ISKSubtype → Carrier` and
-`decode : Carrier → ISKSubtype` — turns a minimal combinatory
-basis into the mandatory interchange for the whole stack. The
-privilege costs three ways: bracket abstraction destroys local
+The ISK terms were never a privileged interchange choice — they
+are a witness for proof mechanics, a minimal basis that makes
+completeness theorems short to state. Baking `ISKSubtype` into
+the `Kernel` interface — every view implementing
+`view_of : ISKSubtype → Carrier` and `decode : Carrier →
+ISKSubtype` — let the proof shorthand leak into the wire role,
+turning it into the mandatory interchange for the whole stack.
+The leak costs three ways: bracket abstraction destroys local
 structure and inflates terms (worst case for a projectional
 editor, where a small view edit becomes a large non-local
 rewrite); `ISKSubtype` is a tree where the runtime wants a
@@ -39,6 +42,18 @@ norm/konst witness). ISK remains for bootstrapping,
 minimal-basis proofs, and canonical Gödel indexing — one
 dialect among equals.
 
+Decidability settled mechanically (probe: two regimes over a
+shared-graph presentation — class-id `Obs` with decidable
+`ObsEq`, and the presentation itself with a Prop relation —
+both instantiate `substrateKernel`/`canonical_hom`/
+`QuotientMap` with zero `Decidable` anywhere): the interface
+never decides; decidability is a property of the chosen `Obs`
+representation. `operEqRegime` already exploits this —
+`InvariantLayer` IS the class-id. A third option beyond
+Prop-vs-decidable: two regimes over one presentation
+(semantic `ObsEq` + computational class-id `Obs`), related by
+`QuotientMap`.
+
 Open: the substrate pin `Dialect.encode : Object → ISKSubtype`
 still routes composition through ISK — migrated through the
 generalized `QuotientMap` layer when a dialect gets its own
@@ -46,5 +61,8 @@ regime; and whether the regime-parameterized `Kernel` is one
 structure or two (a `UniversalKernel` witnessing completeness
 vs a `CarrierKernel` doing representation work). Next carrier
 candidate: typed composition graph / interaction-net shape —
-optimal graph sharing (HVM/Bend lineage) is the performance
-unlock this parameterization was staged for.
+optimal graph sharing is the performance unlock this
+parameterization was staged for. Source is Lafont's
+interaction nets; `bendtt.lean` (vendored `W:\src\bend`) is
+the model for a formalized affine kernel in Lean — bend2 uses
+no HVM.

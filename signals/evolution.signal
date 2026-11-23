@@ -1,0 +1,6 @@
+name: evolution
+kind: inferred
+shape: categorical
+face: in
+membrane: true
+note: belief extended or implemented — direction landed, not reversed; pairs with membrane evolve

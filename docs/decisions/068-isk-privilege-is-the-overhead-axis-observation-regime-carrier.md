@@ -1,14 +1,17 @@
-# 068 — ISK privilege is the overhead axis; carrier generalizes to ObservationRegime
+# 068 — ISK is a proof-mechanics witness, not a wire; carrier generalizes to ObservationRegime
 
 ## Context
 
 `KernelCategory.lean` bakes `ISKSubtype` into the `Kernel`
 interface itself: every view must implement
 `view_of : ISKSubtype → Carrier` and `decode : Carrier → ISKSubtype`.
-That silently makes a minimal combinatory basis the mandatory
-interchange format for the whole stack — ISK is privileged as
-*the* shorthand, not merely a witness that a tiny basis can
-simulate every closed dialect.
+The ISK terms were never chosen as a privileged interchange —
+they exist as a *witness for proof mechanics* (a minimal basis
+making completeness theorems short to state). The defect is that
+the proof shorthand leaked into the wire role: what the
+interface needed for stating theorems silently became the
+mandatory interchange format for the whole stack. The cost is
+the leak, not a privilege decision.
 
 The tax lands three ways (analyzed against the current tree):
 
