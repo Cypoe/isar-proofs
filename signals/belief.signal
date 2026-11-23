@@ -1,0 +1,9 @@
+name: belief
+kind: inferred
+shape: categorical
+face: in
+membrane: true
+note: belief confirmed by a discriminator test — a prediction the existing
+  corpus let survive was exposed/refined only when a harder instance
+  (here: lambda compilation against a carrier built for gamma/delta/
+  epsilon) exercised the edge case; pairs with membrane evolve
