@@ -82,12 +82,26 @@ Stage (b) landed (`src/ISAR/InteractionNet.lean`): `Net` — agents
 plus wires as unordered end-pairs, sharing as datum not tree shape —
 is the first non-ISK kernel carrier, instantiated against
 `Kernel P R` with zero changes to the generic machinery.
-`RuleTable` declares Lafont's annihilate/commute/erase as data;
-`netStep` refuses on contract violation (mismatched arity, aux-wire
-joining the dying pair) rather than fabricate. `Obv` makes the
-⊥/refusal split structural. The textbook γδ grid, annihilation
-splice, erasure, refusal, and fuel-0 divergence all evaluate
-in-file; `inetKernel`/`inetCanonical`/`inetSelfMap` exercise
-substrate kernel, canonical hom, and quotient map with no ISK
-anywhere. Optimal graph sharing is the performance unlock this
-parameterization was staged for.
+`RuleTable` declares Lafont's annihilate/commute/erase as data
+(`action : Nat → Nat → Option Action`, `none` names an unhandled
+principal pair); `netStep` refuses on contract violation rather than
+fabricate. `Obv` makes the ⊥/refusal split structural.
+`inetKernel`/`inetCanonical`/`inetSelfMap` exercise substrate kernel,
+canonical hom, and quotient map with no ISK anywhere. Optimal graph
+sharing is the performance unlock this parameterization was staged
+for.
+
+Stage (b.2) landed (frag 0066): the λ-calculus now compiles to the
+carrier (`src/ISAR/LambdaNet.lean`) — `@`'s principal is the
+fun-seeker, so β is principal-principal annihilation, and shared
+variables fan out through γ-dup trees on the binder's var-port. The
+λ encoding forced the engine fix the γδε fragment let slide: dead
+auxiliary ends are *resolved transitively* through a splice
+substitution (`resolveEnd`/`rewire`), not refused — `(λx.x) y`'s
+internal body-var wire collapses to the bare wire, and `loopNet` is
+a genuine diverger. `netStep` = `netStepRaw` + boundary
+re-validation, so `n'.check = true` on every adopted reduct is a
+proved corollary (`netStep_checked`) — translation validation, not
+construction discipline. Mechanical evidence: `(λx.x x) y` reduces
+leaving γ on the *shared* argument — Lafont's optimal sharing,
+evaluated in-file.

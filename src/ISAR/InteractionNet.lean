@@ -110,9 +110,10 @@ inductive Action where
   | eraseR
 deriving Repr
 
-/-- The rule set as declared data. -/
+/-- The rule set as declared data.  `action` returning `none` names an
+    unhandled principal pair — a refusal, not a default. -/
 structure RuleTable where
-  action : Nat → Nat → Action
+  action : Nat → Nat → Option Action
   eraser : Nat
 
 /-- The three-valued observation: bounded normal form, the ⊥ class, or a
@@ -127,85 +128,162 @@ deriving DecidableEq, Repr
 def portsOf (a : Nat) (arity : Nat) : List PortEnd :=
   (List.range (arity + 1)).map (.port a)
 
-/-- Remove all wires touching any end in `dead`. -/
-def stripWires (dead : List PortEnd) (ws : List (PortEnd × PortEnd)) :
-    List (PortEnd × PortEnd) :=
-  ws.filter (fun (x, y) => !(dead.contains x || dead.contains y))
-
 /-- Wire two ends. -/
 abbrev wire (a b : PortEnd) : PortEnd × PortEnd := (a, b)
 
 /-- Auxiliary port indices of an agent. -/
 def auxPorts (arity : Nat) : List Nat := (List.range arity).map (· + 1)
 
-/-- Peer of agent `a`'s port `k`, refusing ends that die with the pair. -/
-def livePeer (n : Net) (dead : List PortEnd) (a k : Nat) : Option PortEnd :=
-  match n.peerOf (.port a k) with
-  | some e => if dead.contains e then none else some e
-  | none => none
+/-- A splice plan: how each *auxiliary* port of the dying pair is
+    replaced, the fresh agents appended, and the construction wires
+    added (the commute grid).  Principal ports get no entry — a resolve
+    that lands on one drops the wire, which is unreachable in a checked
+    net anyway (the principals' only wire is the pair's own edge). -/
+structure SplicePlan where
+  subst : List (PortEnd × PortEnd)
+  freshAgents : Array (Option Agent)
+  extraWires : List (PortEnd × PortEnd)
 
-/-- One interaction step on the first principal pair.
+/-- Outcome of resolving an end through the splice. -/
+inductive ResolveRes where
+  | live : PortEnd → ResolveRes
+  | drop : ResolveRes          -- dead principal — the pair's own edge vanishes
+
+/-- Iterate the splice substitution until the end is live or hits a
+    principal (`.drop`); `none` on a dead-end cycle (fuel bounds the
+    chase). -/
+def resolveEnd (dead : List PortEnd) (subst : List (PortEnd × PortEnd))
+    (fuel : Nat) (e : PortEnd) : Option ResolveRes :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+    if dead.contains e then
+      match subst.lookup e with
+      | some e' => resolveEnd dead subst fuel e'
+      | none => some .drop
+    else some (.live e)
+
+/-- Rewrite every wire through `resolveEnd`; dropped ends vanish the
+    wire, unresolvable cycles refuse.  Mirror-image duplicates from the
+    splice are collapsed (a wire is unordered). -/
+def rewire (n : Net) (dead : List PortEnd) (subst : List (PortEnd × PortEnd)) :
+    Option (List (PortEnd × PortEnd)) :=
+  let fuel := dead.length + 1
+  let rec go : List (PortEnd × PortEnd) → List (PortEnd × PortEnd) →
+      Option (List (PortEnd × PortEnd))
+    | [], acc => some acc
+    | (x, y) :: ws, acc =>
+      match resolveEnd dead subst fuel x, resolveEnd dead subst fuel y with
+      | some (.live x'), some (.live y') =>
+        if acc.any (fun (a, b) => (a = x' && b = y') || (a = y' && b = x'))
+        then go ws acc else go ws (acc ++ [(x', y')])
+      | some .drop, _ => go ws acc
+      | _, some .drop => go ws acc
+      | _, _ => none
+  go n.wires []
+
+/-- Annihilation: aux port `a.k` is replaced by `b`'s k-th peer and vice
+    versa — resolve chases dead ends transitively, so internal wires
+    (the `(λx.x)` shape, an aux port wired to its own pair) collapse
+    correctly instead of refusing.  Refuses on arity mismatch. -/
+def annihilatePlan (n : Net) (a b : Nat) (agA agB : Agent) : Option SplicePlan :=
+  if agA.arity ≠ agB.arity then none else
+  let aux := auxPorts agA.arity
+  let pa := aux.map (fun k => n.peerOf (.port b k))
+  let pb := aux.map (fun k => n.peerOf (.port a k))
+  if (pa ++ pb).any (·.isNone) then none else
+  some { subst :=
+    (aux.zip pa).map (fun (k, p) => (.port a k, p.get!)) ++
+    (aux.zip pb).map (fun (k, p) => (.port b k, p.get!))
+       , freshAgents := #[]
+       , extraWires := [] }
+
+/-- Commutation: each dead aux port is replaced by the principal of its
+    fresh copy — the old wire (a.i ↔ x) becomes (Bᵢ.0 ↔ x) by the same
+    rewire, peers never touched.  The bipartite grid wires the copies'
+    aux ports crosswise; internal aux-aux wires collapse into real wires
+    between fresh agents (a feedback loop diverges — correct). -/
+def commutePlan (n : Net) (a b : Nat) (agA agB : Agent) : SplicePlan :=
+  let m := agA.arity; let k := agB.arity
+  let baseB := n.agents.size
+  let baseA := baseB + m
+  let auxA := auxPorts m; let auxB := auxPorts k
+  { subst :=
+    auxA.map (fun i => (.port a i, .port (baseB + i - 1) 0)) ++
+    auxB.map (fun j => (.port b j, .port (baseA + j - 1) 0))
+  , freshAgents :=
+    (List.replicate m (some { label := agB.label, arity := k })).toArray ++
+    (List.replicate k (some { label := agA.label, arity := m })).toArray
+  , extraWires := auxA.flatMap (fun i => auxB.map (fun j =>
+      wire (.port (baseB + i - 1) j) (.port (baseA + j - 1) i))) }
+
+/-- Erasure: every dead aux port (of both agents) is replaced by the
+    principal of a fresh arity-0 eraser — the partner's structure is
+    swallowed whole and each freed peer gets its own ε. -/
+def erasePlan (n : Net) (a b : Nat) (agA agB : Agent) (rt : RuleTable) :
+    SplicePlan :=
+  let base := n.agents.size
+  let substA := (auxPorts agA.arity).mapIdx (fun idx i =>
+    (.port a i, .port (base + idx) 0))
+  let substB := (auxPorts agB.arity).mapIdx (fun idx j =>
+    (.port b j, .port (base + agA.arity + idx) 0))
+  { subst := substA ++ substB
+  , freshAgents :=
+    (List.replicate (agA.arity + agB.arity)
+      (some { label := rt.eraser, arity := 0 })).toArray
+  , extraWires := [] }
+
+/-- One interaction step on the first principal pair — the raw candidate.
     `none` = no reducible pair (normal form or stuck);
-    `some none` = arity/structure contract violated (refusal);
-    `some (some n')` = reduct. -/
-def netStep (rt : RuleTable) (n : Net) : Option (Option Net) := do
-  let (a, b) ← match n.principalPairs.head? with
-    | some (.port a 0, .port b 0) => some (a, b)
-    | _ => none
-  let some (some agA) := n.agents[a]? | none
-  let some (some agB) := n.agents[b]? | none
-  let dead := portsOf a agA.arity ++ portsOf b agB.arity
-  let stripped := stripWires dead n.wires
-  match rt.action agA.label agB.label with
-  | .annihilate =>
-    if agA.arity ≠ agB.arity then some none else
-    let aux := auxPorts agA.arity
-    let newWires := aux.map (fun k =>
-      (livePeer n dead a k).bind (fun x =>
-        (livePeer n dead b k).map (fun y => wire x y)))
-    if newWires.any (·.isNone) then some none
-    else some (some { n with
-      agents := (n.agents.set! a none).set! b none
-      wires := stripped ++ newWires.filterMap id })
-  | .commute =>
-    let m := agA.arity; let k := agB.arity
-    let baseB := n.agents.size        -- m copies of b's shape
-    let baseA := baseB + m            -- k copies of a's shape
-    let newBs : Array (Option Agent) :=
-      (List.replicate m (some { label := agB.label, arity := k })).toArray
-    let newAs : Array (Option Agent) :=
-      (List.replicate k (some { label := agA.label, arity := m })).toArray
-    let auxA := auxPorts m; let auxB := auxPorts k
-    -- principal of i-th b-copy ↔ old peer of a.i; of j-th a-copy ↔ peer of b.j
-    let peerWires :=
-      auxA.map (fun i => (livePeer n dead a i).map
-        (fun p => wire (.port (baseB + i - 1) 0) p)) ++
-      auxB.map (fun j => (livePeer n dead b j).map
-        (fun p => wire (.port (baseA + j - 1) 0) p))
-    if peerWires.any (·.isNone) then some none
-    else
-      let gridWires := auxA.flatMap (fun i => auxB.map (fun j =>
-        wire (.port (baseB + i - 1) j) (.port (baseA + j - 1) i)))
-      some (some { n with
-        agents := ((n.agents.set! a none).set! b none) ++ newBs ++ newAs
-        wires := stripped ++ peerWires.filterMap id ++ gridWires })
-  | .eraseL | .eraseR =>
-    -- The eraser swallows its partner whole: every aux peer of *both*
-    -- agents gets a fresh arity-0 eraser.
-    let peers :=
-      (auxPorts agA.arity).map (livePeer n dead a) ++
-      (auxPorts agB.arity).map (livePeer n dead b)
-    if peers.any (·.isNone) then some none
-    else
-      let peers := peers.filterMap id
-      let base := n.agents.size
-      let newEs : Array (Option Agent) :=
-        (List.replicate peers.length (some { label := rt.eraser, arity := 0 })).toArray
-      let eWires := (List.range peers.length).map (fun i =>
-        wire (.port (base + i) 0) peers[i]!)
-      some (some { n with
-        agents := ((n.agents.set! a none).set! b none) ++ newEs
-        wires := stripped ++ eWires })
+    `some none` = contract violated (refusal);
+    `some (some n')` = candidate reduct. -/
+def netStepRaw (rt : RuleTable) (n : Net) : Option (Option Net) :=
+  match n.principalPairs.head? with
+  | some (.port a 0, .port b 0) =>
+    match n.agents[a]?, n.agents[b]? with
+    | some (some agA), some (some agB) =>
+      match rt.action agA.label agB.label with
+      | none => some none
+      | some act =>
+        let sp := match act with
+          | .annihilate => annihilatePlan n a b agA agB
+          | .commute => some (commutePlan n a b agA agB)
+          | .eraseL | .eraseR => some (erasePlan n a b agA agB rt)
+        match sp with
+        | none => some none
+        | some sp =>
+          let dead := portsOf a agA.arity ++ portsOf b agB.arity
+          match rewire n dead sp.subst with
+          | none => some none
+          | some wires' =>
+            some (some { n with
+              agents := ((n.agents.set! a none).set! b none) ++ sp.freshAgents
+              wires := wires' ++ sp.extraWires })
+    | _, _ => some none
+  | _ => none
+
+/-- The validated step: a candidate is adopted only if the wiring check
+    passes — translation validation, verify the transform not the
+    transformer. -/
+def netStep (rt : RuleTable) (n : Net) : Option (Option Net) :=
+  match netStepRaw rt n with
+  | some (some n') => if n'.check = true then some (some n') else some none
+  | none => none
+  | some none => some none
+
+/-- Wiring coherence as a corollary: an adopted reduct always passes the
+    structural check — by the validation guard, not by construction
+    discipline. -/
+theorem netStep_checked (rt : RuleTable) (n n' : Net)
+    (h : netStep rt n = some (some n')) : n'.check = true := by
+  simp only [netStep] at h
+  split at h
+  · rename_i cand _
+    split at h
+    · next hc => cases h; exact hc
+    · simp at h
+  · simp at h
+  · simp at h
 
 /-- Bounded normalization.  Fuel out while a pair remains reducible is
     `.divergent` — the honest over-approximation. -/
@@ -243,10 +321,10 @@ mechanical evidence — evaluated, not asserted.
 
 def γδε : RuleTable where
   action := fun l1 l2 =>
-    if l1 = 0 then .eraseL
-    else if l2 = 0 then .eraseR
-    else if l1 = l2 then .annihilate
-    else .commute
+    if l1 = 0 then some .eraseL
+    else if l2 = 0 then some .eraseR
+    else if l1 = l2 then some .annihilate
+    else some .commute
   eraser := 0
 
 private def mkNet (ags : Array (Option Agent)) (wires : List (PortEnd × PortEnd))

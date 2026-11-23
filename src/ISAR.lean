@@ -11,6 +11,7 @@ import ISAR.ZFCInterpretation
 import ISAR.DialectKernel
 import ISAR.ObservationRegime
 import ISAR.InteractionNet
+import ISAR.LambdaNet
 import ISAR.CoGen
 import ISAR.FASMView
 import ISAR.ViewIndependence
