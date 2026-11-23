@@ -59,10 +59,24 @@ still routes composition through ISK — migrated through the
 generalized `QuotientMap` layer when a dialect gets its own
 regime; and whether the regime-parameterized `Kernel` is one
 structure or two (a `UniversalKernel` witnessing completeness
-vs a `CarrierKernel` doing representation work). Next carrier
+vs a `CarrierKernel` doing representation work).
+
+`observe` settled mechanically (probe `_scratch/inet_observe_probe.lean`
+— hash vs equational-closure vs joinability discriminated on
+annihilation, non-confluence, divergence): `sim` is joinability
+(common reduct). Hash misses rewrite equivalence
+(`F(G x)` vs `x`); equational theory over-identifies
+(`B ~ C` provable across a non-confluent fork, no common
+reduct); joinability matches execution truth and coincides
+with equational theory exactly on the confluent fragment —
+which is why Lafont's interaction rules, confluent by
+construction, are the optimal-sharing substrate. Plain
+nf-observe collapses all divergent terms to one ⊥ class
+(probe: `nfs D = nfs (W D) = []`), so a total `observe`
+needs a normalizability side-condition on the presentation —
+the `Guard`/dead-live split pattern from `bendtt.lean`
+(vendored `W:\src\bend`; bend2 has no HVM) is the model for
+carrying it first-class rather than as a caveat. Next carrier
 candidate: typed composition graph / interaction-net shape —
 optimal graph sharing is the performance unlock this
-parameterization was staged for. Source is Lafont's
-interaction nets; `bendtt.lean` (vendored `W:\src\bend`) is
-the model for a formalized affine kernel in Lean — bend2 uses
-no HVM.
+parameterization was staged for.
