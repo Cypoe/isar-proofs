@@ -3,31 +3,66 @@ type: frag
 id: 0066
 provenance: devin-cli
 ts: 2026-11-19
-tags: [isar, interaction-net, lambda-calculus, lafont, sharing,
-       translation-validation, kernel-carrier]
+tags: [isar, interaction-net, interaction-combinators, lambda-calculus,
+       lafont, lamping, sharing, translation-validation, kernel-carrier,
+       invariant-layer]
 ---
 
-# 0066 — λ→inet compilation lands; splice-resolve replaces `livePeer`;
-`check` preservation is a corollary, not a discipline
+# 0066 — λ over the interaction combinators; splice-resolve replaces
+`livePeer`; `check` preservation is a corollary, not a discipline
 
 ## What landed
 
-Two halves of one change, in `src/ISAR/`:
+Two halves of one change in `src/ISAR/`, plus an abstraction-layer
+correction that fell out of them.
 
-**`LambdaNet.lean`** — the standard interaction-net encoding of
-the λ-calculus, compiling `LambdaFragment.LTerm` (the same de
-Bruijn syntax bracket abstraction feeds to ISK — one source
-language, two carriers). `λ` is an arity-2 agent whose
-*principal* faces the application's fun-seeker; `@`'s principal
-*is* the fun-seeker, so a β-redex is a principal-principal pair
-and β-reduction is **annihilation** — the same index-wise splice
-that deletes γγ pairs. Repeated variable uses fan out through a
-γ-dup tree on the binder's var-port; unused binders get an ε;
-free variables become interface ports. `lamRules` is declared
-data: ε erases, γγ and λ⋈@ annihilate, γ commutes against
-anything else (lazy copying — the duplicator only descends when
-it meets a constructor), unhandled pairs refuse via
-`RuleTable.action`'s new `Option` return.
+**`LambdaNet.lean`** — λ-calculus over the *interaction combinators
+in the abstract*, not a bespoke λ-labeled net system. Three agent
+shapes — `γ` (constructor, arity 2), `δ` (duplicator, arity 2),
+`ε` (eraser, arity 0) — under the **universal `γδε` rule table**.
+No λ-specific labels: `λ` and `@` are **both γ**, told apart only
+by which port faces the consumer (Taelin's reading of Asperti:
+interaction combinators = λ + superposition). `λ`'s port 0 is the
+principal facing the application's fun-seeker; `@`'s port 0 *is* the
+fun-seeker — so a β-redex is a γ⋈γ principal pair and **β is
+annihilation**, the same index-wise splice that deletes any γγ
+pair. The `lamRules` table from the first pass is gone; the
+universal table runs everything.
+
+Shared variables fan out through right-linear δ-trees on the
+binder's var-port; unused binders get ε; **free variables are
+interface binders** — each distinct free var gets a free port and
+its own δ-tree to its use-sites, so sharing at the boundary is net
+data like any other (the earlier draft wired one free port to
+multiple uses — `check`-invalid, now structurally impossible).
+
+**Readback — the degenerate classifier.** `readback` inverts the
+encoding *on the fragment where it inverts*: at a term slot it
+inspects the facing end's port (`γ.0` = λ-root, `γ.1` = @-root,
+`λ.2`/`δ.aux` = a variable leaf through the stack of binder
+leaf-sets and free-port leaf-sets). A δ or ε **principal** facing a
+term slot is a *superposition* — a well-formed net with no
+λ-denotation — and readback refuses it. `readback.isSome` is
+literally the classification "degenerate": the subset of net-space
+where Lamping's abstract algorithm is defined. A bare δ with its
+principal at the root interface is the canonical honest test
+(`supNet`): the aux ports alone are just shared free vars, the
+principal at a term slot is not.
+
+**Observation through the Invariant Layer.** `lambdaObs` composes
+`nfBounded → readback → compileISK → ⟦·⟧`, so a net's observation
+is a class in the *same* `Quotient operEqSetoid` that observes ISK
+terms — cross-carrier `sim` is literal. `LObs` is four-valued:
+`.nf` a layer class, `.superposed` a non-degenerate nf (each its
+own class — no semantic quotient claimed), `.divergent`,
+`.refused`. `compileISK` is a pure S/K/I bracket abstraction
+(`LambdaFragment.compile` optimizes with `comp`, which leaves the
+`ISKTerm` fragment); free vars inject as the closed family
+`varEnc` — distinct normal forms, an honest injection. `DegNFNet`
+(nets already normal *and* degenerate) carries `degMap`, a
+`QuotientMap` into the ISK substrate whose `preserves` holds by
+construction there; extending past the nf subtype *is* the
+simulation theorem and is deliberately not asserted.
 
 **Engine redesign** (`InteractionNet.lean`) — `livePeer`'s
 "refuse ends that die with the pair" was correct for the γδε
@@ -55,17 +90,19 @@ coherence no longer depends on construction discipline; any
 future plan constructor is checked at the boundary by the same
 guard.
 
-## Mechanical evidence (all `#eval`uated in-file)
+## Mechanical evidence (all `example`/`decide`-checked in-file)
 
 | input | observation |
 |---|---|
-| `(λx.x) y` | `nf` — collapses to the bare wire `y ↔ root` |
-| `(λx.λy.x) z` | `nf` — `λy.z`: λ agent, ε on y's var-port |
-| `(λx.x x) y` | `nf` — a γ sits on the *shared* argument edge, one occurrence feeding both use sites — optimal sharing made visible |
-| `x` alone | `nf` — interface only, no agents |
+| `(λx.x) y` | `.nf ⟦var 0⟧` — and *literally equal* to the observation of bare `y`: same `InvariantLayer` class, cross-carrier observational equivalence evaluated |
+| `(λx.λy.x) z` | readback `λy.·` — K-shape with ε on the unused slot |
+| `(λx.x x) y` | readback `x x` — the δ sits on the *shared* argument edge, one occurrence feeding both use sites — optimal sharing made visible |
+| `(λx.x)(λx.x)` | readback `λx.x` — closed round-trip |
+| `x` alone | `nf` — interface wire only, no agents |
+| bare δ principal at root (`supNet`) | `.superposed` — readback refuses; non-degenerate, honestly named |
 | γδ commute | `nf` — the textbook 4-copy bipartite grid |
-| `loopNet` | `divergent` — a real feedback loop that grows fresh agents, no longer a refusal |
-| γδε @ fuel 0 | `divergent` — the ⊥ class |
+| `loopNet` | `.divergent` — a real feedback loop that grows fresh agents, no longer a refusal |
+| γδε @ fuel 0 | `.divergent` — the ⊥ class |
 
 ## Trade-offs / refusals
 
@@ -74,10 +111,17 @@ guard.
   dying pair, unreachable from any live end) refuses rather than
   looping — the honest answer, since such a component is
   untethered either way.
-- Dropping a wire on principal-hit is unreachable in a checked
-  net (the principals' only wire is the pair's own edge); the
-  post-validation `check` would catch any plan that produced it.
 - `check` is per-step revalidation — O(net) per rewrite. The
   honest price of validation over verification at this stage;
   an inductive invariant proof is the upgrade path if the
   carrier stabilizes.
+- `degMap` is only honest on the `DegNFNet` subtype — past
+  normal-and-degenerate nets, the encode/decode round trip is
+  the readback-correctness simulation theorem, deliberately not
+  asserted. `.superposed` keeps non-degenerate nfs as their own
+  observations rather than manufacturing a quotient we can't
+  justify.
+- `lambdaObs`'s `.nf` reads the root branch's *term shape* —
+  for nets with a non-trivial interface environment (e.g. the
+  γδ grid) the observation is the root projection's class, not
+  a claim about the whole net's semantics.

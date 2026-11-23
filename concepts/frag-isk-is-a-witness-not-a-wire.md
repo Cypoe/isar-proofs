@@ -105,3 +105,19 @@ proved corollary (`netStep_checked`) — translation validation, not
 construction discipline. Mechanical evidence: `(λx.x x) y` reduces
 leaving γ on the *shared* argument — Lafont's optimal sharing,
 evaluated in-file.
+
+Stage (b.3) — the abstraction correction: the λ encoding had
+leaked the same shorthand-into-wire sin at carrier scale — bespoke
+`lam`/`app`/`dup`/`era` labels with a λ-specific `λ⋈@` rule. The
+carrier is the interaction combinators in the abstract: `λ` and
+`@` are *both* γ, told apart by which port faces the consumer
+(Taelin's reading of Asperti: combinators = λ + superposition);
+β is γγ-annihilation; the universal `γδε` table replaced
+`lamRules`. Observation now goes through `InvariantLayer`, not a
+bespoke residual-net `Obs`: `lambdaObs` =
+`nfBounded → readback → compileISK → ⟦·⟧` lands in the *same*
+`Quotient operEqSetoid` as ISK terms, so `(λx.x) y` and bare `y`
+observe to the identical class — cross-carrier observational
+equivalence, evaluated. `readback.isSome` is the degenerate
+classifier: a δ or ε principal at a term slot is `.superposed`,
+its own observation — no λ-denotation claimed, none smuggled.
