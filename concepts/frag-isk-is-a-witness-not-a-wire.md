@@ -76,7 +76,18 @@ nf-observe collapses all divergent terms to one ⊥ class
 needs a normalizability side-condition on the presentation —
 the `Guard`/dead-live split pattern from `bendtt.lean`
 (vendored `W:\src\bend`; bend2 has no HVM) is the model for
-carrying it first-class rather than as a caveat. Next carrier
-candidate: typed composition graph / interaction-net shape —
-optimal graph sharing is the performance unlock this
+carrying it first-class rather than as a caveat.
+
+Stage (b) landed (`src/ISAR/InteractionNet.lean`): `Net` — agents
+plus wires as unordered end-pairs, sharing as datum not tree shape —
+is the first non-ISK kernel carrier, instantiated against
+`Kernel P R` with zero changes to the generic machinery.
+`RuleTable` declares Lafont's annihilate/commute/erase as data;
+`netStep` refuses on contract violation (mismatched arity, aux-wire
+joining the dying pair) rather than fabricate. `Obv` makes the
+⊥/refusal split structural. The textbook γδ grid, annihilation
+splice, erasure, refusal, and fuel-0 divergence all evaluate
+in-file; `inetKernel`/`inetCanonical`/`inetSelfMap` exercise
+substrate kernel, canonical hom, and quotient map with no ISK
+anywhere. Optimal graph sharing is the performance unlock this
 parameterization was staged for.

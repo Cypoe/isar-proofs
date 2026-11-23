@@ -10,6 +10,7 @@ import ISAR.HFSetSemantics
 import ISAR.ZFCInterpretation
 import ISAR.DialectKernel
 import ISAR.ObservationRegime
+import ISAR.InteractionNet
 import ISAR.CoGen
 import ISAR.FASMView
 import ISAR.ViewIndependence
