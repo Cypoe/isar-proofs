@@ -37,7 +37,7 @@ the `Kernel` interface "whose `decode` still lands in
 not free of it." The theorem is only truly symmetric once ISK
 is demoted to a peer dialect.
 
-## Decision (direction, not yet landed)
+## Decision (landed stage a)
 
 Separate **universality** from **representation**:
 
@@ -53,6 +53,30 @@ Separate **universality** from **representation**:
 - Domain-native ops (SIMD `join`/`norm`, FASM instrs, tensor
   ops) stay opaque atoms until a specific lowering expands
   them.
+
+### Stage (a) landed — interface generalization
+
+`Kernel` is now `Kernel (P : Type) (R : ObservationRegime P)`;
+every `OperEq` field hypothesis/conclusion became `R.sim`.
+`substrateKernel R` is the per-regime terminal object;
+`ISAR_Kernel := Kernel ISKSubtype operEqRegime` is the ISAR
+specialization and `substrateKernel operEqRegime` is its
+terminal target — `ISAR_Kernel` itself is no longer the
+terminal object, exactly the demotion semantics.
+`QuotientMapO` became `QuotientMap P R Q S` over arbitrary
+source/target regimes, with `QuotientMapO` kept as the ISK
+abbrev. `no_indiscrete_Kernel` takes a non-degeneracy witness
+`∃ t u, ¬ R.sim t u`; `operEqRegime_nondegenerate` supplies
+the ISAR instance from the norm/konst atoms. `DialectKernel`'s
+vestigial `KernelCategory` import removed (cycle:
+`KernelCategory → ObservationRegime → … → DialectKernel →
+KernelCategory`). All generic proofs ported with only
+equivalence-law reasoning — nothing needed ISK-specific
+structure, confirming the demotion was mechanical. Still
+ISK-pinned, deliberately: `Dialect.encode : Object →
+ISKSubtype` is the substrate pin, migrated later through the
+generalized `QuotientMap` layer, and each concrete dialect's
+`decode` still lands in ISK until its own regime exists.
 
 ## Where this sits historically
 

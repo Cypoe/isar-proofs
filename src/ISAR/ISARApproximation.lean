@@ -556,7 +556,8 @@ theorem ISAR_representation
    UAT or metric completion has been constructed.
 -/
 theorem ISAR_logical_and_statistical_universality :
-    (∀ (K : Kernel) (f : KernelHom K ISAR_Kernel) (c : K.Carrier),
+    (∀ (K : Kernel ISKSubtype operEqRegime)
+        (f : KernelHom K (substrateKernel operEqRegime)) (c : K.Carrier),
         OperEq (f.hom c) (K.decode c)) ∧
     (∀ (d k : Nat) (K : Set (EuclideanSpace ℝ (Fin d))) (_ : IsCompact K)
         (f : C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k)))
@@ -567,7 +568,7 @@ theorem ISAR_logical_and_statistical_universality :
     (∀ (d k : Nat) (σ : Activation) (_ : Activation.nonPolynomial σ)
         (f : C(EuclideanSpace ℝ (Fin d), EuclideanSpace ℝ (Fin k))),
         ∃! θ_limit : KernelAddressLimit d k σ, continuousRealizationLimit d k σ θ_limit = f) :=
-  ⟨fun K f c => morphism_uniqueness K f c,
+  ⟨fun K f c => (operEqRegime_sim_iff _ _).mp (morphism_uniqueness K f c),
    fun d k K hK f σ σ_np ε hε => ISAR_UAT d k K hK f σ σ_np ε hε,
    fun d k σ σ_np f => ISAR_representation d k σ σ_np f⟩
 

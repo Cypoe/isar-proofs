@@ -88,22 +88,33 @@ theorem operEqRegime_sim_iff (t u : ISKSubtype) :
    ========================================================= -/
 
 /--
-A quotient map into the OperEq substrate that states exactly what is preserved:
-decoding the class of an encoding recovers the regime's observation of `p`.
+A quotient map between regimes that states exactly what is preserved:
+decoding the target regime's observation of an encoding recovers the source
+regime's observation of `p`.  `Q`/`S` are arbitrary — dialects compose along
+`QuotientMap` chains directly (decision 068); the ISAR substrate is the
+`S = operEqRegime` specialization, not a mandatory transit point.
 -/
-structure QuotientMapO (P : Type) (R : ObservationRegime P) where
-  encode : P → ISKSubtype
-  decode : InvariantLayer → R.Obs
+structure QuotientMap (P : Type) (R : ObservationRegime P)
+    (Q : Type) (S : ObservationRegime Q) where
+  encode : P → Q
+  decode : S.Obs → R.Obs
   preserves : ∀ (p : P),
-    R.ObsEq (decode (toInvariantLayer (encode p))) (R.observe p)
+    R.ObsEq (decode (S.observe (encode p))) (R.observe p)
 
-/-- Encoding is sound for \(\sim_{\mathcal O}\) when decode respects OperEq. -/
-theorem QuotientMapO.encode_sound {P : Type} {R : ObservationRegime P}
-    (M : QuotientMapO P R)
-    (h_resp : ∀ {t u : ISKSubtype}, OperEq t u →
-      R.ObsEq (M.decode (toInvariantLayer t)) (M.decode (toInvariantLayer u)))
+/-- A quotient map into the OperEq substrate — the ISK specialization of
+`QuotientMap`: `encode : P → ISKSubtype`, `decode : InvariantLayer → R.Obs`. -/
+abbrev QuotientMapO (P : Type) (R : ObservationRegime P) :=
+  QuotientMap P R ISKSubtype operEqRegime
+
+/-- Encoding is sound for \(\sim_{\mathcal R}\) when decode respects the
+target regime's equivalence. -/
+theorem QuotientMap.encode_sound {P : Type} {R : ObservationRegime P}
+    {Q : Type} {S : ObservationRegime Q}
+    (M : QuotientMap P R Q S)
+    (h_resp : ∀ {t u : Q}, S.sim t u →
+      R.ObsEq (M.decode (S.observe t)) (M.decode (S.observe u)))
     {p1 p2 : P}
-    (h : OperEq (M.encode p1) (M.encode p2)) :
+    (h : S.sim (M.encode p1) (M.encode p2)) :
     R.sim p1 p2 := by
   have h1 := M.preserves p1
   have h2 := M.preserves p2

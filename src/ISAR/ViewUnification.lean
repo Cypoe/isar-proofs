@@ -28,16 +28,18 @@ structure AdmissibleDialect where
   decode_eq : ∀ (o1 o2 : D.Object), view_eq o1 o2 → OperEq (D.encode o1) (D.encode o2)
 
 /-- Canonical translation of any Admissible Dialect into a category-theoretic Kernel. -/
-def AdmissibleDialect.toKernel (AD : AdmissibleDialect) : Kernel where
+def AdmissibleDialect.toKernel (AD : AdmissibleDialect) :
+    Kernel ISKSubtype operEqRegime where
   Carrier := AD.D.Object
   view_of := AD.view_of
   view_eq := AD.view_eq
   is_equiv := AD.is_equiv
-  sound := AD.sound
+  sound := fun t u h => AD.sound t u ((operEqRegime_sim_iff _ _).mp h)
   decode := AD.D.encode
-  decode_view := AD.decode_view
+  decode_view := fun t => (operEqRegime_sim_iff _ _).mpr (AD.decode_view t)
   view_eq_decode := AD.view_eq_decode
-  decode_eq := AD.decode_eq
+  decode_eq := fun o1 o2 h =>
+    (operEqRegime_sim_iff _ _).mpr (AD.decode_eq o1 o2 h)
 
 
 /- =========================================================
@@ -45,7 +47,7 @@ def AdmissibleDialect.toKernel (AD : AdmissibleDialect) : Kernel where
    ========================================================= -/
 
 /-- An isomorphism between two category-theoretic Kernels. -/
-structure KernelIsomorphism (K1 K2 : Kernel) where
+structure KernelIsomorphism (K1 K2 : Kernel ISKSubtype operEqRegime) where
   hom1 : KernelHom K1 K2
   hom2 : KernelHom K2 K1
   inverse1 : ∀ (c : K1.Carrier), K1.view_eq (hom2.hom (hom1.hom c)) c
@@ -149,9 +151,10 @@ We state this for the five concrete semantic views:
 3. Pure SKI Term Rewriting (`TRS_AdmissibleDialect.toKernel`)
 4. Stack VM Bytecode (`Bytecode_AdmissibleDialect.toKernel`)
 -/
-theorem universal_factorization_theorem (K : Kernel) (f : KernelHom K ISAR_Kernel) (c : K.Carrier) :
+theorem universal_factorization_theorem (K : Kernel ISKSubtype operEqRegime)
+    (f : KernelHom K (substrateKernel operEqRegime)) (c : K.Carrier) :
     OperEq (f.hom c) (K.decode c) := by
-  exact morphism_uniqueness K f c
+  exact (operEqRegime_sim_iff _ _).mp (morphism_uniqueness K f c)
 
 /-- Operational equivalence (joinability) on a transition system. -/
 def OperEq_D {Object : Type} (step : Object → Object → Prop) (o1 o2 : Object) : Prop :=

@@ -226,16 +226,16 @@ theorem decode_eq (q1 q2 : Quantity) (h : q1 = q2) : OperEq (decode q1) (decode 
   exact OperEq.refl (decode q2)
 
 /-- QuantityKernel definition as an admissible semantic kernel. -/
-noncomputable abbrev QuantityKernel : Kernel where
+noncomputable abbrev QuantityKernel : Kernel ISKSubtype operEqRegime where
   Carrier := Quantity
   view_of := view_of
   view_eq := (· = ·)
   is_equiv := quantity_eq_equivalence
-  sound := sound
+  sound := fun t u h => sound t u ((operEqRegime_sim_iff _ _).mp h)
   decode := decode
-  decode_view := decode_view
+  decode_view := fun t => (operEqRegime_sim_iff _ _).mpr (decode_view t)
   view_eq_decode := view_eq_decode
-  decode_eq := decode_eq
+  decode_eq := fun c1 c2 h => (operEqRegime_sim_iff _ _).mpr (decode_eq c1 c2 h)
 
 /- =========================================================
    4. Stable Arithmetic on Quotient Layer

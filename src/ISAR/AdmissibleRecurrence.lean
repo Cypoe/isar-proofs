@@ -205,7 +205,7 @@ theorem I_true {C : Type} (step : C → C → Prop)
 /--
 An Admissible Kernel extends the base Kernel with the Operational SARI Quartet.
 -/
-structure AdmissibleKernel extends Kernel where
+structure AdmissibleKernel extends Kernel ISKSubtype operEqRegime where
   O : Carrier → Carrier → Carrier
   sari : AdmissibleSARI Carrier O
 
@@ -262,12 +262,13 @@ noncomputable def recurrence_to_Kernel (C : AdmCarrier) (step : C.Carrier → C.
         symm := fun h => h.symm
         trans := fun h1 h2 => h1.trans h2
       }
-      sound t u h := Quotient.sound (s := operSetoid step confluent) (sound t u h)
+      sound t u h := Quotient.sound (s := operSetoid step confluent)
+        (sound t u ((operEqRegime_sim_iff _ _).mp h))
       decode q := InvariantLayer.canonical_rep (layer q)
-      decode_view t := by
+      decode_view t := (operEqRegime_sim_iff _ _).mpr (by
         change OperEq (InvariantLayer.canonical_rep (toInvariantLayer (decode (view_of t)))) t
         have h_rep := canonical_rep_eq (decode (view_of t))
-        exact OperEq.trans h_rep (decode_view t)
+        exact OperEq.trans h_rep (decode_view t))
       view_eq_decode q := by
         refine Quotient.inductionOn q (fun c => ?_)
         change Quotient.mk (operSetoid step confluent) (view_of
@@ -284,7 +285,7 @@ noncomputable def recurrence_to_Kernel (C : AdmCarrier) (step : C.Carrier → C.
         exact Quotient.sound (s := operSetoid step confluent) h_join
       decode_eq q1 q2 h := by
         subst h
-        exact OperEq.refl _
+        exact (operEqRegime_sim_iff _ _).mpr (OperEq.refl _)
     }
     O := lift_O
     sari := {

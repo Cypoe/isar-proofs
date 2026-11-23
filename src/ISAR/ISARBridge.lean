@@ -77,7 +77,7 @@ making it identical to `ISAR_Kernel`.  The `matrix_kernel_terminality` theorem t
 directly instantiates `morphism_uniqueness` — closing the categorical loop — and the
 separate `matrix_eval_sound` theorem below is the bridge to `Matrix4` arithmetic.
 -/
-abbrev MatrixKernel : Kernel := ISAR_Kernel
+abbrev MatrixKernel : Kernel ISKSubtype operEqRegime := ISAR_Kernel
 
 /-! ## 2. The Bridge Theorem -/
 
@@ -92,9 +92,9 @@ kernel whose terms are ISK subtypes and whose observational equivalence is `Oper
 The proof is a one-liner: direct application of the abstract terminality theorem.
 -/
 theorem matrix_kernel_terminality
-    (f : KernelHom MatrixKernel ISAR_Kernel) (c : MatrixKernel.Carrier) :
+    (f : KernelHom MatrixKernel (substrateKernel operEqRegime)) (c : MatrixKernel.Carrier) :
     OperEq (f.hom c) (MatrixKernel.decode c) :=
-  morphism_uniqueness MatrixKernel f c
+  (operEqRegime_sim_iff _ _).mp (morphism_uniqueness MatrixKernel f c)
 
 /-! ## 3. Connection to Concrete Matrix Arithmetic -/
 

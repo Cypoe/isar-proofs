@@ -27,16 +27,24 @@ only *actually* symmetric once the anchor is gone — the README
 scope note admits it: views are equidistant modulo the fixed
 ISK anchor, not free of it.
 
-The direction held: parameterize `Kernel` by an
-`ObservationRegime` (∼O) over an arbitrary carrier (typed
-composition graph / e-graph), compose dialects through
-`QuotientMap`s preserving ∼O directly, and keep domain-native
-ops opaque until a specific lowering expands them. ISK remains
-for bootstrapping, minimal-basis proofs, and canonical Gödel
-indexing — one dialect among equals.
+Stage (a) landed: `Kernel` is parameterized by `(P, R :
+ObservationRegime P)` with all coherence fields over `R.sim`;
+`substrateKernel R` is the per-regime terminal object and
+`ISAR_Kernel` is the ISK specialization — a peer kernel, no
+longer the terminal object. `QuotientMap` generalizes to
+arbitrary source/target regimes (`QuotientMapO` is the ISK
+abbrev). `no_indiscrete_Kernel` generalizes to any
+non-degenerate regime (`operEqRegime_nondegenerate` carries the
+norm/konst witness). ISK remains for bootstrapping,
+minimal-basis proofs, and canonical Gödel indexing — one
+dialect among equals.
 
-Open: whether the regime-parameterized `Kernel` is one structure
-or two (a `UniversalKernel` witnessing completeness vs a
-`CarrierKernel` doing representation work); and how much of the
-existing view corpus survives the move intact vs needs its
-`decode` rewritten to land in the new carrier.
+Open: the substrate pin `Dialect.encode : Object → ISKSubtype`
+still routes composition through ISK — migrated through the
+generalized `QuotientMap` layer when a dialect gets its own
+regime; and whether the regime-parameterized `Kernel` is one
+structure or two (a `UniversalKernel` witnessing completeness
+vs a `CarrierKernel` doing representation work). Next carrier
+candidate: typed composition graph / interaction-net shape —
+optimal graph sharing (HVM/Bend lineage) is the performance
+unlock this parameterization was staged for.
